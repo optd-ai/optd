@@ -65,6 +65,52 @@ this explicit operation. Output symlinks and changed parent identities fail
 closed. `dist/` is ignored build output, not source evidence. SHA256SUMS
 provides integrity checking, not authenticity, signing, or attestation.
 
+## Read-only local/precreation preflight
+
+`deno run -A scripts/optd-external-preflight.ts verify` records fresh, redacted
+observations under ignored `.ai/optd-external-preflight/observation-*/`. Earlier
+failures are retained, never replayed as proof. Success is **LOCAL/PRECREATION**
+only, with `publicationAuthorized=false`; it is not publish-ready or an image
+attestation. The independent source and final composed-proposal image gates
+remain mandatory.
+
+The intended publication manifest is exactly `refs/heads/master` and **all**
+reachable ancestry/objects, with no squash. A detached candidate (and later the
+actual checked composed proposal) must contain current accepted master ancestry;
+it need not equal master. Evidence binds accepted master and the prospective tip
+to immutable object IDs. Private DAG/work refs and every other ref are
+inventoried separately and excluded from intended publication, not deleted.
+Missing objects, shallow/promisor history, replacements, grafts, alternates,
+dirty source and changing refs fail closed. No fetch, ref update or remote
+mutation is performed.
+
+The GitHub observations use existing authentication and only GET `/user`,
+`/user/memberships/orgs/optd-ai`, `/orgs/optd-ai`, complete paginated
+`/orgs/optd-ai/repos?type=all&per_page=100`, and `/repos/optd-ai/optd`. The
+authenticated identity must match active administrative membership. To avoid
+mistaking token-filtered 404s for absence, this verifier requires documented
+classic `repo` and org-read scopes, validates repository visibility, and
+reconciles public/private counts with organization metadata. Missing scope/count
+information (including an unprovable fine-grained-token view) fails closed; it
+never requests new scopes or login. Two fresh inventories must agree. Account
+names, tokens, response bodies and stderr are not persisted.
+
+Organization creation-policy fields are recorded when returned; missing fields
+are `UNKNOWN`, not capability success. Destination hooks, Actions, rules, GHCR
+and write capabilities remain explicit `UNVERIFIED` postcreation obligations,
+not prerequisites for a nonexistent destination. Local release/integration
+scripts and canonical OCI identity are inspected and hashed; workflow
+presence/absence is inventoried without claiming execution. TXT control is
+checked against the exact frozen-model challenge at both authoritative servers
+and both required public resolvers, within the bounded observation window.
+
+API contracts:
+[organization metadata](https://docs.github.com/en/rest/orgs/orgs),
+[organization membership](https://docs.github.com/en/rest/orgs/members),
+[repository inventory](https://docs.github.com/en/rest/repos/repos),
+[authenticated user](https://docs.github.com/en/rest/users/users), and
+[OAuth scope headers](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/scopes-for-oauth-apps).
+
 ## External work is separate
 
 The settled premise is creation of a **new public `optd-ai/optd` repository**
