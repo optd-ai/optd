@@ -17,14 +17,14 @@ export function loadPasswordPolicy(
   env: PasswordPolicyEnvironment,
   warn: (message: string) => void = (message) => console.warn(message),
 ): PasswordPolicy {
-  const integer = env.get("OPERANT_PASSWORD_MIN_LENGTH") ?? "8";
+  const integer = env.get("OPTD_PASSWORD_MIN_LENGTH") ?? "8";
   const minimumLength = Number(integer);
   if (!Number.isInteger(minimumLength) || minimumLength < 1) {
-    throw new Error("OPERANT_PASSWORD_MIN_LENGTH must be a positive integer");
+    throw new Error("OPTD_PASSWORD_MIN_LENGTH must be a positive integer");
   }
   if (minimumLength < 8) {
     warn(
-      `warning: OPERANT_PASSWORD_MIN_LENGTH=${minimumLength} is below the default minimum of 8`,
+      `warning: OPTD_PASSWORD_MIN_LENGTH=${minimumLength} is below the default minimum of 8`,
     );
   }
   const flag = (name: string) => {
@@ -37,10 +37,10 @@ export function loadPasswordPolicy(
   return {
     minimumLength,
     maximumBytes: 1024,
-    requireUppercase: flag("OPERANT_PASSWORD_REQUIRE_UPPERCASE"),
-    requireLowercase: flag("OPERANT_PASSWORD_REQUIRE_LOWERCASE"),
-    requireDigit: flag("OPERANT_PASSWORD_REQUIRE_DIGIT"),
-    requireSymbol: flag("OPERANT_PASSWORD_REQUIRE_SYMBOL"),
+    requireUppercase: flag("OPTD_PASSWORD_REQUIRE_UPPERCASE"),
+    requireLowercase: flag("OPTD_PASSWORD_REQUIRE_LOWERCASE"),
+    requireDigit: flag("OPTD_PASSWORD_REQUIRE_DIGIT"),
+    requireSymbol: flag("OPTD_PASSWORD_REQUIRE_SYMBOL"),
   };
 }
 

@@ -97,9 +97,9 @@ Deno.test("compiled optctl binds one nearest Linux process credential without fa
       "/usr/bin/env",
     ]);
     assertEquals(isolatedEnvironment.code, 0, isolatedEnvironment.stderr);
-    assertMatch(isolatedEnvironment.stdout, /OPERANT_AUTH_TREE_STOP_PID=\d+/);
-    assert(!isolatedEnvironment.stdout.includes("OPERANT_BOOTSTRAP_TOKEN="));
-    assert(!isolatedEnvironment.stdout.includes("OPERANT_MASTER_KEY="));
+    assertMatch(isolatedEnvironment.stdout, /OPTD_AUTH_TREE_STOP_PID=\d+/);
+    assert(!isolatedEnvironment.stdout.includes("OPTD_BOOTSTRAP_TOKEN="));
+    assert(!isolatedEnvironment.stdout.includes("OPTD_MASTER_KEY="));
     assertEquals(
       (await harness.runOptctl(["auth", "isolate", "/bin/echo"])).code,
       2,
@@ -333,7 +333,7 @@ Deno.test("compiled sibling human trees retain exact independent credentials", a
       const projectionPath = join(
         harness.rootDir,
         "xdg-config",
-        "operant",
+        "optd",
         "auth.json",
       );
       const projection = await Deno.readTextFile(projectionPath);
@@ -495,7 +495,7 @@ async function waitForJson(path: string): Promise<unknown> {
 }
 
 async function authPaths(home: string) {
-  const root = join(home, ".local", "share", "operant", "auth");
+  const root = join(home, ".local", "share", "optd", "auth");
   const instances = join(root, "instances");
   const instance = (await Array.fromAsync(Deno.readDir(instances)))[0];
   assertExists(instance);
@@ -528,7 +528,7 @@ function narrowAgentHelper(): string {
         XDG_STATE_HOME: Deno.env.get("XDG_STATE_HOME"),
       };
       if (mode === "request" || mode === "status-stop") {
-        env.OPERANT_AUTH_TREE_STOP_PID = String(Deno.pid);
+        env.OPTD_AUTH_TREE_STOP_PID = String(Deno.pid);
       }
       const output = await new Deno.Command(binary, {
         args: ["--server", server, "--json", ...args],
@@ -567,7 +567,7 @@ function narrowAgentHelper(): string {
         HOME: Deno.env.get("HOME"),
         XDG_CONFIG_HOME: Deno.env.get("XDG_CONFIG_HOME"),
         XDG_STATE_HOME: Deno.env.get("XDG_STATE_HOME"),
-        OPERANT_AUTH_TREE_STOP_PID: "2147483647",
+        OPTD_AUTH_TREE_STOP_PID: "2147483647",
       },
       stdout: "piped", stderr: "piped",
     }).output();

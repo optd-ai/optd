@@ -4,9 +4,9 @@ import { query } from "../../src/adapters/outbound/postgres/client.ts";
 import { startAuthenticatedHarness } from "../support/authenticated_harness.ts";
 
 Deno.test("scenario: encrypted secrets are masked through authenticated public CLI", async () => {
-  const previousKey = Deno.env.get("OPERANT_SECRET_MASTER_KEY");
+  const previousKey = Deno.env.get("OPTD_SECRET_MASTER_KEY");
   Deno.env.set(
-    "OPERANT_SECRET_MASTER_KEY",
+    "OPTD_SECRET_MASTER_KEY",
     btoa(String.fromCharCode(...new Uint8Array(32).fill(7))),
   );
   const harness = await startAuthenticatedHarness();
@@ -46,7 +46,7 @@ Deno.test("scenario: encrypted secrets are masked through authenticated public C
     assert(!stored.rows[0].audit_text.includes(secretValue));
   } finally {
     await harness.close();
-    if (previousKey === undefined) Deno.env.delete("OPERANT_SECRET_MASTER_KEY");
-    else Deno.env.set("OPERANT_SECRET_MASTER_KEY", previousKey);
+    if (previousKey === undefined) Deno.env.delete("OPTD_SECRET_MASTER_KEY");
+    else Deno.env.set("OPTD_SECRET_MASTER_KEY", previousKey);
   }
 });

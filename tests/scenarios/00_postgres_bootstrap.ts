@@ -4,9 +4,9 @@ import { findPostgresBins } from "../../src/adapters/outbound/postgres-process/l
 import { startAuthenticatedHarness } from "../support/authenticated_harness.ts";
 
 Deno.test("postgres bootstrap scenario validates HTTP health and restart persistence", async () => {
-  if (!Deno.env.get("OPERANT_DATABASE_URL") && !await findPostgresBins()) {
+  if (!Deno.env.get("OPTD_DATABASE_URL") && !await findPostgresBins()) {
     console.warn(
-      "SKIP postgres bootstrap scenario: postgres binaries not found; set OPERANT_PG_BIN_DIR or enter nix shell",
+      "SKIP postgres bootstrap scenario: postgres binaries not found; set OPTD_PG_BIN_DIR or enter nix shell",
     );
     return;
   }

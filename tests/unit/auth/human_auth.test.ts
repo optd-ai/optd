@@ -14,11 +14,11 @@ Deno.test("password policy normalizes Unicode and enforces configured classes", 
   const env = {
     get(name: string) {
       return ({
-        OPERANT_PASSWORD_MIN_LENGTH: "8",
-        OPERANT_PASSWORD_REQUIRE_UPPERCASE: "true",
-        OPERANT_PASSWORD_REQUIRE_LOWERCASE: "true",
-        OPERANT_PASSWORD_REQUIRE_DIGIT: "true",
-        OPERANT_PASSWORD_REQUIRE_SYMBOL: "true",
+        OPTD_PASSWORD_MIN_LENGTH: "8",
+        OPTD_PASSWORD_REQUIRE_UPPERCASE: "true",
+        OPTD_PASSWORD_REQUIRE_LOWERCASE: "true",
+        OPTD_PASSWORD_REQUIRE_DIGIT: "true",
+        OPTD_PASSWORD_REQUIRE_SYMBOL: "true",
       } as Record<string, string>)[name];
     },
   } as Deno.Env;
@@ -63,13 +63,13 @@ Deno.test("password policy warns explicitly when operator lowers the default", (
   const warnings: string[] = [];
   const env = {
     get(name: string) {
-      return name === "OPERANT_PASSWORD_MIN_LENGTH" ? "6" : undefined;
+      return name === "OPTD_PASSWORD_MIN_LENGTH" ? "6" : undefined;
     },
   } as Deno.Env;
   const policy = loadPasswordPolicy(env, (message) => warnings.push(message));
   assertEquals(policy.minimumLength, 6);
   assertEquals(warnings, [
-    "warning: OPERANT_PASSWORD_MIN_LENGTH=6 is below the default minimum of 8",
+    "warning: OPTD_PASSWORD_MIN_LENGTH=6 is below the default minimum of 8",
   ]);
   assertEquals(validatePassword("sixsix", policy).ok, true);
 });

@@ -209,13 +209,13 @@ async function stopCpuLoad(load: ReturnType<typeof startCpuLoad>) {
 
 Deno.test("startup failure precedes readiness for fixed and ephemeral ports", async () => {
   for (const port of [String(freePort()), "0"]) {
-    const root = await Deno.makeTempDir({ prefix: "operant-startup-fault-" });
+    const root = await Deno.makeTempDir({ prefix: "optd-startup-fault-" });
     try {
       await Deno.writeTextFile(`${root}/runtime`, "not a directory");
       const output = await serverCommand({
-        OPERANT_DATA_DIR: root,
-        OPERANT_HOST: "127.0.0.1",
-        OPERANT_PORT: port,
+        OPTD_DATA_DIR: root,
+        OPTD_HOST: "127.0.0.1",
+        OPTD_PORT: port,
       }).output();
       const stdout = new TextDecoder().decode(output.stdout);
       const stderr = new TextDecoder().decode(output.stderr);
@@ -245,26 +245,26 @@ Deno.test({
       return;
     }
     const configuredRepetitions = Number(
-      Deno.env.get("OPERANT_STARTUP_SIGNAL_REPETITIONS") ?? "4",
+      Deno.env.get("OPTD_STARTUP_SIGNAL_REPETITIONS") ?? "4",
     );
     assert(
       Number.isInteger(configuredRepetitions) && configuredRepetitions >= 2 &&
         configuredRepetitions <= 100,
-      `invalid OPERANT_STARTUP_SIGNAL_REPETITIONS=${configuredRepetitions}`,
+      `invalid OPTD_STARTUP_SIGNAL_REPETITIONS=${configuredRepetitions}`,
     );
     const load = startCpuLoad();
     try {
       for (let iteration = 1; iteration <= configuredRepetitions; iteration++) {
         const root = await Deno.makeTempDir({
-          prefix: `operant-startup-zero-${iteration}-`,
+          prefix: `optd-startup-zero-${iteration}-`,
         });
         const child = serverCommand({
-          OPERANT_DATA_DIR: root,
-          OPERANT_HOST: "127.0.0.1",
-          OPERANT_PORT: "0",
-          OPERANT_PG_PORT: String(freePort()),
-          OPERANT_BOOTSTRAP_TOKEN: masterKey(),
-          OPERANT_MASTER_KEY: masterKey(),
+          OPTD_DATA_DIR: root,
+          OPTD_HOST: "127.0.0.1",
+          OPTD_PORT: "0",
+          OPTD_PG_PORT: String(freePort()),
+          OPTD_BOOTSTRAP_TOKEN: masterKey(),
+          OPTD_MASTER_KEY: masterKey(),
         }).spawn();
         let settledStatus: Deno.CommandStatus | undefined;
         const statusPromise = child.status.then((status) => {
@@ -403,20 +403,20 @@ Deno.test({
   sanitizeResources: false,
   async fn() {
     if (!await findPostgresBins()) return;
-    const root = await Deno.makeTempDir({ prefix: "operant-start-server-" });
+    const root = await Deno.makeTempDir({ prefix: "optd-start-server-" });
     const names = [
-      "OPERANT_DATA_DIR",
-      "OPERANT_PG_PORT",
-      "OPERANT_BOOTSTRAP_TOKEN",
-      "OPERANT_MASTER_KEY",
+      "OPTD_DATA_DIR",
+      "OPTD_PG_PORT",
+      "OPTD_BOOTSTRAP_TOKEN",
+      "OPTD_MASTER_KEY",
     ] as const;
     const previous = new Map(names.map((name) => [name, Deno.env.get(name)]));
     let server: Awaited<ReturnType<typeof startServer>> | undefined;
     try {
-      Deno.env.set("OPERANT_DATA_DIR", root);
-      Deno.env.set("OPERANT_PG_PORT", String(freePort()));
-      Deno.env.set("OPERANT_BOOTSTRAP_TOKEN", masterKey());
-      Deno.env.set("OPERANT_MASTER_KEY", masterKey());
+      Deno.env.set("OPTD_DATA_DIR", root);
+      Deno.env.set("OPTD_PG_PORT", String(freePort()));
+      Deno.env.set("OPTD_BOOTSTRAP_TOKEN", masterKey());
+      Deno.env.set("OPTD_MASTER_KEY", masterKey());
       let callbackUrl: string | undefined;
       server = await startServer({
         hostname: "127.0.0.1",

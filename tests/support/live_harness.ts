@@ -136,11 +136,11 @@ export async function startLiveHarness(
 ): Promise<LiveHarness> {
   if (!options.externalDatabaseUrl && !await findPostgresBins()) {
     throw new Error(
-      "SKIP: real Postgres binaries unavailable; set OPERANT_PG_BIN_DIR or enter nix shell",
+      "SKIP: real Postgres binaries unavailable; set OPTD_PG_BIN_DIR or enter nix shell",
     );
   }
 
-  const rootDir = await Deno.makeTempDir({ prefix: "operant-live-" });
+  const rootDir = await Deno.makeTempDir({ prefix: "optd-live-" });
   const dataDir = join(rootDir, "data");
   const hookCacheDir = join(dataDir, "runtime", "hooks");
   const homeDir = join(rootDir, "home");
@@ -162,19 +162,19 @@ export async function startLiveHarness(
   });
   const env = Deno.env.toObject();
   env.DENO_DIR = dependencyCache;
-  env.OPERANT_DATA_DIR = dataDir;
-  env.OPERANT_PORT = String(freePort());
-  env.OPERANT_PG_PORT = String(freePort());
-  env.OPERANT_HOST = "127.0.0.1";
+  env.OPTD_DATA_DIR = dataDir;
+  env.OPTD_PORT = String(freePort());
+  env.OPTD_PG_PORT = String(freePort());
+  env.OPTD_HOST = "127.0.0.1";
   env.HOME = homeDir;
   env.XDG_CONFIG_HOME = xdgConfig;
   env.XDG_STATE_HOME = xdgState;
-  if (options.bootstrapToken === null) delete env.OPERANT_BOOTSTRAP_TOKEN;
-  else env.OPERANT_BOOTSTRAP_TOKEN = options.bootstrapToken ?? randomSecret(32);
-  env.OPERANT_MASTER_KEY = randomSecret(32);
+  if (options.bootstrapToken === null) delete env.OPTD_BOOTSTRAP_TOKEN;
+  else env.OPTD_BOOTSTRAP_TOKEN = options.bootstrapToken ?? randomSecret(32);
+  env.OPTD_MASTER_KEY = randomSecret(32);
   if (options.externalDatabaseUrl) {
-    env.OPERANT_DATABASE_URL = options.externalDatabaseUrl;
-  } else delete env.OPERANT_DATABASE_URL;
+    env.OPTD_DATABASE_URL = options.externalDatabaseUrl;
+  } else delete env.OPTD_DATABASE_URL;
   applyEnvironment(env, options.environment);
 
   let running: RunningServer;
@@ -198,7 +198,7 @@ export async function startLiveHarness(
     () => running.url,
   );
   const databaseUrl = options.externalDatabaseUrl ??
-    `postgres://operant@127.0.0.1:${env.OPERANT_PG_PORT}/postgres`;
+    `postgres://optd@127.0.0.1:${env.OPTD_PG_PORT}/postgres`;
   const sql = createPostgresClient(databaseUrl);
   const launchers = new Set<CliLauncher>();
   let lifecycle = Promise.resolve();
@@ -420,9 +420,9 @@ export async function startLiveHarness(
     async restart(restartOptions = {}) {
       await withLifecycle(async () => {
         if (restartOptions.bootstrapToken === null) {
-          delete env.OPERANT_BOOTSTRAP_TOKEN;
+          delete env.OPTD_BOOTSTRAP_TOKEN;
         } else if (restartOptions.bootstrapToken !== undefined) {
-          env.OPERANT_BOOTSTRAP_TOKEN = restartOptions.bootstrapToken;
+          env.OPTD_BOOTSTRAP_TOKEN = restartOptions.bootstrapToken;
         }
         applyEnvironment(env, restartOptions.environment);
         if (serverRunning) {
@@ -515,7 +515,7 @@ export async function assertHealth(baseUrl: string) {
 async function ensureDenoDependencies(): Promise<string> {
   const root = join(
     Deno.env.get("TMPDIR") ?? "/tmp",
-    "operant-deno-dependencies-v1",
+    "optd-deno-dependencies-v1",
   );
   const lock = `${root}.warm-lock`;
   await Deno.mkdir(root, { recursive: true, mode: 0o700 });
@@ -581,7 +581,7 @@ async function compileOptctl(options: {
     ? join(options.isolation, "forced-fresh-optctl", digest)
     : join(
       Deno.env.get("TMPDIR") ?? "/tmp",
-      "operant-optctl-cache",
+      "optd-optctl-cache",
       digest,
     );
   const binary = join(cacheDir, "optctl");
@@ -989,10 +989,10 @@ function testAuthStoreBridge(
 ) {
   const inspector = new LinuxProcessInspector();
   const store = new FilesystemLocalAuthStore(
-    join(homeDir, ".local", "share", "operant", "auth"),
+    join(homeDir, ".local", "share", "optd", "auth"),
     inspector,
   );
-  const legacyPath = join(xdgConfig, "operant", "auth.json");
+  const legacyPath = join(xdgConfig, "optd", "auth.json");
   let lastProjection: string | undefined;
   let lastProjectionMtime = 0;
   let queue = Promise.resolve();
@@ -1075,7 +1075,7 @@ function testAuthStoreBridge(
             },
           },
         });
-        await Deno.mkdir(join(xdgConfig, "operant"), {
+        await Deno.mkdir(join(xdgConfig, "optd"), {
           recursive: true,
           mode: 0o700,
         });

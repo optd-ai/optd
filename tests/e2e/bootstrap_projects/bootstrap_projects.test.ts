@@ -78,7 +78,7 @@ Deno.test({
       const lockTransaction = harness.server.sql.begin(async (tx) => {
         await query(
           tx,
-          `select pg_advisory_xact_lock(hashtext('operant.auth.bootstrap'))`,
+          `select pg_advisory_xact_lock(hashtext('optd.auth.bootstrap'))`,
         );
         lockAcquired();
         await release;
@@ -147,8 +147,7 @@ Deno.test({
         completed: true,
         completed_by: winnerBody.user.id,
       });
-      const authStorePath =
-        `${harness.homeDir}/../xdg-config/operant/auth.json`;
+      const authStorePath = `${harness.homeDir}/../xdg-config/optd/auth.json`;
       const authStore = JSON.parse(await Deno.readTextFile(authStorePath));
       const originCredentials = authStore.origins[harness.baseUrl];
       const sessionFacts = await query<

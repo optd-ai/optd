@@ -7,18 +7,18 @@ Deno.test("release scripts reject dirty source and invalid explicit bases before
   const fixture = await createFixture();
   try {
     const invalid = await runGate(fixture, {
-      OPERANT_RELEASE_BASE: "definitely-not-a-commit",
+      OPTD_RELEASE_BASE: "definitely-not-a-commit",
     });
     assert(invalid.code !== 0);
     assertStringIncludes(invalid.stderr, "full 40-character commit");
     assertEquals(await readLog(fixture, "docker.log"), "");
 
     const conflict = await runGate(fixture, {
-      OPERANT_RELEASE_BASE: fixture.base,
-      OPERANT_RELEASE_BASE_REV: fixture.revision,
+      OPTD_RELEASE_BASE: fixture.base,
+      OPTD_RELEASE_BASE_REV: fixture.revision,
     });
     assert(conflict.code !== 0);
-    assertStringIncludes(conflict.stderr, "conflicting OPERANT_RELEASE_BASE");
+    assertStringIncludes(conflict.stderr, "conflicting OPTD_RELEASE_BASE");
     assertEquals(await readLog(fixture, "docker.log"), "");
 
     await Deno.writeTextFile(`${fixture.root}/untracked`, "dirty\n");
@@ -73,7 +73,7 @@ Deno.test("partial snapshot and supplementary scan failures cannot become empty 
   try {
     const result = await runGate(scan, {
       FAKE_DOCKER_FAIL_ALWAYS_MATCH:
-        "volume ls --quiet --filter label=dev.operant.release-gate=",
+        "volume ls --quiet --filter label=dev.optd.release-gate=",
     });
     assert(result.code !== 0);
   } finally {
@@ -100,9 +100,9 @@ Deno.test("gate uses NUL paths, one build, one suite, and only the frozen image 
     const docker = await readLog(fixture, "docker.log");
     assertStringIncludes(docker, `container create`);
     assertStringIncludes(docker, imageId);
-    assert(!docker.includes("container create operant:"), docker);
+    assert(!docker.includes("container create optd:"), docker);
     assertStringIncludes(docker, `image rm --no-prune -- ${imageId}`);
-    assert(!docker.includes("image rm -- operant:"), docker);
+    assert(!docker.includes("image rm -- optd:"), docker);
     assert(!docker.includes("image prune"), docker);
   } finally {
     await removeFixture(fixture);
@@ -529,7 +529,7 @@ Deno.test("Docker ownership inspect failure blocks removal before destruction", 
       }
     `;
     const result = await runHarnessEval(fixture, source, {
-      OPERANT_RELEASE_GATE_ID: gateId,
+      OPTD_RELEASE_GATE_ID: gateId,
       FAKE_DOCKER_FAIL_ALWAYS_MATCH: "container inspect victim",
     });
     assertEquals(result.code, 0, result.stderr);
@@ -622,7 +622,7 @@ for (
           await blocked([...prefix, "multi-live", "multi-absent"]);
         `;
         const result = await runHarnessEval(fixture, source, {
-          OPERANT_RELEASE_GATE_ID: gateId,
+          OPTD_RELEASE_GATE_ID: gateId,
         });
         assertEquals(result.code, 0, `${result.stdout}\n${result.stderr}`);
         const docker = await readLog(fixture, "docker.log");
@@ -710,7 +710,7 @@ Deno.test("Compose down preflights exact resources and never runs after inspect 
       }
     `;
     const result = await runHarnessEval(fixture, source, {
-      OPERANT_RELEASE_GATE_ID: gateId,
+      OPTD_RELEASE_GATE_ID: gateId,
       FAKE_DOCKER_FAIL_ALWAYS_MATCH: "container inspect compose-container",
     });
     assertEquals(result.code, 0, result.stderr);
@@ -784,7 +784,7 @@ Deno.test("pre-registration failure cannot launch or numerically kill a workload
   const fixture = await createFixture();
   try {
     const result = await runGate(fixture, {
-      OPERANT_RELEASE_TEST_PRE_REGISTRATION_FAILURE: "1",
+      OPTD_RELEASE_TEST_PRE_REGISTRATION_FAILURE: "1",
     });
     assert(result.code !== 0);
     assertStringIncludes(result.stderr, "registration failed before launch");
@@ -866,8 +866,8 @@ Deno.test("artifact publication rolls back TERM and rejects symlink outputs", as
       args: ["scripts/release-artifacts.sh", imageId, output],
       cwd: fixture.root,
       env: fixtureEnv(fixture, {
-        OPERANT_CONTAINER_IMAGE_ID: imageId,
-        OPERANT_RELEASE_ARTIFACT_AFTER_PUBLISH_FILE: marker,
+        OPTD_CONTAINER_IMAGE_ID: imageId,
+        OPTD_RELEASE_ARTIFACT_AFTER_PUBLISH_FILE: marker,
       }),
       stdout: "piped",
       stderr: "piped",
@@ -912,8 +912,8 @@ Deno.test("quarantine failure retains the old backup at its top-level recovery p
       args: ["scripts/release-artifacts.sh", imageId, output],
       cwd: fixture.root,
       env: fixtureEnv(fixture, {
-        OPERANT_CONTAINER_IMAGE_ID: imageId,
-        OPERANT_RELEASE_ARTIFACT_AFTER_PUBLISH_FILE: marker,
+        OPTD_CONTAINER_IMAGE_ID: imageId,
+        OPTD_RELEASE_ARTIFACT_AFTER_PUBLISH_FILE: marker,
       }),
       stdout: "piped",
       stderr: "piped",
@@ -960,8 +960,8 @@ Deno.test("image cleanup never dereferences a drifted mutable tag", async () => 
       "mutable convenience tag drifted from the frozen image ID",
     );
     const docker = await readLog(fixture, "docker.log");
-    assert(!docker.includes("image rm -- operant:"), docker);
-    assert(!docker.includes("image rm --force -- operant:"), docker);
+    assert(!docker.includes("image rm -- optd:"), docker);
+    assert(!docker.includes("image rm --force -- optd:"), docker);
     assert(!docker.includes(`image rm --no-prune -- ${imageId}`), docker);
     assertEquals((await resourceIds(fixture, "images")).length, 18);
   } finally {
@@ -991,15 +991,13 @@ Deno.test("container harness freezes the ID before mutable tag drift", async () 
       args: ["eval", evalSource],
       cwd: fixture.root,
       env: fixtureEnv(fixture, {
-        OPERANT_CONTAINER_SKIP_BUILD: "1",
-        OPERANT_CONTAINER_IMAGE: "operant:mutable",
-        OPERANT_CONTAINER_IMAGE_ID: imageId,
-        OPERANT_CONTAINER_REVISION: fixture.revision,
-        OPERANT_CONTAINER_VERSION: `release-gate-${
-          fixture.revision.slice(0, 12)
-        }`,
-        OPERANT_RELEASE_GATE_ID: "b".repeat(32),
-        OPERANT_RELEASE_GATE_REGISTRY: fixture.registry,
+        OPTD_CONTAINER_SKIP_BUILD: "1",
+        OPTD_CONTAINER_IMAGE: "optd:mutable",
+        OPTD_CONTAINER_IMAGE_ID: imageId,
+        OPTD_CONTAINER_REVISION: fixture.revision,
+        OPTD_CONTAINER_VERSION: `release-gate-${fixture.revision.slice(0, 12)}`,
+        OPTD_RELEASE_GATE_ID: "b".repeat(32),
+        OPTD_RELEASE_GATE_REGISTRY: fixture.registry,
       }),
       stdout: "piped",
       stderr: "piped",
@@ -1013,7 +1011,7 @@ Deno.test("container harness freezes the ID before mutable tag drift", async () 
     const dockerLog = await readLog(fixture, "docker.log");
     assertStringIncludes(
       dockerLog,
-      `container create --label dev.operant.release-gate=${
+      `container create --label dev.optd.release-gate=${
         "b".repeat(32)
       } --name frozen-after-retag ${imageId} true`,
     );
@@ -1174,24 +1172,24 @@ if [[ "$*" == "task test" ]]; then
   count=$(<"$FAKE_STATE/suite-count"); printf '%s\\n' "$((count+1))" >"$FAKE_STATE/suite-count"
   case "\${FAKE_TEST_MODE:-}" in
     unrelated-prefix)
-      printf 'label=other\\nname=operant-cr-unrelated\\n' >"$FAKE_STATE/containers/unrelated-prefix"
+      printf 'label=other\\nname=optd-cr-unrelated\\n' >"$FAKE_STATE/containers/unrelated-prefix"
       ;;
     owned-labels)
-      printf 'label=%s\\nname=owned-container\\n' "$OPERANT_RELEASE_GATE_ID" >"$FAKE_STATE/containers/owned-container"
-      printf 'label=%s\\nname=owned-volume\\n' "$OPERANT_RELEASE_GATE_ID" >"$FAKE_STATE/volumes/owned-volume"
-      printf 'label=%s\\nname=owned-network\\n' "$OPERANT_RELEASE_GATE_ID" >"$FAKE_STATE/networks/owned-network"
+      printf 'label=%s\\nname=owned-container\\n' "$OPTD_RELEASE_GATE_ID" >"$FAKE_STATE/containers/owned-container"
+      printf 'label=%s\\nname=owned-volume\\n' "$OPTD_RELEASE_GATE_ID" >"$FAKE_STATE/volumes/owned-volume"
+      printf 'label=%s\\nname=owned-network\\n' "$OPTD_RELEASE_GATE_ID" >"$FAKE_STATE/networks/owned-network"
       ;;
     missing-baseline)
       rm -f -- "$FAKE_STATE/containers/baseline-container"
       exit 37
       ;;
     source-mutation)
-      printf '// mutated\\n' >>"$OPERANT_RELEASE_SOURCE_ROOT/tests/ordinary.ts"
+      printf '// mutated\\n' >>"$OPTD_RELEASE_SOURCE_ROOT/tests/ordinary.ts"
       ;;
     staged-source-mutation)
-      printf '// staged mutation\\n' >>"$OPERANT_RELEASE_SOURCE_ROOT/tests/ordinary.ts"
-      printf 'staged extra\\n' >"$OPERANT_RELEASE_SOURCE_ROOT/tests/staged-extra.ts"
-      git -C "$OPERANT_RELEASE_SOURCE_ROOT" add -- tests/ordinary.ts tests/staged-extra.ts
+      printf '// staged mutation\\n' >>"$OPTD_RELEASE_SOURCE_ROOT/tests/ordinary.ts"
+      printf 'staged extra\\n' >"$OPTD_RELEASE_SOURCE_ROOT/tests/staged-extra.ts"
+      git -C "$OPTD_RELEASE_SOURCE_ROOT" add -- tests/ordinary.ts tests/staged-extra.ts
       ;;
     image-retag)
       : >"$FAKE_STATE/retag"
@@ -1212,14 +1210,14 @@ if [[ "$*" == "task test" ]]; then
       printf 'label=other\\nname=unexpected-ref\\nimage=%s\\n' "$FAKE_IMAGE_ID" >"$FAKE_STATE/containers/unexpected-ref"
       ;;
     authority-symlink-0666)
-      mv -- "$OPERANT_RELEASE_GATE_REGISTRY/image-authority.json" "$FAKE_STATE/outside-authority.json"
+      mv -- "$OPTD_RELEASE_GATE_REGISTRY/image-authority.json" "$FAKE_STATE/outside-authority.json"
       chmod 0666 -- "$FAKE_STATE/outside-authority.json"
-      ln -s -- "$FAKE_STATE/outside-authority.json" "$OPERANT_RELEASE_GATE_REGISTRY/image-authority.json"
+      ln -s -- "$FAKE_STATE/outside-authority.json" "$OPTD_RELEASE_GATE_REGISTRY/image-authority.json"
       ;;
     pid-mismatch)
       setsid sleep 120 >/dev/null 2>&1 & pid=$!
       printf '%s\\n' "$pid" >"$FAKE_STATE/mismatch-pid"
-      python3 - "$pid" "$OPERANT_RELEASE_GATE_REGISTRY/pids/$pid.json" "$OPERANT_RELEASE_GATE_ID" "$(dirname "$OPERANT_RELEASE_GATE_REGISTRY")" <<'PY'
+      python3 - "$pid" "$OPTD_RELEASE_GATE_REGISTRY/pids/$pid.json" "$OPTD_RELEASE_GATE_ID" "$(dirname "$OPTD_RELEASE_GATE_REGISTRY")" <<'PY'
 import base64,json,os,pathlib,sys
 pid=int(sys.argv[1]); proc=pathlib.Path('/proc')/str(pid)
 raw=(proc/'stat').read_text(); fields=raw[raw.rfind(') ')+2:].split()
@@ -1266,10 +1264,10 @@ arg_after() { target=$1; shift; while (($#)); do [[ "$1" == "$target" ]] && { pr
 last_arg() { printf '%s' "\${!#}"; }
 case "\${1:-} \${2:-}" in
   "image ls")
-    filter=$(filter_value dev.operant.release-gate "$@"); project=$(filter_value com.docker.compose.project "$@")
+    filter=$(filter_value dev.optd.release-gate "$@"); project=$(filter_value com.docker.compose.project "$@")
     list_kind images "$filter" "$project" ;;
   "container ls")
-    filter=$(filter_value dev.operant.release-gate "$@"); project=$(filter_value com.docker.compose.project "$@")
+    filter=$(filter_value dev.optd.release-gate "$@"); project=$(filter_value com.docker.compose.project "$@")
     ancestor=$(filter_value ancestor "$@")
     if [[ -n "$ancestor" ]]; then
       shopt -s nullglob
@@ -1293,10 +1291,10 @@ case "\${1:-} \${2:-}" in
       list_kind containers "$filter" "$project"
     fi ;;
   "volume ls")
-    filter=$(filter_value dev.operant.release-gate "$@"); project=$(filter_value com.docker.compose.project "$@")
+    filter=$(filter_value dev.optd.release-gate "$@"); project=$(filter_value com.docker.compose.project "$@")
     list_kind volumes "$filter" "$project" ;;
   "network ls")
-    filter=$(filter_value dev.operant.release-gate "$@"); project=$(filter_value com.docker.compose.project "$@")
+    filter=$(filter_value dev.optd.release-gate "$@"); project=$(filter_value com.docker.compose.project "$@")
     list_kind networks "$filter" "$project" ;;
   "build --pull=false")
     count=$(<"$FAKE_STATE/build-count"); printf '%s\\n' "$((count+1))" >"$FAKE_STATE/build-count"
@@ -1360,14 +1358,14 @@ case "\${1:-} \${2:-}" in
     done
     if [[ "\${FAKE_TEST_MODE:-}" == build-failure ]]; then exit 37; fi
     created=$(date --iso-8601=ns)
-    printf 'Step 18/18 : LABEL dev.operant.release-gate=%s\\n' "$OPERANT_RELEASE_GATE_ID"
-    printf 'label=%s\\nname=%s\\nparent=%s\\ncreated=%s\\ncreated_by=/bin/sh -c #(nop) LABEL dev.operant.release-gate=%s\\ntags=%s\\ndigests=\\n' "$OPERANT_RELEASE_GATE_ID" "$tag" "$parent" "$created" "$OPERANT_RELEASE_GATE_ID" "$tag" >"$FAKE_STATE/images/$FAKE_IMAGE_ID"
+    printf 'Step 18/18 : LABEL dev.optd.release-gate=%s\\n' "$OPTD_RELEASE_GATE_ID"
+    printf 'label=%s\\nname=%s\\nparent=%s\\ncreated=%s\\ncreated_by=/bin/sh -c #(nop) LABEL dev.optd.release-gate=%s\\ntags=%s\\ndigests=\\n' "$OPTD_RELEASE_GATE_ID" "$tag" "$parent" "$created" "$OPTD_RELEASE_GATE_ID" "$tag" >"$FAKE_STATE/images/$FAKE_IMAGE_ID"
     if [[ "\${FAKE_TEST_MODE:-}" == concurrent-result-spoof ]]; then
       concurrent="sha256:$(printf 'd%.0s' {1..64})"
       printf 'label=other\\nname=concurrent\\nparent=\\ncreated=%s\\ncreated_by=/bin/sh -c unrelated\\ntags=\\ndigests=\\n' "$(date --iso-8601=ns)" >"$FAKE_STATE/images/$concurrent"
       printf ' ---> %s\\n' "\${concurrent:7:12}"
     elif [[ "\${FAKE_TEST_MODE:-}" == step-line-spoof ]]; then
-      printf 'Step 18/18 : LABEL dev.operant.release-gate=%s\\n' "$OPERANT_RELEASE_GATE_ID"
+      printf 'Step 18/18 : LABEL dev.optd.release-gate=%s\\n' "$OPTD_RELEASE_GATE_ID"
     elif [[ "\${FAKE_TEST_MODE:-}" == success-line-spoof ]]; then
       printf 'Successfully built dddddddddddd\\n'
     fi
@@ -1388,8 +1386,8 @@ case "\${1:-} \${2:-}" in
     fi
     ;;
   "image inspect")
-    identity=$3; [[ "$identity" != operant:* ]] || identity=$(<"$FAKE_STATE/tag-image")
-    if [[ -e "$FAKE_STATE/retag" && "$3" == operant:* ]]; then identity="sha256:$(printf 'b%.0s' {1..64})"; fi
+    identity=$3; [[ "$identity" != optd:* ]] || identity=$(<"$FAKE_STATE/tag-image")
+    if [[ -e "$FAKE_STATE/retag" && "$3" == optd:* ]]; then identity="sha256:$(printf 'b%.0s' {1..64})"; fi
     file="$FAKE_STATE/images/$identity"
     [[ -e "$file" ]] || exit 1
     if [[ "$*" != *" --format "* ]]; then
@@ -1400,7 +1398,7 @@ values = {}
 for line in pathlib.Path(path).read_text().splitlines():
     key, _, value = line.partition('=')
     values[key] = value
-labels = {'dev.operant.release-gate': values['label']} if values.get('label') else None
+labels = {'dev.optd.release-gate': values['label']} if values.get('label') else None
 print(json.dumps([{
     'Id': identity,
     'Parent': values.get('parent', ''),
@@ -1417,9 +1415,9 @@ PY
       *'.Id}} {{index .Config.Labels'*) printf '%s %s release-gate-%s\\n' "$identity" "$FAKE_REVISION" "\${FAKE_REVISION:0:12}" ;;
       *org.opencontainers.image.revision*) printf '%s\\n' "$FAKE_REVISION" ;;
       *org.opencontainers.image.version*) printf 'release-gate-%s\\n' "\${FAKE_REVISION:0:12}" ;;
-      *dev.operant.release-gate*) value label "$file" ;;
+      *dev.optd.release-gate*) value label "$file" ;;
       *json*.Config.Labels*) printf '{"org.opencontainers.image.revision":"%s","org.opencontainers.image.version":"release-gate-%s"}\\n' "$FAKE_REVISION" "\${FAKE_REVISION:0:12}" ;;
-      *RepoDigests*) printf 'operant@example-digest\\n' ;;
+      *RepoDigests*) printf 'optd@example-digest\\n' ;;
       *'{{.Id}}'*) printf '%s\\n' "$identity" ;;
       *) printf '%s %s release-gate-%s\\n' "$identity" "$FAKE_REVISION" "\${FAKE_REVISION:0:12}" ;;
     esac ;;
@@ -1442,7 +1440,7 @@ PY
       done
     fi ;;
   "image rm")
-    identity=$(last_arg "$@"); [[ "$identity" != operant:* ]] || identity=$(<"$FAKE_STATE/tag-image")
+    identity=$(last_arg "$@"); [[ "$identity" != optd:* ]] || identity=$(<"$FAKE_STATE/tag-image")
     if [[ "\${FAKE_TEST_MODE:-}" == removal-failure && ! -e "$FAKE_STATE/removal-failed" ]]; then : >"$FAKE_STATE/removal-failed"; exit 73; fi
     rm -f -- "$FAKE_STATE/images/$identity"
     [[ ! -e "$FAKE_STATE/tag-image" || "$(<"$FAKE_STATE/tag-image")" != "$identity" ]] || rm -f -- "$FAKE_STATE/tag-image" ;;
@@ -1458,8 +1456,8 @@ PY
     [[ -e "$file" ]] || exit 1
     format=$(last_arg "$@")
     case "$format" in
-      *'{{json .Config.Labels}}'*) printf '{"dev.operant.release-gate":"%s","com.docker.compose.project":"%s"}\\n' "$(value label "$file")" "$(value project "$file")" ;;
-      *dev.operant.release-gate*) value label "$file" ;;
+      *'{{json .Config.Labels}}'*) printf '{"dev.optd.release-gate":"%s","com.docker.compose.project":"%s"}\\n' "$(value label "$file")" "$(value project "$file")" ;;
+      *dev.optd.release-gate*) value label "$file" ;;
       *Mounts*) value mounts "$file" ;;
       *'{{.Id}}'*) printf '%s\\n' "$identity" ;;
       *) value name "$file" ;;
@@ -1475,11 +1473,11 @@ PY
     identity=$(last_arg "$@"); rm -f -- "$FAKE_STATE/containers/$identity" ;;
   "volume inspect")
     identity=$3; file="$FAKE_STATE/volumes/$identity"; [[ -e "$file" ]] || exit 1
-    format=$(last_arg "$@"); [[ "$format" != *'{{json .Labels}}'* ]] || { printf '{"dev.operant.release-gate":"%s","com.docker.compose.project":"%s"}\\n' "$(value label "$file")" "$(value project "$file")"; exit; }; [[ "$format" != *dev.operant.release-gate* ]] || { value label "$file"; exit; }; printf '%s\\n' "$identity" ;;
+    format=$(last_arg "$@"); [[ "$format" != *'{{json .Labels}}'* ]] || { printf '{"dev.optd.release-gate":"%s","com.docker.compose.project":"%s"}\\n' "$(value label "$file")" "$(value project "$file")"; exit; }; [[ "$format" != *dev.optd.release-gate* ]] || { value label "$file"; exit; }; printf '%s\\n' "$identity" ;;
   "volume rm") identity=$(last_arg "$@"); rm -f -- "$FAKE_STATE/volumes/$identity" ;;
   "network inspect")
     identity=$3; file="$FAKE_STATE/networks/$identity"; [[ -e "$file" ]] || exit 1
-    format=$(last_arg "$@"); [[ "$format" != *'{{json .Labels}}'* ]] || { printf '{"dev.operant.release-gate":"%s","com.docker.compose.project":"%s"}\\n' "$(value label "$file")" "$(value project "$file")"; exit; }; [[ "$format" != *dev.operant.release-gate* ]] || { value label "$file"; exit; }; printf '%s\\n' "$identity" ;;
+    format=$(last_arg "$@"); [[ "$format" != *'{{json .Labels}}'* ]] || { printf '{"dev.optd.release-gate":"%s","com.docker.compose.project":"%s"}\\n' "$(value label "$file")" "$(value project "$file")"; exit; }; [[ "$format" != *dev.optd.release-gate* ]] || { value label "$file"; exit; }; printf '%s\\n' "$identity" ;;
   "network rm") identity=$(last_arg "$@"); rm -f -- "$FAKE_STATE/networks/$identity" ;;
   "compose -f") exit 0 ;;
   *) printf 'unexpected fake docker: %s\\n' "$*" >&2; exit 2 ;;
@@ -1498,7 +1496,7 @@ async function runGate(
   );
   for (
     const match of result.stderr.matchAll(
-      /retained release-gate evidence after cleanup failure: (\/tmp\/operant-release-gate-[^\s]+)/g,
+      /retained release-gate evidence after cleanup failure: (\/tmp\/optd-release-gate-[^\s]+)/g,
     )
   ) {
     fixture.retainedEvidence.push(match[1]);
@@ -1815,7 +1813,7 @@ async function runArtifact(
   return await run(
     fixture,
     ["bash", "scripts/release-artifacts.sh", image, output],
-    { OPERANT_CONTAINER_IMAGE_ID: image, ...extraEnv },
+    { OPTD_CONTAINER_IMAGE_ID: image, ...extraEnv },
   );
 }
 
@@ -1848,21 +1846,21 @@ function fixtureEnv(
     FAKE_STATE: fixture.state,
     FAKE_REVISION: fixture.revision,
     FAKE_IMAGE_ID: imageId,
-    OPERANT_RELEASE_BASE: fixture.base,
+    OPTD_RELEASE_BASE: fixture.base,
     // Controlled fixtures are subprocesses, not recursive executions of the
     // parent gate. Never let its ownership or immutable-source context bleed
     // into their isolated fake registries and repositories.
-    OPERANT_RELEASE_GATE_ACTIVE: "0",
-    OPERANT_RELEASE_GATE_ID: "",
-    OPERANT_RELEASE_GATE_REGISTRY: "",
-    OPERANT_RELEASE_SOURCE_REVISION: "",
-    OPERANT_RELEASE_SOURCE_ROOT: "",
-    OPERANT_CONTAINER_IMAGE: "",
-    OPERANT_CONTAINER_IMAGE_TAG: "",
-    OPERANT_CONTAINER_IMAGE_ID: "",
-    OPERANT_CONTAINER_REVISION: "",
-    OPERANT_CONTAINER_VERSION: "",
-    OPERANT_CONTAINER_SKIP_BUILD: "",
+    OPTD_RELEASE_GATE_ACTIVE: "0",
+    OPTD_RELEASE_GATE_ID: "",
+    OPTD_RELEASE_GATE_REGISTRY: "",
+    OPTD_RELEASE_SOURCE_REVISION: "",
+    OPTD_RELEASE_SOURCE_ROOT: "",
+    OPTD_CONTAINER_IMAGE: "",
+    OPTD_CONTAINER_IMAGE_TAG: "",
+    OPTD_CONTAINER_IMAGE_ID: "",
+    OPTD_CONTAINER_REVISION: "",
+    OPTD_CONTAINER_VERSION: "",
+    OPTD_CONTAINER_SKIP_BUILD: "",
     ...extraEnv,
   };
 }

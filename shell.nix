@@ -18,13 +18,13 @@ pkgs.mkShell {
   ];
 
   shellHook = ''
-    export OPERANT_DEV_SHELL=1
-    export OPERANT_PG_BIN_DIR=${pkgs.postgresql}/bin
-    export OPERANT_DATA_DIR="$PWD/.operant-data"
-    mkdir -p "$OPERANT_DATA_DIR"
-    echo "operant dev shell"
+    export OPTD_DEV_SHELL=1
+    export OPTD_PG_BIN_DIR=${pkgs.postgresql}/bin
+    export OPTD_DATA_DIR="$PWD/.optd-data"
+    mkdir -p "$OPTD_DATA_DIR"
+    echo "optd dev shell"
     echo "  deno:      $(deno --version | head -n1)"
     echo "  postgres:  $(postgres --version)"
-    echo "  pg bin:    $OPERANT_PG_BIN_DIR"
+    echo "  pg bin:    $OPTD_PG_BIN_DIR"
   '';
 }

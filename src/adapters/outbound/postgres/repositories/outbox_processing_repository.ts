@@ -19,38 +19,38 @@ export type { OutboxConfig } from "../../../../application/services/process_outb
 export function loadOutboxConfig(env = Deno.env.toObject()): OutboxConfig {
   return {
     pollIntervalMs: integer(
-      env.OPERANT_OUTBOX_POLL_INTERVAL_MS,
+      env.OPTD_OUTBOX_POLL_INTERVAL_MS,
       1_000,
       10,
       60_000,
     ),
-    batchSize: integer(env.OPERANT_OUTBOX_BATCH_SIZE, 25, 1, 100),
+    batchSize: integer(env.OPTD_OUTBOX_BATCH_SIZE, 25, 1, 100),
     leaseMarginMs: integer(
-      env.OPERANT_OUTBOX_LEASE_MARGIN_MS,
+      env.OPTD_OUTBOX_LEASE_MARGIN_MS,
       30_000,
       1_000,
       600_000,
     ),
     initialBackoffMs: integer(
-      env.OPERANT_OUTBOX_INITIAL_BACKOFF_MS,
+      env.OPTD_OUTBOX_INITIAL_BACKOFF_MS,
       5_000,
       1,
       3_600_000,
     ),
     maximumBackoffMs: integer(
-      env.OPERANT_OUTBOX_MAX_BACKOFF_MS,
+      env.OPTD_OUTBOX_MAX_BACKOFF_MS,
       3_600_000,
       1,
       86_400_000,
     ),
     maximumRetryAfterMs: integer(
-      env.OPERANT_OUTBOX_MAX_RETRY_AFTER_MS,
+      env.OPTD_OUTBOX_MAX_RETRY_AFTER_MS,
       3_600_000,
       1,
       86_400_000,
     ),
     shutdownGraceMs: integer(
-      env.OPERANT_OUTBOX_SHUTDOWN_GRACE_MS,
+      env.OPTD_OUTBOX_SHUTDOWN_GRACE_MS,
       30_000,
       1,
       600_000,

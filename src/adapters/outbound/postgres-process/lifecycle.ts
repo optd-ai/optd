@@ -36,7 +36,7 @@ export type PostgresRuntime =
 export function planPostgresRuntime(
   env: Deno.Env = Deno.env,
 ): PostgresRuntimePlan {
-  const databaseUrl = env.get("OPERANT_DATABASE_URL") ?? undefined;
+  const databaseUrl = env.get("OPTD_DATABASE_URL") ?? undefined;
   if (databaseUrl) {
     assertSupportedPostgresUrl(databaseUrl);
     return {
@@ -46,8 +46,8 @@ export function planPostgresRuntime(
     };
   }
 
-  const pgBinDir = env.get("OPERANT_PG_BIN_DIR") ?? undefined;
-  const dataDir = env.get("OPERANT_DATA_DIR") ?? undefined;
+  const pgBinDir = env.get("OPTD_PG_BIN_DIR") ?? undefined;
+  const dataDir = env.get("OPTD_DATA_DIR") ?? undefined;
   return {
     mode: "app_managed",
     dataDir,
@@ -65,7 +65,7 @@ export async function assertPostgresLifecycleAvailable(
   const bins = await findPostgresBins(env);
   if (!bins) {
     throw new Error(
-      "postgres binaries not found; set OPERANT_PG_BIN_DIR or enter nix shell",
+      "postgres binaries not found; set OPTD_PG_BIN_DIR or enter nix shell",
     );
   }
   return { ...plan, binariesAvailable: true };
@@ -74,7 +74,7 @@ export async function assertPostgresLifecycleAvailable(
 export async function startPostgresRuntime(
   env: Deno.Env = Deno.env,
 ): Promise<PostgresRuntime> {
-  const databaseUrl = env.get("OPERANT_DATABASE_URL") ?? undefined;
+  const databaseUrl = env.get("OPTD_DATABASE_URL") ?? undefined;
   if (databaseUrl) {
     assertSupportedPostgresUrl(databaseUrl);
     return {
@@ -84,7 +84,7 @@ export async function startPostgresRuntime(
     };
   }
 
-  const rootDir = env.get("OPERANT_DATA_DIR") ?? ".operant-data";
+  const rootDir = env.get("OPTD_DATA_DIR") ?? ".optd-data";
   const managed = await startManagedPostgres(rootDir, env);
   return {
     ...managed,
@@ -97,7 +97,7 @@ export async function startPostgresRuntime(
 export async function findPostgresBins(
   env: Deno.Env = Deno.env,
 ): Promise<PostgresBinaries | null> {
-  const binDir = env.get("OPERANT_PG_BIN_DIR");
+  const binDir = env.get("OPTD_PG_BIN_DIR");
   const candidates = binDir ? [binDir] : (env.get("PATH") ?? "").split(":");
   for (const dir of candidates.filter(Boolean)) {
     const initdb = `${dir}/initdb`;
@@ -117,7 +117,7 @@ export async function startManagedPostgres(
   const bins = await findPostgresBins(env);
   if (!bins) {
     throw new Error(
-      "postgres binaries not found; set OPERANT_PG_BIN_DIR or enter nix shell",
+      "postgres binaries not found; set OPTD_PG_BIN_DIR or enter nix shell",
     );
   }
 
@@ -131,13 +131,13 @@ export async function startManagedPostgres(
       "--no-locale",
       "--encoding=UTF8",
       "--auth=trust",
-      "--username=operant",
+      "--username=optd",
     ]);
   }
 
   await removeDemonstrablyStalePostmasterPid(dataDir);
 
-  const configuredPort = env.get("OPERANT_PG_PORT");
+  const configuredPort = env.get("OPTD_PG_PORT");
   const port = configuredPort && configuredPort !== "0"
     ? Number(configuredPort)
     : await freePort();
@@ -164,7 +164,7 @@ export async function startManagedPostgres(
     runDir,
     port,
     process: child,
-    databaseUrl: `postgres://operant@127.0.0.1:${port}/postgres`,
+    databaseUrl: `postgres://optd@127.0.0.1:${port}/postgres`,
   };
 
   try {
@@ -287,7 +287,7 @@ export function assertSupportedPostgresVersionNumber(
     !Number.isSafeInteger(numeric) || numeric <= 0 || major < MIN_POSTGRES_MAJOR
   ) {
     throw new Error(
-      `unsupported PostgreSQL server version: Operant requires PostgreSQL ${MIN_POSTGRES_MAJOR} or newer`,
+      `unsupported PostgreSQL server version: Optd requires PostgreSQL ${MIN_POSTGRES_MAJOR} or newer`,
     );
   }
   return major;
@@ -299,7 +299,7 @@ export function assertSupportedPostgresUrl(databaseUrl: string): void {
     protocol = new URL(databaseUrl).protocol;
   } catch {
     throw new Error(
-      "OPERANT_DATABASE_URL must be a valid postgres:// or postgresql:// URL",
+      "OPTD_DATABASE_URL must be a valid postgres:// or postgresql:// URL",
     );
   }
   if (protocol !== "postgres:" && protocol !== "postgresql:") {
@@ -325,7 +325,7 @@ async function waitReady(psqlBin: string, pg: ManagedPostgres): Promise<void> {
         "-d",
         "postgres",
         "-U",
-        "operant",
+        "optd",
         "-Atc",
         "select 1",
       ],

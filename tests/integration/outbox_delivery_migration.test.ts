@@ -19,7 +19,7 @@ import {
 } from "../../src/adapters/outbound/postgres-process/lifecycle.ts";
 
 Deno.test("durable outbox migration rejects populated incompatible legacy rows", async () => {
-  if (Deno.env.get("OPERANT_DATABASE_URL") || !await findPostgresBins()) return;
+  if (Deno.env.get("OPTD_DATABASE_URL") || !await findPostgresBins()) return;
   await withPostgres("legacy", async (sql) => {
     await sql.begin((tx) =>
       applyPlatformMigrations(tx, platformMigrations.slice(0, -1))
@@ -47,7 +47,7 @@ Deno.test("durable outbox migration rejects populated incompatible legacy rows",
 });
 
 Deno.test("durable outbox migration installs exact constraints, indexes and evidence guards", async () => {
-  if (Deno.env.get("OPERANT_DATABASE_URL") || !await findPostgresBins()) return;
+  if (Deno.env.get("OPTD_DATABASE_URL") || !await findPostgresBins()) return;
   await withPostgres("shape", async (sql) => {
     await sql.begin((tx) => applyPlatformMigrations(tx));
     const states = (await query<{ definition: string }>(
@@ -104,9 +104,9 @@ async function withPostgres(
   suffix: string,
   fn: (sql: ReturnType<typeof createPostgresClient>) => Promise<void>,
 ) {
-  const root = await Deno.makeTempDir({ prefix: `operant-outbox-${suffix}-` });
-  const previous = Deno.env.get("OPERANT_DATA_DIR");
-  Deno.env.set("OPERANT_DATA_DIR", root);
+  const root = await Deno.makeTempDir({ prefix: `optd-outbox-${suffix}-` });
+  const previous = Deno.env.get("OPTD_DATA_DIR");
+  Deno.env.set("OPTD_DATA_DIR", root);
   let runtime: Awaited<ReturnType<typeof startPostgresRuntime>> | undefined;
   let sql: ReturnType<typeof createPostgresClient> | undefined;
   try {
@@ -116,8 +116,8 @@ async function withPostgres(
   } finally {
     if (sql) await closePostgresClient(sql).catch(() => undefined);
     if (runtime) await runtime.stop().catch(() => undefined);
-    if (previous === undefined) Deno.env.delete("OPERANT_DATA_DIR");
-    else Deno.env.set("OPERANT_DATA_DIR", previous);
+    if (previous === undefined) Deno.env.delete("OPTD_DATA_DIR");
+    else Deno.env.set("OPTD_DATA_DIR", previous);
     await Deno.remove(root, { recursive: true }).catch(() => undefined);
   }
 }

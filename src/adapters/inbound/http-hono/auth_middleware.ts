@@ -143,7 +143,7 @@ export function containsAuthority(value: unknown): boolean {
 function isTrustHeader(name: string): boolean {
   const normalized = name.toLowerCase().replaceAll("-", "_");
   if (!normalized.startsWith("x_")) return false;
-  const key = normalized.slice(2).replace(/^operant_/, "");
+  const key = normalized.slice(2).replace(/^optd_/, "");
   return isAuthorityKey(key);
 }
 

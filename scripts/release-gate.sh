@@ -2,7 +2,7 @@
 set -euo pipefail
 
 readonly frozen_release_base="a6715631d48f2c6bf0c03326c909896ba9058164"
-readonly gate_label_key="dev.operant.release-gate"
+readonly gate_label_key="dev.optd.release-gate"
 repo_root=""
 release_revision=""
 release_base=""
@@ -245,7 +245,7 @@ PY
 
 register_owned_pid() {
   local pid=$1
-  if [[ "${OPERANT_RELEASE_TEST_PRE_REGISTRATION_FAILURE:-0}" == 1 && ! -e "$state_root/pre-registration-failure-injected" ]]; then
+  if [[ "${OPTD_RELEASE_TEST_PRE_REGISTRATION_FAILURE:-0}" == 1 && ! -e "$state_root/pre-registration-failure-injected" ]]; then
     : >"$state_root/pre-registration-failure-injected"
     return 1
   fi
@@ -732,12 +732,12 @@ signal_exit() {
 # taking any resource snapshot.
 repo_root=$(git rev-parse --show-toplevel)
 cd "$repo_root"
-if [[ "${OPERANT_RELEASE_GATE_ACTIVE:-0}" == "1" ]]; then
+if [[ "${OPTD_RELEASE_GATE_ACTIVE:-0}" == "1" ]]; then
   status_message "nested release-gate execution is forbidden"
   exit 1
 fi
-if [[ -n "${OPERANT_RELEASE_KEEP_IMAGE:-}" && "${OPERANT_RELEASE_KEEP_IMAGE}" != "0" ]]; then
-  status_message "OPERANT_RELEASE_KEEP_IMAGE is incompatible with exact all-image baseline restoration"
+if [[ -n "${OPTD_RELEASE_KEEP_IMAGE:-}" && "${OPTD_RELEASE_KEEP_IMAGE}" != "0" ]]; then
+  status_message "OPTD_RELEASE_KEEP_IMAGE is incompatible with exact all-image baseline restoration"
   exit 1
 fi
 if ! release_revision=$(git rev-parse --verify 'HEAD^{commit}'); then
@@ -757,11 +757,11 @@ if [[ -n "$source_status" ]]; then
   git status --short >&2 || true
   exit 1
 fi
-if [[ -n "${OPERANT_RELEASE_BASE:-}" && -n "${OPERANT_RELEASE_BASE_REV:-}" && "$OPERANT_RELEASE_BASE" != "$OPERANT_RELEASE_BASE_REV" ]]; then
-  status_message "conflicting OPERANT_RELEASE_BASE and legacy OPERANT_RELEASE_BASE_REV"
+if [[ -n "${OPTD_RELEASE_BASE:-}" && -n "${OPTD_RELEASE_BASE_REV:-}" && "$OPTD_RELEASE_BASE" != "$OPTD_RELEASE_BASE_REV" ]]; then
+  status_message "conflicting OPTD_RELEASE_BASE and legacy OPTD_RELEASE_BASE_REV"
   exit 1
 fi
-release_base=${OPERANT_RELEASE_BASE:-${OPERANT_RELEASE_BASE_REV:-$frozen_release_base}}
+release_base=${OPTD_RELEASE_BASE:-${OPTD_RELEASE_BASE_REV:-$frozen_release_base}}
 if [[ ! "$release_base" =~ ^[0-9a-f]{40}$ ]]; then
   status_message "release base must be a full 40-character commit object ID: $release_base"
   exit 1
@@ -781,7 +781,7 @@ if [[ ! "$run_id" =~ ^[0-9a-f]{32}$ ]]; then
   exit 1
 fi
 umask 077
-state_root=$(mktemp -d -t "operant-release-gate-${run_id}-XXXXXX")
+state_root=$(mktemp -d -t "optd-release-gate-${run_id}-XXXXXX")
 trap cleanup_and_compare EXIT
 trap 'signal_exit 130' INT
 trap 'signal_exit 143' TERM
@@ -870,11 +870,11 @@ fi
 printf 'effective committed TypeScript coverage (%d files):\n' "${#release_ts[@]}"
 printf '  %q\n' "${release_ts[@]}"
 
-export OPERANT_RELEASE_GATE_ACTIVE=1
-export OPERANT_RELEASE_GATE_ID="$run_id"
-export OPERANT_RELEASE_GATE_REGISTRY="$state_root/registry"
-export OPERANT_RELEASE_SOURCE_REVISION="$release_revision"
-export OPERANT_RELEASE_SOURCE_ROOT="$source_root"
+export OPTD_RELEASE_GATE_ACTIVE=1
+export OPTD_RELEASE_GATE_ID="$run_id"
+export OPTD_RELEASE_GATE_REGISTRY="$state_root/registry"
+export OPTD_RELEASE_SOURCE_REVISION="$release_revision"
+export OPTD_RELEASE_SOURCE_ROOT="$source_root"
 
 cd "$source_root"
 printf 'COMMAND: deno lint -- <effective NUL-collected files above>\n'
@@ -894,7 +894,7 @@ verify_source
 
 printf '\n== exact one-time release image build ==\n'
 release_version="release-gate-${release_revision:0:12}"
-release_image_tag="operant:${release_version}-${run_id}"
+release_image_tag="optd:${release_version}-${run_id}"
 printf 'COMMAND: docker build --pull=false --no-cache ... --tag %s - < immutable git archive\n' "$release_image_tag"
 append_registry images "pending:$release_image_tag" "$release_image_tag"
 verify_source_archive
@@ -904,8 +904,8 @@ capture_status=0
 if run_owned image-build python3 "$source_root/scripts/release-image-accounting.py" capture \
   --transcript "$build_transcript" --stdin "$source_archive" -- \
   docker build --pull=false --no-cache \
-  --label "$gate_label_key=$run_id" --build-arg "OPERANT_REVISION=$release_revision" \
-  --build-arg "OPERANT_VERSION=$release_version" --tag "$release_image_tag" -; then
+  --label "$gate_label_key=$run_id" --build-arg "OPTD_REVISION=$release_revision" \
+  --build-arg "OPTD_VERSION=$release_version" --tag "$release_image_tag" -; then
   capture_status=0
 else
   capture_status=$?
@@ -941,19 +941,19 @@ if [[ ! "$release_image_id" =~ ^sha256:[0-9a-f]{64}$ || "$image_revision" != "$r
   status_message "built image identity mismatch: id=$release_image_id revision=$image_revision version=$image_version gate=$image_gate_id"
   exit 1
 fi
-export OPERANT_CONTAINER_IMAGE="$release_image_id"
-export OPERANT_CONTAINER_IMAGE_TAG="$release_image_tag"
-export OPERANT_CONTAINER_IMAGE_ID="$release_image_id"
-export OPERANT_CONTAINER_REVISION="$release_revision"
-export OPERANT_CONTAINER_VERSION="$release_version"
-export OPERANT_CONTAINER_SKIP_BUILD=1
+export OPTD_CONTAINER_IMAGE="$release_image_id"
+export OPTD_CONTAINER_IMAGE_TAG="$release_image_tag"
+export OPTD_CONTAINER_IMAGE_ID="$release_image_id"
+export OPTD_CONTAINER_REVISION="$release_revision"
+export OPTD_CONTAINER_VERSION="$release_version"
+export OPTD_CONTAINER_SKIP_BUILD=1
 printf 'exact immutable image ID: %s\ncontainer build mode: skip-build/reuse\n' "$release_image_id"
 
 printf '\n== Compose and release artifact contracts ==\n'
-OPERANT_IMAGE="$release_image_id" \
-OPERANT_POSTGRES_PASSWORD=compose-contract \
-OPERANT_BOOTSTRAP_TOKEN=compose-contract \
-OPERANT_SECRET_MASTER_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= \
+OPTD_IMAGE="$release_image_id" \
+OPTD_POSTGRES_PASSWORD=compose-contract \
+OPTD_BOOTSTRAP_TOKEN=compose-contract \
+OPTD_SECRET_MASTER_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= \
   run_owned compose-config docker compose -f compose.external-postgres.yml config --quiet
 verify_source
 run_owned release-artifacts bash scripts/release-artifacts.sh "$release_image_id" "$artifact_dir"
@@ -964,7 +964,7 @@ jq -e --arg revision "$release_revision" --arg image_id "$release_image_id" --ar
 (cd "$artifact_dir" && sha256sum --check SHA256SUMS)
 
 printf '\n== complete real-PG and exact-image container suite ==\n'
-printf 'COMMAND: OPERANT_CONTAINER_SKIP_BUILD=1 deno task test\n'
+printf 'COMMAND: OPTD_CONTAINER_SKIP_BUILD=1 deno task test\n'
 run_owned complete-suite deno task test
 verify_source
 

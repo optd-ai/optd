@@ -3,7 +3,7 @@ import { makeProcessTreeLauncher } from "../../support/live_harness.ts";
 
 Deno.test("persistent launchers repeatedly run and close without stream leaks", async () => {
   const directory = await Deno.makeTempDir({
-    prefix: "operant-launcher-leak-",
+    prefix: "optd-launcher-leak-",
   });
   const executable = `${directory}/fake-optctl`;
   await Deno.writeTextFile(

@@ -8,11 +8,11 @@ Deno.test("Projects pack source has no legacy relationships, dotted aliases, or 
   const source = await Array.fromAsync(walkSources(PACK));
   const text = source.join("\n");
   assertEquals(
-    /timesheet_entry|operant\.projects|project_task/.test(text),
+    /timesheet_entry|optd\.projects|project_task/.test(text),
     false,
   );
   assertEquals(
-    /Bearer |authorization:|OPERANT_DATABASE_URL|postgres:\/\//i.test(text),
+    /Bearer |authorization:|OPTD_DATABASE_URL|postgres:\/\//i.test(text),
     false,
   );
 });

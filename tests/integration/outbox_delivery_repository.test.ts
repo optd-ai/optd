@@ -28,10 +28,10 @@ import { canonicalSha256 } from "../../src/domain/ids/canonical_json.ts";
 import { uuidV7 } from "../../src/domain/ids/uuid_v7.ts";
 
 Deno.test("production repository preserves stable identity, fixed lease fencing, attempts and generations", async () => {
-  if (Deno.env.get("OPERANT_DATABASE_URL") || !await findPostgresBins()) return;
-  const root = await Deno.makeTempDir({ prefix: "operant-outbox-repository-" });
-  const previous = Deno.env.get("OPERANT_DATA_DIR");
-  Deno.env.set("OPERANT_DATA_DIR", root);
+  if (Deno.env.get("OPTD_DATABASE_URL") || !await findPostgresBins()) return;
+  const root = await Deno.makeTempDir({ prefix: "optd-outbox-repository-" });
+  const previous = Deno.env.get("OPTD_DATA_DIR");
+  Deno.env.set("OPTD_DATA_DIR", root);
   let runtime: Awaited<ReturnType<typeof startPostgresRuntime>> | undefined;
   let sql: ReturnType<typeof createPostgresClient> | undefined;
   try {
@@ -179,17 +179,17 @@ Deno.test("production repository preserves stable identity, fixed lease fencing,
   } finally {
     if (sql) await closePostgresClient(sql).catch(() => undefined);
     if (runtime) await runtime.stop().catch(() => undefined);
-    if (previous === undefined) Deno.env.delete("OPERANT_DATA_DIR");
-    else Deno.env.set("OPERANT_DATA_DIR", previous);
+    if (previous === undefined) Deno.env.delete("OPTD_DATA_DIR");
+    else Deno.env.set("OPTD_DATA_DIR", previous);
     await Deno.remove(root, { recursive: true }).catch(() => undefined);
   }
 });
 
 Deno.test("independent max-one claimers skip locked rows and cancellation has deterministic FIFO outcomes", async () => {
-  if (Deno.env.get("OPERANT_DATABASE_URL") || !await findPostgresBins()) return;
-  const root = await Deno.makeTempDir({ prefix: "operant-outbox-locks-" });
-  const previous = Deno.env.get("OPERANT_DATA_DIR");
-  Deno.env.set("OPERANT_DATA_DIR", root);
+  if (Deno.env.get("OPTD_DATABASE_URL") || !await findPostgresBins()) return;
+  const root = await Deno.makeTempDir({ prefix: "optd-outbox-locks-" });
+  const previous = Deno.env.get("OPTD_DATA_DIR");
+  Deno.env.set("OPTD_DATA_DIR", root);
   let runtime: Awaited<ReturnType<typeof startPostgresRuntime>> | undefined;
   let setup: ReturnType<typeof createPostgresClient> | undefined;
   let firstSql: ReturnType<typeof postgres> | undefined;
@@ -336,17 +336,17 @@ Deno.test("independent max-one claimers skip locked rows and cancellation has de
     if (secondSql) await secondSql.end({ timeout: 5 }).catch(() => undefined);
     if (setup) await closePostgresClient(setup).catch(() => undefined);
     if (runtime) await runtime.stop().catch(() => undefined);
-    if (previous === undefined) Deno.env.delete("OPERANT_DATA_DIR");
-    else Deno.env.set("OPERANT_DATA_DIR", previous);
+    if (previous === undefined) Deno.env.delete("OPTD_DATA_DIR");
+    else Deno.env.set("OPTD_DATA_DIR", previous);
     await Deno.remove(root, { recursive: true }).catch(() => undefined);
   }
 });
 
 Deno.test("production service dead-letters pinned permanent failures before provider effects", async () => {
-  if (Deno.env.get("OPERANT_DATABASE_URL") || !await findPostgresBins()) return;
-  const root = await Deno.makeTempDir({ prefix: "operant-outbox-permanent-" });
-  const previous = Deno.env.get("OPERANT_DATA_DIR");
-  Deno.env.set("OPERANT_DATA_DIR", root);
+  if (Deno.env.get("OPTD_DATABASE_URL") || !await findPostgresBins()) return;
+  const root = await Deno.makeTempDir({ prefix: "optd-outbox-permanent-" });
+  const previous = Deno.env.get("OPTD_DATA_DIR");
+  Deno.env.set("OPTD_DATA_DIR", root);
   let runtime: Awaited<ReturnType<typeof startPostgresRuntime>> | undefined;
   let sql: ReturnType<typeof createPostgresClient> | undefined;
   try {
@@ -864,8 +864,8 @@ Deno.test("production service dead-letters pinned permanent failures before prov
   } finally {
     if (sql) await closePostgresClient(sql).catch(() => undefined);
     if (runtime) await runtime.stop().catch(() => undefined);
-    if (previous === undefined) Deno.env.delete("OPERANT_DATA_DIR");
-    else Deno.env.set("OPERANT_DATA_DIR", previous);
+    if (previous === undefined) Deno.env.delete("OPTD_DATA_DIR");
+    else Deno.env.set("OPTD_DATA_DIR", previous);
     await Deno.remove(root, { recursive: true }).catch(() => undefined);
   }
 });

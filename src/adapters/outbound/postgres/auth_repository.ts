@@ -70,7 +70,7 @@ export class PostgresAuthRepository implements AuthRepository {
       if (result.rows[0]?.completed === true) return ok("active" as const);
       const lock = await query<{ acquired: boolean }>(
         tx,
-        "select pg_try_advisory_xact_lock(hashtext('operant.auth.bootstrap')) acquired",
+        "select pg_try_advisory_xact_lock(hashtext('optd.auth.bootstrap')) acquired",
       );
       if (!lock.rows[0]?.acquired) return ok("bootstrap_in_progress" as const);
       if (!this.configuredBootstrapToken) {
@@ -99,7 +99,7 @@ export class PostgresAuthRepository implements AuthRepository {
     return await this.sql.begin(async (tx) => {
       await query(
         tx,
-        "select pg_advisory_xact_lock(hashtext('operant.auth.bootstrap'))",
+        "select pg_advisory_xact_lock(hashtext('optd.auth.bootstrap'))",
       );
       await query(
         tx,
@@ -1056,7 +1056,7 @@ export class PostgresAuthRepository implements AuthRepository {
   ): Promise<() => void> {
     if (!this.resetListener) {
       this.resetListener = this.sql.listen(
-        "operant_password_reset",
+        "optd_password_reset",
         (requestId: string) => {
           for (
             const notify of passwordResetListeners.get(requestId) ?? []
@@ -1384,7 +1384,7 @@ export class PostgresAuthRepository implements AuthRepository {
     return await this.sql.begin(async (tx) => {
       await query(
         tx,
-        `select pg_advisory_xact_lock(hashtext('operant.auth.recovery'))`,
+        `select pg_advisory_xact_lock(hashtext('optd.auth.recovery'))`,
       );
       const user = (await query<UserRow>(
         tx,
@@ -2133,7 +2133,7 @@ export class PostgresAuthRepository implements AuthRepository {
   ): Promise<() => void> {
     if (!this.agentRequestListener) {
       this.agentRequestListener = this.sql.listen(
-        "operant_agent_authorization",
+        "optd_agent_authorization",
         (requestId: string) => {
           for (
             const notify of agentRequestListeners.get(requestId) ?? []
@@ -2465,7 +2465,7 @@ async function issueAgentSession(
 }
 const agentRequestListeners = new Map<string, Set<() => void>>();
 async function signalAgentRequest(sql: Queryable, id: string): Promise<void> {
-  await query(sql, `select pg_notify('operant_agent_authorization',$1)`, [id]);
+  await query(sql, `select pg_notify('optd_agent_authorization',$1)`, [id]);
   queueMicrotask(() => {
     for (const listener of agentRequestListeners.get(id) ?? []) listener();
   });
@@ -2474,7 +2474,7 @@ async function signalAgentRequest(sql: Queryable, id: string): Promise<void> {
 const passwordResetListeners = new Map<string, Set<() => void>>();
 
 async function signalPasswordReset(sql: Queryable, id: string): Promise<void> {
-  await query(sql, `select pg_notify('operant_password_reset', $1)`, [id]);
+  await query(sql, `select pg_notify('optd_password_reset', $1)`, [id]);
   setTimeout(() => {
     for (const listener of passwordResetListeners.get(id) ?? []) listener();
   }, 0);
@@ -2643,7 +2643,7 @@ export class ImmediateSemaphore {
   constructor(private readonly maximum: number) {
     if (!Number.isInteger(maximum) || maximum < 1) {
       throw new Error(
-        "OPERANT_PASSWORD_MAX_CONCURRENT_HASHES must be a positive integer",
+        "OPTD_PASSWORD_MAX_CONCURRENT_HASHES must be a positive integer",
       );
     }
   }
@@ -2916,7 +2916,7 @@ async function lockActiveHumanSuperAdmins(
   // Every current or future path that can remove human super-admin authority must acquire this first.
   await query(
     sql,
-    `select pg_advisory_xact_lock(hashtext('operant.auth.super_admin_invariant'))`,
+    `select pg_advisory_xact_lock(hashtext('optd.auth.super_admin_invariant'))`,
   );
   return (await query<ActiveHumanSuperAdmin>(
     sql,

@@ -27,7 +27,7 @@ Deno.test({
       const project = JSON.parse(created.stdout).data;
       const store = JSON.parse(
         await Deno.readTextFile(
-          `${harness.homeDir}/../xdg-config/operant/auth.json`,
+          `${harness.homeDir}/../xdg-config/optd/auth.json`,
         ),
       );
       const token = store.origins[harness.baseUrl].token;

@@ -320,7 +320,7 @@ export class PostgresAuthorizationRepository
       if (current.role_id === "system:super_admin") {
         await query(
           tx,
-          "select pg_advisory_xact_lock(hashtext('operant.final_human_super_admin'))",
+          "select pg_advisory_xact_lock(hashtext('optd.final_human_super_admin'))",
         );
         const count = await query<{ count: string }>(
           tx,

@@ -3,7 +3,7 @@ import { constantTimeDigestEqual } from "../auth/token.ts";
 import { isUuidV7 } from "../ids/uuid_v7.ts";
 import type { FieldSpec } from "../expressions/cel.ts";
 
-const DOMAIN = "operant.query.cursor.v1\0";
+const DOMAIN = "optd.query.cursor.v1\0";
 const text = new TextEncoder();
 export type QueryCursorPosition = Readonly<{ values: unknown[]; id: string }>;
 
@@ -11,12 +11,12 @@ export class QueryCursorSigner {
   readonly #key: Promise<CryptoKey>;
   constructor(masterKey: string | null | undefined) {
     if (!masterKey?.trim()) {
-      throw new Error("OPERANT_MASTER_KEY is required for query cursors");
+      throw new Error("OPTD_MASTER_KEY is required for query cursors");
     }
     this.#key = derive(masterKey.trim());
   }
   static fromEnvironment() {
-    return new QueryCursorSigner(Deno.env.get("OPERANT_MASTER_KEY"));
+    return new QueryCursorSigner(Deno.env.get("OPTD_MASTER_KEY"));
   }
   async encode(
     shapeDigest: string,

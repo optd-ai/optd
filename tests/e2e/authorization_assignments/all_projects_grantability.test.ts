@@ -320,7 +320,7 @@ async function createProject(harness: LiveHarness, slug: string) {
 async function stored(harness: LiveHarness): Promise<Stored> {
   const value = JSON.parse(
     await Deno.readTextFile(
-      join(harness.rootDir, "xdg-config", "operant", "auth.json"),
+      join(harness.rootDir, "xdg-config", "optd", "auth.json"),
     ),
   );
   return value.origins[new URL(harness.baseUrl).origin];
@@ -365,7 +365,7 @@ async function login(
 }
 
 async function select(harness: LiveHarness, selected: Partial<Stored>) {
-  const path = join(harness.rootDir, "xdg-config", "operant", "auth.json");
+  const path = join(harness.rootDir, "xdg-config", "optd", "auth.json");
   const value = JSON.parse(await Deno.readTextFile(path));
   value.origins[new URL(harness.baseUrl).origin] = {
     ...value.origins[new URL(harness.baseUrl).origin],

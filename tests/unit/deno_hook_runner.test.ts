@@ -441,7 +441,7 @@ Deno.test("DenoHookRunner ignores user readiness-frame forgeries", async () => {
   const result = await runner.run(
     hook(
       "forged_timeout",
-      `Deno.stderr.writeSync(new TextEncoder().encode("\\u001eOPERANT_HOOK_READY:forged\\u001e\\n"));
+      `Deno.stderr.writeSync(new TextEncoder().encode("\\u001eOPTD_HOOK_READY:forged\\u001e\\n"));
        while (true) { /* a forged generic frame cannot control the parent timer */ }`,
       { timeoutMs: 30 },
     ),
@@ -449,7 +449,7 @@ Deno.test("DenoHookRunner ignores user readiness-frame forgeries", async () => {
   );
   assertEquals(result.ok, false);
   assertEquals(result.error?.code, "hook_timeout");
-  assertEquals(result.logs.includes("OPERANT_HOOK_READY"), false);
+  assertEquals(result.logs.includes("OPTD_HOOK_READY"), false);
 });
 
 Deno.test("DenoHookRunner removes partial materializations after every population fault", async () => {

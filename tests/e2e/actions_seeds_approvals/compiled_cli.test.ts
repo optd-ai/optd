@@ -31,12 +31,12 @@ for (const trace of [false, true]) {
       }, { kind: "success", body: { ok: true } }]);
       const harness = await startLiveHarness({
         environment: {
-          ...(trace ? { OPERANT_LOG_LEVEL: "trace" } : {}),
-          OPERANT_COMMIT_LOCK_TIMEOUT: "100ms",
+          ...(trace ? { OPTD_LOG_LEVEL: "trace" } : {}),
+          OPTD_COMMIT_LOCK_TIMEOUT: "100ms",
         },
       });
       const pack = await Deno.makeTempDir({
-        prefix: "operant-actions-seeds-e2e-",
+        prefix: "optd-actions-seeds-e2e-",
       });
       let actor: CliLauncher | undefined;
       let reviewer: CliLauncher | undefined;
@@ -1469,7 +1469,7 @@ async function assertSeedRevisionBarriers(
   trace: boolean,
 ) {
   const alternate = await Deno.makeTempDir({
-    prefix: "operant-seed-revision-barrier-",
+    prefix: "optd-seed-revision-barrier-",
   });
   const active = (await query<{ id: string }>(
     harness.server.sql,

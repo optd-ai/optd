@@ -13,7 +13,7 @@ const CRM = "operant/crm";
 for (const logLevel of ["info", "trace"] as const) {
   Deno.test(`public transitional migration is atomic using immutable plans (${logLevel})`, async () => {
     const harness = await startLiveHarness({
-      environment: logLevel === "trace" ? { OPERANT_LOG_LEVEL: "trace" } : {},
+      environment: logLevel === "trace" ? { OPTD_LOG_LEVEL: "trace" } : {},
     });
     const output: string[] = [];
     try {

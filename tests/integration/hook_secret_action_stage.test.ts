@@ -36,10 +36,10 @@ Deno.test({
     }]);
     const harness = await startAuthenticatedHarness();
     const pack = await Deno.makeTempDir({
-      prefix: "operant-action-stage-pack-",
+      prefix: "optd-action-stage-pack-",
     });
     const actionCacheDir = await Deno.makeTempDir({
-      prefix: "operant-action-child-",
+      prefix: "optd-action-child-",
     });
     try {
       await writePack(pack, provider.url);
@@ -360,7 +360,7 @@ Deno.test({
   async fn() {
     const provider = startHttpProvider();
     const harness = await startAuthenticatedHarness();
-    const pack = await Deno.makeTempDir({ prefix: "operant-action-boundary-" });
+    const pack = await Deno.makeTempDir({ prefix: "optd-action-boundary-" });
     try {
       await writePack(pack, provider.url);
       const apply = await harness.runOptctl([
@@ -594,7 +594,7 @@ Deno.test({
   async fn() {
     const provider = startHttpProvider();
     const harness = await startAuthenticatedHarness();
-    const pack = await Deno.makeTempDir({ prefix: "operant-action-races-" });
+    const pack = await Deno.makeTempDir({ prefix: "optd-action-races-" });
     try {
       await writePack(pack, provider.url);
       const apply = await harness.runOptctl([

@@ -335,7 +335,7 @@ Deno.test("runner bounds stdout and truncates/redacts stderr", async () => {
   assertEquals(truncated.logs.includes("needle-secret"), false);
   assertEquals(truncated.logs.includes("needle-"), false);
   assertEquals(truncated.logs.includes("secret"), false);
-  assertEquals(truncated.logs.includes("[OPERANT_LOG_TRUNCATED]"), true);
+  assertEquals(truncated.logs.includes("[OPTD_LOG_TRUNCATED]"), true);
 });
 
 Deno.test("runner enforces timeout and strict output without retaining stdout", async () => {

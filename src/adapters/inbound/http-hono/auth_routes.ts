@@ -249,7 +249,7 @@ export function registerAuthRoutes(
         422,
       );
     }
-    const match = /^Operant-Bootstrap (.+)$/.exec(
+    const match = /^Optd-Bootstrap (.+)$/.exec(
       c.req.header("authorization") ?? "",
     );
     return send(
@@ -679,7 +679,7 @@ export function registerAuthRoutes(
   app.post("/api/v1/auth/recovery/complete", async (c) => {
     const parsed = await json(c);
     if (parsed.response) return parsed.response;
-    const match = /^Operant-Recovery (.+)$/.exec(
+    const match = /^Optd-Recovery (.+)$/.exec(
       c.req.header("authorization") ?? "",
     );
     return send(

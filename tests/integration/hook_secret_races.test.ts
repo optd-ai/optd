@@ -10,9 +10,9 @@ Deno.test({
   sanitizeOps: false,
   sanitizeResources: false,
   async fn() {
-    const previousKey = Deno.env.get("OPERANT_SECRET_MASTER_KEY");
+    const previousKey = Deno.env.get("OPTD_SECRET_MASTER_KEY");
     Deno.env.set(
-      "OPERANT_SECRET_MASTER_KEY",
+      "OPTD_SECRET_MASTER_KEY",
       btoa(String.fromCharCode(...new Uint8Array(32).fill(19))),
     );
     const provider = startHttpProvider([{
@@ -21,7 +21,7 @@ Deno.test({
     }]);
     const harness = await startAuthenticatedHarness();
     const pack = await Deno.makeTempDir({
-      prefix: "operant-hook-secret-pack-",
+      prefix: "optd-hook-secret-pack-",
     });
     try {
       for (const legacyPath of ["/secrets", "/hook-secret-grants"]) {
@@ -686,8 +686,8 @@ Deno.test({
       await provider.close();
       await Deno.remove(pack, { recursive: true }).catch(() => undefined);
       if (previousKey === undefined) {
-        Deno.env.delete("OPERANT_SECRET_MASTER_KEY");
-      } else Deno.env.set("OPERANT_SECRET_MASTER_KEY", previousKey);
+        Deno.env.delete("OPTD_SECRET_MASTER_KEY");
+      } else Deno.env.set("OPTD_SECRET_MASTER_KEY", previousKey);
     }
   },
 });

@@ -20,7 +20,7 @@ Deno.test({
   async fn() {
     const harness = await startAuthenticatedHarness();
     const pack = await Deno.makeTempDir({
-      prefix: "operant-hook-failure-pack-",
+      prefix: "optd-hook-failure-pack-",
     });
     try {
       await writeFailurePack(pack);
@@ -53,7 +53,7 @@ Deno.test({
       assertEquals(retained.code, 0, retained.stderr);
       const execution = JSON.parse(retained.stdout).data.hook_executions[0];
       assertEquals(execution.logs_truncated, true);
-      assertEquals(execution.stderr.includes("[OPERANT_LOG_TRUNCATED]"), true);
+      assertEquals(execution.stderr.includes("[OPTD_LOG_TRUNCATED]"), true);
       assertEquals(
         execution.stderr.includes("failure-matrix-secret-prefix"),
         false,

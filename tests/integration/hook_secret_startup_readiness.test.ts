@@ -18,7 +18,7 @@ Deno.test({
   async fn() {
     const zero = await startLiveHarness({
       bootstrapToken: "startup-bootstrap-token",
-      environment: { OPERANT_SECRET_MASTER_KEY: null },
+      environment: { OPTD_SECRET_MASTER_KEY: null },
     });
     try {
       const token = await bootstrapToken(
@@ -51,19 +51,19 @@ Deno.test({
     await assertRejects(
       () =>
         startLiveHarness({
-          environment: { OPERANT_SECRET_MASTER_KEY: "malformed" },
+          environment: { OPTD_SECRET_MASTER_KEY: "malformed" },
         }),
       Error,
       "canonical base64",
     );
 
     const externalRoot = await Deno.makeTempDir({
-      prefix: "operant-secret-startup-pg-",
+      prefix: "optd-secret-startup-pg-",
     });
     const external = await startManagedPostgres(externalRoot);
     const encrypted = await startLiveHarness({
       externalDatabaseUrl: external.databaseUrl,
-      environment: { OPERANT_SECRET_MASTER_KEY: KEY_A },
+      environment: { OPTD_SECRET_MASTER_KEY: KEY_A },
     });
     try {
       assertEquals(
@@ -85,7 +85,7 @@ Deno.test({
       await assertRejects(
         () =>
           encrypted.restart({
-            environment: { OPERANT_SECRET_MASTER_KEY: null },
+            environment: { OPTD_SECRET_MASTER_KEY: null },
           }),
         Error,
         "secret encryption key is unavailable",
@@ -93,13 +93,13 @@ Deno.test({
       await assertRejects(
         () =>
           encrypted.restart({
-            environment: { OPERANT_SECRET_MASTER_KEY: KEY_B },
+            environment: { OPTD_SECRET_MASTER_KEY: KEY_B },
           }),
         Error,
         "fingerprint does not match",
       );
       await encrypted.restart({
-        environment: { OPERANT_SECRET_MASTER_KEY: KEY_A },
+        environment: { OPTD_SECRET_MASTER_KEY: KEY_A },
       });
       const ready = await fetch(`${encrypted.baseUrl}/ready`);
       await ready.body?.cancel();
@@ -112,7 +112,7 @@ Deno.test({
       await assertRejects(
         () =>
           encrypted.restart({
-            environment: { OPERANT_SECRET_MASTER_KEY: KEY_A },
+            environment: { OPTD_SECRET_MASTER_KEY: KEY_A },
           }),
         Error,
         "secret decryption failed",
@@ -136,7 +136,7 @@ async function bootstrapToken(
     method: "POST",
     headers: {
       "content-type": "application/json",
-      authorization: `Operant-Bootstrap ${bootstrapToken}`,
+      authorization: `Optd-Bootstrap ${bootstrapToken}`,
     },
     body: JSON.stringify({
       username,

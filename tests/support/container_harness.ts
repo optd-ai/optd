@@ -52,15 +52,15 @@ export type RunOptions = {
 };
 
 export async function buildReleaseImage(): Promise<string> {
-  const image = Deno.env.get("OPERANT_CONTAINER_IMAGE") ??
-    `operant:container-release-${sourceSuffix()}`;
-  if (Deno.env.get("OPERANT_CONTAINER_SKIP_BUILD") === "1") {
-    const expectedId = Deno.env.get("OPERANT_CONTAINER_IMAGE_ID");
-    const expectedRevision = Deno.env.get("OPERANT_CONTAINER_REVISION");
-    const expectedVersion = Deno.env.get("OPERANT_CONTAINER_VERSION");
-    if (!Deno.env.get("OPERANT_CONTAINER_IMAGE") || !expectedId) {
+  const image = Deno.env.get("OPTD_CONTAINER_IMAGE") ??
+    `optd:container-release-${sourceSuffix()}`;
+  if (Deno.env.get("OPTD_CONTAINER_SKIP_BUILD") === "1") {
+    const expectedId = Deno.env.get("OPTD_CONTAINER_IMAGE_ID");
+    const expectedRevision = Deno.env.get("OPTD_CONTAINER_REVISION");
+    const expectedVersion = Deno.env.get("OPTD_CONTAINER_VERSION");
+    if (!Deno.env.get("OPTD_CONTAINER_IMAGE") || !expectedId) {
       throw new Error(
-        "skip-build requires OPERANT_CONTAINER_IMAGE and OPERANT_CONTAINER_IMAGE_ID",
+        "skip-build requires OPTD_CONTAINER_IMAGE and OPTD_CONTAINER_IMAGE_ID",
       );
     }
     const inspected = await runCommand("docker", [
@@ -92,9 +92,9 @@ export async function buildReleaseImage(): Promise<string> {
     "--pull=false",
     "--no-cache",
     "--build-arg",
-    `OPERANT_REVISION=${revision}`,
+    `OPTD_REVISION=${revision}`,
     "--build-arg",
-    "OPERANT_VERSION=0.1.0-dev",
+    "OPTD_VERSION=0.1.0-dev",
     "--tag",
     image,
     ".",
@@ -111,14 +111,14 @@ export async function buildReleaseImage(): Promise<string> {
 export async function createContainerHarness(
   image: string,
 ): Promise<ContainerHarness> {
-  const gateId = Deno.env.get("OPERANT_RELEASE_GATE_ID");
-  const expectedImageId = Deno.env.get("OPERANT_CONTAINER_IMAGE_ID");
+  const gateId = Deno.env.get("OPTD_RELEASE_GATE_ID");
+  const expectedImageId = Deno.env.get("OPTD_CONTAINER_IMAGE_ID");
   if (gateId && (!expectedImageId || image !== expectedImageId)) {
     throw new Error(
       `gate harness requires its frozen image ID: expected ${expectedImageId}, got ${image}`,
     );
   }
-  const id = `operant-cr-${gateId ? `${gateId.slice(0, 12)}-` : ""}${
+  const id = `optd-cr-${gateId ? `${gateId.slice(0, 12)}-` : ""}${
     crypto.randomUUID().replaceAll("-", "").slice(0, 12)
   }`;
   const port = await freePort();
@@ -129,7 +129,7 @@ export async function createContainerHarness(
   const cleanupArgs: string[][] = [];
   const gateLabel = gateId;
   const labelArgs = gateLabel
-    ? ["--label", `dev.operant.release-gate=${gateLabel}`]
+    ? ["--label", `dev.optd.release-gate=${gateLabel}`]
     : [];
   let volumeRegistered = false;
   let containerRegistered = false;
@@ -155,9 +155,9 @@ export async function createContainerHarness(
       "--publish",
       `127.0.0.1:${port}:8789`,
       "--env",
-      `OPERANT_BOOTSTRAP_TOKEN=${bootstrapToken}`,
+      `OPTD_BOOTSTRAP_TOKEN=${bootstrapToken}`,
       "--env",
-      `OPERANT_SECRET_MASTER_KEY=${masterKey}`,
+      `OPTD_SECRET_MASTER_KEY=${masterKey}`,
       "--volume",
       `${volume}:/data`,
       ...extraArgs,
@@ -188,7 +188,7 @@ export async function createContainerHarness(
       "--env",
       `XDG_STATE_HOME=${cliRoot}/state`,
       "--env",
-      `OPERANT_AUTH_TREE_STOP_PID=1`,
+      `OPTD_AUTH_TREE_STOP_PID=1`,
       container,
       "sh",
       "-c",
@@ -213,9 +213,7 @@ export async function createContainerHarness(
       await docker([
         "volume",
         "create",
-        ...gateLabel
-          ? ["--label", `dev.operant.release-gate=${gateLabel}`]
-          : [],
+        ...gateLabel ? ["--label", `dev.optd.release-gate=${gateLabel}`] : [],
         volume,
       ]);
       if (!volumeRegistered) {
@@ -314,7 +312,7 @@ async function createDockerProcessTreeLauncher(
           env: {
             ...Deno.env.toObject(), ...message.env, HOME: root + "/home",
             XDG_CONFIG_HOME: root + "/config", XDG_STATE_HOME: root + "/state",
-            OPERANT_AUTH_TREE_STOP_PID: String(Deno.pid),
+            OPTD_AUTH_TREE_STOP_PID: String(Deno.pid),
           },
           stdin: message.stdin === undefined ? "null" : "piped",
           stdout: "piped", stderr: "piped",
@@ -419,7 +417,7 @@ export async function runCommand(
   args: string[],
   options: RunOptions = {},
 ): Promise<CommandResult> {
-  const gateId = Deno.env.get("OPERANT_RELEASE_GATE_ID");
+  const gateId = Deno.env.get("OPTD_RELEASE_GATE_ID");
   if (command === "docker" && gateId && args[0] === "run") {
     return await runRegisteredGateContainer(args.slice(1), options, gateId);
   }
@@ -528,8 +526,8 @@ async function verifyGateDockerRemoval(
 
   for (const identity of identities) {
     const format = kind === "container"
-      ? '{{index .Config.Labels "dev.operant.release-gate"}}'
-      : '{{index .Labels "dev.operant.release-gate"}}';
+      ? '{{index .Config.Labels "dev.optd.release-gate"}}'
+      : '{{index .Labels "dev.optd.release-gate"}}';
     const inspected = await runCommandRaw("docker", [
       kind,
       "inspect",
@@ -577,12 +575,12 @@ async function runRegisteredGateContainer(
     createArgs.push(arg);
   }
   if (!name) {
-    name = `operant-gate-${gateId.slice(0, 12)}-${
+    name = `optd-gate-${gateId.slice(0, 12)}-${
       crypto.randomUUID().replaceAll("-", "").slice(0, 12)
     }`;
     createArgs.unshift("--name", name);
   }
-  createArgs.unshift("--label", `dev.operant.release-gate=${gateId}`);
+  createArgs.unshift("--label", `dev.optd.release-gate=${gateId}`);
   await appendGateRegistry("containers", `pending:${name}`, name);
   const created = await runCommandRaw("docker", [
     "container",
@@ -672,12 +670,12 @@ function prepareGateDockerCreation(
       offset,
       0,
       "--label",
-      `dev.operant.release-gate=${gateId}`,
+      `dev.optd.release-gate=${gateId}`,
     );
     const nameIndex = effective.indexOf("--name");
     const name = nameIndex >= 0
       ? effective[nameIndex + 1]
-      : `operant-gate-${gateId.slice(0, 12)}-pending`;
+      : `optd-gate-${gateId.slice(0, 12)}-pending`;
     return { args: effective, registration: { kind: "containers", name } };
   }
   if (args[0] === "volume" && args[1] === "create") {
@@ -687,7 +685,7 @@ function prepareGateDockerCreation(
         "volume",
         "create",
         "--label",
-        `dev.operant.release-gate=${gateId}`,
+        `dev.optd.release-gate=${gateId}`,
         ...args.slice(2),
       ],
       registration: { kind: "volumes", name },
@@ -700,7 +698,7 @@ function prepareGateDockerCreation(
         "network",
         "create",
         "--label",
-        `dev.operant.release-gate=${gateId}`,
+        `dev.optd.release-gate=${gateId}`,
         ...args.slice(2),
       ],
       registration: { kind: "networks", name },
@@ -723,7 +721,7 @@ async function listExactComposeResources(
   const filters = [
     "--filter",
     `label=com.docker.compose.project=${project}`,
-    ...gateId ? ["--filter", `label=dev.operant.release-gate=${gateId}`] : [],
+    ...gateId ? ["--filter", `label=dev.optd.release-gate=${gateId}`] : [],
   ];
   const listed = await runCommandRaw("docker", [...command, ...filters]);
   const identities = listed.stdout.split("\n").filter(Boolean);
@@ -790,7 +788,7 @@ async function preflightComposeRemoval(
       }
       if (
         labels["com.docker.compose.project"] !== project ||
-        labels["dev.operant.release-gate"] !== gateId
+        labels["dev.optd.release-gate"] !== gateId
       ) {
         throw new Error(
           `refusing Compose removal after exact label mismatch: ${kind}/${identity}`,
@@ -846,7 +844,7 @@ async function appendGateRegistry(
   identity: string,
   name: string,
 ): Promise<void> {
-  const root = Deno.env.get("OPERANT_RELEASE_GATE_REGISTRY");
+  const root = Deno.env.get("OPTD_RELEASE_GATE_REGISTRY");
   if (!root) {
     throw new Error(
       "release gate Docker creation requires its durable registry",

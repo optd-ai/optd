@@ -20,7 +20,7 @@ import {
 } from "../../src/adapters/outbound/postgres-process/lifecycle.ts";
 
 Deno.test("fresh platform baseline is idempotent across real Postgres restart", async () => {
-  if (Deno.env.get("OPERANT_DATABASE_URL")) {
+  if (Deno.env.get("OPTD_DATABASE_URL")) {
     console.warn(
       "SKIP app-managed migration restart test: external database configured",
     );
@@ -33,10 +33,10 @@ Deno.test("fresh platform baseline is idempotent across real Postgres restart", 
     return;
   }
   const root = await Deno.makeTempDir({
-    prefix: "operant-platform-migrations-",
+    prefix: "optd-platform-migrations-",
   });
-  const previousData = Deno.env.get("OPERANT_DATA_DIR");
-  Deno.env.set("OPERANT_DATA_DIR", root);
+  const previousData = Deno.env.get("OPTD_DATA_DIR");
+  Deno.env.set("OPTD_DATA_DIR", root);
   let runtime: Awaited<ReturnType<typeof startPostgresRuntime>> | undefined;
   let sql: ReturnType<typeof createPostgresClient> | undefined;
   try {
@@ -61,19 +61,19 @@ Deno.test("fresh platform baseline is idempotent across real Postgres restart", 
   } finally {
     if (sql) await closePostgresClient(sql).catch(() => undefined);
     if (runtime) await runtime.stop().catch(() => undefined);
-    if (previousData === undefined) Deno.env.delete("OPERANT_DATA_DIR");
-    else Deno.env.set("OPERANT_DATA_DIR", previousData);
+    if (previousData === undefined) Deno.env.delete("OPTD_DATA_DIR");
+    else Deno.env.set("OPTD_DATA_DIR", previousData);
     await Deno.remove(root, { recursive: true }).catch(() => undefined);
   }
 });
 
 Deno.test("race-free commit migrations preserve populated legacy audit and events", async () => {
-  if (Deno.env.get("OPERANT_DATABASE_URL") || !await findPostgresBins()) return;
+  if (Deno.env.get("OPTD_DATABASE_URL") || !await findPostgresBins()) return;
   const root = await Deno.makeTempDir({
     prefix: "op-pop-mig-",
   });
-  const previousData = Deno.env.get("OPERANT_DATA_DIR");
-  Deno.env.set("OPERANT_DATA_DIR", root);
+  const previousData = Deno.env.get("OPTD_DATA_DIR");
+  Deno.env.set("OPTD_DATA_DIR", root);
   let runtime: Awaited<ReturnType<typeof startPostgresRuntime>> | undefined;
   let sql: ReturnType<typeof createPostgresClient> | undefined;
   try {
@@ -126,17 +126,17 @@ Deno.test("race-free commit migrations preserve populated legacy audit and event
   } finally {
     if (sql) await closePostgresClient(sql).catch(() => undefined);
     if (runtime) await runtime.stop().catch(() => undefined);
-    if (previousData === undefined) Deno.env.delete("OPERANT_DATA_DIR");
-    else Deno.env.set("OPERANT_DATA_DIR", previousData);
+    if (previousData === undefined) Deno.env.delete("OPTD_DATA_DIR");
+    else Deno.env.set("OPTD_DATA_DIR", previousData);
     await Deno.remove(root, { recursive: true }).catch(() => undefined);
   }
 });
 
 Deno.test("platform baseline invalidates legacy development migration ids", async () => {
-  if (Deno.env.get("OPERANT_DATABASE_URL") || !await findPostgresBins()) return;
-  const root = await Deno.makeTempDir({ prefix: "operant-legacy-schema-" });
-  const previousData = Deno.env.get("OPERANT_DATA_DIR");
-  Deno.env.set("OPERANT_DATA_DIR", root);
+  if (Deno.env.get("OPTD_DATABASE_URL") || !await findPostgresBins()) return;
+  const root = await Deno.makeTempDir({ prefix: "optd-legacy-schema-" });
+  const previousData = Deno.env.get("OPTD_DATA_DIR");
+  Deno.env.set("OPTD_DATA_DIR", root);
   let runtime: Awaited<ReturnType<typeof startPostgresRuntime>> | undefined;
   let sql: ReturnType<typeof createPostgresClient> | undefined;
   try {
@@ -155,12 +155,12 @@ Deno.test("platform baseline invalidates legacy development migration ids", asyn
     const error = await assertRejects(() =>
       sql!.begin((tx) => applyPlatformMigrations(tx))
     );
-    assertStringIncludes(String(error), "create a fresh OPERANT_DATA_DIR");
+    assertStringIncludes(String(error), "create a fresh OPTD_DATA_DIR");
   } finally {
     if (sql) await closePostgresClient(sql).catch(() => undefined);
     if (runtime) await runtime.stop().catch(() => undefined);
-    if (previousData === undefined) Deno.env.delete("OPERANT_DATA_DIR");
-    else Deno.env.set("OPERANT_DATA_DIR", previousData);
+    if (previousData === undefined) Deno.env.delete("OPTD_DATA_DIR");
+    else Deno.env.set("OPTD_DATA_DIR", previousData);
     await Deno.remove(root, { recursive: true }).catch(() => undefined);
   }
 });

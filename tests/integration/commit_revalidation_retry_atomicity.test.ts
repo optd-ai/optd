@@ -51,8 +51,8 @@ Deno.test({
       );
       assertEquals(busy.ok, false);
       if (!busy.ok) assertEquals(busy.error.code, "commit_busy");
-      const priorDefault = Deno.env.get("OPERANT_COMMIT_LOCK_TIMEOUT");
-      Deno.env.set("OPERANT_COMMIT_LOCK_TIMEOUT", "5ms");
+      const priorDefault = Deno.env.get("OPTD_COMMIT_LOCK_TIMEOUT");
+      Deno.env.set("OPTD_COMMIT_LOCK_TIMEOUT", "5ms");
       try {
         const configured = await makeCommitChangesetService(
           commitRepository(shortClient),
@@ -61,8 +61,8 @@ Deno.test({
         if (!configured.ok) assertEquals(configured.error.code, "commit_busy");
       } finally {
         if (priorDefault === undefined) {
-          Deno.env.delete("OPERANT_COMMIT_LOCK_TIMEOUT");
-        } else Deno.env.set("OPERANT_COMMIT_LOCK_TIMEOUT", priorDefault);
+          Deno.env.delete("OPTD_COMMIT_LOCK_TIMEOUT");
+        } else Deno.env.set("OPTD_COMMIT_LOCK_TIMEOUT", priorDefault);
       }
       assertEquals(
         (await query<{ count: string }>(

@@ -26,15 +26,15 @@ import {
 import { uuidV7 } from "../../src/domain/ids/uuid_v7.ts";
 
 Deno.test("immutable candidates are reused while every preview persists a distinct inactive plan", async () => {
-  if (Deno.env.get("OPERANT_DATABASE_URL") || !await findPostgresBins()) {
+  if (Deno.env.get("OPTD_DATABASE_URL") || !await findPostgresBins()) {
     console.warn(
       "SKIP real Postgres pack plan persistence: app-managed binaries unavailable or external database configured",
     );
     return;
   }
-  const root = await Deno.makeTempDir({ prefix: "operant-pack-plan-" });
-  const previous = Deno.env.get("OPERANT_DATA_DIR");
-  Deno.env.set("OPERANT_DATA_DIR", root);
+  const root = await Deno.makeTempDir({ prefix: "optd-pack-plan-" });
+  const previous = Deno.env.get("OPTD_DATA_DIR");
+  Deno.env.set("OPTD_DATA_DIR", root);
   let runtime: Awaited<ReturnType<typeof startPostgresRuntime>> | undefined;
   let sql: ReturnType<typeof createPostgresClient> | undefined;
   try {
@@ -151,7 +151,7 @@ Deno.test("immutable candidates are reused while every preview persists a distin
           );
           for (const row of tables.rows) {
             assert(
-              /^(?:res|rel)_operant_crm_.*_[0-9a-f]{16}$/.test(row.table_name),
+              /^(?:res|rel)_optd_crm_.*_[0-9a-f]{16}$/.test(row.table_name),
             );
             assertEquals(
               (await query<{ exists: boolean }>(
@@ -343,8 +343,8 @@ Deno.test("immutable candidates are reused while every preview persists a distin
   } finally {
     if (sql) await closePostgresClient(sql).catch(() => undefined);
     if (runtime) await runtime.stop().catch(() => undefined);
-    if (previous === undefined) Deno.env.delete("OPERANT_DATA_DIR");
-    else Deno.env.set("OPERANT_DATA_DIR", previous);
+    if (previous === undefined) Deno.env.delete("OPTD_DATA_DIR");
+    else Deno.env.set("OPTD_DATA_DIR", previous);
     await Deno.remove(root, { recursive: true }).catch(() => undefined);
   }
 });

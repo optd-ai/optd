@@ -2,7 +2,7 @@
 .ai
 .env
 .env.*
-.operant-data
+.optd-data
 coverage
 dist
 result

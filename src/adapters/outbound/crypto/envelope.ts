@@ -32,7 +32,7 @@ export class SecretKeyMalformedError extends Error {
   readonly code = "secret_master_key_invalid";
   constructor() {
     super(
-      "OPERANT_SECRET_MASTER_KEY must be canonical base64 for exactly 32 bytes",
+      "OPTD_SECRET_MASTER_KEY must be canonical base64 for exactly 32 bytes",
     );
   }
 }
@@ -59,7 +59,7 @@ export class EnvelopeCrypto {
 
   constructor(
     masterKey: string | null | undefined = Deno.env.get(
-      "OPERANT_SECRET_MASTER_KEY",
+      "OPTD_SECRET_MASTER_KEY",
     ),
   ) {
     // Whitespace is not ignored: accepting it would make the representation

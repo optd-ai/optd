@@ -1,11 +1,11 @@
 # Create the required Secret out of band; do not commit either value:
-# kubectl create secret generic operant-runtime \
-#   --from-literal=OPERANT_BOOTSTRAP_TOKEN="$(openssl rand -base64 32)" \
-#   --from-literal=OPERANT_SECRET_MASTER_KEY="$(openssl rand -base64 32)"
+# kubectl create secret generic optd-runtime \
+#   --from-literal=OPTD_BOOTSTRAP_TOKEN="$(openssl rand -base64 32)" \
+#   --from-literal=OPTD_SECRET_MASTER_KEY="$(openssl rand -base64 32)"
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: operant-data
+  name: optd-data
 spec:
   accessModes: ["ReadWriteOnce"]
   resources:
@@ -15,18 +15,18 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: operant
+  name: optd
 spec:
   replicas: 1
   strategy:
     type: Recreate
   selector:
     matchLabels:
-      app: operant
+      app: optd
   template:
     metadata:
       labels:
-        app: operant
+        app: optd
     spec:
       terminationGracePeriodSeconds: 30
       securityContext:
@@ -36,8 +36,8 @@ spec:
         fsGroup: 1993
         fsGroupChangePolicy: OnRootMismatch
       containers:
-        - name: operant
-          image: registry.example/operant:0.1.0
+        - name: optd
+          image: registry.example/optd:0.1.0
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
@@ -48,22 +48,22 @@ spec:
             - name: http
               containerPort: 8789
           env:
-            - name: OPERANT_HOST
+            - name: OPTD_HOST
               value: 0.0.0.0
-            - name: OPERANT_PORT
+            - name: OPTD_PORT
               value: "8789"
-            - name: OPERANT_DATA_DIR
+            - name: OPTD_DATA_DIR
               value: /data
-            - name: OPERANT_BOOTSTRAP_TOKEN
+            - name: OPTD_BOOTSTRAP_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: operant-runtime
-                  key: OPERANT_BOOTSTRAP_TOKEN
-            - name: OPERANT_SECRET_MASTER_KEY
+                  name: optd-runtime
+                  key: OPTD_BOOTSTRAP_TOKEN
+            - name: OPTD_SECRET_MASTER_KEY
               valueFrom:
                 secretKeyRef:
-                  name: operant-runtime
-                  key: OPERANT_SECRET_MASTER_KEY
+                  name: optd-runtime
+                  key: OPTD_SECRET_MASTER_KEY
           volumeMounts:
             - name: data
               mountPath: /data
@@ -90,17 +90,17 @@ spec:
       volumes:
         - name: data
           persistentVolumeClaim:
-            claimName: operant-data
+            claimName: optd-data
         - name: tmp
           emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: operant
+  name: optd
 spec:
   selector:
-    app: operant
+    app: optd
   ports:
     - name: http
       port: 8789

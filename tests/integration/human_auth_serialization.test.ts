@@ -675,7 +675,7 @@ Deno.test("concurrent super-admin disablement preserves exactly one active human
       const blocker = harness.server.sql.begin(async (tx) => {
         await query(
           tx,
-          `select pg_advisory_xact_lock(hashtext('operant.auth.super_admin_invariant'))`,
+          `select pg_advisory_xact_lock(hashtext('optd.auth.super_admin_invariant'))`,
         );
         invariantAcquired();
         await release;
@@ -826,7 +826,7 @@ async function waitForSuperAdminWaiters(
   while (Date.now() < deadline) {
     const waiting = await query<{ count: string }>(
       sql,
-      `select count(*)::text count from pg_stat_activity where wait_event='advisory' and query like '%operant.auth.super_admin_invariant%'`,
+      `select count(*)::text count from pg_stat_activity where wait_event='advisory' and query like '%optd.auth.super_admin_invariant%'`,
     );
     if (Number(waiting.rows[0]?.count ?? "0") >= expected) return;
     await new Promise((resolve) => setTimeout(resolve, 5));
@@ -842,7 +842,7 @@ async function resetNonce(
   requestId: string,
 ): Promise<string> {
   const store = JSON.parse(
-    await Deno.readTextFile(`${rootDir}/xdg-config/operant/auth.json`),
+    await Deno.readTextFile(`${rootDir}/xdg-config/optd/auth.json`),
   );
   const nonce = store.origins[new URL(baseUrl).origin].resetNonces[requestId];
   assertFalse(typeof nonce !== "string");

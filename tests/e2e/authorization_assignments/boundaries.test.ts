@@ -288,7 +288,7 @@ async function selectedCredentials(
 ): Promise<{ token: string }> {
   const store = JSON.parse(
     await Deno.readTextFile(
-      join(harness.rootDir, "xdg-config", "operant", "auth.json"),
+      join(harness.rootDir, "xdg-config", "optd", "auth.json"),
     ),
   );
   return store.origins[new URL(harness.baseUrl).origin];

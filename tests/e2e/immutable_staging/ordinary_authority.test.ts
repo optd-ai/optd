@@ -694,7 +694,7 @@ type StoredAuthState = { token: string; requestToken: string };
 async function storedAuthState(harness: LiveHarness): Promise<StoredAuthState> {
   const store = JSON.parse(
     await Deno.readTextFile(
-      join(harness.rootDir, "xdg-config", "operant", "auth.json"),
+      join(harness.rootDir, "xdg-config", "optd", "auth.json"),
     ),
   );
   return store.origins[new URL(harness.baseUrl).origin];
@@ -703,7 +703,7 @@ async function selectStoredCredential(
   harness: LiveHarness,
   update: { token?: string; requestToken?: string },
 ) {
-  const path = join(harness.rootDir, "xdg-config", "operant", "auth.json");
+  const path = join(harness.rootDir, "xdg-config", "optd", "auth.json");
   const store = JSON.parse(await Deno.readTextFile(path));
   const origin = new URL(harness.baseUrl).origin;
   store.origins[origin] = { ...store.origins[origin], ...update };

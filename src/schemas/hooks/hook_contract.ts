@@ -8,7 +8,7 @@ const OUTPUT_BY_PHASE: Record<string, string> = {
   "changeset.validate": "validation.v1",
   "event.after_commit": "delivery.v1",
 };
-const RESERVED_ENV = ["OPERANT_", "DENO_", "LD_", "DYLD_"];
+const RESERVED_ENV = ["OPTD_", "DENO_", "LD_", "DYLD_"];
 const SLOT = /^[a-z][a-z0-9_]{0,62}$/;
 const ENV = /^[A-Z][A-Z0-9_]{0,127}$/;
 const DNS_LABEL = /^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)$/;

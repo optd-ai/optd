@@ -418,7 +418,7 @@ async function lockAndVerifyMigrationState(
   // in this order before consulting runtime metadata or live data.
   await query(
     sql,
-    "select pg_advisory_xact_lock(hashtext('operant.pack.migration'),hashtext($1))",
+    "select pg_advisory_xact_lock(hashtext('optd.pack.migration'),hashtext($1))",
     [`${plan.publisher}/${plan.pack}`],
   );
   await verifyActiveMigrationRevision(sql, plan);
@@ -546,13 +546,13 @@ export async function applyMigrationPlan(
       "persisted plan digest does not match persisted SQL",
     );
   }
-  await query(sql, "savepoint operant_apply_revalidation");
+  await query(sql, "savepoint optd_apply_revalidation");
   let revalidation: Record<string, unknown> | null;
   try {
     revalidation = await validateMigrationPlan(sql, id, authContextId);
   } finally {
-    await query(sql, "rollback to savepoint operant_apply_revalidation");
-    await query(sql, "release savepoint operant_apply_revalidation");
+    await query(sql, "rollback to savepoint optd_apply_revalidation");
+    await query(sql, "release savepoint optd_apply_revalidation");
   }
   if (!revalidation || revalidation.status !== "ready") {
     throw new MigrationApplyError(
@@ -1124,7 +1124,7 @@ async function stableProjectionId(
     await crypto.subtle.digest(
       "SHA-256",
       new TextEncoder().encode(
-        `operant.pack.policy.v1\0${candidate}\0${identity}`,
+        `optd.pack.policy.v1\0${candidate}\0${identity}`,
       ),
     ),
   );
@@ -1281,14 +1281,14 @@ async function structurallyValidatePersistedSql(
     );
   }
   verifyStepCoverage(plan, statements);
-  await query(sql, "savepoint operant_structural_validation");
+  await query(sql, "savepoint optd_structural_validation");
   try {
     for (const index of statementOrder(plan)) {
       await query(sql, statements[index]);
     }
   } finally {
-    await query(sql, "rollback to savepoint operant_structural_validation");
-    await query(sql, "release savepoint operant_structural_validation");
+    await query(sql, "rollback to savepoint optd_structural_validation");
+    await query(sql, "release savepoint optd_structural_validation");
   }
 }
 

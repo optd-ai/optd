@@ -256,7 +256,7 @@ Deno.test("compiled pack preview persists inactive reusable candidates and disti
       "reserved platform field",
     );
     const unknownDir = await Deno.makeTempDir({
-      prefix: "operant-unknown-pack-",
+      prefix: "optd-unknown-pack-",
     });
     try {
       await Deno.writeTextFile(`${unknownDir}/pack.yaml`, strictRoot());
@@ -300,7 +300,7 @@ async function assertMalformedPack(
   message: string,
 ) {
   const directory = await Deno.makeTempDir({
-    prefix: "operant-malformed-pack-",
+    prefix: "optd-malformed-pack-",
   });
   try {
     for (const [relative, content] of Object.entries(files)) {
@@ -324,7 +324,7 @@ async function assertMalformedPack(
 async function harnessToken(harness: LiveHarness): Promise<string> {
   const store = JSON.parse(
     await Deno.readTextFile(
-      join(harness.rootDir, "xdg-config", "operant", "auth.json"),
+      join(harness.rootDir, "xdg-config", "optd", "auth.json"),
     ),
   );
   return store.origins[new URL(harness.baseUrl).origin].token;

@@ -173,11 +173,11 @@ function store(): FilesystemLocalAuthStore {
 }
 
 function stopPid(): number | undefined {
-  const raw = Deno.env.get("OPERANT_AUTH_TREE_STOP_PID");
+  const raw = Deno.env.get("OPTD_AUTH_TREE_STOP_PID");
   if (!raw) return undefined;
   const value = Number(raw);
   if (!Number.isSafeInteger(value) || value <= 0) {
-    throw new Error("invalid OPERANT_AUTH_TREE_STOP_PID");
+    throw new Error("invalid OPTD_AUTH_TREE_STOP_PID");
   }
   return value;
 }

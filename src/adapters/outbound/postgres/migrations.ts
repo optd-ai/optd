@@ -787,12 +787,12 @@ export const platformMigrations: PlatformMigration[] = [
         consumed_at timestamptz null,
         created_at timestamptz not null default now()
       );
-      create function operant_immutable_pack_candidate() returns trigger language plpgsql as $$
+      create function optd_immutable_pack_candidate() returns trigger language plpgsql as $$
       begin raise exception 'pack candidate revisions are immutable'; end $$;
-      create trigger pack_candidate_revisions_immutable before update or delete on pack_candidate_revisions for each row execute function operant_immutable_pack_candidate();
-      create function operant_immutable_migration_plan() returns trigger language plpgsql as $$
+      create trigger pack_candidate_revisions_immutable before update or delete on pack_candidate_revisions for each row execute function optd_immutable_pack_candidate();
+      create function optd_immutable_migration_plan() returns trigger language plpgsql as $$
       begin raise exception 'migration plan content is immutable'; end $$;
-      create trigger pack_migration_plans_v1_immutable before update or delete on pack_migration_plans_v1 for each row execute function operant_immutable_migration_plan();
+      create trigger pack_migration_plans_v1_immutable before update or delete on pack_migration_plans_v1 for each row execute function optd_immutable_migration_plan();
     `,
   },
   {
@@ -834,11 +834,11 @@ export const platformMigrations: PlatformMigration[] = [
         details jsonb not null default '{}'::jsonb,
         created_at timestamptz not null default now()
       );
-      create function operant_immutable_migration_record() returns trigger language plpgsql as $$
+      create function optd_immutable_migration_record() returns trigger language plpgsql as $$
       begin raise exception 'migration records are append-only'; end $$;
-      create trigger pack_migration_applications_immutable before update or delete on pack_migration_applications for each row execute function operant_immutable_migration_record();
-      create trigger pack_migration_attempts_immutable before update or delete on pack_migration_attempts for each row execute function operant_immutable_migration_record();
-      create trigger pack_migration_audit_immutable before update or delete on pack_migration_audit_events for each row execute function operant_immutable_migration_record();
+      create trigger pack_migration_applications_immutable before update or delete on pack_migration_applications for each row execute function optd_immutable_migration_record();
+      create trigger pack_migration_attempts_immutable before update or delete on pack_migration_attempts for each row execute function optd_immutable_migration_record();
+      create trigger pack_migration_audit_immutable before update or delete on pack_migration_audit_events for each row execute function optd_immutable_migration_record();
       create index pack_migration_attempts_plan_idx on pack_migration_attempts(plan_id,created_at,id);
       create index pack_migration_audit_plan_idx on pack_migration_audit_events(plan_id,created_at,id);
     `,
@@ -905,13 +905,13 @@ export const platformMigrations: PlatformMigration[] = [
       );
       create index comments_timeline_idx on comments(project_id,definition_kind,resource_identity,object_id,created_at desc,id desc);
 
-      create function operant_reject_history_mutation() returns trigger language plpgsql as $$
+      create function optd_reject_history_mutation() returns trigger language plpgsql as $$
       begin raise exception 'object history and comments are append-only'; end $$;
-      create trigger object_versions_immutable before update or delete on object_versions for each row execute function operant_reject_history_mutation();
-      create trigger comments_immutable before update or delete on comments for each row execute function operant_reject_history_mutation();
-      create trigger changeset_commits_immutable before update or delete on changeset_commits for each row execute function operant_reject_history_mutation();
+      create trigger object_versions_immutable before update or delete on object_versions for each row execute function optd_reject_history_mutation();
+      create trigger comments_immutable before update or delete on comments for each row execute function optd_reject_history_mutation();
+      create trigger changeset_commits_immutable before update or delete on changeset_commits for each row execute function optd_reject_history_mutation();
 
-      create function operant_validate_version_chain() returns trigger language plpgsql as $$
+      create function optd_validate_version_chain() returns trigger language plpgsql as $$
       declare prior object_versions%rowtype;
       begin
         if new.previous_version_id is not null then
@@ -924,7 +924,7 @@ export const platformMigrations: PlatformMigration[] = [
         return new;
       end $$;
       create constraint trigger object_versions_chain after insert on object_versions
-        deferrable initially deferred for each row execute function operant_validate_version_chain();
+        deferrable initially deferred for each row execute function optd_validate_version_chain();
     `,
   },
   {
@@ -1042,15 +1042,15 @@ export const platformMigrations: PlatformMigration[] = [
       alter table changeset_commits add constraint changeset_commits_stage_complete check(
         (stage_id is null and authorization_cutoff_at is null and operation_graph_digest is null) or
         (stage_id is not null and authorization_cutoff_at is not null and operation_graph_digest ~ '^sha256:[0-9a-f]{64}$'));
-      create function operant_reject_staged_evidence_mutation() returns trigger language plpgsql as $$
+      create function optd_reject_staged_evidence_mutation() returns trigger language plpgsql as $$
       begin raise exception 'staged changeset evidence is immutable'; end $$;
-      create trigger staged_changesets_immutable before update or delete on staged_changesets for each row execute function operant_reject_staged_evidence_mutation();
-      create trigger staged_operations_immutable before update or delete on staged_changeset_operations for each row execute function operant_reject_staged_evidence_mutation();
-      create trigger staged_dependencies_immutable before update or delete on staged_changeset_dependencies for each row execute function operant_reject_staged_evidence_mutation();
-      create trigger staged_hooks_immutable before update or delete on staged_hook_executions for each row execute function operant_reject_staged_evidence_mutation();
-      create trigger staged_policy_immutable before update or delete on staged_policy_decisions for each row execute function operant_reject_staged_evidence_mutation();
-      create trigger staged_approvals_immutable before update or delete on staged_approval_requirements for each row execute function operant_reject_staged_evidence_mutation();
-      create trigger staged_decisions_immutable before update or delete on staged_approval_decisions for each row execute function operant_reject_staged_evidence_mutation();
+      create trigger staged_changesets_immutable before update or delete on staged_changesets for each row execute function optd_reject_staged_evidence_mutation();
+      create trigger staged_operations_immutable before update or delete on staged_changeset_operations for each row execute function optd_reject_staged_evidence_mutation();
+      create trigger staged_dependencies_immutable before update or delete on staged_changeset_dependencies for each row execute function optd_reject_staged_evidence_mutation();
+      create trigger staged_hooks_immutable before update or delete on staged_hook_executions for each row execute function optd_reject_staged_evidence_mutation();
+      create trigger staged_policy_immutable before update or delete on staged_policy_decisions for each row execute function optd_reject_staged_evidence_mutation();
+      create trigger staged_approvals_immutable before update or delete on staged_approval_requirements for each row execute function optd_reject_staged_evidence_mutation();
+      create trigger staged_decisions_immutable before update or delete on staged_approval_decisions for each row execute function optd_reject_staged_evidence_mutation();
       create index staged_operations_project_idx on staged_changeset_operations(stage_id,project_id,ordinal);
       create index staged_dependencies_stage_idx on staged_changeset_dependencies(stage_id,dependency_kind,ordinal);
       create index staged_policy_stage_idx on staged_policy_decisions(stage_id,project_id,ordinal);
@@ -1095,10 +1095,10 @@ export const platformMigrations: PlatformMigration[] = [
     migrate: backfillComponentRevisions,
     applicationChecksum: "rfc8785-component-backfill-v1",
     finalSql: `
-      create function operant_reject_pack_component_mutation() returns trigger language plpgsql as $$
+      create function optd_reject_pack_component_mutation() returns trigger language plpgsql as $$
       begin raise exception 'pack component revisions are immutable'; end $$;
       create trigger pack_component_revisions_immutable before update or delete on pack_component_revisions
-        for each row execute function operant_reject_pack_component_mutation();
+        for each row execute function optd_reject_pack_component_mutation();
       alter table staged_changeset_operations alter column component_revision_id set not null;
     `,
   },
@@ -1135,10 +1135,10 @@ export const platformMigrations: PlatformMigration[] = [
     migrate: backfillHookAttachmentRevisions,
     applicationChecksum: "rfc8785-hook-attachment-backfill-v1",
     finalSql: `
-      create function operant_reject_hook_attachment_mutation() returns trigger language plpgsql as $$
+      create function optd_reject_hook_attachment_mutation() returns trigger language plpgsql as $$
       begin raise exception 'pack hook attachment revisions are immutable'; end $$;
       create trigger pack_hook_attachment_revisions_immutable before update or delete on pack_hook_attachment_revisions
-        for each row execute function operant_reject_hook_attachment_mutation();
+        for each row execute function optd_reject_hook_attachment_mutation();
 
       alter table staged_hook_executions alter column attachment_id set not null;
       alter table staged_hook_executions add constraint staged_hook_attachment_revision_fk
@@ -1256,17 +1256,17 @@ export const platformMigrations: PlatformMigration[] = [
          hook_normalized_config is not null and hook_script_content is not null)
       );
 
-      create function operant_reject_hook_secret_history_mutation() returns trigger language plpgsql as $$
+      create function optd_reject_hook_secret_history_mutation() returns trigger language plpgsql as $$
       begin raise exception 'hook secret grant history is append-only'; end $$;
       create trigger hook_secret_grants_immutable before update or delete on hook_secret_grants
-        for each row execute function operant_reject_hook_secret_history_mutation();
+        for each row execute function optd_reject_hook_secret_history_mutation();
       create trigger hook_secret_grant_revocations_immutable before update or delete on hook_secret_grant_revocations
-        for each row execute function operant_reject_hook_secret_history_mutation();
+        for each row execute function optd_reject_hook_secret_history_mutation();
 
-      create function operant_reject_audit_event_mutation() returns trigger language plpgsql as $$
+      create function optd_reject_audit_event_mutation() returns trigger language plpgsql as $$
       begin raise exception 'audit events are append-only'; end $$;
       create trigger audit_events_immutable before update or delete on audit_events
-        for each row execute function operant_reject_audit_event_mutation();
+        for each row execute function optd_reject_audit_event_mutation();
     `,
   },
   {
@@ -1296,7 +1296,7 @@ export const platformMigrations: PlatformMigration[] = [
       );
       create index staged_approval_audit_stage_idx on staged_approval_audit_events(stage_id,created_at,id);
       create trigger staged_approval_audit_immutable before update or delete on staged_approval_audit_events
-        for each row execute function operant_reject_staged_evidence_mutation();
+        for each row execute function optd_reject_staged_evidence_mutation();
     `,
   },
   {
@@ -1324,7 +1324,7 @@ export const platformMigrations: PlatformMigration[] = [
       create index events_commit_idx on events(changeset_commit_id,occurred_at,id);
       create index events_object_timeline_idx on events(project_id,resource_identity,object_id,occurred_at,id);
       create trigger events_immutable before update or delete on events
-        for each row execute function operant_reject_history_mutation();
+        for each row execute function optd_reject_history_mutation();
 
       alter table changeset_commits add constraint changeset_commits_canonical_uuidv7 check(
         stage_id is null or uuid_extract_version(id)=7
@@ -1472,7 +1472,7 @@ export const platformMigrations: PlatformMigration[] = [
       create index outbox_delivery_event_idx on outbox_deliveries(event_id);
       create index outbox_attempt_timeline_idx on outbox_attempts(delivery_id,total_attempt_number,id);
 
-      create function operant_guard_outbox_delivery() returns trigger language plpgsql as $$
+      create function optd_guard_outbox_delivery() returns trigger language plpgsql as $$
       begin
         if tg_op='DELETE' then raise exception 'outbox deliveries cannot be deleted'; end if;
         if row(old.id,old.event_id,old.attachment_id,old.candidate_revision_id,old.hook_revision_id,
@@ -1493,9 +1493,9 @@ export const platformMigrations: PlatformMigration[] = [
         return new;
       end $$;
       create trigger outbox_delivery_guard before update or delete on outbox_deliveries
-        for each row execute function operant_guard_outbox_delivery();
+        for each row execute function optd_guard_outbox_delivery();
 
-      create function operant_guard_outbox_attempt() returns trigger language plpgsql as $$
+      create function optd_guard_outbox_attempt() returns trigger language plpgsql as $$
       begin
         if tg_op='DELETE' then raise exception 'outbox attempts cannot be deleted'; end if;
         if row(old.id,old.delivery_id,old.retry_generation,old.attempt_number,old.total_attempt_number,
@@ -1510,11 +1510,11 @@ export const platformMigrations: PlatformMigration[] = [
         return new;
       end $$;
       create trigger outbox_attempt_guard before update or delete on outbox_attempts
-        for each row execute function operant_guard_outbox_attempt();
-      create function operant_reject_outbox_execution_mutation() returns trigger language plpgsql as $$
+        for each row execute function optd_guard_outbox_attempt();
+      create function optd_reject_outbox_execution_mutation() returns trigger language plpgsql as $$
       begin raise exception 'outbox execution evidence is immutable'; end $$;
       create trigger outbox_execution_immutable before update or delete on outbox_hook_executions
-        for each row execute function operant_reject_outbox_execution_mutation();
+        for each row execute function optd_reject_outbox_execution_mutation();
 
       insert into policy_rules(id,policy_definition_version_id,role_id,capability,resource,condition_kind,summary) values
         ('01900000-0000-7000-8000-000000000261','01900000-0000-7000-8000-000000000201','system:admin','outbox.inspect','system:outbox','unconditional','Inspect durable deliveries.'),
@@ -1838,7 +1838,7 @@ export async function applyPlatformMigrations(
 
   await query(
     sql,
-    "select pg_advisory_xact_lock(hashtext('operant.platform_schema_migrations'))",
+    "select pg_advisory_xact_lock(hashtext('optd.platform_schema_migrations'))",
   );
 
   const knownIds = platformMigrations.map((migration) => migration.id);
@@ -1851,7 +1851,7 @@ export async function applyPlatformMigrations(
     throw new Error(
       `incompatible development database schema: ${
         incompatible.rows.map((row) => row.id).join(", ")
-      }; create a fresh OPERANT_DATA_DIR`,
+      }; create a fresh OPTD_DATA_DIR`,
     );
   }
 

@@ -21,10 +21,10 @@ const ids = Array.from(
 );
 
 Deno.test("populated 1015 to 1016 upgrade preserves shared immutable evidence", async () => {
-  if (Deno.env.get("OPERANT_DATABASE_URL") || !await findPostgresBins()) return;
-  const root = await Deno.makeTempDir({ prefix: "operant-history-upgrade-" });
-  const previous = Deno.env.get("OPERANT_DATA_DIR");
-  Deno.env.set("OPERANT_DATA_DIR", root);
+  if (Deno.env.get("OPTD_DATABASE_URL") || !await findPostgresBins()) return;
+  const root = await Deno.makeTempDir({ prefix: "optd-history-upgrade-" });
+  const previous = Deno.env.get("OPTD_DATA_DIR");
+  Deno.env.set("OPTD_DATA_DIR", root);
   let runtime: Awaited<ReturnType<typeof startPostgresRuntime>> | undefined;
   let sql: Sql | undefined;
   try {
@@ -178,17 +178,17 @@ Deno.test("populated 1015 to 1016 upgrade preserves shared immutable evidence", 
   } finally {
     if (sql) await closePostgresClient(sql).catch(() => undefined);
     if (runtime) await runtime.stop().catch(() => undefined);
-    if (previous === undefined) Deno.env.delete("OPERANT_DATA_DIR");
-    else Deno.env.set("OPERANT_DATA_DIR", previous);
+    if (previous === undefined) Deno.env.delete("OPTD_DATA_DIR");
+    else Deno.env.set("OPTD_DATA_DIR", previous);
     await Deno.remove(root, { recursive: true }).catch(() => undefined);
   }
 });
 
 Deno.test("Project history is immutable, chained, unique, and comments do not bump versions", async () => {
-  if (Deno.env.get("OPERANT_DATABASE_URL") || !await findPostgresBins()) return;
-  const root = await Deno.makeTempDir({ prefix: "operant-object-history-" });
-  const previous = Deno.env.get("OPERANT_DATA_DIR");
-  Deno.env.set("OPERANT_DATA_DIR", root);
+  if (Deno.env.get("OPTD_DATABASE_URL") || !await findPostgresBins()) return;
+  const root = await Deno.makeTempDir({ prefix: "optd-object-history-" });
+  const previous = Deno.env.get("OPTD_DATA_DIR");
+  Deno.env.set("OPTD_DATA_DIR", root);
   let runtime: Awaited<ReturnType<typeof startPostgresRuntime>> | undefined;
   let sql: Sql | undefined;
   try {
@@ -290,8 +290,8 @@ Deno.test("Project history is immutable, chained, unique, and comments do not bu
   } finally {
     if (sql) await closePostgresClient(sql).catch(() => undefined);
     if (runtime) await runtime.stop().catch(() => undefined);
-    if (previous === undefined) Deno.env.delete("OPERANT_DATA_DIR");
-    else Deno.env.set("OPERANT_DATA_DIR", previous);
+    if (previous === undefined) Deno.env.delete("OPTD_DATA_DIR");
+    else Deno.env.set("OPTD_DATA_DIR", previous);
     await Deno.remove(root, { recursive: true }).catch(() => undefined);
   }
 });

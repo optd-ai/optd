@@ -87,15 +87,15 @@ export type DenoHookRunnerOptions = {
   denoBin?: string;
 };
 
-const RESERVED_ENV = ["OPERANT_", "DENO_", "LD_", "DYLD_"];
+const RESERVED_ENV = ["OPTD_", "DENO_", "LD_", "DYLD_"];
 const DEFAULT_STDOUT_LIMIT = 16 * 1024 * 1024;
 const DEFAULT_STDERR_LIMIT = 4 * 1024 * 1024;
-const TRUNCATION_MARKER = "\n[OPERANT_LOG_TRUNCATED]";
+const TRUNCATION_MARKER = "\n[OPTD_LOG_TRUNCATED]";
 const INVOCATION_PREFIX = "invocation_";
 const MAX_RECOVERED_INVOCATIONS = 10_000;
 
 export function runtimeHookCacheDirectory(
-  dataDir = Deno.env.get("OPERANT_DATA_DIR") ?? ".operant-data",
+  dataDir = Deno.env.get("OPTD_DATA_DIR") ?? ".optd-data",
 ): string {
   return `${dataDir.replace(/[\\/]+$/, "")}/runtime/hooks`;
 }
@@ -179,7 +179,7 @@ export class DenoHookRunner {
       value.length > 0
     ).sort((a, b) => b.length - a.length);
     const readyToken = crypto.randomUUID();
-    const readyFrame = `\u001eOPERANT_HOOK_READY:${readyToken}\u001e\n`;
+    const readyFrame = `\u001eOPTD_HOOK_READY:${readyToken}\u001e\n`;
     let scriptPath: string;
     try {
       scriptPath = await this.#materialize(hook, readyFrame);
@@ -526,7 +526,7 @@ export class DenoHookRunner {
     }
     const declaredNet = netList(hook.permissions.net);
     const ceiling = this.#options.netAllow ??
-      parseCeiling(Deno.env.get("OPERANT_HOOK_NET_ALLOW"), true);
+      parseCeiling(Deno.env.get("OPTD_HOOK_NET_ALLOW"), true);
     if (
       ceiling !== undefined &&
       declaredNet.some((endpoint) => !ceiling.includes(endpoint))
@@ -555,7 +555,7 @@ export class DenoHookRunner {
     const secretEnv: Record<string, string> = {};
     const declared = envList(hook.permissions.env);
     const ceiling = this.#options.envAllow ??
-      parseCeiling(Deno.env.get("OPERANT_HOOK_ENV_ALLOW"), false) ?? [];
+      parseCeiling(Deno.env.get("OPTD_HOOK_ENV_ALLOW"), false) ?? [];
     for (const name of declared) {
       if (
         RESERVED_ENV.some((prefix) => name.startsWith(prefix)) ||
@@ -679,15 +679,15 @@ export function validateOutputShape(
 }
 
 export async function resolveHookDenoBinary(
-  configured = Deno.env.get("OPERANT_DENO_BIN"),
+  configured = Deno.env.get("OPTD_DENO_BIN"),
 ): Promise<string> {
   const candidate = configured ?? Deno.execPath();
   if (!candidate.startsWith("/")) {
-    throw new Error("OPERANT_DENO_BIN must be an absolute path");
+    throw new Error("OPTD_DENO_BIN must be an absolute path");
   }
   if (!configured && !/(?:^|\/)deno(?:\.exe)?$/.test(candidate)) {
     throw new Error(
-      "OPERANT_DENO_BIN is required when the server executable is not Deno",
+      "OPTD_DENO_BIN is required when the server executable is not Deno",
     );
   }
   const stat = await Deno.stat(candidate).catch(() => null);
@@ -709,11 +709,11 @@ export async function resolveHookDenoBinary(
 }
 
 function trustedPrelude(readyFrame: string): string {
-  return `const __operantEncoder = new globalThis.TextEncoder();
-const __operantWriteStderr = Deno.stderr.writeSync.bind(Deno.stderr);
-const __operantCloseStdout = Deno.stdout.close.bind(Deno.stdout);
-const __operantCloseStderr = Deno.stderr.close.bind(Deno.stderr);
-const __operantExit = Deno.exit.bind(Deno);
+  return `const __optdEncoder = new globalThis.TextEncoder();
+const __optdWriteStderr = Deno.stderr.writeSync.bind(Deno.stderr);
+const __optdCloseStdout = Deno.stdout.close.bind(Deno.stdout);
+const __optdCloseStderr = Deno.stderr.close.bind(Deno.stderr);
+const __optdExit = Deno.exit.bind(Deno);
 (() => {
   const nativeFetch = globalThis.fetch.bind(globalThis);
   const safeFetch = async function (input, init = undefined) {
@@ -732,48 +732,48 @@ const __operantExit = Deno.exit.bind(Deno);
     configurable: false,
   });
 })();
-const __operantDenyDynamicCode = function () {
+const __optdDenyDynamicCode = function () {
   throw new Error("dynamic code evaluation is disabled");
 };
-for (const __operantTarget of [
+for (const __optdTarget of [
   globalThis,
   Function.prototype,
   Object.getPrototypeOf(async function () {}),
   Object.getPrototypeOf(function* () {}),
   Object.getPrototypeOf(async function* () {}),
 ]) {
-  const __operantKey = __operantTarget === globalThis ? "eval" : "constructor";
-  Object.defineProperty(__operantTarget, __operantKey, {
-    value: __operantDenyDynamicCode,
+  const __optdKey = __optdTarget === globalThis ? "eval" : "constructor";
+  Object.defineProperty(__optdTarget, __optdKey, {
+    value: __optdDenyDynamicCode,
     writable: false,
     enumerable: false,
     configurable: false,
   });
 }
-for (const __operantGlobalName of [
+for (const __optdGlobalName of [
   "Function",
   "AsyncFunction",
   "GeneratorFunction",
   "AsyncGeneratorFunction",
 ]) {
-  Object.defineProperty(globalThis, __operantGlobalName, {
-    value: __operantDenyDynamicCode,
+  Object.defineProperty(globalThis, __optdGlobalName, {
+    value: __optdDenyDynamicCode,
     writable: false,
     enumerable: false,
     configurable: false,
   });
 }
-__operantWriteStderr(
-  __operantEncoder.encode(${JSON.stringify(readyFrame)}),
+__optdWriteStderr(
+  __optdEncoder.encode(${JSON.stringify(readyFrame)}),
 );
 await import("./hook.ts");
 // Hook modules may leave timers, sockets, or other event-loop resources open.
 // Module settlement is the semantic completion boundary: close the output pipes
 // after their final synchronous writes, then force runtime termination so the
 // parent still accepts output only after receiving authoritative process status.
-try { __operantCloseStdout(); } catch { /* hook may have closed stdout */ }
-try { __operantCloseStderr(); } catch { /* hook may have closed stderr */ }
-__operantExit(0);
+try { __optdCloseStdout(); } catch { /* hook may have closed stdout */ }
+try { __optdCloseStderr(); } catch { /* hook may have closed stderr */ }
+__optdExit(0);
 `;
 }
 
@@ -905,7 +905,7 @@ function readControlledBounded(
 }
 
 function stripHookControlFrames(input: string): string {
-  const prefix = "\u001eOPERANT_HOOK_READY:";
+  const prefix = "\u001eOPTD_HOOK_READY:";
   let output = input;
   while (true) {
     const start = output.indexOf(prefix);

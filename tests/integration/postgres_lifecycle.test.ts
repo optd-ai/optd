@@ -43,8 +43,8 @@ Deno.test("Postgres runtime planning preserves external vs app-managed selection
   assertEquals(available.mode, "app_managed");
 });
 
-Deno.test("PG18.4 app-managed startup recovers a stale nonexistent postmaster PID", async () => {
-  if (!await hasPostgres18_4()) return;
+Deno.test("PG18.4+ app-managed startup recovers a stale nonexistent postmaster PID", async () => {
+  if (!await hasPostgres18()) return;
   await withManagedDataDir(async (rootDir) => {
     await initializeAndStop(rootDir);
     const pidPath = `${rootDir}/postgres/data/postmaster.pid`;
@@ -61,8 +61,8 @@ Deno.test("PG18.4 app-managed startup recovers a stale nonexistent postmaster PI
   });
 });
 
-Deno.test("PG18.4 app-managed startup recovers a PID reused by a non-Postgres process", async () => {
-  if (!await hasPostgres18_4()) return;
+Deno.test("PG18.4+ app-managed startup recovers a PID reused by a non-Postgres process", async () => {
+  if (!await hasPostgres18()) return;
   await withManagedDataDir(async (rootDir) => {
     await initializeAndStop(rootDir);
     const pidPath = `${rootDir}/postgres/data/postmaster.pid`;
@@ -79,8 +79,8 @@ Deno.test("PG18.4 app-managed startup recovers a PID reused by a non-Postgres pr
   });
 });
 
-Deno.test("PG18.4 app-managed startup refuses and preserves a live same-data-dir server", async () => {
-  if (!await hasPostgres18_4()) return;
+Deno.test("PG18.4+ app-managed startup refuses and preserves a live same-data-dir server", async () => {
+  if (!await hasPostgres18()) return;
   await withManagedDataDir(async (rootDir) => {
     const runtime = await startManagedPostgres(rootDir);
     const pidPath = `${rootDir}/postgres/data/postmaster.pid`;
@@ -107,8 +107,8 @@ Deno.test("PG18.4 app-managed startup refuses and preserves a live same-data-dir
   });
 });
 
-Deno.test("PG18.4 app-managed startup resolves a live relative -D from the postmaster cwd", async () => {
-  if (!await hasPostgres18_4()) return;
+Deno.test("PG18.4+ app-managed startup resolves a live relative -D from the postmaster cwd", async () => {
+  if (!await hasPostgres18()) return;
   await withManagedDataDir(async (rootDir) => {
     await initializeAndStop(rootDir);
     const raw = await startRelativePostgres(rootDir);
@@ -133,11 +133,11 @@ Deno.test("PG18.4 app-managed startup resolves a live relative -D from the postm
   });
 });
 
-Deno.test("PG18.4 app-managed startup recovers a relative -D postmaster PID for another directory", async () => {
-  if (!await hasPostgres18_4()) return;
+Deno.test("PG18.4+ app-managed startup recovers a relative -D postmaster PID for another directory", async () => {
+  if (!await hasPostgres18()) return;
   await withManagedDataDir(async (rootDir) => {
     await initializeAndStop(rootDir);
-    const otherRoot = await Deno.makeTempDir({ prefix: "operant-pg-other-" });
+    const otherRoot = await Deno.makeTempDir({ prefix: "optd-pg-other-" });
     let raw: RawPostgres | undefined;
     let recovered: Awaited<ReturnType<typeof startManagedPostgres>> | undefined;
     try {
@@ -164,12 +164,12 @@ Deno.test("PG18.4 app-managed startup recovers a relative -D postmaster PID for 
   });
 });
 
-Deno.test("PG18.4 app-managed startup fails closed for a postgres identity with a deleted cwd", async () => {
-  if (!await hasPostgres18_4()) return;
+Deno.test("PG18.4+ app-managed startup fails closed for a postgres identity with a deleted cwd", async () => {
+  if (!await hasPostgres18()) return;
   await withManagedDataDir(async (rootDir) => {
     await initializeAndStop(rootDir);
     const deletedCwd = await Deno.makeTempDir({
-      prefix: "operant-pg-deleted-cwd-",
+      prefix: "optd-pg-deleted-cwd-",
     });
     const fixture = startPostgresIdentityFixture(deletedCwd, [
       "-D",
@@ -195,12 +195,12 @@ Deno.test("PG18.4 app-managed startup fails closed for a postgres identity with 
   });
 });
 
-Deno.test("PG18.4 app-managed startup fails closed for ambiguous postgres -D identity", async () => {
-  if (!await hasPostgres18_4()) return;
+Deno.test("PG18.4+ app-managed startup fails closed for ambiguous postgres -D identity", async () => {
+  if (!await hasPostgres18()) return;
   await withManagedDataDir(async (rootDir) => {
     await initializeAndStop(rootDir);
     const fixtureCwd = await Deno.makeTempDir({
-      prefix: "operant-pg-ambiguous-cwd-",
+      prefix: "optd-pg-ambiguous-cwd-",
     });
     const fixture = startPostgresIdentityFixture(fixtureCwd, [
       "-D",
@@ -226,8 +226,8 @@ Deno.test("PG18.4 app-managed startup fails closed for ambiguous postgres -D ide
   });
 });
 
-Deno.test("PG18.4 app-managed startup fails closed and preserves malformed postmaster.pid", async () => {
-  if (!await hasPostgres18_4()) return;
+Deno.test("PG18.4+ app-managed startup fails closed and preserves malformed postmaster.pid", async () => {
+  if (!await hasPostgres18()) return;
   await withManagedDataDir(async (rootDir) => {
     await initializeAndStop(rootDir);
     const pidPath = `${rootDir}/postgres/data/postmaster.pid`;
@@ -243,8 +243,8 @@ Deno.test("PG18.4 app-managed startup fails closed and preserves malformed postm
   });
 });
 
-Deno.test("PG18.4 app-managed startup repeatedly recovers hard-stop postmaster.pid files", async () => {
-  if (!await hasPostgres18_4()) return;
+Deno.test("PG18.4+ app-managed startup repeatedly recovers hard-stop postmaster.pid files", async () => {
+  if (!await hasPostgres18()) return;
   await withManagedDataDir(async (rootDir) => {
     for (let recreation = 0; recreation < 3; recreation++) {
       const runtime = await startManagedPostgres(rootDir);
@@ -262,8 +262,8 @@ Deno.test("PG18.4 app-managed startup repeatedly recovers hard-stop postmaster.p
   });
 });
 
-Deno.test("PG18.4 app-managed ordinary stop completes a clean smart shutdown", async () => {
-  if (!await hasPostgres18_4()) return;
+Deno.test("PG18.4+ app-managed ordinary stop completes a clean smart shutdown", async () => {
+  if (!await hasPostgres18()) return;
   await withManagedDataDir(async (rootDir) => {
     const bins = await findPostgresBins();
     if (!bins) throw new Error("postgres binaries unexpectedly unavailable");
@@ -303,8 +303,8 @@ Deno.test("PG18.4 app-managed ordinary stop completes a clean smart shutdown", a
   });
 });
 
-Deno.test("PG18.4 app-managed blocked client reaches fast shutdown and restarts cleanly", async () => {
-  if (!await hasPostgres18_4()) return;
+Deno.test("PG18.4+ app-managed blocked client reaches fast shutdown and restarts cleanly", async () => {
+  if (!await hasPostgres18()) return;
   await withManagedDataDir(async (rootDir) => {
     const bins = await findPostgresBins();
     if (!bins) throw new Error("postgres binaries unexpectedly unavailable");
@@ -317,7 +317,7 @@ Deno.test("PG18.4 app-managed blocked client reaches fast shutdown and restarts 
     const blockerUrl = new URL(runtime.databaseUrl);
     blockerUrl.searchParams.set(
       "application_name",
-      "operant_shutdown_blocker",
+      "optd_shutdown_blocker",
     );
     const blocker = new Deno.Command(bins.psql, {
       args: [
@@ -400,8 +400,8 @@ Deno.test("PG18.4 app-managed blocked client reaches fast shutdown and restarts 
   });
 });
 
-Deno.test("PG18.4 app-managed delayed stop reaches immediate fallback and crash-recovers", async () => {
-  if (!await hasPostgres18_4()) return;
+Deno.test("PG18.4+ app-managed delayed stop reaches immediate fallback and crash-recovers", async () => {
+  if (!await hasPostgres18()) return;
   await withManagedDataDir(async (rootDir) => {
     const bins = await findPostgresBins();
     if (!bins) throw new Error("postgres binaries unexpectedly unavailable");
@@ -414,7 +414,7 @@ Deno.test("PG18.4 app-managed delayed stop reaches immediate fallback and crash-
     const blockerUrl = new URL(runtime.databaseUrl);
     blockerUrl.searchParams.set(
       "application_name",
-      "operant_shutdown_blocker",
+      "optd_shutdown_blocker",
     );
     const blocker = new Deno.Command(bins.psql, {
       args: [
@@ -500,17 +500,17 @@ Deno.test("PG18.4 app-managed delayed stop reaches immediate fallback and crash-
 });
 
 Deno.test("app-managed Postgres starts, migrates, persists sentinel across restart", async () => {
-  if (!Deno.env.get("OPERANT_DATABASE_URL") && !await findPostgresBins()) {
+  if (!Deno.env.get("OPTD_DATABASE_URL") && !await findPostgresBins()) {
     console.warn(
-      "SKIP app-managed Postgres integration: postgres binaries not found; set OPERANT_PG_BIN_DIR or enter nix shell",
+      "SKIP app-managed Postgres integration: postgres binaries not found; set OPTD_PG_BIN_DIR or enter nix shell",
     );
     return;
   }
 
-  const dataDir = await Deno.makeTempDir({ prefix: "operant-pg-lifecycle-" });
-  const previousDataDir = Deno.env.get("OPERANT_DATA_DIR");
-  const previousDatabaseUrl = Deno.env.get("OPERANT_DATABASE_URL");
-  if (!previousDatabaseUrl) Deno.env.set("OPERANT_DATA_DIR", dataDir);
+  const dataDir = await Deno.makeTempDir({ prefix: "optd-pg-lifecycle-" });
+  const previousDataDir = Deno.env.get("OPTD_DATA_DIR");
+  const previousDatabaseUrl = Deno.env.get("OPTD_DATABASE_URL");
+  if (!previousDatabaseUrl) Deno.env.set("OPTD_DATA_DIR", dataDir);
 
   let firstRuntime:
     | Awaited<ReturnType<typeof startPostgresRuntime>>
@@ -548,8 +548,8 @@ Deno.test("app-managed Postgres starts, migrates, persists sentinel across resta
     if (sql) await closePostgresClient(sql).catch(() => undefined);
     if (firstRuntime) await firstRuntime.stop().catch(() => undefined);
     if (secondRuntime) await secondRuntime.stop().catch(() => undefined);
-    if (previousDataDir === undefined) Deno.env.delete("OPERANT_DATA_DIR");
-    else Deno.env.set("OPERANT_DATA_DIR", previousDataDir);
+    if (previousDataDir === undefined) Deno.env.delete("OPTD_DATA_DIR");
+    else Deno.env.set("OPTD_DATA_DIR", previousDataDir);
     await Deno.remove(dataDir, { recursive: true }).catch(() => {});
   }
 });
@@ -582,7 +582,7 @@ async function startRelativePostgres(rootDir: string): Promise<RawPostgres> {
   }).spawn();
   const raw = {
     process,
-    databaseUrl: `postgres://operant@127.0.0.1:${port}/postgres`,
+    databaseUrl: `postgres://optd@127.0.0.1:${port}/postgres`,
   };
   try {
     await waitForPostgres(bins.psql, port, process);
@@ -624,7 +624,7 @@ async function waitForPostgres(
         "-d",
         "postgres",
         "-U",
-        "operant",
+        "optd",
         "-Atc",
         "select 1",
       ],
@@ -670,7 +670,7 @@ async function waitForShutdownBlocker(
       sql,
       `select count(*)::int active
          from pg_stat_activity
-        where application_name = 'operant_shutdown_blocker'
+        where application_name = 'optd_shutdown_blocker'
           and state = 'active'
           and query like '%pg_sleep%'`,
     );
@@ -755,11 +755,11 @@ async function readClusterState(
   return state;
 }
 
-async function hasPostgres18_4(): Promise<boolean> {
+async function hasPostgres18(): Promise<boolean> {
   const bins = await findPostgresBins();
   if (!bins) {
     console.warn(
-      "SKIP PG18.4 lifecycle integration: postgres binaries not found",
+      "SKIP PG18.4+ lifecycle integration: postgres binaries not found",
     );
     return false;
   }
@@ -769,8 +769,9 @@ async function hasPostgres18_4(): Promise<boolean> {
     stderr: "piped",
   }).output();
   const version = new TextDecoder().decode(output.stdout);
-  if (!output.success || !version.includes("18.4")) {
-    console.warn(`SKIP PG18.4 lifecycle integration: found ${version.trim()}`);
+  const minor = /PostgreSQL\) 18\.(\d+)/.exec(version)?.[1];
+  if (!output.success || minor === undefined || Number(minor) < 4) {
+    console.warn(`SKIP PG18.4+ lifecycle integration: found ${version.trim()}`);
     return false;
   }
   return true;
@@ -779,7 +780,7 @@ async function hasPostgres18_4(): Promise<boolean> {
 async function withManagedDataDir(
   run: (rootDir: string) => Promise<void>,
 ): Promise<void> {
-  const rootDir = await Deno.makeTempDir({ prefix: "operant-pg-pid-" });
+  const rootDir = await Deno.makeTempDir({ prefix: "optd-pg-pid-" });
   try {
     await run(rootDir);
   } finally {
@@ -810,3 +811,50 @@ async function processExists(pid: number): Promise<boolean> {
   }).output();
   return output.success;
 }
+
+Deno.test("fresh optd PostgreSQL role and external stop preserve owner lifecycle", async () => {
+  assert(
+    await findPostgresBins(),
+    "real PostgreSQL binaries are required for optd identity acceptance",
+  );
+  await withManagedDataDir(async (rootDir) => {
+    const managed = await startManagedPostgres(rootDir);
+    try {
+      assertEquals(new URL(managed.databaseUrl).username, "optd");
+      const values: Record<string, string> = {
+        OPTD_DATABASE_URL: managed.databaseUrl,
+      };
+      const env: Deno.Env = {
+        get: (key) => values[key],
+        has: (key) => key in values,
+        toObject: () => ({ ...values }),
+        set() {
+          throw new Error("read-only");
+        },
+        delete() {
+          throw new Error("read-only");
+        },
+      };
+      const external = await startPostgresRuntime(env);
+      assertEquals(external.mode, "external");
+      await external.stop();
+      const sql = createPostgresClient(managed.databaseUrl);
+      try {
+        const identity = await query<{ role: string; legacy: boolean }>(
+          sql,
+          "select current_user as role, exists(select 1 from pg_roles where rolname = 'operant') as legacy",
+        );
+        assertEquals(identity.rows[0], { role: "optd", legacy: false });
+      } finally {
+        await closePostgresClient(sql);
+      }
+    } finally {
+      await stopManagedPostgres(managed);
+    }
+    assertEquals((await managed.process.status).success, true);
+    await assertRejects(
+      () => Deno.stat(`${managed.dataDir}/postmaster.pid`),
+      Deno.errors.NotFound,
+    );
+  });
+});

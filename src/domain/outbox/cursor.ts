@@ -1,7 +1,7 @@
 import { canonicalJson } from "../ids/canonical_json.ts";
 import { isUuidV7 } from "../ids/uuid_v7.ts";
 
-const DOMAIN = "operant.outbox.cursor.v1\0";
+const DOMAIN = "optd.outbox.cursor.v1\0";
 const encoder = new TextEncoder();
 
 export type OutboxCursorPosition = { created_at: string; id: string };
@@ -12,13 +12,13 @@ export class OutboxCursorSigner {
   constructor(masterKey: string | null | undefined) {
     const material = masterKey?.trim();
     if (!material) {
-      throw new Error("OPERANT_MASTER_KEY is required for outbox cursors");
+      throw new Error("OPTD_MASTER_KEY is required for outbox cursors");
     }
     this.#key = deriveKey(material);
   }
 
   static fromEnvironment(): OutboxCursorSigner {
-    return new OutboxCursorSigner(Deno.env.get("OPERANT_MASTER_KEY"));
+    return new OutboxCursorSigner(Deno.env.get("OPTD_MASTER_KEY"));
   }
 
   async encode(

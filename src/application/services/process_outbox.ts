@@ -48,7 +48,7 @@ export function makeProcessOutboxService(deps: {
   const config = deps.config;
   if (config.maximumBackoffMs < config.initialBackoffMs) {
     throw new Error(
-      "OPERANT_OUTBOX_MAX_BACKOFF_MS must not be below initial backoff",
+      "OPTD_OUTBOX_MAX_BACKOFF_MS must not be below initial backoff",
     );
   }
   const workerId = deps.workerId;

@@ -1466,7 +1466,7 @@ export async function runCompleteCrmPublicFlow(
     // Create one delivery for a controllable terminalization path. This is the
     // sole commit boundary that intentionally remains non-quiescent.
     await harness.restartServer({
-      environment: { OPERANT_OUTBOX_POLL_INTERVAL_MS: "60000" },
+      environment: { OPTD_OUTBOX_POLL_INTERVAL_MS: "60000" },
     });
     await harness.waitUntilReady();
     await refreshHumanLauncher(
@@ -1626,7 +1626,7 @@ export async function runCompleteCrmPublicFlow(
     output.push(cancelledRetry.stdout, cancelledRetry.stderr);
     assertEquals(cancelledRetry.code, 1);
     await harness.restartServer({
-      environment: { OPERANT_OUTBOX_POLL_INTERVAL_MS: "20" },
+      environment: { OPTD_OUTBOX_POLL_INTERVAL_MS: "20" },
     });
     await harness.waitUntilReady();
     await refreshHumanLauncher(
@@ -1868,7 +1868,7 @@ async function assertNoLeaks(
       "crm acceptance password",
       "authorization: Bearer",
       "postgres://",
-      "OPERANT_SECRET_MASTER_KEY",
+      "OPTD_SECRET_MASTER_KEY",
       "BEGIN PRIVATE KEY",
       "at file://",
     ]

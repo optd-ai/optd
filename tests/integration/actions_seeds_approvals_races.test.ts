@@ -15,7 +15,7 @@ Deno.test({
   sanitizeResources: false,
   async fn() {
     const harness = await startAuthenticatedHarness();
-    const pack = await Deno.makeTempDir({ prefix: "operant-approval-races-" });
+    const pack = await Deno.makeTempDir({ prefix: "optd-approval-races-" });
     try {
       assertEquals((await harness.runOptctl(["--json", "home"])).code, 0);
       await writeRacePack(pack);

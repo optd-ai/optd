@@ -38,7 +38,7 @@ Deno.test({
     });
     const sourceAddress = source.addr as Deno.NetAddr;
     const harness = await startAuthenticatedHarness();
-    const pack = await Deno.makeTempDir({ prefix: "operant-redirect-pack-" });
+    const pack = await Deno.makeTempDir({ prefix: "optd-redirect-pack-" });
     try {
       await writeRedirectPack(
         pack,

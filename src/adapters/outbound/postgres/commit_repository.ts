@@ -82,19 +82,19 @@ export class PostgresCommitRepository implements CommitRepository {
     options: CommitOptions,
   ): Promise<Result<CommitChangesetDto>> {
     const retries = boundedInt(
-      Deno.env.get("OPERANT_COMMIT_MAX_RETRIES"),
+      Deno.env.get("OPTD_COMMIT_MAX_RETRIES"),
       3,
       0,
       10,
     );
     const jitterMin = boundedInt(
-      Deno.env.get("OPERANT_COMMIT_RETRY_JITTER_MIN_MS"),
+      Deno.env.get("OPTD_COMMIT_RETRY_JITTER_MIN_MS"),
       1,
       0,
       1_000,
     );
     const jitterMax = boundedInt(
-      Deno.env.get("OPERANT_COMMIT_RETRY_JITTER_MAX_MS"),
+      Deno.env.get("OPTD_COMMIT_RETRY_JITTER_MAX_MS"),
       25,
       jitterMin,
       5_000,
@@ -2071,7 +2071,7 @@ async function enqueueAfterCommitDeliveries(
         grants,
         authContextId,
         event.commitId,
-        boundedInt(Deno.env.get("OPERANT_OUTBOX_MAX_ATTEMPTS"), 10, 1, 1000),
+        boundedInt(Deno.env.get("OPTD_OUTBOX_MAX_ATTEMPTS"), 10, 1, 1000),
         timeoutMs,
       ],
     );

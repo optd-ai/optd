@@ -99,7 +99,7 @@ Deno.test("protected JSON routes reject authority injection independent of conte
       headers: {
         authorization: "Bearer valid",
         "content-type": "application/json",
-        "x-operant-actor": "admin",
+        "x-optd-actor": "admin",
       },
       body: "{}",
     })).status,
@@ -134,7 +134,7 @@ Deno.test("protected JSON routes reject authority injection independent of conte
       headers: {
         authorization: "Bearer valid",
         "content-type": "application/json",
-        "x-operant-principal-id": "spoofed",
+        "x-optd-principal-id": "spoofed",
       },
       body: "{}",
     })).status,

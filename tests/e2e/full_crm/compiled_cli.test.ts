@@ -14,7 +14,7 @@ Deno.test("CRM public output source and selected trace leak barriers", async () 
   ]);
   for (const source of sources) {
     assertEquals(
-      /Bearer |authorization:|OPERANT_DATABASE_URL|postgres:\/\//i.test(source),
+      /Bearer |authorization:|OPTD_DATABASE_URL|postgres:\/\//i.test(source),
       false,
     );
   }

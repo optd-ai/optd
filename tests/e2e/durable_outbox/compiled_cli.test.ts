@@ -40,16 +40,16 @@ for (const logLevel of ["info", "trace"] as const) {
         externalDatabaseUrl: external.databaseUrl,
         forceFreshCompile: true,
         environment: {
-          OPERANT_LOG_LEVEL: logLevel,
-          OPERANT_SECRET_MASTER_KEY: secretKey,
-          OPERANT_HOOK_NET_ALLOW: host,
-          OPERANT_OUTBOX_POLL_INTERVAL_MS: "10",
-          OPERANT_OUTBOX_BATCH_SIZE: "4",
-          OPERANT_OUTBOX_LEASE_MARGIN_MS: "1000",
-          OPERANT_OUTBOX_INITIAL_BACKOFF_MS: "10",
-          OPERANT_OUTBOX_MAX_BACKOFF_MS: "100",
-          OPERANT_OUTBOX_MAX_RETRY_AFTER_MS: "1000",
-          OPERANT_OUTBOX_SHUTDOWN_GRACE_MS: "3000",
+          OPTD_LOG_LEVEL: logLevel,
+          OPTD_SECRET_MASTER_KEY: secretKey,
+          OPTD_HOOK_NET_ALLOW: host,
+          OPTD_OUTBOX_POLL_INTERVAL_MS: "10",
+          OPTD_OUTBOX_BATCH_SIZE: "4",
+          OPTD_OUTBOX_LEASE_MARGIN_MS: "1000",
+          OPTD_OUTBOX_INITIAL_BACKOFF_MS: "10",
+          OPTD_OUTBOX_MAX_BACKOFF_MS: "100",
+          OPTD_OUTBOX_MAX_RETRY_AFTER_MS: "1000",
+          OPTD_OUTBOX_SHUTDOWN_GRACE_MS: "3000",
         },
       });
       const pack = await Deno.makeTempDir({ prefix: "durable-outbox-pack-" });
@@ -1401,13 +1401,13 @@ for (const logLevel of ["info", "trace"] as const) {
         assertEquals(toonDrain.executions, []);
 
         await harness.restart({
-          environment: { OPERANT_OUTBOX_POLL_INTERVAL_MS: "60000" },
+          environment: { OPTD_OUTBOX_POLL_INTERVAL_MS: "60000" },
         });
         const startupPollLock = await holdOutboxDeliveryTable(harness);
         let startupPollPid: number;
         try {
           await harness.restart({
-            environment: { OPERANT_OUTBOX_POLL_INTERVAL_MS: "60000" },
+            environment: { OPTD_OUTBOX_POLL_INTERVAL_MS: "60000" },
           });
           startupPollPid = await waitForBlockedStartupOutboxPoll(harness);
         } finally {
@@ -1514,7 +1514,7 @@ for (const logLevel of ["info", "trace"] as const) {
           assertEquals(emptyDrain.executions, []);
         }
         await harness.restart({
-          environment: { OPERANT_OUTBOX_POLL_INTERVAL_MS: "10" },
+          environment: { OPTD_OUTBOX_POLL_INTERVAL_MS: "10" },
         });
         for (const asJson of [true, false]) {
           const legacy = await harness.runOptctl([

@@ -17,10 +17,10 @@ export function registerHostPublicFlowMatrix(): void {
           await startLiveHarness({
             forceFreshCompile: true,
             environment: {
-              OPERANT_OUTBOX_POLL_INTERVAL_MS: "60000",
-              OPERANT_OUTBOX_INITIAL_BACKOFF_MS: "600000",
-              OPERANT_OUTBOX_MAX_BACKOFF_MS: "600000",
-              OPERANT_SECRET_MASTER_KEY: btoa(
+              OPTD_OUTBOX_POLL_INTERVAL_MS: "60000",
+              OPTD_OUTBOX_INITIAL_BACKOFF_MS: "600000",
+              OPTD_OUTBOX_MAX_BACKOFF_MS: "600000",
+              OPTD_SECRET_MASTER_KEY: btoa(
                 String.fromCharCode(
                   ...crypto.getRandomValues(new Uint8Array(32)),
                 ),

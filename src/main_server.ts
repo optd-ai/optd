@@ -1,5 +1,5 @@
 import { makeApplication } from "./composition/application.ts";
-import { loadRuntimeConfig, OPERANT_VERSION } from "./config/runtime.ts";
+import { loadRuntimeConfig, OPTD_VERSION } from "./config/runtime.ts";
 import { makeHttpApp } from "./adapters/inbound/http-hono/app.ts";
 import {
   closePostgresClient,
@@ -75,12 +75,12 @@ export async function createFetchHandler(
   const database = new URL(postgresRuntime.databaseUrl);
   const databasePort = database.port || "5432";
   const application = makeApplication(sql, {
-    bootstrapToken: Deno.env.get("OPERANT_BOOTSTRAP_TOKEN"),
+    bootstrapToken: Deno.env.get("OPTD_BOOTSTRAP_TOKEN"),
     hookRunnerOptions: {
       cacheDir: hookCacheDir,
       denoBin,
       serverPort: options.hookServerPort ??
-        Number(Deno.env.get("OPERANT_SERVER_PORT") ?? "8789"),
+        Number(Deno.env.get("OPTD_SERVER_PORT") ?? "8789"),
       serverHosts: options.hookServerHosts,
       databaseEndpoints: databaseHostAliases(database.hostname).map((host) =>
         `${host}:${databasePort}`
@@ -114,7 +114,7 @@ export async function createFetchHandler(
     secrets: application.secrets,
     hookSecretGrants: application.hookSecretGrants,
     health: makeHealthService(sql, postgresRuntime, migrationResult),
-    version: OPERANT_VERSION,
+    version: OPTD_VERSION,
   });
   return {
     fetch: app.fetch,
@@ -251,13 +251,13 @@ async function runRecoveryHostCommand(args: string[]): Promise<void> {
     const username = usernameIndex >= 0 ? args[usernameIndex + 1] : undefined;
     if (!username || (action !== "begin" && action !== "cancel")) {
       throw new Error(
-        "usage: operant auth recovery begin|cancel --username <username>",
+        "usage: optd auth recovery begin|cancel --username <username>",
       );
     }
     const result = action === "begin"
       ? await application.authentication.beginRecovery({
         username,
-        token: Deno.env.get("OPERANT_RECOVERY_TOKEN") ?? "",
+        token: Deno.env.get("OPTD_RECOVERY_TOKEN") ?? "",
         enableUser: args.includes("--enable-user"),
         restoreSuperAdmin: args.includes("--restore-super-admin"),
         replace: args.includes("--replace"),
@@ -281,8 +281,8 @@ async function runMain(): Promise<void> {
     Deno.args[0] === "run" &&
     Deno.args.at(-1)?.endsWith("/auth_password_worker.ts")
   ) {
-    const denoBin = Deno.env.get("OPERANT_DENO_BIN");
-    const worker = Deno.env.get("OPERANT_AUTH_PASSWORD_WORKER");
+    const denoBin = Deno.env.get("OPTD_DENO_BIN");
+    const worker = Deno.env.get("OPTD_AUTH_PASSWORD_WORKER");
     if (!denoBin || !worker) {
       throw new Error("compiled password worker runtime is not configured");
     }
@@ -336,7 +336,7 @@ async function runMain(): Promise<void> {
       ok: true,
       event: "server_listening",
       listening: server.url,
-      version: OPERANT_VERSION,
+      version: OPTD_VERSION,
     }),
   );
 }
@@ -351,9 +351,9 @@ function redactedError(
   );
   for (
     const secret of [
-      Deno.env.get("OPERANT_DATABASE_URL"),
-      Deno.env.get("OPERANT_BOOTSTRAP_TOKEN"),
-      Deno.env.get("OPERANT_SECRET_MASTER_KEY"),
+      Deno.env.get("OPTD_DATABASE_URL"),
+      Deno.env.get("OPTD_BOOTSTRAP_TOKEN"),
+      Deno.env.get("OPTD_SECRET_MASTER_KEY"),
     ]
   ) {
     if (secret) message = message.replaceAll(secret, "[redacted]");

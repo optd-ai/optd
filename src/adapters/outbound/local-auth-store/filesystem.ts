@@ -52,9 +52,9 @@ export function normalizeOrigin(value: string): string {
     url.hostname === "[::1]" || url.hostname === "::1";
   if (
     url.protocol === "http:" && !loopback &&
-    Deno.env.get("OPERANT_INSECURE_HTTP") !== "1"
+    Deno.env.get("OPTD_INSECURE_HTTP") !== "1"
   ) {
-    throw new Error("remote HTTP requires OPERANT_INSECURE_HTTP=1");
+    throw new Error("remote HTTP requires OPTD_INSECURE_HTTP=1");
   }
   return url.origin.toLowerCase();
 }
@@ -68,21 +68,21 @@ async function digest(value: string): Promise<string> {
 
 export function authDataRoot(): string {
   if (Deno.build.os === "windows") {
-    return join(Deno.env.get("LOCALAPPDATA") ?? ".", "Operant", "auth");
+    return join(Deno.env.get("LOCALAPPDATA") ?? ".", "optd", "auth");
   }
   if (Deno.build.os === "darwin") {
     return join(
       Deno.env.get("HOME") ?? ".",
       "Library",
       "Application Support",
-      "Operant",
+      "optd",
       "auth",
     );
   }
   return join(
     Deno.env.get("XDG_DATA_HOME") ??
       join(Deno.env.get("HOME") ?? ".", ".local", "share"),
-    "operant",
+    "optd",
     "auth",
   );
 }

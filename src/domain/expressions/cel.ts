@@ -115,7 +115,7 @@ export function lowerExpression(
 
 export function expressionHelp(context = "query"): string {
   return [
-    `Operant CEL subset (${context})`,
+    `Optd CEL subset (${context})`,
     "operators: && || ! == != < <= > >= in",
     "helpers: present(field), active(), archived()",
     "literals: strings, JSON-safe integers, booleans, non-empty homogeneous arrays",

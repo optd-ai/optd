@@ -31,7 +31,7 @@ export async function createContainerPublicFlowBackend(
   });
   const harness = await createContainerHarness(image);
   const assetRoot = await Deno.makeTempDir({
-    prefix: "operant-public-flow-assets-",
+    prefix: "optd-public-flow-assets-",
   });
   const assets = new PublicFlowAssets(assetRoot);
   assets.setProviderUrl(provider.url);
@@ -46,13 +46,13 @@ export async function createContainerPublicFlowBackend(
       "--add-host",
       "host.docker.internal:host-gateway",
       "--env",
-      `OPERANT_HOOK_NET_ALLOW=${new URL(provider.url).host}`,
+      `OPTD_HOOK_NET_ALLOW=${new URL(provider.url).host}`,
       "--env",
-      "OPERANT_OUTBOX_POLL_INTERVAL_MS=60000",
+      "OPTD_OUTBOX_POLL_INTERVAL_MS=60000",
       "--env",
-      "OPERANT_OUTBOX_INITIAL_BACKOFF_MS=600000",
+      "OPTD_OUTBOX_INITIAL_BACKOFF_MS=600000",
       "--env",
-      "OPERANT_OUTBOX_MAX_BACKOFF_MS=600000",
+      "OPTD_OUTBOX_MAX_BACKOFF_MS=600000",
     ]);
     await harness.waitReady();
   } catch (error) {
@@ -169,7 +169,7 @@ export async function createContainerPublicFlowBackend(
         "--add-host",
         "host.docker.internal:host-gateway",
         "--env",
-        `OPERANT_HOOK_NET_ALLOW=${new URL(provider.url).host}`,
+        `OPTD_HOOK_NET_ALLOW=${new URL(provider.url).host}`,
       ];
       for (const [name, value] of Object.entries(options?.environment ?? {})) {
         if (value !== null) extra.push("--env", `${name}=${value}`);
@@ -294,9 +294,9 @@ printf '%s %s\\n' "$cache" "$children"`,
       assertEquals(volume.code === 0, false, volume.stdout);
     },
     async assetPath(asset) {
-      if (asset === "crm") return "/opt/operant/prototypes/crm-default-pack";
+      if (asset === "crm") return "/opt/optd/prototypes/crm-default-pack";
       if (asset === "projects") {
-        return "/opt/operant/prototypes/project-management-pack";
+        return "/opt/optd/prototypes/project-management-pack";
       }
       const existing = copied.get(asset);
       if (existing) return existing;
@@ -471,13 +471,13 @@ printf '%s %s\\n' "$cache" "$children"`,
         "--add-host",
         "host.docker.internal:host-gateway",
         "--env",
-        `OPERANT_HOOK_NET_ALLOW=${new URL(provider.url).host}`,
+        `OPTD_HOOK_NET_ALLOW=${new URL(provider.url).host}`,
         "--env",
-        "OPERANT_OUTBOX_POLL_INTERVAL_MS=20",
+        "OPTD_OUTBOX_POLL_INTERVAL_MS=20",
         "--env",
-        "OPERANT_OUTBOX_INITIAL_BACKOFF_MS=20",
+        "OPTD_OUTBOX_INITIAL_BACKOFF_MS=20",
         "--env",
-        "OPERANT_OUTBOX_MAX_BACKOFF_MS=100",
+        "OPTD_OUTBOX_MAX_BACKOFF_MS=100",
       ]);
       await harness.waitReady();
       return provider.url;
@@ -520,7 +520,7 @@ printf '%s %s\\n' "$cache" "$children"`,
           harness.container,
           "sh",
           "-c",
-          'exec psql -h /data/postgres/run -p "$(sed -n 4p /data/postgres/data/postmaster.pid)" -U operant -d postgres -At -c "$1"',
+          'exec psql -h /data/postgres/run -p "$(sed -n 4p /data/postgres/data/postmaster.pid)" -U optd -d postgres -At -c "$1"',
           "sh",
           script,
         ],
@@ -621,7 +621,7 @@ async function copyAuthStore(
     harness.container,
     "sh",
     "-c",
-    `rm -rf "$2/home/.local/share/operant/auth"; mkdir -p "$2/home/.local/share/operant"; if test -d "$1/home/.local/share/operant/auth"; then cp -a "$1/home/.local/share/operant/auth" "$2/home/.local/share/operant/auth"; chown -R 1993:1993 "$2/home"; fi`,
+    `rm -rf "$2/home/.local/share/optd/auth"; mkdir -p "$2/home/.local/share/optd"; if test -d "$1/home/.local/share/optd/auth"; then cp -a "$1/home/.local/share/optd/auth" "$2/home/.local/share/optd/auth"; chown -R 1993:1993 "$2/home"; fi`,
     "sh",
     sourceRoot,
     destinationRoot,
@@ -634,7 +634,7 @@ async function sqlExec(harness: ContainerHarness, sql: string) {
     harness.container,
     "sh",
     "-c",
-    `exec psql -h /data/postgres/run -p "$(sed -n 4p /data/postgres/data/postmaster.pid)" -v ON_ERROR_STOP=1 -U operant -d postgres -c "$1"`,
+    `exec psql -h /data/postgres/run -p "$(sed -n 4p /data/postgres/data/postmaster.pid)" -v ON_ERROR_STOP=1 -U optd -d postgres -c "$1"`,
     "sh",
     sql,
   ]);
@@ -648,7 +648,7 @@ async function sqlScalar(
     harness.container,
     "sh",
     "-c",
-    `exec psql -h /data/postgres/run -p "$(sed -n 4p /data/postgres/data/postmaster.pid)" -v ON_ERROR_STOP=1 -U operant -d postgres -At -c "$1"`,
+    `exec psql -h /data/postgres/run -p "$(sed -n 4p /data/postgres/data/postmaster.pid)" -v ON_ERROR_STOP=1 -U optd -d postgres -At -c "$1"`,
     "sh",
     sql,
   ])).stdout.trim();
@@ -682,7 +682,7 @@ async function spawnContainerCli(
     "--env",
     `XDG_STATE_HOME=${root}/state`,
     "--env",
-    "OPERANT_AUTH_TREE_STOP_PID=1",
+    "OPTD_AUTH_TREE_STOP_PID=1",
     harness.container,
     "sh",
     "-c",

@@ -18,9 +18,9 @@ Deno.test({
       kind: "success",
       body: { ok: true },
     }]);
-    const previousKey = Deno.env.get("OPERANT_SECRET_MASTER_KEY");
+    const previousKey = Deno.env.get("OPTD_SECRET_MASTER_KEY");
     Deno.env.set(
-      "OPERANT_SECRET_MASTER_KEY",
+      "OPTD_SECRET_MASTER_KEY",
       btoa(String.fromCharCode(...new Uint8Array(32).fill(41))),
     );
     const matrix = await startCommitMatrix({ providerUrl: provider.url });
@@ -161,8 +161,8 @@ Deno.test({
       await matrix.close();
       await provider.close();
       if (previousKey === undefined) {
-        Deno.env.delete("OPERANT_SECRET_MASTER_KEY");
-      } else Deno.env.set("OPERANT_SECRET_MASTER_KEY", previousKey);
+        Deno.env.delete("OPTD_SECRET_MASTER_KEY");
+      } else Deno.env.set("OPTD_SECRET_MASTER_KEY", previousKey);
     }
   },
 });

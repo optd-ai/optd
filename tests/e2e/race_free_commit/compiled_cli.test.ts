@@ -16,7 +16,7 @@ for (const trace of [false, true]) {
     sanitizeResources: false,
     async fn() {
       const harness = await startLiveHarness({
-        environment: trace ? { OPERANT_LOG_LEVEL: "trace" } : {},
+        environment: trace ? { OPTD_LOG_LEVEL: "trace" } : {},
       });
       const pack = await Deno.makeTempDir({ prefix: "race-free-pack-" });
       try {

@@ -3,9 +3,9 @@ set -euo pipefail
 
 image=${1:?usage: release-artifacts.sh IMMUTABLE_IMAGE_ID [OUTPUT_DIR]}
 out=${2:-dist}
-gate_label_key="dev.operant.release-gate"
-gate_id=${OPERANT_RELEASE_GATE_ID:-}
-registry=${OPERANT_RELEASE_GATE_REGISTRY:-}
+gate_label_key="dev.optd.release-gate"
+gate_id=${OPTD_RELEASE_GATE_ID:-}
+registry=${OPTD_RELEASE_GATE_REGISTRY:-}
 revision=""
 image_id=""
 parent=""
@@ -78,7 +78,7 @@ remove_container() {
 run_image_command() {
   local entrypoint=$1
   shift
-  local container_name="operant-artifact-${gate_id:-standalone}-$$-$container_sequence"
+  local container_name="optd-artifact-${gate_id:-standalone}-$$-$container_sequence"
   container_sequence=$((container_sequence + 1))
   local -a label_args=()
   [[ -z "$gate_id" ]] || label_args=(--label "$gate_label_key=$gate_id")
@@ -177,8 +177,8 @@ if [[ -n "$source_status" ]]; then
 fi
 revision=$(git rev-parse --verify 'HEAD^{commit}')
 [[ "$revision" =~ ^[0-9a-f]{40}$ ]] || fail "source HEAD is not an exact commit"
-if [[ -n "${OPERANT_RELEASE_SOURCE_REVISION:-}" && "$revision" != "$OPERANT_RELEASE_SOURCE_REVISION" ]]; then
-  fail "source revision changed: expected=$OPERANT_RELEASE_SOURCE_REVISION actual=$revision"
+if [[ -n "${OPTD_RELEASE_SOURCE_REVISION:-}" && "$revision" != "$OPTD_RELEASE_SOURCE_REVISION" ]]; then
+  fail "source revision changed: expected=$OPTD_RELEASE_SOURCE_REVISION actual=$revision"
 fi
 image_id=$(docker image inspect "$image" --format '{{.Id}}')
 [[ "$image_id" == "$image" ]] || fail "image ID did not resolve exactly: expected=$image actual=$image_id"
@@ -187,11 +187,11 @@ image_version=$(docker image inspect "$image_id" --format '{{index .Config.Label
 if [[ -z "$image_revision" || "$image_revision" == "<no value>" || "$image_revision" != "$revision" ]]; then
   fail "image/source revision mismatch: source=$revision image=${image_revision:-missing}"
 fi
-if [[ -n "${OPERANT_CONTAINER_IMAGE_ID:-}" && "$image_id" != "$OPERANT_CONTAINER_IMAGE_ID" ]]; then
-  fail "image ID mismatch: expected=$OPERANT_CONTAINER_IMAGE_ID actual=$image_id"
+if [[ -n "${OPTD_CONTAINER_IMAGE_ID:-}" && "$image_id" != "$OPTD_CONTAINER_IMAGE_ID" ]]; then
+  fail "image ID mismatch: expected=$OPTD_CONTAINER_IMAGE_ID actual=$image_id"
 fi
-if [[ -n "${OPERANT_CONTAINER_VERSION:-}" && "$image_version" != "$OPERANT_CONTAINER_VERSION" ]]; then
-  fail "image version mismatch: expected=$OPERANT_CONTAINER_VERSION actual=$image_version"
+if [[ -n "${OPTD_CONTAINER_VERSION:-}" && "$image_version" != "$OPTD_CONTAINER_VERSION" ]]; then
+  fail "image version mismatch: expected=$OPTD_CONTAINER_VERSION actual=$image_version"
 fi
 
 parent=$(dirname -- "$out")
@@ -259,10 +259,10 @@ staging=""
 # This deliberately remains before commit. A signal delivered immediately
 # after the publication rename therefore runs EXIT rollback and restores the
 # prior output (or removes a first publication).
-if [[ -n "${OPERANT_RELEASE_ARTIFACT_AFTER_PUBLISH_FILE:-}" ]]; then
-  : >"$OPERANT_RELEASE_ARTIFACT_AFTER_PUBLISH_FILE"
-  sync_path "$OPERANT_RELEASE_ARTIFACT_AFTER_PUBLISH_FILE"
-  while [[ -e "$OPERANT_RELEASE_ARTIFACT_AFTER_PUBLISH_FILE" ]]; do sleep 0.01; done
+if [[ -n "${OPTD_RELEASE_ARTIFACT_AFTER_PUBLISH_FILE:-}" ]]; then
+  : >"$OPTD_RELEASE_ARTIFACT_AFTER_PUBLISH_FILE"
+  sync_path "$OPTD_RELEASE_ARTIFACT_AFTER_PUBLISH_FILE"
+  while [[ -e "$OPTD_RELEASE_ARTIFACT_AFTER_PUBLISH_FILE" ]]; do sleep 0.01; done
 fi
 
 sync_path "$out"

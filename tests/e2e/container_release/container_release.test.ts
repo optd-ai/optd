@@ -69,7 +69,7 @@ Deno.test({
       ]);
       const lines = processes.stdout.trim().split("\n");
       assertEquals(
-        lines.filter((line) => /operant-server/.test(line)).length,
+        lines.filter((line) => /optd/.test(line)).length,
         1,
       );
       assertEquals(
@@ -86,7 +86,7 @@ Deno.test({
         harness.container,
         "sh",
         "-c",
-        "find /opt/operant/prototypes -mindepth 1 -maxdepth 1 -type d -printf '%f\\n' | sort",
+        "find /opt/optd/prototypes -mindepth 1 -maxdepth 1 -type d -printf '%f\\n' | sort",
       ]);
       assertEquals(packs.stdout.trim().split("\n"), [
         "crm-default-pack",
@@ -101,11 +101,11 @@ Deno.test({
         "exec",
         "--interactive",
         "--env",
-        `OPERANT_BOOTSTRAP_TOKEN=${harness.bootstrapToken}`,
+        `OPTD_BOOTSTRAP_TOKEN=${harness.bootstrapToken}`,
         harness.container,
         "sh",
         "-c",
-        "printf '%s\\n' 'container release password' | OPERANT_AUTH_TREE_STOP_PID=$$ optctl --server http://127.0.0.1:8789 --json bootstrap init --username container-admin --password-stdin && printf '%s\\n' 'container-encrypted-value' | OPERANT_AUTH_TREE_STOP_PID=$$ optctl --server http://127.0.0.1:8789 --json secret create container_api_token --stdin",
+        "printf '%s\\n' 'container release password' | OPTD_AUTH_TREE_STOP_PID=$$ optctl --server http://127.0.0.1:8789 --json bootstrap init --username container-admin --password-stdin && printf '%s\\n' 'container-encrypted-value' | OPTD_AUTH_TREE_STOP_PID=$$ optctl --server http://127.0.0.1:8789 --json secret create container_api_token --stdin",
       ]);
       assertStringIncludes(bootstrapped.stdout, '"ok": true');
       assertStringIncludes(bootstrapped.stdout, "container_api_token");
@@ -184,12 +184,12 @@ Deno.test({
         },
         {
           name: `${harness.id}-wrong`,
-          keyArgs: ["--env", `OPERANT_SECRET_MASTER_KEY=${wrongKey}`],
+          keyArgs: ["--env", `OPTD_SECRET_MASTER_KEY=${wrongKey}`],
           expected: "secret_key_mismatch",
         },
         {
           name: `${harness.id}-malformed`,
-          keyArgs: ["--env", "OPERANT_SECRET_MASTER_KEY=malformed"],
+          keyArgs: ["--env", "OPTD_SECRET_MASTER_KEY=malformed"],
           expected: "secret_master_key_invalid",
         },
       ];
@@ -235,9 +235,9 @@ Deno.test({
         "--publish",
         `127.0.0.1:${harness.port}:8789`,
         "--env",
-        `OPERANT_BOOTSTRAP_TOKEN=${harness.bootstrapToken}`,
+        `OPTD_BOOTSTRAP_TOKEN=${harness.bootstrapToken}`,
         "--env",
-        `OPERANT_SECRET_MASTER_KEY=${harness.masterKey}`,
+        `OPTD_SECRET_MASTER_KEY=${harness.masterKey}`,
         "--volume",
         `${harness.volume}:/data`,
         harness.image,
@@ -270,19 +270,19 @@ Deno.test({
         "--add-host",
         "host.docker.internal:host-gateway",
         "--env",
-        `OPERANT_HOOK_NET_ALLOW=${new URL(provider.url).host}`,
+        `OPTD_HOOK_NET_ALLOW=${new URL(provider.url).host}`,
         "--env",
-        "OPERANT_OUTBOX_POLL_INTERVAL_MS=60000",
+        "OPTD_OUTBOX_POLL_INTERVAL_MS=60000",
         "--env",
-        "OPERANT_OUTBOX_BATCH_SIZE=2",
+        "OPTD_OUTBOX_BATCH_SIZE=2",
         "--env",
-        "OPERANT_OUTBOX_LEASE_MARGIN_MS=4000",
+        "OPTD_OUTBOX_LEASE_MARGIN_MS=4000",
         "--env",
-        "OPERANT_OUTBOX_INITIAL_BACKOFF_MS=20",
+        "OPTD_OUTBOX_INITIAL_BACKOFF_MS=20",
         "--env",
-        "OPERANT_OUTBOX_MAX_BACKOFF_MS=100",
+        "OPTD_OUTBOX_MAX_BACKOFF_MS=100",
         "--env",
-        "OPERANT_OUTBOX_SHUTDOWN_GRACE_MS=100",
+        "OPTD_OUTBOX_SHUTDOWN_GRACE_MS=100",
       ]);
       await harness.waitReady();
       launcher = await harness.createProcessTreeLauncher();
@@ -727,11 +727,11 @@ Deno.test({
   async fn() {
     const releaseImage = await image();
     const id = releaseScopedId(12);
-    const malformedName = `operant-cr-bad-key-${id}`;
-    const bindName = `operant-cr-bad-bind-${id}`;
-    const goodBindName = `operant-cr-good-bind-${id}`;
+    const malformedName = `optd-cr-bad-key-${id}`;
+    const bindName = `optd-cr-bad-bind-${id}`;
+    const goodBindName = `optd-cr-good-bind-${id}`;
     const root = await Deno.makeTempDir({
-      prefix: "operant-container-unwritable-",
+      prefix: "optd-container-unwritable-",
     });
     const anonymousVolumesBefore = await anonymousDockerVolumeIds();
     await Deno.chmod(root, 0o500);
@@ -741,9 +741,9 @@ Deno.test({
         "--name",
         malformedName,
         "--env",
-        "OPERANT_BOOTSTRAP_TOKEN=not-logged",
+        "OPTD_BOOTSTRAP_TOKEN=not-logged",
         "--env",
-        "OPERANT_SECRET_MASTER_KEY=malformed",
+        "OPTD_SECRET_MASTER_KEY=malformed",
         releaseImage,
       ], { timeoutMs: 60_000, allowFailure: true });
       assert(malformed.code !== 0);
@@ -760,9 +760,9 @@ Deno.test({
         "--name",
         bindName,
         "--env",
-        "OPERANT_BOOTSTRAP_TOKEN=not-logged",
+        "OPTD_BOOTSTRAP_TOKEN=not-logged",
         "--env",
-        "OPERANT_SECRET_MASTER_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        "OPTD_SECRET_MASTER_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
         "--volume",
         `${root}:/data`,
         releaseImage,
@@ -791,9 +791,9 @@ Deno.test({
         "--name",
         goodBindName,
         "--env",
-        "OPERANT_BOOTSTRAP_TOKEN=bind-token",
+        "OPTD_BOOTSTRAP_TOKEN=bind-token",
         "--env",
-        "OPERANT_SECRET_MASTER_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+        "OPTD_SECRET_MASTER_KEY=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
         "--volume",
         `${root}:/data`,
         releaseImage,
@@ -850,13 +850,13 @@ Deno.test({
   async fn() {
     const releaseImage = await image();
     const id = releaseScopedId(12);
-    const network = `operant-cr-net-${id}`;
-    const pg = `operant-cr-pg-${id}`;
-    const app = `operant-cr-ext-${id}`;
-    const badPg = `operant-cr-pg16-${id}`;
-    const badApp = `operant-cr-ext16-${id}`;
-    const unreachableApp = `operant-cr-unreachable-${id}`;
-    const badAuthApp = `operant-cr-bad-auth-${id}`;
+    const network = `optd-cr-net-${id}`;
+    const pg = `optd-cr-pg-${id}`;
+    const app = `optd-cr-ext-${id}`;
+    const badPg = `optd-cr-pg16-${id}`;
+    const badApp = `optd-cr-ext16-${id}`;
+    const unreachableApp = `optd-cr-unreachable-${id}`;
+    const badAuthApp = `optd-cr-bad-auth-${id}`;
     const token = "external-token-not-logged";
     const key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
     const anonymousVolumesBefore = await anonymousDockerVolumeIds();
@@ -872,9 +872,9 @@ Deno.test({
         "--env",
         "POSTGRES_PASSWORD=external-pass",
         "--env",
-        "POSTGRES_USER=operant",
+        "POSTGRES_USER=optd",
         "--env",
-        "POSTGRES_DB=operant",
+        "POSTGRES_DB=optd",
         "postgres:18.4-bookworm@sha256:1961f96e6029a02c3812d7cb329a3b03a3ac2bb067058dec17b0f5596aca9296",
       ]);
       await waitPg(pg);
@@ -886,11 +886,11 @@ Deno.test({
         "--network",
         network,
         "--env",
-        `OPERANT_DATABASE_URL=postgres://operant:external-pass@${pg}:5432/operant`,
+        `OPTD_DATABASE_URL=postgres://optd:external-pass@${pg}:5432/optd`,
         "--env",
-        `OPERANT_BOOTSTRAP_TOKEN=${token}`,
+        `OPTD_BOOTSTRAP_TOKEN=${token}`,
         "--env",
-        `OPERANT_SECRET_MASTER_KEY=${key}`,
+        `OPTD_SECRET_MASTER_KEY=${key}`,
         releaseImage,
       ]);
       await waitContainerHealthy(app);
@@ -921,9 +921,9 @@ Deno.test({
         "--env",
         "POSTGRES_PASSWORD=external-pass",
         "--env",
-        "POSTGRES_USER=operant",
+        "POSTGRES_USER=optd",
         "--env",
-        "POSTGRES_DB=operant",
+        "POSTGRES_DB=optd",
         "postgres:16-bookworm",
       ]);
       await waitPg(badPg);
@@ -934,11 +934,11 @@ Deno.test({
         "--network",
         network,
         "--env",
-        `OPERANT_DATABASE_URL=postgres://operant:external-pass@${badPg}:5432/operant`,
+        `OPTD_DATABASE_URL=postgres://optd:external-pass@${badPg}:5432/optd`,
         "--env",
-        `OPERANT_BOOTSTRAP_TOKEN=${token}`,
+        `OPTD_BOOTSTRAP_TOKEN=${token}`,
         "--env",
-        `OPERANT_SECRET_MASTER_KEY=${key}`,
+        `OPTD_SECRET_MASTER_KEY=${key}`,
         releaseImage,
       ], { allowFailure: true, timeoutMs: 30_000 });
       assert(unsupported.code !== 0);
@@ -951,12 +951,12 @@ Deno.test({
         const [name, url, credential] of [
           [
             unreachableApp,
-            "postgres://operant:unreachable-secret@127.0.0.1:1/operant",
+            "postgres://optd:unreachable-secret@127.0.0.1:1/optd",
             "unreachable-secret",
           ],
           [
             badAuthApp,
-            `postgres://operant:wrong-auth-secret@${pg}:5432/operant`,
+            `postgres://optd:wrong-auth-secret@${pg}:5432/optd`,
             "wrong-auth-secret",
           ],
         ]
@@ -968,11 +968,11 @@ Deno.test({
           "--network",
           network,
           "--env",
-          `OPERANT_DATABASE_URL=${url}`,
+          `OPTD_DATABASE_URL=${url}`,
           "--env",
-          `OPERANT_BOOTSTRAP_TOKEN=${token}`,
+          `OPTD_BOOTSTRAP_TOKEN=${token}`,
           "--env",
-          `OPERANT_SECRET_MASTER_KEY=${key}`,
+          `OPTD_SECRET_MASTER_KEY=${key}`,
           releaseImage,
         ], { allowFailure: true, timeoutMs: 30_000 });
         assert(failed.code !== 0);
@@ -1012,26 +1012,26 @@ Deno.test({
 
 Deno.test({
   name:
-    "container release: external PostgreSQL compose preserves database across Operant recreation",
+    "container release: external PostgreSQL compose preserves database across Optd recreation",
   sanitizeResources: false,
   sanitizeOps: false,
   async fn() {
     const releaseImage = await image();
     const id = releaseScopedId(10);
-    const project = `operant-ext-${id}`;
+    const project = `optd-ext-${id}`;
     const version = `compose-${id}`;
     const port = 20000 + Math.floor(Math.random() * 20000);
     const env = {
       ...Deno.env.toObject(),
       COMPOSE_PROJECT_NAME: project,
-      OPERANT_VERSION: version,
-      OPERANT_IMAGE: releaseImage,
-      OPERANT_RELEASE_GATE_ID: Deno.env.get("OPERANT_RELEASE_GATE_ID") ??
+      OPTD_VERSION: version,
+      OPTD_IMAGE: releaseImage,
+      OPTD_RELEASE_GATE_ID: Deno.env.get("OPTD_RELEASE_GATE_ID") ??
         "standalone",
-      OPERANT_PORT: String(port),
-      OPERANT_POSTGRES_PASSWORD: `pg-${id}-password`,
-      OPERANT_BOOTSTRAP_TOKEN: `bootstrap-${id}`,
-      OPERANT_SECRET_MASTER_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+      OPTD_PORT: String(port),
+      OPTD_POSTGRES_PASSWORD: `pg-${id}-password`,
+      OPTD_BOOTSTRAP_TOKEN: `bootstrap-${id}`,
+      OPTD_SECRET_MASTER_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
     };
     const compose = async (args: string[], allowFailure = false) =>
       await runCommand("docker", [
@@ -1045,7 +1045,7 @@ Deno.test({
       await compose(["up", "-d", "--no-build"]);
       await waitHttpReady(port);
       const pgId = (await compose(["ps", "-q", "postgres"])).stdout.trim();
-      const appId = (await compose(["ps", "-q", "operant"])).stdout.trim();
+      const appId = (await compose(["ps", "-q", "optd"])).stdout.trim();
       const firstAppAnonymousVolumes = await containerAnonymousDockerVolumeIds(
         appId,
       );
@@ -1053,10 +1053,10 @@ Deno.test({
       const bootstrap = await compose([
         "exec",
         "-T",
-        "operant",
+        "optd",
         "sh",
         "-c",
-        "printf '%s\\n' 'compose proof password' | OPERANT_AUTH_TREE_STOP_PID=$$ optctl --server http://127.0.0.1:8789 --json bootstrap init --username compose-admin --password-stdin && OPERANT_AUTH_TREE_STOP_PID=$$ optctl --server http://127.0.0.1:8789 --json project create compose-fact --display-name 'Compose Persistent Fact'",
+        "printf '%s\\n' 'compose proof password' | OPTD_AUTH_TREE_STOP_PID=$$ optctl --server http://127.0.0.1:8789 --json bootstrap init --username compose-admin --password-stdin && OPTD_AUTH_TREE_STOP_PID=$$ optctl --server http://127.0.0.1:8789 --json project create compose-fact --display-name 'Compose Persistent Fact'",
       ]);
       assertStringIncludes(bootstrap.stdout, '"ok": true');
       assertStringIncludes(bootstrap.stdout, "compose-fact");
@@ -1068,7 +1068,7 @@ Deno.test({
         "cat /proc/[0-9]*/comm 2>/dev/null",
       ]);
       assert(!/^postgres$/m.test(processes.stdout));
-      await compose(["stop", "operant"]);
+      await compose(["stop", "optd"]);
       assertEquals(
         (await runCommand("docker", [
           "inspect",
@@ -1079,18 +1079,18 @@ Deno.test({
           .stdout.trim(),
         "true",
       );
-      await compose(["rm", "-f", "-v", "operant"]);
+      await compose(["rm", "-f", "-v", "optd"]);
       await assertNoNewAnonymousDockerVolumes(
         anonymousVolumesBefore,
-        "first Compose Operant removal",
+        "first Compose Optd removal",
       );
-      await compose(["up", "-d", "--no-deps", "--no-build", "operant"]);
+      await compose(["up", "-d", "--no-deps", "--no-build", "optd"]);
       await waitHttpReady(port);
       assertEquals(
         (await compose(["ps", "-q", "postgres"])).stdout.trim(),
         pgId,
       );
-      const recreatedAppId = (await compose(["ps", "-q", "operant"]))
+      const recreatedAppId = (await compose(["ps", "-q", "optd"]))
         .stdout.trim();
       assert(recreatedAppId !== appId);
       const recreatedAppAnonymousVolumes =
@@ -1122,7 +1122,7 @@ Deno.test({
 });
 
 function releaseScopedId(randomLength: number): string {
-  const gateId = Deno.env.get("OPERANT_RELEASE_GATE_ID");
+  const gateId = Deno.env.get("OPTD_RELEASE_GATE_ID");
   const random = crypto.randomUUID().replaceAll("-", "").slice(
     0,
     randomLength,
@@ -1338,17 +1338,17 @@ async function restartOutboxContainer(
     "--add-host",
     "host.docker.internal:host-gateway",
     "--env",
-    `OPERANT_HOOK_NET_ALLOW=${new URL(providerUrl).host}`,
+    `OPTD_HOOK_NET_ALLOW=${new URL(providerUrl).host}`,
     "--env",
-    "OPERANT_OUTBOX_POLL_INTERVAL_MS=20",
+    "OPTD_OUTBOX_POLL_INTERVAL_MS=20",
     "--env",
-    "OPERANT_OUTBOX_BATCH_SIZE=2",
+    "OPTD_OUTBOX_BATCH_SIZE=2",
     "--env",
-    "OPERANT_OUTBOX_LEASE_MARGIN_MS=4000",
+    "OPTD_OUTBOX_LEASE_MARGIN_MS=4000",
     "--env",
-    "OPERANT_OUTBOX_INITIAL_BACKOFF_MS=20",
+    "OPTD_OUTBOX_INITIAL_BACKOFF_MS=20",
     "--env",
-    "OPERANT_OUTBOX_MAX_BACKOFF_MS=100",
+    "OPTD_OUTBOX_MAX_BACKOFF_MS=100",
   ]);
   await harness.waitReady();
   const launcher = await harness.createProcessTreeLauncher();
@@ -1412,9 +1412,9 @@ async function waitPg(name: string): Promise<void> {
       name,
       "pg_isready",
       "-U",
-      "operant",
+      "optd",
       "-d",
-      "operant",
+      "optd",
     ], { allowFailure: true, timeoutMs: 5_000 });
     if (result.code === 0) return;
     await new Promise((resolve) => setTimeout(resolve, 250));

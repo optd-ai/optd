@@ -313,8 +313,8 @@ export function createHostPublicFlowBackend(
     },
     async observeRelationshipTuple(input) {
       const [publisher, name] = input.pack === "crm"
-        ? ["operant", "crm"]
-        : ["operant", "projects"];
+        ? ["optd", "crm"]
+        : ["optd", "projects"];
       const table = (await query<{ table_name: string }>(
         harness.server.sql,
         `select table_name from pack_runtime_tables where publisher=$1 and pack_name=$2 and definition_kind='relationship' and definition_name=$3`,
@@ -348,10 +348,10 @@ export function createHostPublicFlowBackend(
       assets.setProviderUrl(provider.url);
       await harness.restart({
         environment: {
-          OPERANT_HOOK_NET_ALLOW: new URL(provider.url).host,
-          OPERANT_OUTBOX_POLL_INTERVAL_MS: "20",
-          OPERANT_OUTBOX_INITIAL_BACKOFF_MS: "20",
-          OPERANT_OUTBOX_MAX_BACKOFF_MS: "100",
+          OPTD_HOOK_NET_ALLOW: new URL(provider.url).host,
+          OPTD_OUTBOX_POLL_INTERVAL_MS: "20",
+          OPTD_OUTBOX_INITIAL_BACKOFF_MS: "20",
+          OPTD_OUTBOX_MAX_BACKOFF_MS: "100",
         },
       });
       Object.defineProperty(backend, "serverOrigin", {

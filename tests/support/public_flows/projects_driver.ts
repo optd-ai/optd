@@ -1446,7 +1446,7 @@ async function assertNoLeaks(
       "projects acceptance password",
       "authorization: Bearer",
       "postgres://",
-      "OPERANT_SECRET_MASTER_KEY",
+      "OPTD_SECRET_MASTER_KEY",
       "at file://",
     ]
   ) {

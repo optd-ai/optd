@@ -2,7 +2,7 @@ import { canonicalJson } from "../ids/canonical_json.ts";
 import { constantTimeDigestEqual } from "../auth/token.ts";
 import { isUuidV7 } from "../ids/uuid_v7.ts";
 
-const DOMAIN = "operant.history.cursor.v1\0";
+const DOMAIN = "optd.history.cursor.v1\0";
 const encoder = new TextEncoder();
 
 export type HistoryCursorPosition = { createdAt: string; id: string };
@@ -13,13 +13,13 @@ export class HistoryCursorSigner {
   constructor(masterKey: string | null | undefined) {
     const material = masterKey?.trim();
     if (!material) {
-      throw new Error("OPERANT_MASTER_KEY is required for history cursors");
+      throw new Error("OPTD_MASTER_KEY is required for history cursors");
     }
     this.#key = deriveKey(material);
   }
 
   static fromEnvironment(): HistoryCursorSigner {
-    return new HistoryCursorSigner(Deno.env.get("OPERANT_MASTER_KEY"));
+    return new HistoryCursorSigner(Deno.env.get("OPTD_MASTER_KEY"));
   }
 
   async encode(

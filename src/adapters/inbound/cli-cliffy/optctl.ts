@@ -664,7 +664,7 @@ async function resolveProject(
 
 async function resolveReadProject(parsed: Parsed): Promise<string> {
   const selected = await readOrigin(new URL(parsed.server).origin);
-  const selector = parsed.project ?? Deno.env.get("OPERANT_PROJECT") ??
+  const selector = parsed.project ?? Deno.env.get("OPTD_PROJECT") ??
     selected.projectId ?? selected.projectSlug;
   if (!selector) {
     throw usageError(
@@ -695,7 +695,7 @@ async function metadataQuery(parsed: Parsed, args: string[]): Promise<string> {
     else throw usageError(`unknown metadata option ${arg}`);
   }
   const selected = await readOrigin(new URL(parsed.server).origin);
-  const selector = parsed.project ?? Deno.env.get("OPERANT_PROJECT") ??
+  const selector = parsed.project ?? Deno.env.get("OPTD_PROJECT") ??
     selected.projectId ?? selected.projectSlug;
   if (selector) {
     const project = await resolveProject(parsed.server, selector);
@@ -1045,8 +1045,8 @@ const CLI_GROUPS: ReadonlyArray<readonly [string, string, readonly string[]]> =
 function cliCommand() {
   const root = new Command()
     .name("optctl")
-    .description("Content-first Operant control client.")
-    .option("--server <origin:string>", "Operant server origin.")
+    .description("Content-first Optd control client.")
+    .option("--server <origin:string>", "Optd server origin.")
     .option(
       "--project <project:string>",
       "Explicit Project UUID or local selector.",
@@ -1135,10 +1135,10 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       const username = option(bootstrapArgs, "--username");
       const password = await readPassword(bootstrapArgs);
       const displayName = option(bootstrapArgs, "--display-name") ?? username;
-      const bootstrapToken = Deno.env.get("OPERANT_BOOTSTRAP_TOKEN");
+      const bootstrapToken = Deno.env.get("OPTD_BOOTSTRAP_TOKEN");
       if (!username || !bootstrapToken) {
         throw usageError(
-          "bootstrap init requires --username and OPERANT_BOOTSTRAP_TOKEN configured",
+          "bootstrap init requires --username and OPTD_BOOTSTRAP_TOKEN configured",
         );
       }
       result = await decodeJsonResponse(
@@ -1146,7 +1146,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
           method: "POST",
           headers: {
             "content-type": "application/json",
-            authorization: `Operant-Bootstrap ${bootstrapToken}`,
+            authorization: `Optd-Bootstrap ${bootstrapToken}`,
           },
           body: JSON.stringify({
             username,
@@ -1251,12 +1251,12 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       }
       const env: Record<string, string> = {
         ...Deno.env.toObject(),
-        OPERANT_AUTH_TREE_STOP_PID: String(Deno.pid),
+        OPTD_AUTH_TREE_STOP_PID: String(Deno.pid),
       };
       for (const key of Object.keys(env)) {
         if (
-          /^OPERANT_.*(?:TOKEN|BEARER|CREDENTIAL).*$/.test(key) ||
-          key === "OPERANT_MASTER_KEY"
+          /^OPTD_.*(?:TOKEN|BEARER|CREDENTIAL).*$/.test(key) ||
+          key === "OPTD_MASTER_KEY"
         ) delete env[key];
       }
       return await runIsolatedCommand(
@@ -1646,10 +1646,10 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
     } else if (cmd === "auth" && sub === "recover") {
       const recoveryArgs = parsed.positional.slice(2);
       const username = option(recoveryArgs, "--username");
-      const recoveryToken = Deno.env.get("OPERANT_RECOVERY_TOKEN");
+      const recoveryToken = Deno.env.get("OPTD_RECOVERY_TOKEN");
       if (!username || !recoveryToken) {
         throw usageError(
-          "auth recover requires --username and OPERANT_RECOVERY_TOKEN",
+          "auth recover requires --username and OPTD_RECOVERY_TOKEN",
         );
       }
       const password = await readPassword(recoveryArgs);
@@ -1658,7 +1658,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
           method: "POST",
           headers: {
             "content-type": "application/json",
-            authorization: `Operant-Recovery ${recoveryToken}`,
+            authorization: `Optd-Recovery ${recoveryToken}`,
           },
           body: JSON.stringify({ username, password }),
         }),

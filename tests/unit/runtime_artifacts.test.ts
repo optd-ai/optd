@@ -7,12 +7,12 @@ import {
 } from "../../src/adapters/outbound/postgres-process/lifecycle.ts";
 
 Deno.test("runtime guardrails reject non-Postgres database URLs", () => {
-  assertSupportedPostgresUrl("postgres://user:pass@example:5432/operant");
-  assertSupportedPostgresUrl("postgresql://user:pass@example:5432/operant");
+  assertSupportedPostgresUrl("postgres://user:pass@example:5432/optd");
+  assertSupportedPostgresUrl("postgresql://user:pass@example:5432/optd");
 
   for (
     const url of [
-      "sqlite:///tmp/operant.db",
+      "sqlite:///tmp/optd.db",
       "file:///tmp/db",
       "pglite://local",
     ]
@@ -34,14 +34,14 @@ Deno.test("runtime rejects unsupported PostgreSQL versions before migrations", (
 });
 
 Deno.test("runtime planning does not silently accept PGlite or SQLite URLs", () => {
-  const env = new MapEnv({ OPERANT_DATABASE_URL: "pglite://prototype" });
+  const env = new MapEnv({ OPTD_DATABASE_URL: "pglite://prototype" });
   assertThrowsWithMessage(() => planPostgresRuntime(env), "Postgres-only");
 });
 
 Deno.test("container and deployment artifacts document Postgres-only production runtime", async () => {
   const dockerfile = await Deno.readTextFile("Dockerfile");
   assertStringIncludes(dockerfile, "postgres:18.4-bookworm@sha256:");
-  assertStringIncludes(dockerfile, "operant-server");
+  assertStringIncludes(dockerfile, "optd");
   assertStringIncludes(dockerfile, "optctl");
   assertStringIncludes(dockerfile, "USER 1993:1993");
   assertStringIncludes(dockerfile, 'ENTRYPOINT ["/usr/bin/tini"');
@@ -49,18 +49,18 @@ Deno.test("container and deployment artifacts document Postgres-only production 
   assertStringIncludes(dockerfile, "/ready");
 
   const compose = await Deno.readTextFile("docker-compose.yml");
-  assertStringIncludes(compose, "operant-data:/data");
-  assertStringIncludes(compose, "OPERANT_BOOTSTRAP_TOKEN");
+  assertStringIncludes(compose, "optd-data:/data");
+  assertStringIncludes(compose, "OPTD_BOOTSTRAP_TOKEN");
   assertStringIncludes(compose, "http://127.0.0.1:8789/ready");
-  assert(!compose.includes("OPERANT_DATABASE_URL"));
+  assert(!compose.includes("OPTD_DATABASE_URL"));
   assertEquals((compose.match(/^\s{2}[a-z][a-z-]*:\s*$/gm) ?? []).length, 2);
 
   const externalCompose = await Deno.readTextFile(
     "compose.external-postgres.yml",
   );
-  assertStringIncludes(externalCompose, "OPERANT_DATABASE_URL");
+  assertStringIncludes(externalCompose, "OPTD_DATABASE_URL");
   assertStringIncludes(externalCompose, "postgres:18.4-bookworm@sha256:");
-  assertStringIncludes(externalCompose, "OPERANT_BOOTSTRAP_TOKEN");
+  assertStringIncludes(externalCompose, "OPTD_BOOTSTRAP_TOKEN");
   assertStringIncludes(externalCompose, "pg_isready");
 
   const docs = await Deno.readTextFile("docs/runtime.md");
@@ -68,12 +68,12 @@ Deno.test("container and deployment artifacts document Postgres-only production 
     docs,
     "PGlite and SQLite are prototype-only/non-MVP",
   );
-  assertStringIncludes(docs, "OPERANT_SECRET_MASTER_KEY");
+  assertStringIncludes(docs, "OPTD_SECRET_MASTER_KEY");
 
   for (
     const path of [
-      "k8s/operant-app-managed.example.yaml",
-      "k8s/operant-external-postgres.example.yaml",
+      "k8s/optd-app-managed.example.yaml",
+      "k8s/optd-external-postgres.example.yaml",
     ]
   ) {
     const manifest = await Deno.readTextFile(path);
@@ -84,7 +84,7 @@ Deno.test("container and deployment artifacts document Postgres-only production 
     assertStringIncludes(manifest, "runAsNonRoot: true");
     assertStringIncludes(manifest, "runAsUser: 1993");
     assertStringIncludes(manifest, "secretKeyRef");
-    assertStringIncludes(manifest, "OPERANT_DATA_DIR");
+    assertStringIncludes(manifest, "OPTD_DATA_DIR");
   }
 });
 
@@ -122,3 +122,30 @@ class MapEnv implements Deno.Env {
     return { ...this.values };
   }
 }
+
+Deno.test("deployment artifacts use only canonical runtime identities", async () => {
+  for (
+    const path of [
+      "Dockerfile",
+      "docker-compose.yml",
+      "compose.external-postgres.yml",
+      "k8s/optd-app-managed.example.yaml",
+      "k8s/optd-external-postgres.example.yaml",
+      "scripts/container-entrypoint.sh",
+      "scripts/release-gate.sh",
+      "scripts/release-artifacts.sh",
+      "scripts/release-image-accounting.py",
+    ]
+  ) {
+    const source = await Deno.readTextFile(path);
+    assert(!/operant/i.test(source), `legacy runtime identity in ${path}`);
+  }
+  const dockerfile = await Deno.readTextFile("Dockerfile");
+  assertStringIncludes(dockerfile, "https://github.com/optd-ai/optd");
+  assertStringIncludes(dockerfile, "/opt/optd/bin/optd");
+  assertStringIncludes(
+    await Deno.readTextFile("scripts/container-entrypoint.sh"),
+    "exec /usr/local/bin/optd",
+  );
+  assertStringIncludes(dockerfile, "OPTD_DATA_DIR");
+});

@@ -25,12 +25,12 @@ Deno.test({
   sanitizeOps: false,
   sanitizeResources: false,
   async fn() {
-    if (Deno.env.get("OPERANT_DATABASE_URL") || !await findPostgresBins()) {
+    if (Deno.env.get("OPTD_DATABASE_URL") || !await findPostgresBins()) {
       throw new Error("PostgreSQL 18.4 app-managed binaries are required");
     }
-    const root = await Deno.makeTempDir({ prefix: "operant-stage-upgrade-" });
-    const previous = Deno.env.get("OPERANT_DATA_DIR");
-    Deno.env.set("OPERANT_DATA_DIR", root);
+    const root = await Deno.makeTempDir({ prefix: "optd-stage-upgrade-" });
+    const previous = Deno.env.get("OPTD_DATA_DIR");
+    Deno.env.set("OPTD_DATA_DIR", root);
     let runtime: Awaited<ReturnType<typeof startPostgresRuntime>> | undefined;
     let sql: Sql | undefined;
     try {
@@ -262,7 +262,7 @@ Deno.test({
       assertEquals(
         (await query<{ exists: boolean }>(
           sql,
-          "select to_regprocedure('operant_canonical_jsonb(jsonb)') is not null exists",
+          "select to_regprocedure('optd_canonical_jsonb(jsonb)') is not null exists",
         )).rows[0].exists,
         false,
       );
@@ -564,8 +564,8 @@ spec:
     } finally {
       if (sql) await closePostgresClient(sql).catch(() => undefined);
       if (runtime) await runtime.stop().catch(() => undefined);
-      if (previous === undefined) Deno.env.delete("OPERANT_DATA_DIR");
-      else Deno.env.set("OPERANT_DATA_DIR", previous);
+      if (previous === undefined) Deno.env.delete("OPTD_DATA_DIR");
+      else Deno.env.set("OPTD_DATA_DIR", previous);
       await Deno.remove(root, { recursive: true }).catch(() => undefined);
     }
   },

@@ -68,13 +68,13 @@ Deno.test("normative packs avoid legacy identities and authority fields", async 
         if (child.name.endsWith(".yaml")) {
           assertStringIncludes(source, "apiVersion: operant.dev/v1");
           assert(
-            !/operant\.(?:crm|projects)/.test(source),
+            !/optd\.(?:crm|projects)/.test(source),
             `${child.name} has dotted identity`,
           );
         } else {
           assert(
             !source.includes("fetch("),
-            `${child.name} calls the Operant self API`,
+            `${child.name} calls the Optd self API`,
           );
         }
       }

@@ -25,7 +25,7 @@ STEP_LINE = re.compile(rb"^Step ([1-9][0-9]*)/([1-9][0-9]*) : (.+)\r?$")
 RESULT_LINE = re.compile(rb"^ ---> ([0-9a-f]{12,64}|sha256:[0-9a-f]{64})\r?$")
 SUCCESS_LINE = re.compile(rb"^Successfully built ([0-9a-f]{12,64}|sha256:[0-9a-f]{64})\r?$")
 CONTROL_PREFIX = (b"Step ", b" ---> ", b"Successfully built ")
-LABEL = "dev.operant.release-gate"
+LABEL = "dev.optd.release-gate"
 DIR_FLAGS = os.O_RDONLY | os.O_CLOEXEC | os.O_DIRECTORY | os.O_NOFOLLOW
 FILE_FLAGS = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK
 

@@ -40,7 +40,7 @@ import {
   makeHookSecretResolver,
 } from "../adapters/outbound/deno-hooks/trusted_stage_hook_adapter.ts";
 import { TrustedStageHookCoordinator } from "../application/services/hooks/trusted_stage_hook_coordinator.ts";
-import { OPERANT_VERSION } from "../config/runtime.ts";
+import { OPTD_VERSION } from "../config/runtime.ts";
 import type { Queryable, Sql } from "../adapters/outbound/postgres/client.ts";
 import { PostgresTransactionManager } from "../adapters/outbound/postgres/transaction_manager.ts";
 import { PostgresAuthRepository } from "../adapters/outbound/postgres/auth_repository.ts";
@@ -132,12 +132,12 @@ export function makeApplication(
   const changesets = {
     ...stageChangesets,
     ...makeCommitChangesetService(new PostgresCommitRepository(sql), {
-      lockTimeout: Deno.env.get("OPERANT_COMMIT_LOCK_TIMEOUT"),
-      maximumLockTimeout: Deno.env.get("OPERANT_COMMIT_LOCK_TIMEOUT_MAX"),
+      lockTimeout: Deno.env.get("OPTD_COMMIT_LOCK_TIMEOUT"),
+      maximumLockTimeout: Deno.env.get("OPTD_COMMIT_LOCK_TIMEOUT_MAX"),
     }),
   };
   const maximumHashes = Number(
-    Deno.env.get("OPERANT_PASSWORD_MAX_CONCURRENT_HASHES") ?? "4",
+    Deno.env.get("OPTD_PASSWORD_MAX_CONCURRENT_HASHES") ?? "4",
   );
   const authentication = new PostgresAuthRepository(
     sql,
@@ -166,7 +166,7 @@ export function makeApplication(
     metadata: makeInspectMetadataService({
       catalog: makePostgresMetadataRepository(sql),
       clock,
-      version: OPERANT_VERSION,
+      version: OPTD_VERSION,
       authorization: authorizationRepository,
     }),
     objectReads: makeObjectReadService({
@@ -284,21 +284,21 @@ export function makeApplication(
 
 function migrationRetryConfig(env: typeof Deno.env) {
   const jitterMinimumMs = boundedEnvironmentInteger(
-    env.get("OPERANT_PACK_APPLY_RETRY_JITTER_MIN_MS"),
+    env.get("OPTD_PACK_APPLY_RETRY_JITTER_MIN_MS"),
     1,
     0,
     1_000,
   );
   return {
     maximumRetries: boundedEnvironmentInteger(
-      env.get("OPERANT_PACK_APPLY_MAX_RETRIES"),
+      env.get("OPTD_PACK_APPLY_MAX_RETRIES"),
       2,
       0,
       10,
     ),
     jitterMinimumMs,
     jitterMaximumMs: boundedEnvironmentInteger(
-      env.get("OPERANT_PACK_APPLY_RETRY_JITTER_MAX_MS"),
+      env.get("OPTD_PACK_APPLY_RETRY_JITTER_MAX_MS"),
       25,
       jitterMinimumMs,
       5_000,

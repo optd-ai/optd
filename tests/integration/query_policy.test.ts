@@ -17,12 +17,12 @@ import { canonicalSha256 } from "../../src/domain/ids/canonical_json.ts";
 import { uuidV7 } from "../../src/domain/ids/uuid_v7.ts";
 
 Deno.test("query pushes assigned ABAC before count and page on PostgreSQL", async () => {
-  if (Deno.env.get("OPERANT_DATABASE_URL") || !await findPostgresBins()) {
+  if (Deno.env.get("OPTD_DATABASE_URL") || !await findPostgresBins()) {
     throw new Error("PostgreSQL 18.4 binaries required");
   }
-  const root = await Deno.makeTempDir({ prefix: "operant-query-policy-" }),
-    previous = Deno.env.get("OPERANT_DATA_DIR");
-  Deno.env.set("OPERANT_DATA_DIR", root);
+  const root = await Deno.makeTempDir({ prefix: "optd-query-policy-" }),
+    previous = Deno.env.get("OPTD_DATA_DIR");
+  Deno.env.set("OPTD_DATA_DIR", root);
   let runtime: Awaited<ReturnType<typeof startPostgresRuntime>> | undefined;
   let sql: ReturnType<typeof createPostgresClient> | undefined;
   try {
@@ -233,8 +233,8 @@ Deno.test("query pushes assigned ABAC before count and page on PostgreSQL", asyn
   } finally {
     if (sql) await closePostgresClient(sql).catch(() => undefined);
     if (runtime) await runtime.stop().catch(() => undefined);
-    if (previous === undefined) Deno.env.delete("OPERANT_DATA_DIR");
-    else Deno.env.set("OPERANT_DATA_DIR", previous);
+    if (previous === undefined) Deno.env.delete("OPTD_DATA_DIR");
+    else Deno.env.set("OPTD_DATA_DIR", previous);
     await Deno.remove(root, { recursive: true }).catch(() => undefined);
   }
 });

@@ -4,8 +4,8 @@ import { query } from "../../../src/adapters/outbound/postgres/client.ts";
 import { isUuidV7 } from "../../../src/domain/ids/uuid_v7.ts";
 
 Deno.test("server warns while honoring an operator-lowered password minimum", async () => {
-  const prior = Deno.env.get("OPERANT_PASSWORD_MIN_LENGTH");
-  Deno.env.set("OPERANT_PASSWORD_MIN_LENGTH", "6");
+  const prior = Deno.env.get("OPTD_PASSWORD_MIN_LENGTH");
+  Deno.env.set("OPTD_PASSWORD_MIN_LENGTH", "6");
   const harness = await startLiveHarness();
   try {
     const bootstrap = await harness.bootstrap({
@@ -23,14 +23,14 @@ Deno.test("server warns while honoring an operator-lowered password minimum", as
     const diagnostics = await harness.diagnostics();
     assertEquals(
       diagnostics.server.includes(
-        "warning: OPERANT_PASSWORD_MIN_LENGTH=6 is below the default minimum of 8",
+        "warning: OPTD_PASSWORD_MIN_LENGTH=6 is below the default minimum of 8",
       ),
       true,
     );
   } finally {
     await harness.close();
-    if (prior === undefined) Deno.env.delete("OPERANT_PASSWORD_MIN_LENGTH");
-    else Deno.env.set("OPERANT_PASSWORD_MIN_LENGTH", prior);
+    if (prior === undefined) Deno.env.delete("OPTD_PASSWORD_MIN_LENGTH");
+    else Deno.env.set("OPTD_PASSWORD_MIN_LENGTH", prior);
   }
 });
 
@@ -108,8 +108,8 @@ Deno.test("compiled optctl logs in, lists sessions, logs out, and survives resta
 });
 
 Deno.test("compiled optctl observes bounded hash saturation", async () => {
-  const prior = Deno.env.get("OPERANT_PASSWORD_MAX_CONCURRENT_HASHES");
-  Deno.env.set("OPERANT_PASSWORD_MAX_CONCURRENT_HASHES", "1");
+  const prior = Deno.env.get("OPTD_PASSWORD_MAX_CONCURRENT_HASHES");
+  Deno.env.set("OPTD_PASSWORD_MAX_CONCURRENT_HASHES", "1");
   const harness = await startLiveHarness();
   try {
     assertEquals(
@@ -149,8 +149,8 @@ Deno.test("compiled optctl observes bounded hash saturation", async () => {
   } finally {
     await harness.close();
     if (prior === undefined) {
-      Deno.env.delete("OPERANT_PASSWORD_MAX_CONCURRENT_HASHES");
-    } else Deno.env.set("OPERANT_PASSWORD_MAX_CONCURRENT_HASHES", prior);
+      Deno.env.delete("OPTD_PASSWORD_MAX_CONCURRENT_HASHES");
+    } else Deno.env.set("OPTD_PASSWORD_MAX_CONCURRENT_HASHES", prior);
   }
 });
 
@@ -199,8 +199,8 @@ Deno.test("password reset request throttling is Postgres-backed and non-enumerat
 
 Deno.test("compiled host command covers recovery revocation repair cancellation and expiry", async () => {
   const recoveryToken = "host-recovery-secret-with-at-least-32-characters";
-  const prior = Deno.env.get("OPERANT_RECOVERY_TOKEN");
-  Deno.env.set("OPERANT_RECOVERY_TOKEN", recoveryToken);
+  const prior = Deno.env.get("OPTD_RECOVERY_TOKEN");
+  Deno.env.set("OPTD_RECOVERY_TOKEN", recoveryToken);
   const harness = await startLiveHarness();
   let serverBinary: string | undefined;
   try {
@@ -235,7 +235,7 @@ Deno.test("compiled host command covers recovery revocation repair cancellation 
       })).code,
       0,
     );
-    serverBinary = `${harness.rootDir}/operant-server`;
+    serverBinary = `${harness.rootDir}/optd`;
     const compiled = await new Deno.Command(Deno.execPath(), {
       args: [
         "compile",
@@ -257,10 +257,8 @@ Deno.test("compiled host command covers recovery revocation repair cancellation 
     )).split("\n");
     const hostEnv = {
       ...Deno.env.toObject(),
-      OPERANT_DATABASE_URL: `postgres://operant@127.0.0.1:${
-        postmaster[3]
-      }/postgres`,
-      OPERANT_RECOVERY_TOKEN: recoveryToken,
+      OPTD_DATABASE_URL: `postgres://optd@127.0.0.1:${postmaster[3]}/postgres`,
+      OPTD_RECOVERY_TOKEN: recoveryToken,
     };
     const host = (args: string[]) =>
       new Deno.Command(serverBinary!, {
@@ -499,8 +497,8 @@ Deno.test("compiled host command covers recovery revocation repair cancellation 
     );
   } finally {
     await harness.close();
-    if (prior === undefined) Deno.env.delete("OPERANT_RECOVERY_TOKEN");
-    else Deno.env.set("OPERANT_RECOVERY_TOKEN", prior);
+    if (prior === undefined) Deno.env.delete("OPTD_RECOVERY_TOKEN");
+    else Deno.env.set("OPTD_RECOVERY_TOKEN", prior);
   }
 });
 
@@ -535,7 +533,7 @@ Deno.test("compiled optctl reset wait reconnects by WebSocket without polling", 
     const requestId = JSON.parse(requested.stdout).data.request_id;
     const store = JSON.parse(
       await Deno.readTextFile(
-        `${harness.rootDir}/xdg-config/operant/auth.json`,
+        `${harness.rootDir}/xdg-config/optd/auth.json`,
       ),
     );
     const nonce =

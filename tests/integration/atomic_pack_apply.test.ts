@@ -54,12 +54,12 @@ function makeMigrationTestServices(deps: MigrationTestDeps) {
 }
 
 Deno.test("atomic pack apply activates globally, is idempotent, and rolls back injected failures", async () => {
-  if (Deno.env.get("OPERANT_DATABASE_URL") || !await findPostgresBins()) {
+  if (Deno.env.get("OPTD_DATABASE_URL") || !await findPostgresBins()) {
     throw new Error("PostgreSQL 18.4 app-managed binaries are required");
   }
-  const root = await Deno.makeTempDir({ prefix: "operant-atomic-pack-" });
-  const previous = Deno.env.get("OPERANT_DATA_DIR");
-  Deno.env.set("OPERANT_DATA_DIR", root);
+  const root = await Deno.makeTempDir({ prefix: "optd-atomic-pack-" });
+  const previous = Deno.env.get("OPTD_DATA_DIR");
+  Deno.env.set("OPTD_DATA_DIR", root);
   let runtime: Awaited<ReturnType<typeof startPostgresRuntime>> | undefined;
   let sql: ReturnType<typeof createPostgresClient> | undefined;
   try {
@@ -204,7 +204,7 @@ Deno.test("atomic pack apply activates globally, is idempotent, and rolls back i
     const activeDefinition = await getDefinition(
       sql,
       "resources",
-      "operant",
+      "optd",
       "crm",
       "lead",
     );
@@ -884,19 +884,19 @@ Deno.test("atomic pack apply activates globally, is idempotent, and rolls back i
   } finally {
     if (sql) await closePostgresClient(sql).catch(() => undefined);
     if (runtime) await runtime.stop().catch(() => undefined);
-    if (previous === undefined) Deno.env.delete("OPERANT_DATA_DIR");
-    else Deno.env.set("OPERANT_DATA_DIR", previous);
+    if (previous === undefined) Deno.env.delete("OPTD_DATA_DIR");
+    else Deno.env.set("OPTD_DATA_DIR", previous);
     await Deno.remove(root, { recursive: true }).catch(() => undefined);
   }
 });
 
 Deno.test("PG18.4 migrates legacy full seed uniqueness atomically to exact active uniqueness", async () => {
-  if (Deno.env.get("OPERANT_DATABASE_URL") || !await findPostgresBins()) {
+  if (Deno.env.get("OPTD_DATABASE_URL") || !await findPostgresBins()) {
     throw new Error("PostgreSQL 18.4 app-managed binaries are required");
   }
   const root = await Deno.makeTempDir({ prefix: "op-seed-mig-" });
-  const previous = Deno.env.get("OPERANT_DATA_DIR");
-  Deno.env.set("OPERANT_DATA_DIR", root);
+  const previous = Deno.env.get("OPTD_DATA_DIR");
+  Deno.env.set("OPTD_DATA_DIR", root);
   let runtime: Awaited<ReturnType<typeof startPostgresRuntime>> | undefined;
   let sql: ReturnType<typeof createPostgresClient> | undefined;
   try {
@@ -1184,8 +1184,8 @@ Deno.test("PG18.4 migrates legacy full seed uniqueness atomically to exact activ
   } finally {
     if (sql) await closePostgresClient(sql).catch(() => undefined);
     if (runtime) await runtime.stop().catch(() => undefined);
-    if (previous === undefined) Deno.env.delete("OPERANT_DATA_DIR");
-    else Deno.env.set("OPERANT_DATA_DIR", previous);
+    if (previous === undefined) Deno.env.delete("OPTD_DATA_DIR");
+    else Deno.env.set("OPTD_DATA_DIR", previous);
     await Deno.remove(root, { recursive: true }).catch(() => undefined);
   }
 });

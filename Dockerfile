@@ -9,10 +9,10 @@ COPY deno.json deno.lock ./
 COPY src ./src
 RUN deno cache --frozen src/main_server.ts src/main_optctl.ts \
   && deno compile --frozen --no-prompt --allow-all \
-    --output /opt/operant/bin/operant-server src/main_server.ts \
+    --output /opt/optd/bin/optd src/main_server.ts \
   && deno compile --frozen --no-prompt \
     --allow-read --allow-write --allow-env --allow-net --allow-run --allow-sys=uid \
-    --output /opt/operant/bin/optctl src/main_optctl.ts
+    --output /opt/optd/bin/optctl src/main_optctl.ts
 
 FROM ${POSTGRES_IMAGE} AS tini
 RUN apt-get update \
@@ -22,49 +22,49 @@ RUN apt-get update \
 FROM ${POSTGRES_IMAGE} AS rootfs
 
 USER root
-RUN groupadd --gid 1993 operant \
-  && useradd --uid 1993 --gid 1993 --no-create-home --home-dir /data --shell /usr/sbin/nologin operant \
-  && mkdir -p /data /opt/operant/bin \
-  && chown -R 1993:1993 /data /opt/operant
+RUN groupadd --gid 1993 optd \
+  && useradd --uid 1993 --gid 1993 --no-create-home --home-dir /data --shell /usr/sbin/nologin optd \
+  && mkdir -p /data /opt/optd/bin \
+  && chown -R 1993:1993 /data /opt/optd
 COPY --from=build /usr/bin/deno /usr/local/bin/deno
-COPY --from=build /deno-dir /opt/operant/deno-dir
-COPY --from=build /opt/operant/bin/operant-server /opt/operant/bin/optctl /usr/local/bin/
+COPY --from=build /deno-dir /opt/optd/deno-dir
+COPY --from=build /opt/optd/bin/optd /opt/optd/bin/optctl /usr/local/bin/
 COPY --from=tini /usr/bin/tini /usr/bin/tini
-COPY deno.json deno.lock /opt/operant/
-COPY src/adapters/outbound/postgres/auth_password_worker.ts /opt/operant/runtime/auth_password_worker.ts
-COPY prototypes/crm-default-pack /opt/operant/prototypes/crm-default-pack
-COPY prototypes/project-management-pack /opt/operant/prototypes/project-management-pack
-COPY scripts/container-entrypoint.sh /usr/local/bin/operant-entrypoint
-RUN chmod 0555 /usr/local/bin/operant-server /usr/local/bin/optctl \
-    /usr/local/bin/deno /usr/local/bin/operant-entrypoint /usr/bin/tini \
-  && chown -R 1993:1993 /opt/operant
+COPY deno.json deno.lock /opt/optd/
+COPY src/adapters/outbound/postgres/auth_password_worker.ts /opt/optd/runtime/auth_password_worker.ts
+COPY prototypes/crm-default-pack /opt/optd/prototypes/crm-default-pack
+COPY prototypes/project-management-pack /opt/optd/prototypes/project-management-pack
+COPY scripts/container-entrypoint.sh /usr/local/bin/optd-entrypoint
+RUN chmod 0555 /usr/local/bin/optd /usr/local/bin/optctl \
+    /usr/local/bin/deno /usr/local/bin/optd-entrypoint /usr/bin/tini \
+  && chown -R 1993:1993 /opt/optd
 
 # The official postgres image declares /var/lib/postgresql as a volume and
 # port 5432 as exposed metadata. Docker cannot remove inherited metadata, so
 # copy the prepared filesystem into a metadata-clean final image.
 FROM scratch AS runtime
-ARG OPERANT_VERSION=0.1.0-dev
-ARG OPERANT_REVISION=unknown
-ARG OPERANT_SOURCE=https://github.com/from-nibly/operant
+ARG OPTD_VERSION=0.1.0-dev
+ARG OPTD_REVISION=unknown
+ARG OPTD_SOURCE=https://github.com/optd-ai/optd
 COPY --from=rootfs / /
-LABEL org.opencontainers.image.title="Operant" \
-  org.opencontainers.image.version="${OPERANT_VERSION}" \
-  org.opencontainers.image.revision="${OPERANT_REVISION}" \
-  org.opencontainers.image.source="${OPERANT_SOURCE}"
+LABEL org.opencontainers.image.title="optd" \
+  org.opencontainers.image.version="${OPTD_VERSION}" \
+  org.opencontainers.image.revision="${OPTD_REVISION}" \
+  org.opencontainers.image.source="${OPTD_SOURCE}"
 ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/lib/postgresql/18/bin \
   LANG=en_US.utf8 \
-  OPERANT_HOST=0.0.0.0 \
-  OPERANT_PORT=8789 \
-  OPERANT_DATA_DIR=/data \
-  OPERANT_PG_BIN_DIR=/usr/lib/postgresql/18/bin \
-  OPERANT_DENO_BIN=/usr/local/bin/deno \
-  OPERANT_AUTH_PASSWORD_WORKER=/opt/operant/runtime/auth_password_worker.ts \
-  DENO_DIR=/opt/operant/deno-dir
-WORKDIR /opt/operant
+  OPTD_HOST=0.0.0.0 \
+  OPTD_PORT=8789 \
+  OPTD_DATA_DIR=/data \
+  OPTD_PG_BIN_DIR=/usr/lib/postgresql/18/bin \
+  OPTD_DENO_BIN=/usr/local/bin/deno \
+  OPTD_AUTH_PASSWORD_WORKER=/opt/optd/runtime/auth_password_worker.ts \
+  DENO_DIR=/opt/optd/deno-dir
+WORKDIR /opt/optd
 USER 1993:1993
 EXPOSE 8789
 VOLUME ["/data"]
 HEALTHCHECK --interval=10s --timeout=3s --start-period=20s --retries=6 \
-  CMD ["deno", "eval", "const p=Deno.env.get('OPERANT_PORT')??'8789';const r=await fetch(`http://127.0.0.1:${p}/ready`);if(!r.ok)Deno.exit(1)"]
-ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/operant-entrypoint"]
+  CMD ["deno", "eval", "const p=Deno.env.get('OPTD_PORT')??'8789';const r=await fetch(`http://127.0.0.1:${p}/ready`);if(!r.ok)Deno.exit(1)"]
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/optd-entrypoint"]
 CMD ["server"]
