@@ -9,6 +9,7 @@ fi
 deno fmt --check src tests docs project-model deno.json
 deno task model:check
 deno task check
-deno test -A tests/unit/optd_model_contract.test.ts tests/unit/optd_integration_verify.test.ts
+deno test -A tests/unit/optd_model_contract.test.ts tests/unit/optd_integration_verify.test.ts tests/unit/optd_distribution.test.ts
+deno test -A tests/e2e/foundation/compiled_cli_smoke.test.ts
 deno task model:check
 printf '%s\n' 'PREFIX CHECKS PASSED; image/release acceptance has not been run.'

@@ -2,3 +2,4 @@
 .lavish
 .direnv
 codedb.snapshot
+/dist/

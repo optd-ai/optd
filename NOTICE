@@ -1,0 +1,10 @@
+optd
+Copyright 2026 optd contributors
+
+This product is licensed under the Apache License, Version 2.0.
+https://github.com/optd-ai/optd is the canonical source identity, not evidence
+that the hosted repository or any release has been published.
+
+Third-party components retain their respective licenses and notices. Container
+base filesystem notices remain in their original locations (including
+/usr/share/doc); this notice does not relicense those components.

@@ -184,6 +184,10 @@ image_id=$(docker image inspect "$image" --format '{{.Id}}')
 [[ "$image_id" == "$image" ]] || fail "image ID did not resolve exactly: expected=$image actual=$image_id"
 image_revision=$(docker image inspect "$image_id" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')
 image_version=$(docker image inspect "$image_id" --format '{{index .Config.Labels "org.opencontainers.image.version"}}')
+image_license=$(docker image inspect "$image_id" --format '{{index .Config.Labels "org.opencontainers.image.licenses"}}')
+image_source=$(docker image inspect "$image_id" --format '{{index .Config.Labels "org.opencontainers.image.source"}}')
+[[ "$image_license" == Apache-2.0 ]] || fail "image license must be Apache-2.0"
+[[ "$image_source" == https://github.com/optd-ai/optd ]] || fail "image source must be canonical optd repository"
 if [[ -z "$image_revision" || "$image_revision" == "<no value>" || "$image_revision" != "$revision" ]]; then
   fail "image/source revision mismatch: source=$revision image=${image_revision:-missing}"
 fi
@@ -224,24 +228,28 @@ deno_output=$(run_image_command deno --version)
 deno_version=${deno_output%%$'\n'*}
 postgres_version=$(run_image_command /usr/lib/postgresql/18/bin/postgres --version)
 
+# Legal files are part of the same exact-source, checksummed transaction.
+cp -- LICENSE NOTICE "$staging/"
 optctl_sha256=$(sha256sum -- "$staging/optctl" | awk '{print $1}')
 jq -n \
   --arg image "$image_id" \
   --arg image_id "$image_id" \
   --arg image_digest "$image_digest" \
   --arg revision "$revision" \
+  --arg license "$image_license" \
+  --arg source "$image_source" \
   --argjson labels "$labels" \
   --arg deno_version "$deno_version" \
   --arg postgres_version "$postgres_version" \
   --arg optctl_sha256 "$optctl_sha256" \
-  '{image:$image,image_id:$image_id,image_digest:$image_digest,source_revision:$revision,source_dirty:false,labels:$labels,deno:$deno_version,postgres:$postgres_version,optctl_sha256:$optctl_sha256}' \
+  '{image:$image,image_id:$image_id,image_digest:$image_digest,source_revision:$revision,source_dirty:false,source:$source,license:$license,labels:$labels,deno:$deno_version,postgres:$postgres_version,optctl_sha256:$optctl_sha256}' \
   >"$staging/image-metadata.json"
 (
   cd "$staging"
-  sha256sum -- optctl image-metadata.json >SHA256SUMS
+  sha256sum -- optctl image-metadata.json LICENSE NOTICE >SHA256SUMS
   sha256sum --check SHA256SUMS
 )
-for artifact in optctl image-metadata.json SHA256SUMS; do sync_path "$staging/$artifact"; done
+for artifact in optctl image-metadata.json LICENSE NOTICE SHA256SUMS; do sync_path "$staging/$artifact"; done
 sync_path "$staging"
 verify_parent_identity || fail "output parent identity changed before publication"
 

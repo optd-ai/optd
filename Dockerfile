@@ -30,7 +30,7 @@ COPY --from=build /usr/bin/deno /usr/local/bin/deno
 COPY --from=build /deno-dir /opt/optd/deno-dir
 COPY --from=build /opt/optd/bin/optd /opt/optd/bin/optctl /usr/local/bin/
 COPY --from=tini /usr/bin/tini /usr/bin/tini
-COPY deno.json deno.lock /opt/optd/
+COPY deno.json deno.lock LICENSE NOTICE /opt/optd/
 COPY src/adapters/outbound/postgres/auth_password_worker.ts /opt/optd/runtime/auth_password_worker.ts
 COPY prototypes/crm-default-pack /opt/optd/prototypes/crm-default-pack
 COPY prototypes/project-management-pack /opt/optd/prototypes/project-management-pack
@@ -50,7 +50,8 @@ COPY --from=rootfs / /
 LABEL org.opencontainers.image.title="optd" \
   org.opencontainers.image.version="${OPTD_VERSION}" \
   org.opencontainers.image.revision="${OPTD_REVISION}" \
-  org.opencontainers.image.source="${OPTD_SOURCE}"
+  org.opencontainers.image.source="${OPTD_SOURCE}" \
+  org.opencontainers.image.licenses="Apache-2.0"
 ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/lib/postgresql/18/bin \
   LANG=en_US.utf8 \
   OPTD_HOST=0.0.0.0 \

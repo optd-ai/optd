@@ -69,6 +69,15 @@ Deno.test("prefix verifier propagates real formatting, model, type and regressio
       "tests/unit/optd_integration_verify.test.ts",
       'Deno.test("fixture second regression", () => {});\n',
     );
+    await Deno.mkdir(join(fixture, "tests/e2e/foundation"), {
+      recursive: true,
+    });
+    for (
+      const path of [
+        "tests/unit/optd_distribution.test.ts",
+        "tests/e2e/foundation/compiled_cli_smoke.test.ts",
+      ]
+    ) await write(path, passing);
     const baseline = await run();
     assert.equal(baseline.code, 0, decode(baseline));
     assert.match(
@@ -76,8 +85,21 @@ Deno.test("prefix verifier propagates real formatting, model, type and regressio
       /PREFIX CHECKS PASSED; image\/release acceptance has not been run/,
     );
 
-    for (const failure of ["format", "model", "type", "regression"] as const) {
-      const path = failure === "model"
+    for (
+      const failure of [
+        "format",
+        "model",
+        "type",
+        "regression",
+        "distribution",
+        "compiled",
+      ] as const
+    ) {
+      const path = failure === "distribution"
+        ? "tests/unit/optd_distribution.test.ts"
+        : failure === "compiled"
+        ? "tests/e2e/foundation/compiled_cli_smoke.test.ts"
+        : failure === "model"
         ? "spec/README.md"
         : failure === "regression"
         ? testPath
@@ -87,6 +109,10 @@ Deno.test("prefix verifier propagates real formatting, model, type and regressio
         format: "export const value:number=1;\n",
         model: "deliberate frozen projection drift\n",
         type: 'export const value: number = "wrong";\n',
+        distribution:
+          'Deno.test("distribution failure", () => {\n  throw new Error("deliberate distribution failure");\n});\n',
+        compiled:
+          'Deno.test("compiled failure", () => {\n  throw new Error("deliberate compiled failure");\n});\n',
         regression:
           'Deno.test("fixture regression", () => {\n  throw new Error("deliberate regression failure");\n});\n',
       }[failure];
@@ -102,6 +128,8 @@ Deno.test("prefix verifier propagates real formatting, model, type and regressio
           model: /Specification drift/,
           type: /not assignable/,
           regression: /deliberate regression failure/,
+          distribution: /deliberate distribution failure/,
+          compiled: /deliberate compiled failure/,
         }[failure],
       );
       assert.equal(await Deno.readTextFile(join(fixture, path)), broken);

@@ -1109,6 +1109,9 @@ async function createFixture(): Promise<Fixture> {
   await Deno.chmod(`${root}/scripts/release-owned-supervisor.py`, 0o755);
   await Deno.chmod(`${root}/scripts/release-pidfd-signal.py`, 0o755);
   await Deno.chmod(`${root}/scripts/release-image-accounting.py`, 0o755);
+  for (const file of ["LICENSE", "NOTICE"]) {
+    await Deno.copyFile(file, `${root}/${file}`);
+  }
   await Deno.writeTextFile(`${root}/src/main_optctl.ts`, "export {};\n");
   await Deno.writeTextFile(
     `${root}/tests/ordinary.ts`,
@@ -1415,6 +1418,8 @@ PY
       *'.Id}} {{index .Config.Labels'*) printf '%s %s release-gate-%s\\n' "$identity" "$FAKE_REVISION" "\${FAKE_REVISION:0:12}" ;;
       *org.opencontainers.image.revision*) printf '%s\\n' "$FAKE_REVISION" ;;
       *org.opencontainers.image.version*) printf 'release-gate-%s\\n' "\${FAKE_REVISION:0:12}" ;;
+      *org.opencontainers.image.licenses*) printf 'Apache-2.0\\n' ;;
+      *org.opencontainers.image.source*) printf 'https://github.com/optd-ai/optd\\n' ;;
       *dev.optd.release-gate*) value label "$file" ;;
       *json*.Config.Labels*) printf '{"org.opencontainers.image.revision":"%s","org.opencontainers.image.version":"release-gate-%s"}\\n' "$FAKE_REVISION" "\${FAKE_REVISION:0:12}" ;;
       *RepoDigests*) printf 'optd@example-digest\\n' ;;

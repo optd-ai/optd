@@ -101,8 +101,13 @@ Release verification and metadata:
 ```bash
 deno task container-smoke
 deno task release-gate
-./scripts/release-artifacts.sh optd:0.1.0-dev dist
+# Substitute the full immutable ID of the image built from this exact HEAD:
+./scripts/release-artifacts.sh sha256:<64-lowercase-hex-digits> dist
 ```
+
+See [local distribution](release.md) for legal artifacts, the new-repository
+premise, and the separately authorized external publication boundary. These
+commands are local verification, not evidence of a published release.
 
 `release-gate` refuses tracked or untracked source changes. Set
 `OPTD_RELEASE_BASE` to a full 40-character commit ID when checking a range other
