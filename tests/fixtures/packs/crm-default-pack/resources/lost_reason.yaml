@@ -1,6 +1,6 @@
 {
   "kind": "Resource",
-  "apiVersion": "operant.dev/v1",
+  "apiVersion": "optd.dev/v1",
   "metadata": {
     "name": "lost_reason",
   },

@@ -5,7 +5,7 @@ const after = envelope.input?.proposed ?? operation.fields ?? {};
 const resource = operation.resource ?? "";
 const errors = [];
 const warnings: unknown[] = [];
-if (resource === "operant/projects:task") {
+if (resource === "optd/projects:task") {
   if (!after.title || String(after.title).trim() === "") {
     errors.push({
       path: "/title",
@@ -52,7 +52,7 @@ if (resource === "operant/projects:task") {
     }
   }
 }
-if (resource === "operant/projects:timesheet") {
+if (resource === "optd/projects:timesheet") {
   const hours = Number(after.hours);
   if (!Number.isFinite(hours) || hours <= 0 || hours > 24) {
     errors.push({
@@ -62,11 +62,11 @@ if (resource === "operant/projects:timesheet") {
     });
   }
 }
-const requiredApprovals = resource === "operant/projects:task"
+const requiredApprovals = resource === "optd/projects:task"
   ? after.state === "done" && before?.state !== "done"
     ? [{
       key: "task_completion",
-      role: "operant/projects:project_manager",
+      role: "optd/projects:project_manager",
       boundary: { type: "project", project_id: envelope.input.project_id },
       minimum: 1,
       principal_types: ["human_user"],

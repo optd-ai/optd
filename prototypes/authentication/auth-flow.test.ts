@@ -111,14 +111,14 @@ Deno.test("complete public auth lifecycle", async () => {
   result = await call(
     app,
     "/api/v1/test/work",
-    json({ project: "sales", required_role: "operant/crm:sales_manager" }),
+    json({ project: "sales", required_role: "optd/crm:sales_manager" }),
   );
   assertEquals(result.body.error.code, "authentication_required");
   result = await call(
     app,
     "/api/v1/test/work",
     json(
-      { project: "sales", required_role: "operant/crm:sales_manager" },
+      { project: "sales", required_role: "optd/crm:sales_manager" },
       bearer(requestToken),
     ),
   );
@@ -126,7 +126,7 @@ Deno.test("complete public auth lifecycle", async () => {
 
   const nonce1 = "nonce-for-agent-request-1";
   const requestBody = {
-    roles: ["operant/crm:sales_manager", "operant/crm:sales_rep"],
+    roles: ["optd/crm:sales_manager", "optd/crm:sales_rep"],
     boundary: { type: "project", project_id: "sales" },
     reason: "Need to qualify CRM leads",
     redemption_nonce_hash: await sha(nonce1),
@@ -181,7 +181,7 @@ Deno.test("complete public auth lifecycle", async () => {
     app,
     "/api/v1/test/work",
     json(
-      { project: "sales", required_role: "operant/crm:sales_manager" },
+      { project: "sales", required_role: "optd/crm:sales_manager" },
       bearer(agentToken1),
     ),
   );
@@ -190,7 +190,7 @@ Deno.test("complete public auth lifecycle", async () => {
     app,
     "/api/v1/test/work",
     json(
-      { project: "delivery", required_role: "operant/projects:viewer" },
+      { project: "delivery", required_role: "optd/projects:viewer" },
       bearer(agentToken1),
     ),
   );
@@ -203,7 +203,7 @@ Deno.test("complete public auth lifecycle", async () => {
     app,
     "/api/v1/auth/requests",
     json({
-      roles: ["operant/projects:viewer"],
+      roles: ["optd/projects:viewer"],
       boundary: { type: "project", project_id: "delivery" },
       reason: "Need to inspect delivery project",
       redemption_nonce_hash: await sha(nonce2),
@@ -233,7 +233,7 @@ Deno.test("complete public auth lifecycle", async () => {
     app,
     "/api/v1/test/work",
     json(
-      { project: "sales", required_role: "operant/crm:sales_manager" },
+      { project: "sales", required_role: "optd/crm:sales_manager" },
       bearer(agentToken2),
     ),
   );
@@ -242,7 +242,7 @@ Deno.test("complete public auth lifecycle", async () => {
     app,
     "/api/v1/test/work",
     json(
-      { project: "delivery", required_role: "operant/projects:viewer" },
+      { project: "delivery", required_role: "optd/projects:viewer" },
       bearer(agentToken2),
     ),
   );
@@ -253,7 +253,7 @@ Deno.test("complete public auth lifecycle", async () => {
     app,
     "/api/v1/auth/requests",
     json({
-      roles: ["operant/crm:sales_rep"],
+      roles: ["optd/crm:sales_rep"],
       boundary: { type: "project", project_id: "sales" },
       reason: "Subagent needs sales rep authority",
       redemption_nonce_hash: await sha(childNonce),
@@ -279,7 +279,7 @@ Deno.test("complete public auth lifecycle", async () => {
     app,
     "/api/v1/test/work",
     json(
-      { project: "sales", required_role: "operant/crm:sales_rep" },
+      { project: "sales", required_role: "optd/crm:sales_rep" },
       bearer(childToken),
     ),
   );
@@ -288,7 +288,7 @@ Deno.test("complete public auth lifecycle", async () => {
     app,
     "/api/v1/test/work",
     json(
-      { project: "sales", required_role: "operant/crm:sales_manager" },
+      { project: "sales", required_role: "optd/crm:sales_manager" },
       bearer(childToken),
     ),
   );

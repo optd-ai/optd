@@ -1,5 +1,5 @@
 kind: Resource
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: company
 spec:
@@ -18,9 +18,9 @@ spec:
     owner_id:
       type: string
   axi:
-    purpose: company guidance for the operant/crm pack.
+    purpose: company guidance for the optd/crm pack.
     whenToUse:
-      - Use operant/crm:company when working with company records.
+      - Use optd/crm:company when working with company records.
     identity:
       title: ${name}
       labelFields:
@@ -35,7 +35,7 @@ spec:
       empty:
         message: No company records found.
         help:
-          - optctl --project ${project} create operant/crm:company --input object.json --stage
+          - optctl --project ${project} create optd/crm:company --input object.json --stage
     detail:
       sections:
         - title: company
@@ -46,11 +46,11 @@ spec:
             - phone
             - industry
       help:
-        - optctl --project ${project} query operant/crm:company --where 'id == "${id}"'
+        - optctl --project ${project} query optd/crm:company --where 'id == "${id}"'
     help:
       list:
-        - optctl --project ${project} query operant/crm:company
+        - optctl --project ${project} query optd/crm:company
       view:
-        - optctl --project ${project} view operant/crm:company ${id}
+        - optctl --project ${project} view optd/crm:company ${id}
       created:
-        - optctl --project ${project} view operant/crm:company ${id}
+        - optctl --project ${project} view optd/crm:company ${id}

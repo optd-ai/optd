@@ -1,9 +1,9 @@
 kind: Seed
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: sales_teams
 spec:
-  resource: operant/crm:sales_team
+  resource: optd/crm:sales_team
   key: name
   mode: changeset
   rows:
@@ -16,8 +16,8 @@ spec:
       email_alias: enterprise@example.com
       monthly_target: "250000"
   axi:
-    purpose: sales teams guidance for the operant/crm pack.
+    purpose: sales teams guidance for the optd/crm pack.
     whenToUse:
       - Inspect seed sales_teams behavior and guidance before relying on it.
     help:
-      - optctl metadata seed operant/crm:sales_teams
+      - optctl metadata seed optd/crm:sales_teams

@@ -1,10 +1,10 @@
 kind: Relationship
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: opportunity_viewer
 spec:
   from:
-    resource: operant/crm:opportunity
+    resource: optd/crm:opportunity
   to:
     resource: system:principal
   unique:
@@ -15,4 +15,4 @@ spec:
     whenToUse:
       - Link an opportunity to a principal when direct viewer access is required.
     help:
-      - optctl metadata relationship operant/crm:opportunity_viewer
+      - optctl metadata relationship optd/crm:opportunity_viewer

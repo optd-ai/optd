@@ -1,5 +1,5 @@
 kind: Resource
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: note
 spec:
@@ -11,20 +11,20 @@ spec:
       type: string
     lead_id:
       type: string
-      ref: operant/crm:lead
+      ref: optd/crm:lead
     opportunity_id:
       type: string
-      ref: operant/crm:opportunity
+      ref: optd/crm:opportunity
     contact_id:
       type: string
-      ref: operant/crm:contact
+      ref: optd/crm:contact
     company_id:
       type: string
-      ref: operant/crm:company
+      ref: optd/crm:company
   axi:
-    purpose: note guidance for the operant/crm pack.
+    purpose: note guidance for the optd/crm pack.
     whenToUse:
-      - Use operant/crm:note when working with note records.
+      - Use optd/crm:note when working with note records.
     identity:
       title: ${body}
       labelFields:
@@ -39,7 +39,7 @@ spec:
       empty:
         message: No note records found.
         help:
-          - optctl --project ${project} create operant/crm:note --input object.json --stage
+          - optctl --project ${project} create optd/crm:note --input object.json --stage
     detail:
       sections:
         - title: note
@@ -50,11 +50,11 @@ spec:
             - opportunity_id
             - contact_id
       help:
-        - optctl --project ${project} query operant/crm:note --where 'id == "${id}"'
+        - optctl --project ${project} query optd/crm:note --where 'id == "${id}"'
     help:
       list:
-        - optctl --project ${project} query operant/crm:note
+        - optctl --project ${project} query optd/crm:note
       view:
-        - optctl --project ${project} view operant/crm:note ${id}
+        - optctl --project ${project} view optd/crm:note ${id}
       created:
-        - optctl --project ${project} view operant/crm:note ${id}
+        - optctl --project ${project} view optd/crm:note ${id}

@@ -92,12 +92,12 @@ Deno.test("populated 1015 to 1016 upgrade preserves shared immutable evidence", 
       );
       await query(
         tx,
-        "insert into pack_candidate_revisions(id,publisher,pack_name,version,source_digest,content_digest,manifest,normalized,source_files) values($1,'operant','upgrade','1','sha256:'||repeat('1',64),'sha256:'||repeat('2',64),'{}','{}','[]')",
+        "insert into pack_candidate_revisions(id,publisher,pack_name,version,source_digest,content_digest,manifest,normalized,source_files) values($1,'optd','upgrade','1','sha256:'||repeat('1',64),'sha256:'||repeat('2',64),'{}','{}','[]')",
         [candidate],
       );
       await query(
         tx,
-        `insert into pack_migration_plans_v1(id,publisher,pack_name,to_pack_revision_id,candidate_source_digest,plan_digest,created_auth_context_id,class,status,live_facts_digest,plan_json,sql_preview) values($1,'operant','upgrade',$2,'sha256:'||repeat('1',64),'sha256:'||repeat('3',64),$3,'safe','applied','sha256:'||repeat('4',64),'{}','[]')`,
+        `insert into pack_migration_plans_v1(id,publisher,pack_name,to_pack_revision_id,candidate_source_digest,plan_digest,created_auth_context_id,class,status,live_facts_digest,plan_json,sql_preview) values($1,'optd','upgrade',$2,'sha256:'||repeat('1',64),'sha256:'||repeat('3',64),$3,'safe','applied','sha256:'||repeat('4',64),'{}','[]')`,
         [plan, candidate, auth],
       );
       await query(
@@ -236,7 +236,7 @@ Deno.test("Project history is immutable, chained, unique, and comments do not bu
       );
       await query(
         tx,
-        "insert into pack_candidate_revisions(id,publisher,pack_name,version,source_digest,content_digest,manifest,normalized,source_files) values($1,'operant','test','1','sha256:'||repeat('1',64),'sha256:'||repeat('2',64),'{}','{}','[]')",
+        "insert into pack_candidate_revisions(id,publisher,pack_name,version,source_digest,content_digest,manifest,normalized,source_files) values($1,'optd','test','1','sha256:'||repeat('1',64),'sha256:'||repeat('2',64),'{}','{}','[]')",
         [revision],
       );
       await query(
@@ -246,17 +246,17 @@ Deno.test("Project history is immutable, chained, unique, and comments do not bu
       );
       await query(
         tx,
-        `insert into object_versions(id,project_id,definition_kind,resource_identity,object_id,version,changeset_commit_id,operation,resource_revision,snapshot_json,auth_context_id) values($1,$2,'resource','operant/test:thing',$3,1,$4,'create',$5,'{"data":{},"archived_at":null}',$6)`,
+        `insert into object_versions(id,project_id,definition_kind,resource_identity,object_id,version,changeset_commit_id,operation,resource_revision,snapshot_json,auth_context_id) values($1,$2,'resource','optd/test:thing',$3,1,$4,'create',$5,'{"data":{},"archived_at":null}',$6)`,
         [v1, project, object, commit, revision, auth],
       );
       await query(
         tx,
-        `insert into object_versions(id,project_id,definition_kind,resource_identity,object_id,version,previous_version_id,changeset_commit_id,operation,resource_revision,snapshot_json,auth_context_id) values($1,$2,'resource','operant/test:thing',$3,2,$4,$5,'update',$6,'{"data":{},"archived_at":null}',$7)`,
+        `insert into object_versions(id,project_id,definition_kind,resource_identity,object_id,version,previous_version_id,changeset_commit_id,operation,resource_revision,snapshot_json,auth_context_id) values($1,$2,'resource','optd/test:thing',$3,2,$4,$5,'update',$6,'{"data":{},"archived_at":null}',$7)`,
         [v2, project, object, v1, commit, revision, auth],
       );
       await query(
         tx,
-        `insert into comments(id,project_id,definition_kind,resource_identity,object_id,target_object_version_id,changeset_commit_id,auth_context_id,body) values($1,$2,'resource','operant/test:thing',$3,$4,$5,$6,'observed')`,
+        `insert into comments(id,project_id,definition_kind,resource_identity,object_id,target_object_version_id,changeset_commit_id,auth_context_id,body) values($1,$2,'resource','optd/test:thing',$3,$4,$5,$6,'observed')`,
         [comment, project, object, v2, commit, auth],
       );
     });
@@ -283,7 +283,7 @@ Deno.test("Project history is immutable, chained, unique, and comments do not bu
     await assertRejects(() =>
       query(
         sql!,
-        `insert into object_versions(id,project_id,definition_kind,resource_identity,object_id,version,previous_version_id,changeset_commit_id,operation,resource_revision,snapshot_json,auth_context_id) values($1,$2,'resource','operant/test:thing',$3,3,$4,$5,'update',$6,'{}',$7)`,
+        `insert into object_versions(id,project_id,definition_kind,resource_identity,object_id,version,previous_version_id,changeset_commit_id,operation,resource_revision,snapshot_json,auth_context_id) values($1,$2,'resource','optd/test:thing',$3,3,$4,$5,'update',$6,'{}',$7)`,
         [ids[13], project, object, v1, commit, revision, auth],
       )
     );

@@ -224,14 +224,14 @@ export function createHostPublicFlowBackend(
       return (await query<Record<string, string>>(
         harness.server.sql,
         `select pr.role_id,pr.capability,pr.resource from policy_rules pr join policy_definition_versions pdv on pdv.id=pr.policy_definition_version_id where pdv.policy_id=$1 and pr.rule_name='sales_manager_approval'`,
-        ["operant/crm:sales_access"],
+        ["optd/crm:sales_access"],
       )).rows;
     },
     async observeCrmRelationshipPolicy() {
       return (await query<Record<string, string>>(
         harness.server.sql,
         `select pr.capability,pr.resource from policy_rules pr join policy_definition_versions pdv on pdv.id=pr.policy_definition_version_id where pdv.policy_id=$1 and pr.rule_name='crm_admin_relationship_links' order by pr.resource,pr.capability`,
-        ["operant/crm:sales_access"],
+        ["optd/crm:sales_access"],
       )).rows;
     },
     async observePersistenceCounts() {
@@ -250,7 +250,7 @@ export function createHostPublicFlowBackend(
     async observeCrmLostReasonId(projectId) {
       const table = (await query<{ table_name: string }>(
         harness.server.sql,
-        "select table_name from pack_runtime_tables where publisher='operant' and pack_name='crm' and definition_kind='resource' and definition_name='lost_reason'",
+        "select table_name from pack_runtime_tables where publisher='optd' and pack_name='crm' and definition_kind='resource' and definition_name='lost_reason'",
       )).rows[0].table_name;
       if (!/^[a-z0-9_]+$/.test(table)) {
         throw new Error("invalid lost-reason table");
@@ -264,7 +264,7 @@ export function createHostPublicFlowBackend(
     async observeProjectsTodoStageId(projectId) {
       const table = (await query<{ table_name: string }>(
         harness.server.sql,
-        "select table_name from pack_runtime_tables where publisher='operant' and pack_name='projects' and definition_kind='resource' and definition_name='task_stage'",
+        "select table_name from pack_runtime_tables where publisher='optd' and pack_name='projects' and definition_kind='resource' and definition_name='task_stage'",
       )).rows[0].table_name;
       if (!/^[a-z0-9_]+$/.test(table)) {
         throw new Error("invalid task-stage table");
@@ -278,7 +278,7 @@ export function createHostPublicFlowBackend(
     async observeProjectsTaskCount(projectId, state) {
       const table = (await query<{ table_name: string }>(
         harness.server.sql,
-        "select table_name from pack_runtime_tables where publisher='operant' and pack_name='projects' and definition_kind='resource' and definition_name='task'",
+        "select table_name from pack_runtime_tables where publisher='optd' and pack_name='projects' and definition_kind='resource' and definition_name='task'",
       )).rows[0].table_name;
       if (!/^[a-z0-9_]+$/.test(table)) throw new Error("invalid task table");
       return (await query<{ count: number }>(
@@ -290,7 +290,7 @@ export function createHostPublicFlowBackend(
     async observeProjectsTimesheets(projectId, principalId) {
       const table = (await query<{ table_name: string }>(
         harness.server.sql,
-        "select table_name from pack_runtime_tables where publisher='operant' and pack_name='projects' and definition_kind='resource' and definition_name='timesheet'",
+        "select table_name from pack_runtime_tables where publisher='optd' and pack_name='projects' and definition_kind='resource' and definition_name='timesheet'",
       )).rows[0].table_name;
       if (!/^[a-z0-9_]+$/.test(table)) {
         throw new Error("invalid timesheet table");
@@ -307,7 +307,7 @@ export function createHostPublicFlowBackend(
     async observeCrmRelationshipAuthority(input) {
       return (await query<{ count: number }>(
         harness.server.sql,
-        `select count(*)::int count from role_assignments ra join policy_rules pr on pr.role_id=ra.role_id join policy_definition_versions pdv on pdv.id=pr.policy_definition_version_id and pdv.active join policy_assignments pa on pa.policy_definition_version_id=pdv.id and pa.active where ra.principal_id=$1 and ra.active and ra.role_id='operant/crm:crm_admin' and ra.project_id=$2 and pr.capability='link' and pr.resource='operant/crm:opportunity_viewer' and pa.boundary_type='all_projects'`,
+        `select count(*)::int count from role_assignments ra join policy_rules pr on pr.role_id=ra.role_id join policy_definition_versions pdv on pdv.id=pr.policy_definition_version_id and pdv.active join policy_assignments pa on pa.policy_definition_version_id=pdv.id and pa.active where ra.principal_id=$1 and ra.active and ra.role_id='optd/crm:crm_admin' and ra.project_id=$2 and pr.capability='link' and pr.resource='optd/crm:opportunity_viewer' and pa.boundary_type='all_projects'`,
         [input.principalId, input.projectId],
       )).rows[0].count;
     },
@@ -389,7 +389,7 @@ export function createHostPublicFlowBackend(
     async holdMigrationTableLock() {
       const table = (await query<{ table_name: string }>(
         harness.server.sql,
-        "select table_name from pack_runtime_tables where publisher='operant' and pack_name='crm' and definition_kind='resource' and definition_name='lead'",
+        "select table_name from pack_runtime_tables where publisher='optd' and pack_name='crm' and definition_kind='resource' and definition_name='lead'",
       )).rows[0].table_name;
       const locked = Promise.withResolvers<void>();
       lockRelease = Promise.withResolvers<void>();
@@ -409,11 +409,11 @@ export function createHostPublicFlowBackend(
     async observeMigration(projectId, leadId) {
       const activeRevisionId = (await query<{ id: string }>(
         harness.server.sql,
-        "select candidate_revision_id::text id from pack_active_revisions where publisher='operant' and pack_name='crm'",
+        "select candidate_revision_id::text id from pack_active_revisions where publisher='optd' and pack_name='crm'",
       )).rows[0].id;
       const table = (await query<{ table_name: string }>(
         harness.server.sql,
-        "select table_name from pack_runtime_tables where publisher='operant' and pack_name='crm' and definition_kind='resource' and definition_name='lead'",
+        "select table_name from pack_runtime_tables where publisher='optd' and pack_name='crm' and definition_kind='resource' and definition_name='lead'",
       )).rows[0].table_name;
       if (!/^[a-z0-9_]+$/.test(table)) throw new Error("invalid lead table");
       const snapshot = (await query<{
@@ -426,9 +426,9 @@ export function createHostPublicFlowBackend(
       }>(
         harness.server.sql,
         `select
-          (select to_jsonb(a)::text from pack_active_revisions a where publisher='operant' and pack_name='crm') activation,
+          (select to_jsonb(a)::text from pack_active_revisions a where publisher='optd' and pack_name='crm') activation,
           (select coalesce(jsonb_agg(to_jsonb(a) order by a.id),'[]'::jsonb)::text from pack_migration_applications a) applications,
-          (select coalesce(jsonb_agg(to_jsonb(t) order by t.definition_kind,t.definition_name),'[]'::jsonb)::text from pack_runtime_tables t where publisher='operant' and pack_name='crm') catalog,
+          (select coalesce(jsonb_agg(to_jsonb(t) order by t.definition_kind,t.definition_name),'[]'::jsonb)::text from pack_runtime_tables t where publisher='optd' and pack_name='crm') catalog,
           (select coalesce(jsonb_agg(field_name order by field_name),'[]'::jsonb)::text from pack_source_files, lateral jsonb_object_keys(content::jsonb->'spec'->'fields') field_name where revision=$1 and path='resources/lead.yaml') source_fields,
           (select coalesce(jsonb_agg(to_jsonb(c) order by c.ordinal_position),'[]'::jsonb)::text from (select ordinal_position,column_name,data_type,udt_name,is_nullable,column_default from information_schema.columns where table_schema='public' and table_name=$2) c) physical_columns,
           (select coalesce(jsonb_agg(to_jsonb(r) order by r.id),'[]'::jsonb)::text from ${table} r where r.project_id=$3 and r.id=$4) physical_rows`,

@@ -1369,16 +1369,16 @@ async function writeContainerOutboxPack(root: string, providerUrl: string) {
   await Deno.mkdir(`${root}/hooks`, { recursive: true });
   await Deno.writeTextFile(
     `${root}/pack.yaml`,
-    "kind: Pack\napiVersion: operant.dev/v1\nmetadata: { publisher: test, name: containeroutbox, version: 1.0.0 }\nspec: { purpose: Container restart delivery proof., axi: {} }\n",
+    "kind: Pack\napiVersion: optd.dev/v1\nmetadata: { publisher: test, name: containeroutbox, version: 1.0.0 }\nspec: { purpose: Container restart delivery proof., axi: {} }\n",
   );
   await Deno.writeTextFile(
     `${root}/resources/item.yaml`,
-    "kind: Resource\napiVersion: operant.dev/v1\nmetadata: { name: item }\nspec:\n  fields:\n    key: { type: string, required: true, unique: true }\n  axi: {}\n",
+    "kind: Resource\napiVersion: optd.dev/v1\nmetadata: { name: item }\nspec:\n  fields:\n    key: { type: string, required: true, unique: true }\n  axi: {}\n",
   );
   const host = new URL(providerUrl).host;
   await Deno.writeTextFile(
     `${root}/hooks/deliver.yaml`,
-    `kind: Hook\napiVersion: operant.dev/v1\nmetadata: { name: deliver }\nspec:\n  script: deliver.ts\n  timeout: 30s\n  permissions: { net: [${host}], env: false, read: false, write: false, run: false }\n  secrets: []\n  effects: { operations: [] }\n  output: { schema: delivery.v1 }\n  attachments:\n    - phase: event.after_commit\n      event: object.created\n      order: 10\n      condition: 'event_type == "object.created"'\n      input: { event: '$event' }\n  axi: {}\n`,
+    `kind: Hook\napiVersion: optd.dev/v1\nmetadata: { name: deliver }\nspec:\n  script: deliver.ts\n  timeout: 30s\n  permissions: { net: [${host}], env: false, read: false, write: false, run: false }\n  secrets: []\n  effects: { operations: [] }\n  output: { schema: delivery.v1 }\n  attachments:\n    - phase: event.after_commit\n      event: object.created\n      order: 10\n      condition: 'event_type == "object.created"'\n      input: { event: '$event' }\n  axi: {}\n`,
   );
   await Deno.writeTextFile(
     `${root}/hooks/deliver.ts`,

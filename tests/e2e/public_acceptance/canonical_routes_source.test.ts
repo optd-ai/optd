@@ -66,7 +66,7 @@ Deno.test("normative packs avoid legacy identities and authority fields", async 
           `${child.name} has idempotency`,
         );
         if (child.name.endsWith(".yaml")) {
-          assertStringIncludes(source, "apiVersion: operant.dev/v1");
+          assertStringIncludes(source, "apiVersion: optd.dev/v1");
           assert(
             !/optd\.(?:crm|projects)/.test(source),
             `${child.name} has dotted identity`,

@@ -81,17 +81,17 @@ Deno.test("query pushes assigned ABAC before count and page on PostgreSQL", asyn
     };
     await query(
       sql,
-      `insert into pack_candidate_revisions(id,publisher,pack_name,version,source_digest,content_digest,manifest,normalized,source_files) values($1,'operant','querytest','1.0.0',$2,$2,'{}',$3::text::jsonb,'{}')`,
+      `insert into pack_candidate_revisions(id,publisher,pack_name,version,source_digest,content_digest,manifest,normalized,source_files) values($1,'optd','querytest','1.0.0',$2,$2,'{}',$3::text::jsonb,'{}')`,
       [candidate, `sha256:${"a".repeat(64)}`, JSON.stringify(normalized)],
     );
     await query(
       sql,
-      "insert into pack_active_revisions values('operant','querytest',$1,now())",
+      "insert into pack_active_revisions values('optd','querytest',$1,now())",
       [candidate],
     );
     await query(
       sql,
-      "insert into pack_runtime_tables values('operant','querytest','resource','lead','res_query_lead')",
+      "insert into pack_runtime_tables values('optd','querytest','resource','lead','res_query_lead')",
     );
     await query(
       sql,
@@ -104,26 +104,26 @@ Deno.test("query pushes assigned ABAC before count and page on PostgreSQL", asyn
     );
     await query(
       sql,
-      "insert into system_roles(id,display_name,active) values('operant/querytest:reader','Reader',true)",
+      "insert into system_roles(id,display_name,active) values('optd/querytest:reader','Reader',true)",
     );
     await query(
       sql,
-      "insert into role_definition_versions(id,role_id,version,active,candidate_revision_id,definition_name) values($1,'operant/querytest:reader',1,true,$2,'reader')",
+      "insert into role_definition_versions(id,role_id,version,active,candidate_revision_id,definition_name) values($1,'optd/querytest:reader',1,true,$2,'reader')",
       [roleVersion, candidate],
     );
     await query(
       sql,
-      "insert into role_assignments(id,principal_id,role_id,boundary_type,project_id,active) values($1,$2,'operant/querytest:reader','project',$3,true)",
+      "insert into role_assignments(id,principal_id,role_id,boundary_type,project_id,active) values($1,$2,'optd/querytest:reader','project',$3,true)",
       [roleAssignment, principal, project],
     );
     await query(
       sql,
-      "insert into policy_definition_versions(id,policy_id,version,active,candidate_revision_id,definition_name) values($1,'operant/querytest:read',1,true,$2,'read')",
+      "insert into policy_definition_versions(id,policy_id,version,active,candidate_revision_id,definition_name) values($1,'optd/querytest:read',1,true,$2,'read')",
       [policyVersion, candidate],
     );
     await query(
       sql,
-      "insert into policy_rules(id,policy_definition_version_id,role_id,capability,resource,condition_kind,predicate,rule_name) values($1,$2,'operant/querytest:reader','read','operant/querytest:lead','abac','score >= 10','visible')",
+      "insert into policy_rules(id,policy_definition_version_id,role_id,capability,resource,condition_kind,predicate,rule_name) values($1,$2,'optd/querytest:reader','read','optd/querytest:lead','abac','score >= 10','visible')",
       [uuidV7(), policyVersion],
     );
     await query(
@@ -154,7 +154,7 @@ Deno.test("query pushes assigned ABAC before count and page on PostgreSQL", asyn
       project_id: project,
       definition: {
         kind: "resource",
-        publisher: "operant",
+        publisher: "optd",
         pack: "querytest",
         name: "lead",
       },
@@ -176,7 +176,7 @@ Deno.test("query pushes assigned ABAC before count and page on PostgreSQL", asyn
       project_id: project,
       definition: {
         kind: "resource" as const,
-        publisher: "operant",
+        publisher: "optd",
         pack: "querytest",
         name: "lead",
       },

@@ -332,13 +332,13 @@ printf '%s %s\\n' "$cache" "$children"`,
     async observeCrmApprovalPolicy() {
       return await sqlJson(
         harness,
-        `select coalesce(json_agg(x),'[]'::json) from (select pr.role_id,pr.capability,pr.resource from policy_rules pr join policy_definition_versions pdv on pdv.id=pr.policy_definition_version_id where pdv.policy_id='operant/crm:sales_access' and pr.rule_name='sales_manager_approval') x`,
+        `select coalesce(json_agg(x),'[]'::json) from (select pr.role_id,pr.capability,pr.resource from policy_rules pr join policy_definition_versions pdv on pdv.id=pr.policy_definition_version_id where pdv.policy_id='optd/crm:sales_access' and pr.rule_name='sales_manager_approval') x`,
       );
     },
     async observeCrmRelationshipPolicy() {
       return await sqlJson(
         harness,
-        `select coalesce(json_agg(x),'[]'::json) from (select pr.capability,pr.resource from policy_rules pr join policy_definition_versions pdv on pdv.id=pr.policy_definition_version_id where pdv.policy_id='operant/crm:sales_access' and pr.rule_name='crm_admin_relationship_links' order by pr.resource,pr.capability) x`,
+        `select coalesce(json_agg(x),'[]'::json) from (select pr.capability,pr.resource from policy_rules pr join policy_definition_versions pdv on pdv.id=pr.policy_definition_version_id where pdv.policy_id='optd/crm:sales_access' and pr.rule_name='crm_admin_relationship_links' order by pr.resource,pr.capability) x`,
       );
     },
     async observePersistenceCounts() {
@@ -356,7 +356,7 @@ printf '%s %s\\n' "$cache" "$children"`,
     async observeCrmLostReasonId(projectId) {
       const table = await sqlScalar(
         harness,
-        "select table_name from pack_runtime_tables where publisher='operant' and pack_name='crm' and definition_kind='resource' and definition_name='lost_reason'",
+        "select table_name from pack_runtime_tables where publisher='optd' and pack_name='crm' and definition_kind='resource' and definition_name='lost_reason'",
       );
       if (!/^[a-z0-9_]+$/.test(table)) {
         throw new Error("invalid lost-reason table");
@@ -371,7 +371,7 @@ printf '%s %s\\n' "$cache" "$children"`,
     async observeProjectsTodoStageId(projectId) {
       const table = await sqlScalar(
         harness,
-        "select table_name from pack_runtime_tables where publisher='operant' and pack_name='projects' and definition_kind='resource' and definition_name='task_stage'",
+        "select table_name from pack_runtime_tables where publisher='optd' and pack_name='projects' and definition_kind='resource' and definition_name='task_stage'",
       );
       if (!/^[a-z0-9_]+$/.test(table)) {
         throw new Error("invalid task-stage table");
@@ -386,7 +386,7 @@ printf '%s %s\\n' "$cache" "$children"`,
     async observeProjectsTaskCount(projectId, state) {
       const table = await sqlScalar(
         harness,
-        "select table_name from pack_runtime_tables where publisher='operant' and pack_name='projects' and definition_kind='resource' and definition_name='task'",
+        "select table_name from pack_runtime_tables where publisher='optd' and pack_name='projects' and definition_kind='resource' and definition_name='task'",
       );
       if (!/^[a-z0-9_]+$/.test(table)) throw new Error("invalid task table");
       return Number(
@@ -401,7 +401,7 @@ printf '%s %s\\n' "$cache" "$children"`,
     async observeProjectsTimesheets(projectId, principalId) {
       const table = await sqlScalar(
         harness,
-        "select table_name from pack_runtime_tables where publisher='operant' and pack_name='projects' and definition_kind='resource' and definition_name='timesheet'",
+        "select table_name from pack_runtime_tables where publisher='optd' and pack_name='projects' and definition_kind='resource' and definition_name='timesheet'",
       );
       if (!/^[a-z0-9_]+$/.test(table)) {
         throw new Error("invalid timesheet table");
@@ -423,14 +423,14 @@ printf '%s %s\\n' "$cache" "$children"`,
           harness,
           `select count(*)::int from role_assignments ra join policy_rules pr on pr.role_id=ra.role_id join policy_definition_versions pdv on pdv.id=pr.policy_definition_version_id and pdv.active join policy_assignments pa on pa.policy_definition_version_id=pdv.id and pa.active where ra.principal_id=${
             literal(input.principalId)
-          } and ra.active and ra.role_id='operant/crm:crm_admin' and ra.project_id=${
+          } and ra.active and ra.role_id='optd/crm:crm_admin' and ra.project_id=${
             literal(input.projectId)
-          } and pr.capability='link' and pr.resource='operant/crm:opportunity_viewer' and pa.boundary_type='all_projects'`,
+          } and pr.capability='link' and pr.resource='optd/crm:opportunity_viewer' and pa.boundary_type='all_projects'`,
         ),
       );
     },
     async observeRelationshipTuple(input) {
-      const publisher = "operant";
+      const publisher = "optd";
       const pack = input.pack === "crm" ? "crm" : "projects";
       const table = await sqlScalar(
         harness,
@@ -510,7 +510,7 @@ printf '%s %s\\n' "$cache" "$children"`,
     async holdMigrationTableLock() {
       const table = await sqlScalar(
         harness,
-        "select table_name from pack_runtime_tables where publisher='operant' and pack_name='crm' and definition_kind='resource' and definition_name='lead'",
+        "select table_name from pack_runtime_tables where publisher='optd' and pack_name='crm' and definition_kind='resource' and definition_name='lead'",
       );
       const script =
         `begin; lock table "${table}" in row exclusive mode; select 'LOCKED'; select pg_sleep(3600);`;
@@ -553,20 +553,20 @@ printf '%s %s\\n' "$cache" "$children"`,
     async observeMigration(projectId, leadId) {
       const activeRevisionId = await sqlScalar(
         harness,
-        "select candidate_revision_id::text from pack_active_revisions where publisher='operant' and pack_name='crm'",
+        "select candidate_revision_id::text from pack_active_revisions where publisher='optd' and pack_name='crm'",
       );
       const table = await sqlScalar(
         harness,
-        "select table_name from pack_runtime_tables where publisher='operant' and pack_name='crm' and definition_kind='resource' and definition_name='lead'",
+        "select table_name from pack_runtime_tables where publisher='optd' and pack_name='crm' and definition_kind='resource' and definition_name='lead'",
       );
       if (!/^[a-z0-9_]+$/.test(table)) throw new Error("invalid lead table");
       return await sqlJson(
         harness,
         `select json_build_object(
           'activeRevisionId',${literal(activeRevisionId)},
-          'activation',(select to_jsonb(a)::text from pack_active_revisions a where publisher='operant' and pack_name='crm'),
+          'activation',(select to_jsonb(a)::text from pack_active_revisions a where publisher='optd' and pack_name='crm'),
           'applications',(select coalesce(jsonb_agg(to_jsonb(a) order by a.id),'[]'::jsonb)::text from pack_migration_applications a),
-          'catalog',(select coalesce(jsonb_agg(to_jsonb(t) order by t.definition_kind,t.definition_name),'[]'::jsonb)::text from pack_runtime_tables t where publisher='operant' and pack_name='crm'),
+          'catalog',(select coalesce(jsonb_agg(to_jsonb(t) order by t.definition_kind,t.definition_name),'[]'::jsonb)::text from pack_runtime_tables t where publisher='optd' and pack_name='crm'),
           'sourceFields',(select coalesce(jsonb_agg(field_name order by field_name),'[]'::jsonb)::text from pack_source_files, lateral jsonb_object_keys(content::jsonb->'spec'->'fields') field_name where revision=${
           literal(activeRevisionId)
         } and path='resources/lead.yaml'),

@@ -1,5 +1,5 @@
 kind: Resource
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: timesheet
 spec:
@@ -7,7 +7,7 @@ spec:
     task_id:
       type: string
       required: true
-      ref: operant/projects:task
+      ref: optd/projects:task
     principal_id:
       type: string
       format: uuid
@@ -27,7 +27,7 @@ spec:
   axi:
     purpose: Time logged by a principal against a task.
     whenToUse:
-      - Use operant/projects:timesheet to record principal-owned task time.
+      - Use optd/projects:timesheet to record principal-owned task time.
     identity:
       title: ${task_id}
       labelFields:
@@ -42,7 +42,7 @@ spec:
       empty:
         message: No timesheet records found.
         help:
-          - optctl --project ${project} create operant/projects:timesheet --input object.json
+          - optctl --project ${project} create optd/projects:timesheet --input object.json
             --stage
     detail:
       sections:
@@ -54,11 +54,11 @@ spec:
             - description
             - entry_date
       help:
-        - optctl --project ${project} query operant/projects:timesheet --where 'id == "${id}"'
+        - optctl --project ${project} query optd/projects:timesheet --where 'id == "${id}"'
     help:
       list:
-        - optctl --project ${project} query operant/projects:timesheet
+        - optctl --project ${project} query optd/projects:timesheet
       view:
-        - optctl --project ${project} view operant/projects:timesheet ${id}
+        - optctl --project ${project} view optd/projects:timesheet ${id}
       created:
-        - optctl --project ${project} view operant/projects:timesheet ${id}
+        - optctl --project ${project} view optd/projects:timesheet ${id}

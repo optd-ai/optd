@@ -1,5 +1,5 @@
 kind: Policy
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: sales_access
 spec:
@@ -8,13 +8,13 @@ spec:
     - name: direct_opportunity_viewer
       effect: allow
       roles:
-        - operant/crm:sales_rep
+        - optd/crm:sales_rep
       actions:
         - read
       resources:
-        - operant/crm:opportunity
+        - optd/crm:opportunity
       relation:
-        relationship: operant/crm:opportunity_viewer
+        relationship: optd/crm:opportunity_viewer
         object_side: from
         subject_side: to
         subject: actor.id
@@ -23,7 +23,7 @@ spec:
     - name: crm_admin_access_1
       effect: allow
       roles:
-        - operant/crm:crm_admin
+        - optd/crm:crm_admin
       actions:
         - read
         - create
@@ -34,43 +34,43 @@ spec:
         - unlink
         - comment
       resources:
-        - operant/crm:company
-        - operant/crm:sales_team
-        - operant/crm:task
-        - operant/crm:activity
-        - operant/crm:note
-        - operant/crm:lead_status
-        - operant/crm:contact
-        - operant/crm:lost_reason
-        - operant/crm:lead
-        - operant/crm:opportunity
-        - operant/crm:opportunity_stage
-        - operant/crm:activity_type
+        - optd/crm:company
+        - optd/crm:sales_team
+        - optd/crm:task
+        - optd/crm:activity
+        - optd/crm:note
+        - optd/crm:lead_status
+        - optd/crm:contact
+        - optd/crm:lost_reason
+        - optd/crm:lead
+        - optd/crm:opportunity
+        - optd/crm:opportunity_stage
+        - optd/crm:activity_type
       axi:
         summary: CRM administrators may manage every CRM resource.
     - name: crm_admin_relationship_links
       effect: allow
       roles:
-        - operant/crm:crm_admin
+        - optd/crm:crm_admin
       actions:
         - link
         - unlink
       resources:
-        - operant/crm:activity_contact
-        - operant/crm:activity_lead
-        - operant/crm:activity_opportunity
-        - operant/crm:contact_company
-        - operant/crm:note_lead
-        - operant/crm:opportunity_company
-        - operant/crm:opportunity_contact
-        - operant/crm:opportunity_viewer
-        - operant/crm:task_opportunity
+        - optd/crm:activity_contact
+        - optd/crm:activity_lead
+        - optd/crm:activity_opportunity
+        - optd/crm:contact_company
+        - optd/crm:note_lead
+        - optd/crm:opportunity_company
+        - optd/crm:opportunity_contact
+        - optd/crm:opportunity_viewer
+        - optd/crm:task_opportunity
       axi:
         summary: CRM administrators may create and remove every CRM relationship.
     - name: sales_manager_approval
       effect: allow
       roles:
-        - operant/crm:sales_manager
+        - optd/crm:sales_manager
       actions:
         - changeset.approval.decide
       resources:
@@ -80,7 +80,7 @@ spec:
     - name: sales_manager_access_2
       effect: allow
       roles:
-        - operant/crm:sales_manager
+        - optd/crm:sales_manager
       actions:
         - read
         - create
@@ -88,30 +88,30 @@ spec:
         - archive
         - transition
         - comment
-        - action:operant/crm:mark_lost
-        - action:operant/crm:log_activity
-        - action:operant/crm:mark_won
-        - action:operant/crm:convert_lead
+        - action:optd/crm:mark_lost
+        - action:optd/crm:log_activity
+        - action:optd/crm:mark_won
+        - action:optd/crm:convert_lead
       resources:
-        - operant/crm:company
-        - operant/crm:sales_team
-        - operant/crm:task
-        - operant/crm:activity
-        - operant/crm:note
-        - operant/crm:lead_status
-        - operant/crm:contact
-        - operant/crm:lost_reason
-        - operant/crm:lead
-        - operant/crm:opportunity
-        - operant/crm:opportunity_stage
-        - operant/crm:activity_type
+        - optd/crm:company
+        - optd/crm:sales_team
+        - optd/crm:task
+        - optd/crm:activity
+        - optd/crm:note
+        - optd/crm:lead_status
+        - optd/crm:contact
+        - optd/crm:lost_reason
+        - optd/crm:lead
+        - optd/crm:opportunity
+        - optd/crm:opportunity_stage
+        - optd/crm:activity_type
       where: "true"
       axi:
         summary: Sales managers may manage CRM resources and invoke CRM actions.
     - name: sales_rep_access_3
       effect: allow
       roles:
-        - operant/crm:sales_rep
+        - optd/crm:sales_rep
       actions:
         - read
         - create
@@ -119,44 +119,44 @@ spec:
         - archive
         - transition
         - comment
-        - action:operant/crm:mark_lost
-        - action:operant/crm:log_activity
-        - action:operant/crm:mark_won
-        - action:operant/crm:convert_lead
+        - action:optd/crm:mark_lost
+        - action:optd/crm:log_activity
+        - action:optd/crm:mark_won
+        - action:optd/crm:convert_lead
       resources:
-        - operant/crm:company
-        - operant/crm:sales_team
-        - operant/crm:task
-        - operant/crm:activity
-        - operant/crm:lead_status
-        - operant/crm:contact
-        - operant/crm:lost_reason
-        - operant/crm:lead
-        - operant/crm:opportunity
-        - operant/crm:opportunity_stage
-        - operant/crm:activity_type
+        - optd/crm:company
+        - optd/crm:sales_team
+        - optd/crm:task
+        - optd/crm:activity
+        - optd/crm:lead_status
+        - optd/crm:contact
+        - optd/crm:lost_reason
+        - optd/crm:lead
+        - optd/crm:opportunity
+        - optd/crm:opportunity_stage
+        - optd/crm:activity_type
       where: owner_id == actor.id
       axi:
         summary: Sales representatives may manage CRM records owned by their principal.
     - name: sales_rep_notes
       effect: allow
       roles:
-        - operant/crm:sales_rep
+        - optd/crm:sales_rep
       actions:
         - read
         - create
         - update
         - archive
         - comment
-        - action:operant/crm:log_activity
+        - action:optd/crm:log_activity
       resources:
-        - operant/crm:note
+        - optd/crm:note
       where: author_id == actor.id
       axi:
         summary: Sales representatives may manage CRM notes authored by their principal.
   axi:
-    purpose: sales access guidance for the operant/crm pack.
+    purpose: sales access guidance for the optd/crm pack.
     whenToUse:
       - Inspect policy sales_access behavior and guidance before relying on it.
     help:
-      - optctl metadata policy operant/crm:sales_access
+      - optctl metadata policy optd/crm:sales_access

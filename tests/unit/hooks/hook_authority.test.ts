@@ -36,7 +36,7 @@ Deno.test("failed pre-spawn authority never invokes hook coordinator or persiste
     project_id: projectId,
     operations: [{
       op: "create",
-      resource: "operant/test:item",
+      resource: "optd/test:item",
       fields: { name: "denied" },
     }],
   }, auth());

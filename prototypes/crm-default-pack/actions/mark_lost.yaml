@@ -1,5 +1,5 @@
 kind: Action
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: mark_lost
 spec:
@@ -20,11 +20,11 @@ spec:
       type: string
       required: true
   axi:
-    purpose: mark lost guidance for the operant/crm pack.
+    purpose: mark lost guidance for the optd/crm pack.
     whenToUse:
-      - Use operant/crm:mark_lost when its declared operation should be staged.
+      - Use optd/crm:mark_lost when its declared operation should be staged.
     stageFirst: true
     examples:
-      - optctl --project ${project} action stage operant/crm:mark_lost --input action.json
+      - optctl --project ${project} action stage optd/crm:mark_lost --input action.json
     successHelp:
       - optctl changeset inspect ${stage_id}

@@ -4,12 +4,16 @@ import type { ErrorObject } from "npm:ajv";
 import { Type } from "npm:@sinclair/typebox@0.34.38";
 
 const Name = Type.String({ pattern: "^[a-z][a-z0-9_]{0,62}$" });
-const Publisher = Type.String({ pattern: "^[a-z][a-z0-9-]{0,62}$" });
+const Publisher = Type.String({
+  pattern: "^[a-z][a-z0-9-]{0,62}$",
+  // The former official publisher is reserved, not a third-party alias.
+  not: { const: "operant" },
+});
 const Identity = Type.String({
   pattern:
-    "^(?:[a-z][a-z0-9-]{0,62}/[a-z][a-z0-9_]{0,62}:)?[a-z][a-z0-9_]{0,62}$",
+    "^(?!operant/)(?:[a-z][a-z0-9-]{0,62}/[a-z][a-z0-9_]{0,62}:)?[a-z][a-z0-9_]{0,62}$",
 });
-const ApiVersion = Type.Literal("operant.dev/v1");
+const ApiVersion = Type.Literal("optd.dev/v1");
 const ChildMetadata = Type.Object({ name: Name }, {
   additionalProperties: false,
 });

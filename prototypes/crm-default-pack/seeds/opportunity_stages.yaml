@@ -1,9 +1,9 @@
 kind: Seed
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: opportunity_stages
 spec:
-  resource: operant/crm:opportunity_stage
+  resource: optd/crm:opportunity_stage
   key: name
   mode: changeset
   rows:
@@ -33,8 +33,8 @@ spec:
       sort_order: 100
       terminal: true
   axi:
-    purpose: opportunity stages guidance for the operant/crm pack.
+    purpose: opportunity stages guidance for the optd/crm pack.
     whenToUse:
       - Inspect seed opportunity_stages behavior and guidance before relying on it.
     help:
-      - optctl metadata seed operant/crm:opportunity_stages
+      - optctl metadata seed optd/crm:opportunity_stages

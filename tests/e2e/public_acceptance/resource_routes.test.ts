@@ -51,12 +51,12 @@ Deno.test("resource convenience commands probe only canonical routes", async () 
     for (
       const command of [
         ["resources"],
-        ["list", "operant/crm:lead"],
-        ["search", "operant/crm:lead", "--text", "Acme"],
-        ["create", "operant/crm:lead", "--input", '{"name":"Acme"}', "--stage"],
+        ["list", "optd/crm:lead"],
+        ["search", "optd/crm:lead", "--text", "Acme"],
+        ["create", "optd/crm:lead", "--input", '{"name":"Acme"}', "--stage"],
         [
           "update",
-          "operant/crm:lead",
+          "optd/crm:lead",
           objectId,
           "--input",
           '{"name":"Beta"}',
@@ -66,7 +66,7 @@ Deno.test("resource convenience commands probe only canonical routes", async () 
         ],
         [
           "transition",
-          "operant/crm:lead",
+          "optd/crm:lead",
           objectId,
           "--input",
           "{}",
@@ -83,9 +83,9 @@ Deno.test("resource convenience commands probe only canonical routes", async () 
     }
     assertEquals(seen, [
       "GET /api/v1/metadata/home",
-      "GET /api/v1/metadata/packs/operant/crm/resources/lead",
+      "GET /api/v1/metadata/packs/optd/crm/resources/lead",
       "POST /api/v1/queries",
-      "GET /api/v1/metadata/packs/operant/crm/resources/lead",
+      "GET /api/v1/metadata/packs/optd/crm/resources/lead",
       "POST /api/v1/queries",
       "POST /api/v1/changesets/stage",
       "POST /api/v1/changesets/stage",

@@ -218,7 +218,7 @@ Deno.test({
         async () => {
           await Deno.writeTextFile(
             `${matrix.pack}/pack.yaml`,
-            `kind: Pack\napiVersion: operant.dev/v1\nmetadata: { publisher: test, name: commitmatrix, version: 1.0.9 }\nspec: { purpose: Production observed revision., axi: {} }\n`,
+            `kind: Pack\napiVersion: optd.dev/v1\nmetadata: { publisher: test, name: commitmatrix, version: 1.0.9 }\nspec: { purpose: Production observed revision., axi: {} }\n`,
           );
           const applied = await matrix.harness.runOptctl([
             "--json",
@@ -331,7 +331,7 @@ Deno.test({
       }]);
       await Deno.writeTextFile(
         `${matrix.pack}/pack.yaml`,
-        `kind: Pack\napiVersion: operant.dev/v1\nmetadata: { publisher: test, name: commitmatrix, version: 1.0.1 }\nspec: { purpose: Production commit matrix revision., axi: {} }\n`,
+        `kind: Pack\napiVersion: optd.dev/v1\nmetadata: { publisher: test, name: commitmatrix, version: 1.0.1 }\nspec: { purpose: Production commit matrix revision., axi: {} }\n`,
       );
       const applied = await matrix.harness.runOptctl([
         "--json",
@@ -351,7 +351,7 @@ Deno.test({
       }]);
       await query(
         matrix.harness.server.sql,
-        "update pack_active_revisions set activated_at=activated_at where publisher='operant' and pack_name='crm'",
+        "update pack_active_revisions set activated_at=activated_at where publisher='optd' and pack_name='crm'",
       );
       const success = await matrix.commit(unrelated.id);
       assertEquals(success.ok, true);

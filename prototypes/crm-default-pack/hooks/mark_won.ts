@@ -18,7 +18,7 @@ if (!opportunityId) {
   console.log(JSON.stringify({
     operations: [{
       op: "transition",
-      resource: "operant/crm:opportunity",
+      resource: "optd/crm:opportunity",
       object_id: opportunityId,
       to: "won",
       expected_version,

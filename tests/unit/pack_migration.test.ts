@@ -5,18 +5,18 @@ import { uuidV7 } from "../../src/domain/ids/uuid_v7.ts";
 import { compileMigrationPreview } from "../../src/adapters/outbound/postgres/resource_ddl.ts";
 
 const root = `kind: Pack
-apiVersion: operant.dev/v1
-metadata: { publisher: operant, name: test, version: 0.2.0 }
+apiVersion: optd.dev/v1
+metadata: { publisher: optd, name: test, version: 0.2.0 }
 spec:
   purpose: Migration test.
   axi:
     purpose: Validate migration planning.
     home:
-      resources: [operant/test:lead]
-      help: [optctl metadata pack operant/test]
+      resources: [optd/test:lead]
+      help: [optctl metadata pack optd/test]
 `;
 const resource = `kind: Resource
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata: { name: lead }
 spec:
   fields:
@@ -25,19 +25,19 @@ spec:
     status: { type: string }
   axi:
     purpose: Validate migration resources.
-    whenToUse: [Use operant/test:lead for migration tests.]
+    whenToUse: [Use optd/test:lead for migration tests.]
     identity: { title: "\${name}" }
     list:
       defaultFields: [name, email, status]
       empty:
         message: No test resources found.
-        help: [optctl query operant/test:lead]
+        help: [optctl query optd/test:lead]
     detail:
-      help: ['optctl view operant/test:lead \${id}']
+      help: ['optctl view optd/test:lead \${id}']
     help:
-      list: [optctl query operant/test:lead]
-      view: ['optctl view operant/test:lead \${id}']
-      created: ['optctl view operant/test:lead \${id}']
+      list: [optctl query optd/test:lead]
+      view: ['optctl view optd/test:lead \${id}']
+      created: ['optctl view optd/test:lead \${id}']
 `;
 
 Deno.test("migration plans use frozen durable shape for first install", async () => {
@@ -55,7 +55,7 @@ Deno.test("migration plans use frozen durable shape for first install", async ()
     createdAt: new Date("2026-01-01T00:00:00Z"),
   });
   assertEquals(plan.schema_version, "migration.plan.v1");
-  assertEquals(plan.publisher, "operant");
+  assertEquals(plan.publisher, "optd");
   assertEquals(plan.pack, "test");
   assertEquals(plan.from_pack_revision_id, null);
   assertEquals(plan.class, "safe");
@@ -65,7 +65,7 @@ Deno.test("migration plans use frozen durable shape for first install", async ()
   assertEquals(compiled.statements.length, 3);
   assertMatch(
     compiled.statements[0],
-    /^create table "res_operant_test_lead_[0-9a-f]{16}"/,
+    /^create table "res_optd_test_lead_[0-9a-f]{16}"/,
   );
   assertMatch(compiled.statements[1], /^insert into pack_runtime_tables/);
   assertMatch(compiled.statements[2], /^insert into pack_active_revisions/);
@@ -87,7 +87,7 @@ Deno.test("migration plans use frozen durable shape for first install", async ()
 
 Deno.test("relationship replacements are destructive reviewed DDL with activation dependencies", async () => {
   const relationship = (withWeight: boolean) =>
-    `kind: Relationship\napiVersion: operant.dev/v1\nmetadata: {name: lead_company}\nspec:\n  from: {resource: lead}\n  to: {resource: company}\n  fields:\n    role: {type: string}\n${
+    `kind: Relationship\napiVersion: optd.dev/v1\nmetadata: {name: lead_company}\nspec:\n  from: {resource: lead}\n  to: {resource: company}\n  fields:\n    role: {type: string}\n${
       withWeight ? "    weight: {type: integer}\n" : ""
     }  unique: [from, to]\n  axi: {}\n`;
   const company = resource.replace("name: lead", "name: company");
@@ -232,6 +232,6 @@ Deno.test("migration plans block destructive field removal against refreshed fac
   assertEquals(
     plan.changes.find((change) => change.kind === "remove_field")?.target
       .resource,
-    "operant/test:lead",
+    "optd/test:lead",
   );
 });

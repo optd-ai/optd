@@ -1,13 +1,13 @@
 kind: Role
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: sales_manager
 spec:
   display_name: Sales Manager
   description: sales_manager responsibility for the crm proof pack.
   axi:
-    purpose: sales manager guidance for the operant/crm pack.
+    purpose: sales manager guidance for the optd/crm pack.
     whenToUse:
       - Inspect role sales_manager behavior and guidance before relying on it.
     help:
-      - optctl metadata role operant/crm:sales_manager
+      - optctl metadata role optd/crm:sales_manager

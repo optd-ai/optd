@@ -61,7 +61,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       JSON.stringify(
         {
           kind: "Relationship",
-          apiVersion: "operant.dev/v1",
+          apiVersion: "optd.dev/v1",
           metadata: { name: "lead_viewer" },
           spec: {
             from: { resource: "lead" },
@@ -87,18 +87,18 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       "--json",
       "metadata",
       "pack",
-      "operant/crm",
+      "optd/crm",
     ]);
     assertEquals(packMetadata.code, 0, packMetadata.stderr);
     assertEquals(JSON.parse(packMetadata.stdout).data.axi_readiness, {
       ready: false,
-      missing_guidance: ["relationship:operant/crm:lead_viewer"],
+      missing_guidance: ["relationship:optd/crm:lead_viewer"],
     });
     const relationshipMetadata = await harness.runOptctl([
       "--json",
       "metadata",
       "relationship",
-      "operant/crm:lead_viewer",
+      "optd/crm:lead_viewer",
     ]);
     assertEquals(relationshipMetadata.code, 0, relationshipMetadata.stderr);
     assertEquals(JSON.parse(relationshipMetadata.stdout).data.axi_readiness, {
@@ -132,7 +132,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
         "--json",
         "expression",
         "validate",
-        "operant/crm:lead",
+        "optd/crm:lead",
         "--context",
         context,
         context === "policy"
@@ -149,7 +149,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       "--json",
       "expression",
       "validate",
-      "operant/crm:lead",
+      "optd/crm:lead",
       "--context",
       "query",
       "status ==",
@@ -168,7 +168,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
           [
             "expression",
             "validate",
-            "operant/crm:missing",
+            "optd/crm:missing",
             "--context",
             "query",
             "true",
@@ -180,7 +180,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
           [
             "expression",
             "validate",
-            "operant/crm:lead",
+            "optd/crm:lead",
             "--context",
             "query",
             'score == "wrong"',
@@ -220,7 +220,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
     )).rows[0].id;
     const ids = await seedObjectHistoryFixture({
       sql: harness.server.sql,
-      publisher: "operant",
+      publisher: "optd",
       pack: "crm",
       resource: "lead",
       relationship: "contact_company",
@@ -239,7 +239,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
     });
     const table = (await query<{ table_name: string }>(
       harness.server.sql,
-      "select table_name from pack_runtime_tables where publisher='operant' and pack_name='crm' and definition_kind='resource' and definition_name='lead'",
+      "select table_name from pack_runtime_tables where publisher='optd' and pack_name='crm' and definition_kind='resource' and definition_name='lead'",
     )).rows[0].table_name;
     await query(
       harness.server.sql,
@@ -263,7 +263,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
         "--project",
         "query-sales",
         "query",
-        "operant/crm:lead",
+        "optd/crm:lead",
         "--where",
         where,
         "--fields",
@@ -284,7 +284,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       "query-sales",
       "query",
       "relationship",
-      "operant/crm:contact_company",
+      "optd/crm:contact_company",
       "--fields",
       "role,primary",
       "--sort",
@@ -307,7 +307,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       "--project",
       "query-sales",
       "query",
-      "operant/crm:lead",
+      "optd/crm:lead",
       "--where",
       'name == "Typed Lead"',
       "--sort",
@@ -328,7 +328,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       "--project",
       "query-sales",
       "query",
-      "operant/crm:lead",
+      "optd/crm:lead",
       "--where",
       'name == "Typed Lead"',
       "--sort",
@@ -355,7 +355,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
         "--project",
         "query-sales",
         "query",
-        "operant/crm:lead",
+        "optd/crm:lead",
         "--sort",
         "score:asc",
         "--sort",
@@ -376,7 +376,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       "--project",
       "query-sales",
       "query",
-      "operant/crm:lead",
+      "optd/crm:lead",
       "--where",
       'name == "Typed Lead"',
       "--sort",
@@ -402,7 +402,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
         "--project",
         "query-sales",
         "query",
-        "operant/crm:lead",
+        "optd/crm:lead",
         "--where",
         'name == "Typed Lead"',
         "--sort",
@@ -426,7 +426,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       "--project",
       "query-sales",
       "query",
-      "operant/crm:lead",
+      "optd/crm:lead",
       "--where",
       'name == "Typed Lead"',
       "--sort",
@@ -444,7 +444,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       "--project",
       "query-sales",
       "query",
-      "operant/crm:lead",
+      "optd/crm:lead",
       "--where",
       'name == "Typed Lead"',
     ]);
@@ -467,7 +467,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
         "--project",
         "query-sales",
         "query",
-        "operant/crm:lead",
+        "optd/crm:lead",
         "--where",
         invalid,
       ]);
@@ -492,7 +492,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
         "--project",
         "query-sales",
         "query",
-        "operant/crm:lead",
+        "optd/crm:lead",
         ...args,
       ]);
       assert(failed.code !== 0, failed.stderr);
@@ -502,7 +502,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       "--project",
       "query-sales",
       "query",
-      "operant/crm:lead",
+      "optd/crm:lead",
       "--where",
       `name == ${JSON.stringify(injectionLiteral)}`,
       "--include-total",
@@ -513,7 +513,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       "--project",
       "query-sales",
       "query",
-      "operant/crm:lead",
+      "optd/crm:lead",
       "--where",
       'name == "Typed Lead"',
       "--include-total",
@@ -552,7 +552,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
         project_id: project,
         definition: {
           kind: "resource",
-          publisher: "operant",
+          publisher: "optd",
           pack: "crm",
           name: "lead",
         },
@@ -583,7 +583,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
         body: JSON.stringify({
           definition: {
             kind: "resource",
-            publisher: "operant",
+            publisher: "optd",
             pack: "crm",
             name: "lead",
           },
@@ -637,7 +637,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       harness.server.sql,
       `insert into role_assignments(
       id,principal_id,role_id,boundary_type,project_id,active)
-      values($1,$2,'operant/crm:sales_rep','project',$3,true)`,
+      values($1,$2,'optd/crm:sales_rep','project',$3,true)`,
       [
         ordinaryRoleAssignment,
         ordinaryIdentity.principal_id,
@@ -648,7 +648,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       harness.server.sql,
       `update policy_assignments pa set active=false,
       disabled_at=now() from policy_definition_versions pd
-      where pa.policy_definition_version_id=pd.id and pd.policy_id like 'operant/crm:%'`,
+      where pa.policy_definition_version_id=pd.id and pd.policy_id like 'optd/crm:%'`,
     );
     const policyModes = [
       { name: "unconditional", predicate: null, relation: null },
@@ -680,7 +680,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
         id,policy_definition_version_id,role_id,capability,resource,
         condition_kind,predicate,rule_name,relation_relationship,
         relation_object_side,relation_subject_side,relation_subject)
-        values($1,$2,'operant/crm:sales_rep','read','operant/crm:lead',$3,$4,$5,
+        values($1,$2,'optd/crm:sales_rep','read','optd/crm:lead',$3,$4,$5,
           $6,'from','to',$7)`,
         [
           ruleId,
@@ -688,7 +688,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
           mode.relation ? "rebac" : mode.predicate ? "abac" : "unconditional",
           mode.predicate,
           mode.name,
-          mode.relation ? "operant/crm:lead_viewer" : null,
+          mode.relation ? "optd/crm:lead_viewer" : null,
           mode.relation,
         ],
       );
@@ -712,7 +712,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
     );
     const viewerTable = (await query<{ table_name: string }>(
       harness.server.sql,
-      "select table_name from pack_runtime_tables where publisher='operant' and pack_name='crm' and definition_kind='relationship' and definition_name='lead_viewer'",
+      "select table_name from pack_runtime_tables where publisher='optd' and pack_name='crm' and definition_kind='relationship' and definition_name='lead_viewer'",
     )).rows[0].table_name;
     const actorEdge = uuidV7(),
       humanEdge = uuidV7(),
@@ -745,7 +745,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       "--project",
       project,
       "query",
-      "operant/crm:lead",
+      "optd/crm:lead",
       "--fields",
       "name,score",
       "--include-total",
@@ -828,14 +828,14 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
         await query(
           harness.server.sql,
           `update policy_rules
-          set relation_relationship='operant/crm:lead_viewer->deep' where id=$1`,
+          set relation_relationship='optd/crm:lead_viewer->deep' where id=$1`,
           [actorRule],
         );
         await expectCliDenied(ordinaryProcess.launcher, ordinaryArgs);
         await query(
           harness.server.sql,
           `update policy_rules
-          set relation_relationship='operant/crm:lead_viewer',
+          set relation_relationship='optd/crm:lead_viewer',
             relation_object_side='to',relation_subject_side='from' where id=$1`,
           [actorRule],
         );
@@ -865,7 +865,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       harness.server.sql,
       `insert into role_assignments(
       id,principal_id,role_id,boundary_type,project_id,active)
-      values($1,$2,'operant/crm:sales_manager','project',$3,true)`,
+      values($1,$2,'optd/crm:sales_manager','project',$3,true)`,
       [uuidV7(), ordinaryIdentity.principal_id, project],
     );
     const requestOnlyAgent = await harness.createProcessTreeLauncher(
@@ -882,9 +882,9 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       "auth",
       "request",
       "--role",
-      "operant/crm:sales_rep",
+      "optd/crm:sales_rep",
       "--role",
-      "operant/crm:sales_manager",
+      "optd/crm:sales_manager",
       "--project",
       project,
       "--reason",
@@ -1011,7 +1011,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       project_id: project,
       definition: {
         kind: "resource",
-        publisher: "operant",
+        publisher: "optd",
         pack: "crm",
         name: "lead",
       },
@@ -1255,7 +1255,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       harness.server.sql,
       `insert into policy_rules(
       id,policy_definition_version_id,role_id,capability,resource,condition_kind,rule_name)
-      values($1,$2,'operant/crm:sales_rep','read_archived','operant/crm:lead','unconditional','archived')`,
+      values($1,$2,'optd/crm:sales_rep','read_archived','optd/crm:lead','unconditional','archived')`,
       [uuidV7(), archivedVersion],
     );
     await query(
@@ -1319,7 +1319,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
         sql,
         `insert into policy_rules(
         id,policy_definition_version_id,role_id,capability,resource,condition_kind,rule_name)
-        values($1,$2,'operant/crm:sales_rep','read','operant/crm:lead','unconditional','unconditional-v2')`,
+        values($1,$2,'optd/crm:sales_rep','read','optd/crm:lead','unconditional','unconditional-v2')`,
         [uuidV7(), nextPolicyVersion],
       );
       await query(
@@ -1489,7 +1489,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
           project_id: project,
           definition: {
             kind: "resource",
-            publisher: "operant",
+            publisher: "optd",
             pack: "crm",
             name: "lead",
           },
@@ -1509,7 +1509,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       "--project",
       project,
       "query",
-      "operant/crm:lead",
+      "optd/crm:lead",
       "--where",
       'name == "Typed Lead"',
       "--sort",
@@ -1530,7 +1530,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       "--project",
       "query-sales",
       "query",
-      "operant/crm:lead",
+      "optd/crm:lead",
       "--where",
       'name == "Typed Lead"',
       "--sort",
@@ -1551,7 +1551,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       "--project",
       "query-sales",
       "query",
-      "operant/crm:lead",
+      "optd/crm:lead",
       "--where",
       "score >= 42",
     ]);
@@ -1635,7 +1635,7 @@ async function seedQueryAgentDecidePolicy(
   await query(
     harness.server.sql,
     `insert into policy_rules(id,policy_definition_version_id,role_id,capability)
-    values($1,$2,'operant/crm:sales_rep','auth.request.decide')`,
+    values($1,$2,'optd/crm:sales_rep','auth.request.decide')`,
     [uuidV7(), version],
   );
   await query(
@@ -1668,7 +1668,7 @@ async function createDelegatedQueryAgent(input: {
     "auth",
     "request",
     "--role",
-    "operant/crm:sales_rep",
+    "optd/crm:sales_rep",
     "--project",
     input.project,
     "--reason",

@@ -803,15 +803,15 @@ async function writePack(root: string, providerUrl: string): Promise<void> {
   await Deno.mkdir(`${root}/hooks`);
   await Deno.writeTextFile(
     `${root}/pack.yaml`,
-    `kind: Pack\napiVersion: operant.dev/v1\nmetadata: { publisher: test, name: secrets, version: 1.0.0 }\nspec: { purpose: Secret race proof., axi: {} }\n`,
+    `kind: Pack\napiVersion: optd.dev/v1\nmetadata: { publisher: test, name: secrets, version: 1.0.0 }\nspec: { purpose: Secret race proof., axi: {} }\n`,
   );
   await Deno.writeTextFile(
     `${root}/resources/item.yaml`,
-    `kind: Resource\napiVersion: operant.dev/v1\nmetadata: { name: item }\nspec:\n  fields:\n    name: { type: string, required: true }\n    normalized: { type: boolean }\n  axi: {}\n`,
+    `kind: Resource\napiVersion: optd.dev/v1\nmetadata: { name: item }\nspec:\n  fields:\n    name: { type: string, required: true }\n    normalized: { type: boolean }\n  axi: {}\n`,
   );
   await Deno.writeTextFile(
     `${root}/hooks/normalize.yaml`,
-    `kind: Hook\napiVersion: operant.dev/v1\nmetadata: { name: normalize }\nspec:\n  script: normalize.ts\n  permissions: { net: false, env: false, read: false, write: false, run: false }\n  secrets: []\n  effects: { operations: [] }\n  output: { schema: patch.v1 }\n  attachments:\n    - { phase: changeset.before_stage, resource: item, order: 10, input: { proposed: '$proposed' } }\n  axi: {}\n`,
+    `kind: Hook\napiVersion: optd.dev/v1\nmetadata: { name: normalize }\nspec:\n  script: normalize.ts\n  permissions: { net: false, env: false, read: false, write: false, run: false }\n  secrets: []\n  effects: { operations: [] }\n  output: { schema: patch.v1 }\n  attachments:\n    - { phase: changeset.before_stage, resource: item, order: 10, input: { proposed: '$proposed' } }\n  axi: {}\n`,
   );
   await Deno.writeTextFile(
     `${root}/hooks/normalize.ts`,
@@ -819,7 +819,7 @@ async function writePack(root: string, providerUrl: string): Promise<void> {
   );
   await Deno.writeTextFile(
     `${root}/hooks/guard.yaml`,
-    `kind: Hook\napiVersion: operant.dev/v1\nmetadata: { name: guard }\nspec:\n  script: guard.ts\n  permissions: { net: [${endpoint}], env: false, read: false, write: false, run: false }\n  secrets:\n    - { slot: token, env: TOKEN }\n  effects: { operations: [] }\n  output: { schema: validation.v1 }\n  attachments:\n    - { phase: changeset.validate, resource: item, input: { proposed: '$proposed' } }\n  axi: {}\n`,
+    `kind: Hook\napiVersion: optd.dev/v1\nmetadata: { name: guard }\nspec:\n  script: guard.ts\n  permissions: { net: [${endpoint}], env: false, read: false, write: false, run: false }\n  secrets:\n    - { slot: token, env: TOKEN }\n  effects: { operations: [] }\n  output: { schema: validation.v1 }\n  attachments:\n    - { phase: changeset.validate, resource: item, input: { proposed: '$proposed' } }\n  axi: {}\n`,
   );
   await Deno.writeTextFile(
     `${root}/hooks/guard.ts`,

@@ -1,5 +1,5 @@
 kind: Hook
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: block_task
 spec:
@@ -15,20 +15,20 @@ spec:
     schema: changeset.operations.v1
   attachments:
     - phase: action.stage
-      action: operant/projects:block_task
+      action: optd/projects:block_task
       order: 100
       input:
         action_input: $action.input
         task: $reads.task
   axi:
-    purpose: block task guidance for the operant/projects pack.
+    purpose: block task guidance for the optd/projects pack.
     whenToUse:
       - Inspect hook block_task behavior and guidance before relying on it.
     help:
-      - optctl metadata hook operant/projects:block_task
+      - optctl metadata hook optd/projects:block_task
   secrets: []
   effects:
     operations:
-      - resource: operant/projects:task
+      - resource: optd/projects:task
         ops:
           - transition

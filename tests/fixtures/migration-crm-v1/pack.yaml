@@ -1,5 +1,5 @@
 kind: Pack
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   namespace: default
   name: migration_crm

@@ -12,7 +12,7 @@ console.log(JSON.stringify({
   operations: [
     {
       op: "create",
-      resource: "operant/crm:company",
+      resource: "optd/crm:company",
       key: "company",
       fields: present({
         name: companyName,
@@ -23,7 +23,7 @@ console.log(JSON.stringify({
     },
     {
       op: "create",
-      resource: "operant/crm:contact",
+      resource: "optd/crm:contact",
       key: "contact",
       fields: present({
         name: contactName,
@@ -34,7 +34,7 @@ console.log(JSON.stringify({
     },
     {
       op: "create",
-      resource: "operant/crm:opportunity",
+      resource: "optd/crm:opportunity",
       key: "opportunity",
       fields: present({
         name: `${companyName} opportunity`,
@@ -49,28 +49,28 @@ console.log(JSON.stringify({
     },
     {
       op: "link",
-      relationship: "operant/crm:contact_company",
+      relationship: "optd/crm:contact_company",
       from: { $ref: "contact.object_id" },
       to: { $ref: "company.object_id" },
       fields: { role: "buyer", primary: true },
     },
     {
       op: "link",
-      relationship: "operant/crm:opportunity_company",
+      relationship: "optd/crm:opportunity_company",
       from: { $ref: "opportunity.object_id" },
       to: { $ref: "company.object_id" },
       fields: { role: "customer" },
     },
     {
       op: "link",
-      relationship: "operant/crm:opportunity_contact",
+      relationship: "optd/crm:opportunity_contact",
       from: { $ref: "opportunity.object_id" },
       to: { $ref: "contact.object_id" },
       fields: { role: "decision_maker", primary: true },
     },
     {
       op: "update",
-      resource: "operant/crm:lead",
+      resource: "optd/crm:lead",
       object_id: leadId,
       set: { status: "converted" },
     },

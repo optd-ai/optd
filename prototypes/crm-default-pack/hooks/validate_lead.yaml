@@ -1,5 +1,5 @@
 kind: Hook
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: validate_lead
 spec:
@@ -15,17 +15,17 @@ spec:
     schema: validation.v1
   attachments:
     - phase: changeset.validate
-      resource: operant/crm:lead
+      resource: optd/crm:lead
       order: 100
       input:
         operation: $operation
         proposed: $proposed
   axi:
-    purpose: validate lead guidance for the operant/crm pack.
+    purpose: validate lead guidance for the optd/crm pack.
     whenToUse:
       - Inspect hook validate_lead behavior and guidance before relying on it.
     help:
-      - optctl metadata hook operant/crm:validate_lead
+      - optctl metadata hook optd/crm:validate_lead
   secrets: []
   effects:
     operations: []

@@ -1,5 +1,5 @@
 kind: Resource
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: activity_type
 spec:
@@ -18,9 +18,9 @@ spec:
       fields: [name]
       where: active()
   axi:
-    purpose: activity type guidance for the operant/crm pack.
+    purpose: activity type guidance for the optd/crm pack.
     whenToUse:
-      - Use operant/crm:activity_type when working with activity type records.
+      - Use optd/crm:activity_type when working with activity type records.
     identity:
       title: ${name}
       labelFields:
@@ -34,7 +34,7 @@ spec:
       empty:
         message: No activity type records found.
         help:
-          - optctl --project ${project} create operant/crm:activity_type --input object.json --stage
+          - optctl --project ${project} create optd/crm:activity_type --input object.json --stage
     detail:
       sections:
         - title: activity type
@@ -43,11 +43,11 @@ spec:
             - label
             - default_deadline_days
       help:
-        - optctl --project ${project} query operant/crm:activity_type --where 'id == "${id}"'
+        - optctl --project ${project} query optd/crm:activity_type --where 'id == "${id}"'
     help:
       list:
-        - optctl --project ${project} query operant/crm:activity_type
+        - optctl --project ${project} query optd/crm:activity_type
       view:
-        - optctl --project ${project} view operant/crm:activity_type ${id}
+        - optctl --project ${project} view optd/crm:activity_type ${id}
       created:
-        - optctl --project ${project} view operant/crm:activity_type ${id}
+        - optctl --project ${project} view optd/crm:activity_type ${id}

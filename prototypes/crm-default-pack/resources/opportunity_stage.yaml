@@ -1,5 +1,5 @@
 kind: Resource
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: opportunity_stage
 spec:
@@ -23,9 +23,9 @@ spec:
       fields: [name]
       where: active()
   axi:
-    purpose: opportunity stage guidance for the operant/crm pack.
+    purpose: opportunity stage guidance for the optd/crm pack.
     whenToUse:
-      - Use operant/crm:opportunity_stage when working with opportunity stage records.
+      - Use optd/crm:opportunity_stage when working with opportunity stage records.
     identity:
       title: ${name}
       labelFields:
@@ -40,7 +40,7 @@ spec:
       empty:
         message: No opportunity stage records found.
         help:
-          - optctl --project ${project} create operant/crm:opportunity_stage --input object.json
+          - optctl --project ${project} create optd/crm:opportunity_stage --input object.json
             --stage
     detail:
       sections:
@@ -52,11 +52,11 @@ spec:
             - sort_order
             - terminal
       help:
-        - optctl --project ${project} query operant/crm:opportunity_stage --where 'id == "${id}"'
+        - optctl --project ${project} query optd/crm:opportunity_stage --where 'id == "${id}"'
     help:
       list:
-        - optctl --project ${project} query operant/crm:opportunity_stage
+        - optctl --project ${project} query optd/crm:opportunity_stage
       view:
-        - optctl --project ${project} view operant/crm:opportunity_stage ${id}
+        - optctl --project ${project} view optd/crm:opportunity_stage ${id}
       created:
-        - optctl --project ${project} view operant/crm:opportunity_stage ${id}
+        - optctl --project ${project} view optd/crm:opportunity_stage ${id}

@@ -1,5 +1,5 @@
 kind: Resource
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: opportunity
 spec:
@@ -16,27 +16,27 @@ spec:
       type: integer
     company_id:
       type: string
-      ref: operant/crm:company
+      ref: optd/crm:company
     contact_id:
       type: string
-      ref: operant/crm:contact
+      ref: optd/crm:contact
     lead_id:
       type: string
-      ref: operant/crm:lead
+      ref: optd/crm:lead
     sales_team_id:
       type: string
-      ref: operant/crm:sales_team
+      ref: optd/crm:sales_team
     owner_id:
       type: string
     lost_reason_id:
       type: string
-      ref: operant/crm:lost_reason
+      ref: optd/crm:lost_reason
     close_date:
       type: timestamp
   axi:
-    purpose: opportunity guidance for the operant/crm pack.
+    purpose: opportunity guidance for the optd/crm pack.
     whenToUse:
-      - Use operant/crm:opportunity when working with opportunity records.
+      - Use optd/crm:opportunity when working with opportunity records.
     identity:
       title: ${name}
       labelFields:
@@ -51,7 +51,7 @@ spec:
       empty:
         message: No opportunity records found.
         help:
-          - optctl --project ${project} create operant/crm:opportunity --input object.json --stage
+          - optctl --project ${project} create optd/crm:opportunity --input object.json --stage
     detail:
       sections:
         - title: opportunity
@@ -62,11 +62,11 @@ spec:
             - probability
             - company_id
       help:
-        - optctl --project ${project} query operant/crm:opportunity --where 'id == "${id}"'
+        - optctl --project ${project} query optd/crm:opportunity --where 'id == "${id}"'
     help:
       list:
-        - optctl --project ${project} query operant/crm:opportunity
+        - optctl --project ${project} query optd/crm:opportunity
       view:
-        - optctl --project ${project} view operant/crm:opportunity ${id}
+        - optctl --project ${project} view optd/crm:opportunity ${id}
       created:
-        - optctl --project ${project} view operant/crm:opportunity ${id}
+        - optctl --project ${project} view optd/crm:opportunity ${id}

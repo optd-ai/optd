@@ -55,7 +55,7 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
     )).rows[0].id;
     const ids = await seedObjectHistoryFixture({
       sql: harness.server.sql,
-      publisher: "operant",
+      publisher: "optd",
       pack: "crm",
       resource: "lead",
       relationship: "contact_company",
@@ -69,7 +69,7 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
       "--project",
       "history-sales",
       "view",
-      "operant/crm:lead",
+      "optd/crm:lead",
       ids.object,
     ]);
     assertEquals(object.code, 0, object.stderr);
@@ -82,7 +82,7 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
       "--project",
       projectOne,
       "history",
-      "operant/crm:lead",
+      "optd/crm:lead",
       ids.object,
     ]);
     assertEquals(history.code, 0, `${history.stderr}\n${history.stdout}`);
@@ -96,7 +96,7 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
       "--project",
       projectOne,
       "history",
-      "operant/crm:lead",
+      "optd/crm:lead",
       ids.object,
       "--limit",
       "1",
@@ -108,7 +108,7 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
       "--project",
       projectOne,
       "history",
-      "operant/crm:lead",
+      "optd/crm:lead",
       ids.object,
       "--limit",
       "1",
@@ -126,7 +126,7 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
       "--project",
       projectOne,
       "history",
-      "operant/crm:lead",
+      "optd/crm:lead",
       ids.object,
       "--limit",
       "1",
@@ -143,7 +143,7 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
       "--project",
       projectOne,
       "history",
-      "operant/crm:lead",
+      "optd/crm:lead",
       ids.object,
       "--limit",
       "1",
@@ -158,7 +158,7 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
       projectOne,
       "view",
       "relationship",
-      "operant/crm:contact_company",
+      "optd/crm:contact_company",
       ids.relationship,
     ]);
     assertEquals(relationship.code, 0, relationship.stderr);
@@ -169,7 +169,7 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
       projectOne,
       "history",
       "relationship",
-      "operant/crm:contact_company",
+      "optd/crm:contact_company",
       ids.relationship,
     ]);
     assertEquals(relationshipHistory.code, 0, relationshipHistory.stderr);
@@ -178,7 +178,7 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
       "--project",
       projectOne,
       "view",
-      "operant/crm:lead",
+      "optd/crm:lead",
       ids.object,
     ]);
     assertEquals(toon.code, 0, toon.stderr);
@@ -190,7 +190,7 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
       projectOne,
       "metadata",
       "hook",
-      "operant/crm:validate_lead",
+      "optd/crm:validate_lead",
     ]);
     assertEquals(hookDefault.code, 0, hookDefault.stderr);
     assertEquals("script_digest" in JSON.parse(hookDefault.stdout).data, false);
@@ -200,7 +200,7 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
       projectOne,
       "metadata",
       "hook",
-      "operant/crm:validate_lead",
+      "optd/crm:validate_lead",
       "--include-security",
     ]);
     assertEquals(hookSecurity.code, 0, hookSecurity.stderr);
@@ -214,7 +214,7 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
       projectOne,
       "metadata",
       "pack",
-      "operant/crm",
+      "optd/crm",
       "--include-security",
     ]);
     assertEquals(packSecurity.code, 0, packSecurity.stderr);
@@ -225,7 +225,7 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
       projectOne,
       "metadata",
       "policy",
-      "operant/crm:sales_access",
+      "optd/crm:sales_access",
       "--include-security",
     ]);
     assertEquals(policySecurity.code, 0, policySecurity.stderr);
@@ -236,14 +236,14 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
       projectOne,
       "metadata",
       "resource",
-      "operant/crm:lead",
+      "optd/crm:lead",
       "--include-security",
     ], "bad_request");
     const metadataWithoutBoundary = await harness.runOptctl([
       "--json",
       "metadata",
       "resource",
-      "operant/crm:lead",
+      "optd/crm:lead",
     ]);
     assertEquals(
       metadataWithoutBoundary.code,
@@ -281,7 +281,7 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
       "--project",
       projectOne,
       "view",
-      "operant/crm:lead",
+      "optd/crm:lead",
       ids.object,
     ]);
     assertEquals(readerView.code, 0, readerView.stderr);
@@ -290,7 +290,7 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
       "--project",
       projectOne,
       "history",
-      "operant/crm:lead",
+      "optd/crm:lead",
       ids.object,
     ], "not_found");
     await expectCode(harness, [
@@ -299,7 +299,7 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
       projectOne,
       "view",
       "relationship",
-      "operant/crm:contact_company",
+      "optd/crm:contact_company",
       ids.relationship,
     ], "not_found");
     await installCapability(
@@ -317,7 +317,7 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
         "--project",
         projectOne,
         "history",
-        "operant/crm:lead",
+        "optd/crm:lead",
         ids.object,
       ])).code,
       0,
@@ -328,7 +328,7 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
       projectOne,
       "history",
       "relationship",
-      "operant/crm:contact_company",
+      "optd/crm:contact_company",
       ids.relationship,
     ], "not_found");
     await installCapability(
@@ -347,7 +347,7 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
         projectOne,
         "view",
         "relationship",
-        "operant/crm:contact_company",
+        "optd/crm:contact_company",
         ids.relationship,
       ])).code,
       0,
@@ -359,7 +359,7 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
         projectOne,
         "history",
         "relationship",
-        "operant/crm:contact_company",
+        "optd/crm:contact_company",
         ids.relationship,
       ])).code,
       0,
@@ -370,13 +370,13 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
       projectOne,
       "metadata",
       "hook",
-      "operant/crm:validate_lead",
+      "optd/crm:validate_lead",
       "--include-security",
     ], "policy_denied");
 
     const leadTable = (await query<{ table_name: string }>(
       harness.server.sql,
-      "select table_name from pack_runtime_tables where publisher='operant' and pack_name='crm' and definition_kind='resource' and definition_name='lead'",
+      "select table_name from pack_runtime_tables where publisher='optd' and pack_name='crm' and definition_kind='resource' and definition_name='lead'",
     )).rows[0].table_name;
     await proveRevocationOrdering(
       harness,
@@ -386,7 +386,7 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
         "--project",
         projectOne,
         "view",
-        "operant/crm:lead",
+        "optd/crm:lead",
         ids.object,
       ],
       readerPrincipal,
@@ -405,7 +405,7 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
         "--project",
         projectOne,
         "history",
-        "operant/crm:lead",
+        "optd/crm:lead",
         ids.object,
       ],
       readerPrincipal,
@@ -444,7 +444,7 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
         "--project",
         projectOne,
         "view",
-        "operant/crm:lead",
+        "optd/crm:lead",
         ids.object,
       ])).code,
       0,
@@ -460,7 +460,7 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
       "--project",
       projectOne,
       "view",
-      "operant/crm:lead",
+      "optd/crm:lead",
       ids.object,
     ];
     await expectCode(harness, conditionalLeadView, "not_found");
@@ -471,7 +471,7 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
     });
     const agent = await createAgentLineage(harness, auth);
     const currentUrl =
-      `${harness.baseUrl}/api/v1/projects/${projectOne}/objects/operant/crm/lead/${ids.object}`;
+      `${harness.baseUrl}/api/v1/projects/${projectOne}/objects/optd/crm/lead/${ids.object}`;
     const historyUrl = `${currentUrl}/history`;
     const agentSmoke = await fetch(currentUrl, {
       headers: { authorization: `Bearer ${agent.token}` },
@@ -593,7 +593,7 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
       "--project",
       projectTwo,
       "view",
-      "operant/crm:lead",
+      "optd/crm:lead",
       ids.object,
     ]);
     assertEquals(mismatch.code, 1);
@@ -603,7 +603,7 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
       "--project",
       projectOne,
       "view",
-      "operant/crm:company",
+      "optd/crm:company",
       ids.object,
     ], "not_found");
     assertEquals(
@@ -612,7 +612,7 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
         "--project",
         projectOne,
         "view",
-        "operant/crm:lead",
+        "optd/crm:lead",
         ids.object.toUpperCase(),
       ])).code,
       2,
@@ -644,8 +644,8 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
     const fullToken = freshCredentials.token;
     for (
       const path of [
-        `/api/v1/projects/${projectOne}/objects/operant/crm/lead/${ids.object.toUpperCase()}`,
-        `/api/v1/projects/${projectOne}/objects/operant/crm/lead/not-a-uuid`,
+        `/api/v1/projects/${projectOne}/objects/optd/crm/lead/${ids.object.toUpperCase()}`,
+        `/api/v1/projects/${projectOne}/objects/optd/crm/lead/not-a-uuid`,
         `/api/v1/projects/${projectOne}/objects/Operant/crm/lead/${ids.object}`,
       ]
     ) {
@@ -658,7 +658,7 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
       assertEquals(invalidBody.error.code, "bad_request");
     }
     const invalidMetadataQuery = await fetch(
-      `${harness.baseUrl}/api/v1/metadata/packs/operant/crm/hooks/validate_lead?include_security=false`,
+      `${harness.baseUrl}/api/v1/metadata/packs/optd/crm/hooks/validate_lead?include_security=false`,
       { headers: { authorization: `Bearer ${fullToken}` } },
     );
     const invalidMetadataQueryBody = await invalidMetadataQuery.json();
@@ -666,7 +666,7 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
     assertEquals(invalidMetadataQueryBody.ok, false);
     assertEquals(invalidMetadataQueryBody.error.code, "bad_request");
     const denied = await fetch(
-      `${harness.baseUrl}/api/v1/projects/${projectOne}/objects/operant/crm/lead/${ids.object}`,
+      `${harness.baseUrl}/api/v1/projects/${projectOne}/objects/optd/crm/lead/${ids.object}`,
       {
         headers: { authorization: `Bearer ${requestToken}` },
       },
@@ -684,7 +684,7 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
       "--project",
       projectOne,
       "view",
-      "operant/crm:lead",
+      "optd/crm:lead",
       ids.object,
     ], "project_conflict");
   } catch (error) {

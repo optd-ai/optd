@@ -52,7 +52,7 @@ Deno.test("pack schema catches metadata filename mismatches", () => {
 
 Deno.test("changeset schema validates discriminated v0 operation shapes", () => {
   const good = {
-    apiVersion: "operant.dev/v1",
+    apiVersion: "optd.dev/v1",
     actor: { id: "agent", roles: ["sales_rep"] },
     operations: [
       {
@@ -103,13 +103,13 @@ Deno.test("changeset schema validates discriminated v0 operation shapes", () => 
 
 Deno.test("commit schema supports persisted preview or direct operations with idempotency", () => {
   const byPreview = {
-    apiVersion: "operant.dev/v1",
+    apiVersion: "optd.dev/v1",
     actor: { id: "agent", roles: [] },
     idempotencyKey: "k1",
     previewId: "csp_1",
   };
   const direct = {
-    apiVersion: "operant.dev/v1",
+    apiVersion: "optd.dev/v1",
     actor: { id: "agent", roles: [] },
     idempotencyKey: "k2",
     operations: [{
@@ -183,7 +183,7 @@ Deno.test("Hono boundary validates request body and returns stable errors", asyn
   const bad = await app.request("/changesets/preview", {
     method: "POST",
     body: JSON.stringify({
-      apiVersion: "operant.dev/v1",
+      apiVersion: "optd.dev/v1",
       actor: { id: "a", roles: [] },
       operations: [],
     }),
@@ -195,7 +195,7 @@ Deno.test("Hono boundary validates request body and returns stable errors", asyn
   const good = await app.request("/changesets/preview", {
     method: "POST",
     body: JSON.stringify({
-      apiVersion: "operant.dev/v1",
+      apiVersion: "optd.dev/v1",
       actor: { id: "a", roles: [] },
       operations: [{ op: "create", resource: "default.lead", fields: {} }],
     }),

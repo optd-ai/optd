@@ -1,5 +1,5 @@
 kind: Resource
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: lead_status
 spec:
@@ -21,9 +21,9 @@ spec:
       fields: [name]
       where: active()
   axi:
-    purpose: lead status guidance for the operant/crm pack.
+    purpose: lead status guidance for the optd/crm pack.
     whenToUse:
-      - Use operant/crm:lead_status when working with lead status records.
+      - Use optd/crm:lead_status when working with lead status records.
     identity:
       title: ${name}
       labelFields:
@@ -38,7 +38,7 @@ spec:
       empty:
         message: No lead status records found.
         help:
-          - optctl --project ${project} create operant/crm:lead_status --input object.json --stage
+          - optctl --project ${project} create optd/crm:lead_status --input object.json --stage
     detail:
       sections:
         - title: lead status
@@ -48,11 +48,11 @@ spec:
             - sort_order
             - terminal
       help:
-        - optctl --project ${project} query operant/crm:lead_status --where 'id == "${id}"'
+        - optctl --project ${project} query optd/crm:lead_status --where 'id == "${id}"'
     help:
       list:
-        - optctl --project ${project} query operant/crm:lead_status
+        - optctl --project ${project} query optd/crm:lead_status
       view:
-        - optctl --project ${project} view operant/crm:lead_status ${id}
+        - optctl --project ${project} view optd/crm:lead_status ${id}
       created:
-        - optctl --project ${project} view operant/crm:lead_status ${id}
+        - optctl --project ${project} view optd/crm:lead_status ${id}

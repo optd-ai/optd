@@ -1,6 +1,6 @@
 {
   "kind": "Relationship",
-  "apiVersion": "operant.dev/v1",
+  "apiVersion": "optd.dev/v1",
   "metadata": { "name": "task_tag_assignment" },
   "spec": {
     "from": { "resource": "task", "field": "id" },

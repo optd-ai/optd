@@ -1,6 +1,6 @@
 {
   "kind": "Policy",
-  "apiVersion": "operant.dev/v1",
+  "apiVersion": "optd.dev/v1",
   "metadata": { "name": "project_access" },
   "spec": {
     "model": "sql_lowerable.v1",

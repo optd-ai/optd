@@ -1,23 +1,23 @@
 kind: Relationship
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: opportunity_contact
 spec:
   from:
-    resource: operant/crm:opportunity
+    resource: optd/crm:opportunity
   to:
-    resource: operant/crm:contact
+    resource: optd/crm:contact
   fields:
     role:
       type: string
     primary:
       type: boolean
   axi:
-    purpose: opportunity contact guidance for the operant/crm pack.
+    purpose: opportunity contact guidance for the optd/crm pack.
     whenToUse:
       - Inspect relationship opportunity_contact behavior and guidance before relying on it.
     help:
-      - optctl metadata relationship operant/crm:opportunity_contact
+      - optctl metadata relationship optd/crm:opportunity_contact
   unique:
     - from
     - to

@@ -140,7 +140,7 @@ Deno.test("atomic pack apply activates globally, is idempotent, and rolls back i
     assertEquals(
       (await query<{ id: string }>(
         sql,
-        "select candidate_revision_id::text id from pack_active_revisions where publisher='operant' and pack_name='crm'",
+        "select candidate_revision_id::text id from pack_active_revisions where publisher='optd' and pack_name='crm'",
       )).rows[0].id,
       first.plan.to_pack_revision_id,
     );
@@ -148,7 +148,7 @@ Deno.test("atomic pack apply activates globally, is idempotent, and rolls back i
       Number(
         (await query<{ count: string }>(
           sql,
-          "select count(*)::text count from pack_runtime_tables where publisher='operant' and pack_name='crm'",
+          "select count(*)::text count from pack_runtime_tables where publisher='optd' and pack_name='crm'",
         )).rows[0].count,
       ) > 1,
     );
@@ -178,7 +178,7 @@ Deno.test("atomic pack apply activates globally, is idempotent, and rolls back i
     );
     const activePolicyVersion = (await query<{ id: string }>(
       sql,
-      "select id from policy_definition_versions where policy_id='operant/crm:sales_access' and active",
+      "select id from policy_definition_versions where policy_id='optd/crm:sales_access' and active",
     )).rows[0].id;
     const carriedAssignmentIds = [uuidV7(), uuidV7(), uuidV7()];
     for (
@@ -211,7 +211,7 @@ Deno.test("atomic pack apply activates globally, is idempotent, and rolls back i
     if (!activeDefinition) {
       const debug = await query<{ keys: string[] }>(
         sql,
-        `select jsonb_object_keys(cr.normalized->'resources') keys from pack_active_revisions ar join pack_candidate_revisions cr on cr.id=ar.candidate_revision_id where ar.publisher='operant' and ar.pack_name='crm'`,
+        `select jsonb_object_keys(cr.normalized->'resources') keys from pack_active_revisions ar join pack_candidate_revisions cr on cr.id=ar.candidate_revision_id where ar.publisher='optd' and ar.pack_name='crm'`,
       );
       throw new Error(
         `missing active lead metadata: ${JSON.stringify(debug.rows)}`,
@@ -221,7 +221,7 @@ Deno.test("atomic pack apply activates globally, is idempotent, and rolls back i
     const revokedCandidate = structuredClone(pack);
     revokedCandidate.version = "0.1.8";
     revokedCandidate.sourceDigest = `sha256:${"e".repeat(64)}`;
-    revokedCandidate.revision = `operant/crm@0.1.8:sha256:${"e".repeat(64)}`;
+    revokedCandidate.revision = `optd/crm@0.1.8:sha256:${"e".repeat(64)}`;
     const revokedPlan = await createPackMigrationPlan(
       sql,
       revokedCandidate,
@@ -232,7 +232,7 @@ Deno.test("atomic pack apply activates globally, is idempotent, and rolls back i
     );
     const firstRuntimeTable = (await query<{ table_name: string }>(
       sql,
-      "select table_name from pack_runtime_tables where publisher='operant' and pack_name='crm' order by case definition_kind when 'resource' then 0 else 1 end,definition_name,table_name limit 1",
+      "select table_name from pack_runtime_tables where publisher='optd' and pack_name='crm' order by case definition_kind when 'resource' then 0 else 1 end,definition_name,table_name limit 1",
     )).rows[0].table_name;
     const lockHeld = Promise.withResolvers<void>();
     const unlock = Promise.withResolvers<void>();
@@ -310,7 +310,7 @@ Deno.test("atomic pack apply activates globally, is idempotent, and rolls back i
     assertEquals(
       (await query<{ id: string }>(
         sql,
-        "select candidate_revision_id::text id from pack_active_revisions where publisher='operant' and pack_name='crm'",
+        "select candidate_revision_id::text id from pack_active_revisions where publisher='optd' and pack_name='crm'",
       )).rows[0].id,
       first.plan.to_pack_revision_id,
     );
@@ -327,7 +327,7 @@ Deno.test("atomic pack apply activates globally, is idempotent, and rolls back i
       if (fault === "after_sql") {
         candidate.sourceDigest = `sha256:${"a".repeat(64)}`;
       }
-      candidate.revision = `operant/crm@${candidate.version}:sha256:${
+      candidate.revision = `optd/crm@${candidate.version}:sha256:${
         "c".repeat(64)
       }`;
       const next = await createPackMigrationPlan(sql, candidate, auth);
@@ -349,7 +349,7 @@ Deno.test("atomic pack apply activates globally, is idempotent, and rolls back i
       assertEquals(
         (await query<{ id: string }>(
           sql,
-          "select candidate_revision_id::text id from pack_active_revisions where publisher='operant' and pack_name='crm'",
+          "select candidate_revision_id::text id from pack_active_revisions where publisher='optd' and pack_name='crm'",
         )).rows[0].id,
         first.plan.to_pack_revision_id,
       );
@@ -374,7 +374,7 @@ Deno.test("atomic pack apply activates globally, is idempotent, and rolls back i
     const carryCandidate = structuredClone(pack);
     carryCandidate.version = "0.1.8";
     carryCandidate.sourceDigest = `sha256:${"7".repeat(64)}`;
-    carryCandidate.revision = `operant/crm@0.1.8:sha256:${"6".repeat(64)}`;
+    carryCandidate.revision = `optd/crm@0.1.8:sha256:${"6".repeat(64)}`;
     const carryPolicy = carryCandidate.policies.sales_access.document as {
       spec: { default_assignment: "none" | "all_projects" };
     };
@@ -434,7 +434,7 @@ Deno.test("atomic pack apply activates globally, is idempotent, and rolls back i
     const restoredCandidate = structuredClone(pack);
     restoredCandidate.version = "0.1.81";
     restoredCandidate.sourceDigest = `sha256:${"5".repeat(64)}`;
-    restoredCandidate.revision = `operant/crm@0.1.81:sha256:${"4".repeat(64)}`;
+    restoredCandidate.revision = `optd/crm@0.1.81:sha256:${"4".repeat(64)}`;
     const restoredPlan = await createPackMigrationPlan(
       sql,
       restoredCandidate,
@@ -459,7 +459,7 @@ Deno.test("atomic pack apply activates globally, is idempotent, and rolls back i
     const timeoutCandidate = structuredClone(restoredCandidate);
     timeoutCandidate.version = "0.1.9";
     timeoutCandidate.sourceDigest = `sha256:${"9".repeat(64)}`;
-    timeoutCandidate.revision = `operant/crm@0.1.9:sha256:${"8".repeat(64)}`;
+    timeoutCandidate.revision = `optd/crm@0.1.9:sha256:${"8".repeat(64)}`;
     const timeoutPlan = await createPackMigrationPlan(
       sql,
       timeoutCandidate,
@@ -470,7 +470,7 @@ Deno.test("atomic pack apply activates globally, is idempotent, and rolls back i
     );
     const lockedTable = (await query<{ table_name: string }>(
       sql,
-      "select table_name from pack_runtime_tables where publisher='operant' and pack_name='crm' order by case definition_kind when 'resource' then 0 else 1 end,definition_name,table_name limit 1",
+      "select table_name from pack_runtime_tables where publisher='optd' and pack_name='crm' order by case definition_kind when 'resource' then 0 else 1 end,definition_name,table_name limit 1",
     )).rows[0].table_name;
     const acquired = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();
@@ -498,7 +498,7 @@ Deno.test("atomic pack apply activates globally, is idempotent, and rolls back i
       const retryCandidate = structuredClone(pack);
       retryCandidate.version = `0.1.${index + 20}`;
       retryCandidate.sourceDigest = `sha256:${String(index + 2).repeat(64)}`;
-      retryCandidate.revision = `operant/crm@${retryCandidate.version}:sha256:${
+      retryCandidate.revision = `optd/crm@${retryCandidate.version}:sha256:${
         String(index + 4).repeat(64)
       }`;
       const retryPlan = await createPackMigrationPlan(
@@ -547,7 +547,7 @@ Deno.test("atomic pack apply activates globally, is idempotent, and rolls back i
     const noRetryCandidate = structuredClone(pack);
     noRetryCandidate.version = "0.1.30";
     noRetryCandidate.sourceDigest = `sha256:${"6".repeat(64)}`;
-    noRetryCandidate.revision = `operant/crm@0.1.30:sha256:${"7".repeat(64)}`;
+    noRetryCandidate.revision = `optd/crm@0.1.30:sha256:${"7".repeat(64)}`;
     const noRetryPlan = await createPackMigrationPlan(
       sql,
       noRetryCandidate,
@@ -639,7 +639,7 @@ Deno.test("atomic pack apply activates globally, is idempotent, and rolls back i
     const exhaustedCandidate = structuredClone(pack);
     exhaustedCandidate.version = "0.1.40";
     exhaustedCandidate.sourceDigest = `sha256:${"8".repeat(64)}`;
-    exhaustedCandidate.revision = `operant/crm@0.1.40:sha256:${"8".repeat(64)}`;
+    exhaustedCandidate.revision = `optd/crm@0.1.40:sha256:${"8".repeat(64)}`;
     const exhaustedPlan = await createPackMigrationPlan(
       sql,
       exhaustedCandidate,
@@ -695,13 +695,13 @@ Deno.test("atomic pack apply activates globally, is idempotent, and rolls back i
     const staleCandidate = structuredClone(pack);
     staleCandidate.version = "0.1.31";
     staleCandidate.sourceDigest = `sha256:${"0".repeat(64)}`;
-    staleCandidate.revision = `operant/crm@0.1.31:sha256:${"1".repeat(64)}`;
+    staleCandidate.revision = `optd/crm@0.1.31:sha256:${"1".repeat(64)}`;
     const stalePlan = await createPackMigrationPlan(sql, staleCandidate, auth);
     await sql.begin((tx) => validateMigrationPlan(tx, stalePlan.plan.id, auth));
     const advancement = structuredClone(pack);
     advancement.version = "0.1.32";
     advancement.sourceDigest = `sha256:${"4".repeat(64)}`;
-    advancement.revision = `operant/crm@0.1.32:sha256:${"5".repeat(64)}`;
+    advancement.revision = `optd/crm@0.1.32:sha256:${"5".repeat(64)}`;
     const advancementPlan = await createPackMigrationPlan(
       sql,
       advancement,
@@ -732,7 +732,7 @@ Deno.test("atomic pack apply activates globally, is idempotent, and rolls back i
     const destructive = structuredClone(pack);
     destructive.version = "0.2.0";
     destructive.sourceDigest = `sha256:${"d".repeat(64)}`;
-    destructive.revision = `operant/crm@0.2.0:sha256:${"e".repeat(64)}`;
+    destructive.revision = `optd/crm@0.2.0:sha256:${"e".repeat(64)}`;
     delete (destructive.resources.lead.spec.fields as Record<string, unknown>)
       .phone;
     delete ((destructive.resources.lead.document.spec as Record<
@@ -809,7 +809,7 @@ Deno.test("atomic pack apply activates globally, is idempotent, and rolls back i
     assert(destructiveApplication);
     const leadTable = (await query<{ table_name: string }>(
       sql,
-      "select table_name from pack_runtime_tables where publisher='operant' and pack_name='crm' and definition_kind='resource' and definition_name='lead'",
+      "select table_name from pack_runtime_tables where publisher='optd' and pack_name='crm' and definition_kind='resource' and definition_name='lead'",
     )).rows[0].table_name;
     assertEquals(
       (await query<{ exists: boolean }>(
@@ -831,7 +831,7 @@ Deno.test("atomic pack apply activates globally, is idempotent, and rolls back i
     const risky = structuredClone(destructive);
     risky.version = "0.3.0";
     risky.sourceDigest = `sha256:${"f".repeat(64)}`;
-    risky.revision = `operant/crm@0.3.0:sha256:${"1".repeat(64)}`;
+    risky.revision = `optd/crm@0.3.0:sha256:${"1".repeat(64)}`;
     const actionName = Object.keys(risky.actions).sort()[0];
     (risky.actions[actionName].document.spec as Record<string, unknown>)
       .description = "reviewed behavior change";
@@ -1198,12 +1198,12 @@ function legacySeedMigrationPack(
     {
       path: "pack.yaml",
       text:
-        `kind: Pack\napiVersion: operant.dev/v1\nmetadata: { publisher: test, name: legacyseed, version: ${version} }\nspec: { purpose: Live full-to-active seed migration proof., axi: {} }\n`,
+        `kind: Pack\napiVersion: optd.dev/v1\nmetadata: { publisher: test, name: legacyseed, version: ${version} }\nspec: { purpose: Live full-to-active seed migration proof., axi: {} }\n`,
     },
     {
       path: "resources/status.yaml",
       text:
-        `kind: Resource\napiVersion: operant.dev/v1\nmetadata: { name: status }\nspec:\n  fields:\n    name: { type: string, required: true${
+        `kind: Resource\napiVersion: optd.dev/v1\nmetadata: { name: status }\nspec:\n  fields:\n    name: { type: string, required: true${
           activeConstraint ? "" : ", unique: true"
         } }\n    label: { type: string, required: true }\n${
           activeConstraint
@@ -1215,7 +1215,7 @@ function legacySeedMigrationPack(
       ? [{
         path: "seeds/statuses.yaml",
         text:
-          `kind: Seed\napiVersion: operant.dev/v1\nmetadata: { name: statuses }\nspec:\n  resource: status\n  key: name\n  mode: changeset\n  rows: [{ name: Ready, label: Ready }]\n  axi: {}\n`,
+          `kind: Seed\napiVersion: optd.dev/v1\nmetadata: { name: statuses }\nspec:\n  resource: status\n  key: name\n  mode: changeset\n  rows: [{ name: Ready, label: Ready }]\n  axi: {}\n`,
       }]
       : [],
   ];

@@ -1,5 +1,5 @@
 kind: Action
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: complete_task
 spec:
@@ -34,16 +34,16 @@ spec:
         - assignee_id
       required: true
   availability:
-    resource: operant/projects:task
+    resource: optd/projects:task
     states:
       - in_progress
       - blocked
   axi:
-    purpose: complete task guidance for the operant/projects pack.
+    purpose: complete task guidance for the optd/projects pack.
     whenToUse:
-      - Use operant/projects:complete_task when its declared operation should be staged.
+      - Use optd/projects:complete_task when its declared operation should be staged.
     stageFirst: true
     examples:
-      - optctl --project ${project} action stage operant/projects:complete_task --input action.json
+      - optctl --project ${project} action stage optd/projects:complete_task --input action.json
     successHelp:
       - optctl changeset inspect ${stage_id}

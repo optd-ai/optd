@@ -9,7 +9,7 @@ console.log(JSON.stringify({
   required_approvals: requiresApproval
     ? [{
       key: "opportunity_won",
-      role: "operant/crm:sales_manager",
+      role: "optd/crm:sales_manager",
       boundary: { type: "project", project_id: envelope.input.project_id },
       minimum: 1,
       principal_types: ["human_user"],

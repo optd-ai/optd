@@ -1,6 +1,6 @@
 {
   "kind": "Relationship",
-  "apiVersion": "operant.dev/v1",
+  "apiVersion": "optd.dev/v1",
   "metadata": {
     "name": "opportunity_company",
   },

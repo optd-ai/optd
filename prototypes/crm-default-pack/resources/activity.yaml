@@ -1,5 +1,5 @@
 kind: Resource
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: activity
 spec:
@@ -21,17 +21,17 @@ spec:
       type: string
     lead_id:
       type: string
-      ref: operant/crm:lead
+      ref: optd/crm:lead
     opportunity_id:
       type: string
-      ref: operant/crm:opportunity
+      ref: optd/crm:opportunity
     contact_id:
       type: string
-      ref: operant/crm:contact
+      ref: optd/crm:contact
   axi:
-    purpose: activity guidance for the operant/crm pack.
+    purpose: activity guidance for the optd/crm pack.
     whenToUse:
-      - Use operant/crm:activity when working with activity records.
+      - Use optd/crm:activity when working with activity records.
     identity:
       title: ${subject}
       labelFields:
@@ -46,7 +46,7 @@ spec:
       empty:
         message: No activity records found.
         help:
-          - optctl --project ${project} create operant/crm:activity --input object.json --stage
+          - optctl --project ${project} create optd/crm:activity --input object.json --stage
     detail:
       sections:
         - title: activity
@@ -57,11 +57,11 @@ spec:
             - due_at
             - completed_at
       help:
-        - optctl --project ${project} query operant/crm:activity --where 'id == "${id}"'
+        - optctl --project ${project} query optd/crm:activity --where 'id == "${id}"'
     help:
       list:
-        - optctl --project ${project} query operant/crm:activity
+        - optctl --project ${project} query optd/crm:activity
       view:
-        - optctl --project ${project} view operant/crm:activity ${id}
+        - optctl --project ${project} view optd/crm:activity ${id}
       created:
-        - optctl --project ${project} view operant/crm:activity ${id}
+        - optctl --project ${project} view optd/crm:activity ${id}

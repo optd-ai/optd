@@ -45,24 +45,24 @@ Deno.test("compiled optctl administers and redacts explicit policy assignments",
     await query(
       harness.server.sql,
       `insert into system_roles(id,display_name,active,description,axi_summary)
-       values('operant/test:reviewer','Reviewer',true,'Reviews test records','Review records conditionally')`,
+       values('optd/test:reviewer','Reviewer',true,'Reviews test records','Review records conditionally')`,
     );
     await query(
       harness.server.sql,
       `insert into role_definition_versions(id,role_id,version,active)
-       values($1,'operant/test:reviewer',1,true)`,
+       values($1,'optd/test:reviewer',1,true)`,
       [roleVersionId],
     );
     await query(
       harness.server.sql,
       `insert into policy_definition_versions(id,policy_id,version,active)
-       values($1,'operant/test:conditional_access',1,true)`,
+       values($1,'optd/test:conditional_access',1,true)`,
       [policyVersionId],
     );
     await query(
       harness.server.sql,
       `insert into policy_rules(id,policy_definition_version_id,role_id,capability,resource,condition_kind,summary,predicate)
-       values($1,$2,'operant/test:reviewer','read','operant/test:record','abac','Read records owned by the current principal.','owner_id == actor.id')`,
+       values($1,$2,'optd/test:reviewer','read','optd/test:record','abac','Read records owned by the current principal.','owner_id == actor.id')`,
       [ruleId, policyVersionId],
     );
 
@@ -73,7 +73,7 @@ Deno.test("compiled optctl administers and redacts explicit policy assignments",
       "create",
       user.id,
       "--role",
-      "operant/test:reviewer",
+      "optd/test:reviewer",
       "--project",
       projectOne,
     ]);
@@ -84,7 +84,7 @@ Deno.test("compiled optctl administers and redacts explicit policy assignments",
       "create",
       rootUser.id,
       "--role",
-      "operant/test:reviewer",
+      "optd/test:reviewer",
       "--project",
       projectOne,
     ]);
@@ -298,7 +298,7 @@ Deno.test("compiled optctl administers and redacts explicit policy assignments",
 
     await query(
       harness.server.sql,
-      "update system_roles set active=false where id='operant/test:reviewer'",
+      "update system_roles set active=false where id='optd/test:reviewer'",
     );
     const disabledRole = await harness.runOptctl([
       "--json",
@@ -307,7 +307,7 @@ Deno.test("compiled optctl administers and redacts explicit policy assignments",
       "create",
       rootUser.id,
       "--role",
-      "operant/test:reviewer",
+      "optd/test:reviewer",
       "--project",
       projectTwo,
     ]);

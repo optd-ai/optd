@@ -1,6 +1,6 @@
 {
   "kind": "Action",
-  "apiVersion": "operant.dev/v1",
+  "apiVersion": "optd.dev/v1",
   "metadata": { "name": "block_task" },
   "spec": {
     "description": "Move a task to Blocked and record why work is blocked.",

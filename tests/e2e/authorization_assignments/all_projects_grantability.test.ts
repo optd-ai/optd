@@ -129,7 +129,7 @@ Deno.test("compiled optctl grantability inherits all-project authority only into
     ]);
     assertEquals(systemRequest.code, 1);
 
-    const exactRole = "operant/test:project_reviewer";
+    const exactRole = "optd/test:project_reviewer";
     await query(
       harness.server.sql,
       "insert into system_roles(id,display_name,active) values($1,'Project Reviewer',true)",

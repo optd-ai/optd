@@ -1,5 +1,5 @@
 kind: Action
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: mark_won
 spec:
@@ -13,11 +13,11 @@ spec:
       required: true
       minimum: 1
   axi:
-    purpose: mark won guidance for the operant/crm pack.
+    purpose: mark won guidance for the optd/crm pack.
     whenToUse:
-      - Use operant/crm:mark_won when its declared operation should be staged.
+      - Use optd/crm:mark_won when its declared operation should be staged.
     stageFirst: true
     examples:
-      - optctl --project ${project} action stage operant/crm:mark_won --input action.json
+      - optctl --project ${project} action stage optd/crm:mark_won --input action.json
     successHelp:
       - optctl changeset inspect ${stage_id}

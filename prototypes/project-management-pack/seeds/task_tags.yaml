@@ -1,9 +1,9 @@
 kind: Seed
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: task_tags
 spec:
-  resource: operant/projects:task_tag
+  resource: optd/projects:task_tag
   key: name
   mode: changeset
   rows:
@@ -16,8 +16,8 @@ spec:
     - name: Research
       color: purple
   axi:
-    purpose: task tags guidance for the operant/projects pack.
+    purpose: task tags guidance for the optd/projects pack.
     whenToUse:
       - Inspect seed task_tags behavior and guidance before relying on it.
     help:
-      - optctl metadata seed operant/projects:task_tags
+      - optctl metadata seed optd/projects:task_tags

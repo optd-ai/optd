@@ -221,12 +221,12 @@ export async function writePack(root: string, providerUrl?: string) {
   await Deno.mkdir(`${root}/actions`);
   await Deno.writeTextFile(
     `${root}/pack.yaml`,
-    `kind: Pack\napiVersion: operant.dev/v1\nmetadata: { publisher: test, name: commitmatrix, version: 1.0.0 }\nspec: { purpose: Production commit matrix., axi: {} }\n`,
+    `kind: Pack\napiVersion: optd.dev/v1\nmetadata: { publisher: test, name: commitmatrix, version: 1.0.0 }\nspec: { purpose: Production commit matrix., axi: {} }\n`,
   );
   for (const name of ["alpha", "beta", "gamma"]) {
     await Deno.writeTextFile(
       `${root}/resources/${name}.yaml`,
-      `kind: Resource\napiVersion: operant.dev/v1\nmetadata: { name: ${name} }\nspec:\n  fields:\n    key: { type: string, required: true${
+      `kind: Resource\napiVersion: optd.dev/v1\nmetadata: { name: ${name} }\nspec:\n  fields:\n    key: { type: string, required: true${
         name === "alpha" ? "" : ", unique: true"
       } }\n    status: { type: string, required: true }\n    note: { type: string }\n    parent_key: { type: string }\n    beta_id: { type: string, ref: 'test/commitmatrix:beta' }\n  constraints:\n    - { name: ${name}_beta_fk, kind: foreign_key, fields: [beta_id], target: { resource: 'test/commitmatrix:beta', fields: [id] }, onDelete: restrict }\n${
         name === "alpha"
@@ -237,27 +237,27 @@ export async function writePack(root: string, providerUrl?: string) {
   }
   await Deno.writeTextFile(
     `${root}/resources/approval_case.yaml`,
-    `kind: Resource\napiVersion: operant.dev/v1\nmetadata: { name: approval_case }\nspec:\n  fields:\n    key: { type: string, required: true, unique: true }\n  axi: {}\n`,
+    `kind: Resource\napiVersion: optd.dev/v1\nmetadata: { name: approval_case }\nspec:\n  fields:\n    key: { type: string, required: true, unique: true }\n  axi: {}\n`,
   );
   await Deno.writeTextFile(
     `${root}/resources/approval_agent.yaml`,
-    `kind: Resource\napiVersion: operant.dev/v1\nmetadata: { name: approval_agent }\nspec:\n  fields:\n    key: { type: string, required: true, unique: true }\n  axi: {}\n`,
+    `kind: Resource\napiVersion: optd.dev/v1\nmetadata: { name: approval_agent }\nspec:\n  fields:\n    key: { type: string, required: true, unique: true }\n  axi: {}\n`,
   );
   await Deno.writeTextFile(
     `${root}/resources/approval_expiring.yaml`,
-    `kind: Resource\napiVersion: operant.dev/v1\nmetadata: { name: approval_expiring }\nspec:\n  fields:\n    key: { type: string, required: true, unique: true }\n  axi: {}\n`,
+    `kind: Resource\napiVersion: optd.dev/v1\nmetadata: { name: approval_expiring }\nspec:\n  fields:\n    key: { type: string, required: true, unique: true }\n  axi: {}\n`,
   );
   await Deno.writeTextFile(
     `${root}/roles/reviewer.yaml`,
-    `kind: Role\napiVersion: operant.dev/v1\nmetadata: { name: reviewer }\nspec:\n  display_name: Commit Reviewer\n  description: Exact matrix reviewer.\n  axi: {}\n`,
+    `kind: Role\napiVersion: optd.dev/v1\nmetadata: { name: reviewer }\nspec:\n  display_name: Commit Reviewer\n  description: Exact matrix reviewer.\n  axi: {}\n`,
   );
   await Deno.writeTextFile(
     `${root}/hooks/approval.yaml`,
-    `kind: Hook\napiVersion: operant.dev/v1\nmetadata: { name: approval }\nspec:\n  script: approval.ts\n  permissions: { net: false, env: false, read: false, write: false, run: false }\n  secrets: []\n  effects: { operations: [] }\n  output: { schema: validation.v1 }\n  attachments:\n    - { phase: changeset.validate, resource: approval_case, input: { proposed: '$proposed' } }\n  axi: {}\n`,
+    `kind: Hook\napiVersion: optd.dev/v1\nmetadata: { name: approval }\nspec:\n  script: approval.ts\n  permissions: { net: false, env: false, read: false, write: false, run: false }\n  secrets: []\n  effects: { operations: [] }\n  output: { schema: validation.v1 }\n  attachments:\n    - { phase: changeset.validate, resource: approval_case, input: { proposed: '$proposed' } }\n  axi: {}\n`,
   );
   await Deno.writeTextFile(
     `${root}/hooks/approval_agent.yaml`,
-    `kind: Hook\napiVersion: operant.dev/v1\nmetadata: { name: approval_agent }\nspec:\n  script: approval_agent.ts\n  permissions: { net: false, env: false, read: false, write: false, run: false }\n  secrets: []\n  effects: { operations: [] }\n  output: { schema: validation.v1 }\n  attachments:\n    - { phase: changeset.validate, resource: approval_agent, input: { proposed: '$proposed' } }\n  axi: {}\n`,
+    `kind: Hook\napiVersion: optd.dev/v1\nmetadata: { name: approval_agent }\nspec:\n  script: approval_agent.ts\n  permissions: { net: false, env: false, read: false, write: false, run: false }\n  secrets: []\n  effects: { operations: [] }\n  output: { schema: validation.v1 }\n  attachments:\n    - { phase: changeset.validate, resource: approval_agent, input: { proposed: '$proposed' } }\n  axi: {}\n`,
   );
   await Deno.writeTextFile(
     `${root}/hooks/approval_agent.ts`,
@@ -265,7 +265,7 @@ export async function writePack(root: string, providerUrl?: string) {
   );
   await Deno.writeTextFile(
     `${root}/hooks/approval_expiring.yaml`,
-    `kind: Hook\napiVersion: operant.dev/v1\nmetadata: { name: approval_expiring }\nspec:\n  script: approval_expiring.ts\n  permissions: { net: false, env: false, read: false, write: false, run: false }\n  secrets: []\n  effects: { operations: [] }\n  output: { schema: validation.v1 }\n  attachments:\n    - { phase: changeset.validate, resource: approval_expiring, input: { proposed: '$proposed' } }\n  axi: {}\n`,
+    `kind: Hook\napiVersion: optd.dev/v1\nmetadata: { name: approval_expiring }\nspec:\n  script: approval_expiring.ts\n  permissions: { net: false, env: false, read: false, write: false, run: false }\n  secrets: []\n  effects: { operations: [] }\n  output: { schema: validation.v1 }\n  attachments:\n    - { phase: changeset.validate, resource: approval_expiring, input: { proposed: '$proposed' } }\n  axi: {}\n`,
   );
   await Deno.writeTextFile(
     `${root}/hooks/approval_expiring.ts`,
@@ -273,12 +273,12 @@ export async function writePack(root: string, providerUrl?: string) {
   );
   await Deno.writeTextFile(
     `${root}/actions/generate.yaml`,
-    `kind: Action\napiVersion: operant.dev/v1\nmetadata: { name: generate }\nspec:\n  input:\n    project_id: { type: string, required: true, format: uuid }\n    source_id: { type: string, required: true, format: uuid }\n  reads:\n    source:\n      resource: alpha\n      id_from: '$action.input.source_id'\n      fields: [key, status]\n      required: true\n  availability: { resource: alpha, states: [ready], condition: 'status == "ready"' }\n  axi: {}\n`,
+    `kind: Action\napiVersion: optd.dev/v1\nmetadata: { name: generate }\nspec:\n  input:\n    project_id: { type: string, required: true, format: uuid }\n    source_id: { type: string, required: true, format: uuid }\n  reads:\n    source:\n      resource: alpha\n      id_from: '$action.input.source_id'\n      fields: [key, status]\n      required: true\n  availability: { resource: alpha, states: [ready], condition: 'status == "ready"' }\n  axi: {}\n`,
   );
   const endpoint = providerUrl ? new URL(providerUrl).host : "";
   await Deno.writeTextFile(
     `${root}/hooks/generate.yaml`,
-    `kind: Hook\napiVersion: operant.dev/v1\nmetadata: { name: generate }\nspec:\n  script: generate.ts\n  permissions: { net: ${
+    `kind: Hook\napiVersion: optd.dev/v1\nmetadata: { name: generate }\nspec:\n  script: generate.ts\n  permissions: { net: ${
       providerUrl ? `[${endpoint}]` : "false"
     }, env: false, read: false, write: false, run: false }\n  secrets: ${
       providerUrl ? "[{ slot: token, env: TOKEN }]" : "[]"
@@ -300,18 +300,18 @@ export async function writePack(root: string, providerUrl?: string) {
   );
   await Deno.writeTextFile(
     `${root}/relationships/alpha_owner.yaml`,
-    `kind: Relationship\napiVersion: operant.dev/v1\nmetadata: { name: alpha_owner }\nspec:\n  from: { resource: alpha }\n  to: { resource: system:principal }\n  fields: {}\n  unique: [from, to]\n  axi: {}\n`,
+    `kind: Relationship\napiVersion: optd.dev/v1\nmetadata: { name: alpha_owner }\nspec:\n  from: { resource: alpha }\n  to: { resource: system:principal }\n  fields: {}\n  unique: [from, to]\n  axi: {}\n`,
   );
   await Deno.writeTextFile(
     `${root}/seeds/alpha.yaml`,
-    `kind: Seed\napiVersion: operant.dev/v1\nmetadata: { name: alpha }\nspec:\n  resource: alpha\n  key: key\n  mode: changeset\n  rows:\n    - { key: seeded-alpha, status: ready }\n  axi: {}\n`,
+    `kind: Seed\napiVersion: optd.dev/v1\nmetadata: { name: alpha }\nspec:\n  resource: alpha\n  key: key\n  mode: changeset\n  rows:\n    - { key: seeded-alpha, status: ready }\n  axi: {}\n`,
   );
   await Deno.writeTextFile(
     `${root}/relationships/alpha_beta.yaml`,
-    `kind: Relationship\napiVersion: operant.dev/v1\nmetadata: { name: alpha_beta }\nspec:\n  from: { resource: alpha }\n  to: { resource: beta }\n  fields:\n    label: { type: string }\n  unique: [from, to]\n  axi: {}\n`,
+    `kind: Relationship\napiVersion: optd.dev/v1\nmetadata: { name: alpha_beta }\nspec:\n  from: { resource: alpha }\n  to: { resource: beta }\n  fields:\n    label: { type: string }\n  unique: [from, to]\n  axi: {}\n`,
   );
   await Deno.writeTextFile(
     `${root}/lifecycles/alpha_status.yaml`,
-    `kind: Lifecycle\napiVersion: operant.dev/v1\nmetadata: { name: alpha_status }\nspec:\n  resource: alpha\n  field: status\n  initial: ready\n  states:\n    - { name: ready, terminal: false }\n    - { name: done, terminal: true }\n  transitions:\n    - { name: finish, from: [ready], to: done, set: { note: transitioned } }\n  axi: {}\n`,
+    `kind: Lifecycle\napiVersion: optd.dev/v1\nmetadata: { name: alpha_status }\nspec:\n  resource: alpha\n  field: status\n  initial: ready\n  states:\n    - { name: ready, terminal: false }\n    - { name: done, terminal: true }\n  transitions:\n    - { name: finish, from: [ready], to: done, set: { note: transitioned } }\n  axi: {}\n`,
   );
 }

@@ -35,7 +35,7 @@ async function withMockServer(
     }
     seen.push(entry);
     if (
-      url.pathname === "/api/v1/metadata/packs/operant/crm/resources/missing"
+      url.pathname === "/api/v1/metadata/packs/optd/crm/resources/missing"
     ) {
       return error(
         404,
@@ -50,10 +50,10 @@ async function withMockServer(
     ) {
       return ok({ surface: "query", request: entry.body });
     }
-    if (url.pathname.endsWith("/actions/operant/crm/convert_lead/stage")) {
+    if (url.pathname.endsWith("/actions/optd/crm/convert_lead/stage")) {
       return ok({ id: "019b7a2e-7c10-7000-8000-000000000011" });
     }
-    if (url.pathname.endsWith("/packs/operant/crm/seeds/stage")) {
+    if (url.pathname.endsWith("/packs/optd/crm/seeds/stage")) {
       return ok({
         stage: { id: "019b7a2e-7c10-7000-8000-000000000011" },
       });
@@ -74,12 +74,12 @@ Deno.test("optctl maps current strict commands to canonical HTTP URLs", async ()
       ["home"],
       ["metadata"],
       ["metadata", "packs"],
-      ["metadata", "pack", "operant/crm"],
-      ["metadata", "resource", "operant/crm:lead"],
-      ["metadata", "relationship", "operant/crm:contact_company"],
-      ["metadata", "action", "operant/crm:convert_lead"],
-      ["metadata", "hook", "operant/crm:validate_lead"],
-      ["metadata", "policy", "operant/crm:crm_sales"],
+      ["metadata", "pack", "optd/crm"],
+      ["metadata", "resource", "optd/crm:lead"],
+      ["metadata", "relationship", "optd/crm:contact_company"],
+      ["metadata", "action", "optd/crm:convert_lead"],
+      ["metadata", "hook", "optd/crm:validate_lead"],
+      ["metadata", "policy", "optd/crm:crm_sales"],
       ["changeset", "inspect", stageId],
       ["changeset", "commit", stageId],
       ["changeset", "commit", stageId, "--timeout", "250ms"],
@@ -93,7 +93,7 @@ Deno.test("optctl maps current strict commands to canonical HTTP URLs", async ()
         stageId,
         "action",
         "commit",
-        "operant/crm:convert_lead",
+        "optd/crm:convert_lead",
         "--input",
         "{}",
       ],
@@ -102,7 +102,7 @@ Deno.test("optctl maps current strict commands to canonical HTTP URLs", async ()
         stageId,
         "seed",
         "commit",
-        "operant/crm",
+        "optd/crm",
         "--all",
       ],
     ];
@@ -124,12 +124,12 @@ Deno.test("optctl maps current strict commands to canonical HTTP URLs", async ()
       "GET /api/v1/metadata/home",
       "GET /api/v1/metadata/packs",
       "GET /api/v1/metadata/packs",
-      "GET /api/v1/metadata/packs/operant/crm",
-      "GET /api/v1/metadata/packs/operant/crm/resources/lead",
-      "GET /api/v1/metadata/packs/operant/crm/relationships/contact_company",
-      "GET /api/v1/metadata/packs/operant/crm/actions/convert_lead",
-      "GET /api/v1/metadata/packs/operant/crm/hooks/validate_lead",
-      "GET /api/v1/metadata/packs/operant/crm/policies/crm_sales",
+      "GET /api/v1/metadata/packs/optd/crm",
+      "GET /api/v1/metadata/packs/optd/crm/resources/lead",
+      "GET /api/v1/metadata/packs/optd/crm/relationships/contact_company",
+      "GET /api/v1/metadata/packs/optd/crm/actions/convert_lead",
+      "GET /api/v1/metadata/packs/optd/crm/hooks/validate_lead",
+      "GET /api/v1/metadata/packs/optd/crm/policies/crm_sales",
       `GET /api/v1/changesets/${stageId}`,
       `POST /api/v1/changesets/${stageId}/commit`,
       `POST /api/v1/changesets/${stageId}/commit`,
@@ -138,9 +138,9 @@ Deno.test("optctl maps current strict commands to canonical HTTP URLs", async ()
       "GET /api/v1/outbox",
       "POST /api/v1/outbox/drain",
       `POST /api/v1/outbox/${stageId}/retry`,
-      "POST /api/v1/actions/operant/crm/convert_lead/stage",
+      "POST /api/v1/actions/optd/crm/convert_lead/stage",
       `POST /api/v1/changesets/${stageId}/commit`,
-      "POST /api/v1/packs/operant/crm/seeds/stage",
+      "POST /api/v1/packs/optd/crm/seeds/stage",
       `POST /api/v1/changesets/${stageId}/commit`,
     ]);
     const commitBodies = seen.filter((request) =>
@@ -194,7 +194,7 @@ Deno.test("optctl emits TOON by default and stable JSON error envelopes", async 
       "--json",
       "metadata",
       "resource",
-      "operant/crm:missing",
+      "optd/crm:missing",
     ]);
     assertEquals(missing.code, 1);
     const envelope = JSON.parse(missing.stderr);

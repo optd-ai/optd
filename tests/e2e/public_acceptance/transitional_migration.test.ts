@@ -8,7 +8,7 @@ import {
   startLiveHarness,
 } from "../../support/live_harness.ts";
 
-const CRM = "operant/crm";
+const CRM = "optd/crm";
 
 for (const logLevel of ["info", "trace"] as const) {
   Deno.test(`public transitional migration is atomic using immutable plans (${logLevel})`, async () => {
@@ -236,7 +236,7 @@ for (const logLevel of ["info", "trace"] as const) {
       // A lock barrier exercises the bounded lock timeout without changing data.
       const table = (await query<{ table_name: string }>(
         harness.server.sql,
-        "select table_name from pack_runtime_tables where publisher='operant' and pack_name='crm' and definition_kind='resource' and definition_name='lead'",
+        "select table_name from pack_runtime_tables where publisher='optd' and pack_name='crm' and definition_kind='resource' and definition_name='lead'",
       )).rows[0].table_name;
       const locked = Promise.withResolvers<void>();
       const release = Promise.withResolvers<void>();
@@ -505,7 +505,7 @@ async function migrationSideEffects(h: LiveHarness, planId: string) {
 async function activeRevision(h: LiveHarness) {
   return (await query<{ id: string }>(
     h.server.sql,
-    "select candidate_revision_id::text id from pack_active_revisions where publisher='operant' and pack_name='crm'",
+    "select candidate_revision_id::text id from pack_active_revisions where publisher='optd' and pack_name='crm'",
   )).rows[0].id;
 }
 function assertNoLeaks(text: string, secrets: string[]) {

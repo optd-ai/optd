@@ -10,7 +10,7 @@ const binding = {
   project_id: "019a0000-0000-7000-8000-000000000002",
   definition: {
     kind: "resource",
-    publisher: "operant",
+    publisher: "optd",
     pack: "crm",
     name: "lead",
   },

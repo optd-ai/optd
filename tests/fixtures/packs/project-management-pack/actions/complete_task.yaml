@@ -1,6 +1,6 @@
 {
   "kind": "Action",
-  "apiVersion": "operant.dev/v1",
+  "apiVersion": "optd.dev/v1",
   "metadata": { "name": "complete_task" },
   "spec": {
     "description": "Move a task to Done after blocking reasons are cleared.",

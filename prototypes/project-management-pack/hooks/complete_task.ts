@@ -7,7 +7,7 @@ console.log(JSON.stringify({
   operations: [
     {
       op: "transition",
-      resource: "operant/projects:task",
+      resource: "optd/projects:task",
       object_id: input.task_id,
       to: "done",
       expected_version: task.version,
@@ -19,7 +19,7 @@ console.log(JSON.stringify({
     },
     {
       op: "create",
-      resource: "operant/projects:timesheet",
+      resource: "optd/projects:timesheet",
       fields: {
         task_id: input.task_id,
         principal_id: actor.id,

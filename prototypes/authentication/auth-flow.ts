@@ -250,7 +250,7 @@ export async function createAuthPrototype(bootstrapToken = "bootstrap-secret") {
   ): boolean {
     return hasSuperAdmin(auth) ||
       (auth.authorization?.roles.some((item) =>
-        item.role === "operant/crm:sales_manager"
+        item.role === "optd/crm:sales_manager"
       ) ?? false);
   }
 

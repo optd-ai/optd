@@ -64,7 +64,7 @@ Deno.test({
         join(pack, "pack.yaml"),
         JSON.stringify({
           kind: "Pack",
-          apiVersion: "operant.dev/v1",
+          apiVersion: "optd.dev/v1",
           metadata: { publisher: "testpub", name: "strict", version: "1.0.0" },
           spec: { purpose: "Immutable staging acceptance pack", axi: {} },
         }),
@@ -73,7 +73,7 @@ Deno.test({
         join(pack, "resources", "item.yaml"),
         JSON.stringify({
           kind: "Resource",
-          apiVersion: "operant.dev/v1",
+          apiVersion: "optd.dev/v1",
           metadata: { name: "item" },
           spec: {
             fields: {
@@ -141,7 +141,7 @@ Deno.test({
         join(pack, "relationships", "item_link.yaml"),
         JSON.stringify({
           kind: "Relationship",
-          apiVersion: "operant.dev/v1",
+          apiVersion: "optd.dev/v1",
           metadata: { name: "item_link" },
           spec: {
             from: { resource: "testpub/strict:item" },
@@ -156,7 +156,7 @@ Deno.test({
         join(pack, "lifecycles", "item_lifecycle.yaml"),
         JSON.stringify({
           kind: "Lifecycle",
-          apiVersion: "operant.dev/v1",
+          apiVersion: "optd.dev/v1",
           metadata: { name: "item_lifecycle" },
           spec: {
             resource: "testpub/strict:item",
@@ -689,7 +689,7 @@ Deno.test({
         join(pack, "hooks", "guard.yaml"),
         JSON.stringify({
           kind: "Hook",
-          apiVersion: "operant.dev/v1",
+          apiVersion: "optd.dev/v1",
           metadata: { name: "guard" },
           spec: {
             script: "guard.ts",

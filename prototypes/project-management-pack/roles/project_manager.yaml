@@ -1,13 +1,13 @@
 kind: Role
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: project_manager
 spec:
   display_name: Project Manager
   description: project_manager responsibility for the projects proof pack.
   axi:
-    purpose: project manager guidance for the operant/projects pack.
+    purpose: project manager guidance for the optd/projects pack.
     whenToUse:
       - Inspect role project_manager behavior and guidance before relying on it.
     help:
-      - optctl metadata role operant/projects:project_manager
+      - optctl metadata role optd/projects:project_manager

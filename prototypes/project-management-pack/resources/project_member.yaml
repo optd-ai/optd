@@ -1,5 +1,5 @@
 kind: Resource
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: project_member
 spec:
@@ -7,7 +7,7 @@ spec:
     work_project_id:
       type: string
       required: true
-      ref: operant/projects:project
+      ref: optd/projects:project
     principal_id:
       type: string
       format: uuid
@@ -41,7 +41,7 @@ spec:
       empty:
         message: No project members found.
         help:
-          - optctl --project ${project} create operant/projects:project_member --input object.json --stage
+          - optctl --project ${project} create optd/projects:project_member --input object.json --stage
     detail:
       sections:
         - title: Membership
@@ -49,20 +49,20 @@ spec:
             - work_project_id
             - principal_id
       help:
-        - optctl --project ${project} view operant/projects:project_member ${id}
+        - optctl --project ${project} view optd/projects:project_member ${id}
     search:
       fields:
         - principal_id
       examples:
-        - optctl --project ${project} search operant/projects:project_member --text ${principal_id}
+        - optctl --project ${project} search optd/projects:project_member --text ${principal_id}
       resultFields:
         - id
         - work_project_id
         - principal_id
     help:
       list:
-        - optctl --project ${project} list operant/projects:project_member
+        - optctl --project ${project} list optd/projects:project_member
       view:
-        - optctl --project ${project} view operant/projects:project_member ${id}
+        - optctl --project ${project} view optd/projects:project_member ${id}
       created:
-        - optctl --project ${project} view operant/projects:project_member ${id}
+        - optctl --project ${project} view optd/projects:project_member ${id}

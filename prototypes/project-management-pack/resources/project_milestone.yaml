@@ -1,5 +1,5 @@
 kind: Resource
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: project_milestone
 spec:
@@ -10,7 +10,7 @@ spec:
     work_project_id:
       type: string
       required: true
-      ref: operant/projects:project
+      ref: optd/projects:project
     deadline:
       type: date
     status:
@@ -21,9 +21,9 @@ spec:
         - at_risk
         - done
   axi:
-    purpose: project milestone guidance for the operant/projects pack.
+    purpose: project milestone guidance for the optd/projects pack.
     whenToUse:
-      - Use operant/projects:project_milestone when working with project milestone records.
+      - Use optd/projects:project_milestone when working with project milestone records.
     identity:
       title: ${name}
       labelFields:
@@ -38,7 +38,7 @@ spec:
       empty:
         message: No project milestone records found.
         help:
-          - optctl --project ${project} create operant/projects:project_milestone --input
+          - optctl --project ${project} create optd/projects:project_milestone --input
             object.json --stage
     detail:
       sections:
@@ -49,12 +49,12 @@ spec:
             - deadline
             - status
       help:
-        - optctl --project ${project} query operant/projects:project_milestone --where 'id ==
+        - optctl --project ${project} query optd/projects:project_milestone --where 'id ==
           "${id}"'
     help:
       list:
-        - optctl --project ${project} query operant/projects:project_milestone
+        - optctl --project ${project} query optd/projects:project_milestone
       view:
-        - optctl --project ${project} view operant/projects:project_milestone ${id}
+        - optctl --project ${project} view optd/projects:project_milestone ${id}
       created:
-        - optctl --project ${project} view operant/projects:project_milestone ${id}
+        - optctl --project ${project} view optd/projects:project_milestone ${id}

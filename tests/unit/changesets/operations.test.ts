@@ -27,34 +27,34 @@ const generated = [
 
 Deno.test("all seven authored operation schemas are accepted exactly", () => {
   const values = [
-    { op: "create", resource: "operant/crm:lead", fields: {} },
+    { op: "create", resource: "optd/crm:lead", fields: {} },
     {
       op: "update",
-      resource: "operant/crm:lead",
+      resource: "optd/crm:lead",
       object_id: generated[0],
       set: { score: 1 },
     },
     {
       op: "transition",
-      resource: "operant/crm:lead",
+      resource: "optd/crm:lead",
       object_id: generated[0],
       to: "done",
     },
-    { op: "archive", resource: "operant/crm:lead", object_id: generated[0] },
+    { op: "archive", resource: "optd/crm:lead", object_id: generated[0] },
     {
       op: "link",
-      relationship: "operant/crm:lead_owner",
+      relationship: "optd/crm:lead_owner",
       from: generated[0],
       to: generated[1],
     },
     {
       op: "unlink",
-      relationship: "operant/crm:lead_owner",
+      relationship: "optd/crm:lead_owner",
       relationship_id: generated[0],
     },
     {
       op: "comment",
-      resource: "operant/crm:lead",
+      resource: "optd/crm:lead",
       object_id: generated[0],
       body: "ok",
     },
@@ -77,7 +77,7 @@ Deno.test("authored operations reject caller IDs and legacy aliases", () => {
     const value = {
       op: "create",
       project_id: project,
-      resource: "operant/crm:lead",
+      resource: "optd/crm:lead",
       fields: {},
       [extra]: generated[0],
     };
@@ -88,7 +88,7 @@ Deno.test("authored operations reject caller IDs and legacy aliases", () => {
       project_id: project,
       operations: [{
         op: "update",
-        resource: "operant/crm:lead",
+        resource: "optd/crm:lead",
         object_id: generated[0],
         expectedVersion: 1,
         set: { name: "x" },
@@ -105,14 +105,14 @@ Deno.test("normalization allocates before resolving forward refs and folds updat
     operations: [
       {
         op: "update",
-        resource: "operant/crm:lead",
+        resource: "optd/crm:lead",
         object_id: { $ref: "lead.object_id" },
         set: { score: 2 },
       },
       {
         op: "create",
         key: "lead",
-        resource: "operant/crm:lead",
+        resource: "optd/crm:lead",
         fields: { name: "A" },
       },
     ],
@@ -133,13 +133,13 @@ Deno.test("normalization rejects cross-project and conflicting mutation refs", a
             op: "create",
             key: "lead",
             project_id: project,
-            resource: "operant/crm:lead",
+            resource: "optd/crm:lead",
             fields: {},
           },
           {
             op: "comment",
             project_id: "019b7a2e-7c10-7000-8000-000000000002",
-            resource: "operant/crm:lead",
+            resource: "optd/crm:lead",
             object_id: { $ref: "lead.object_id" },
             body: "x",
           },
@@ -180,12 +180,12 @@ Deno.test("normalization allocates fresh IDs and rejects mutation conflicts", as
       {
         op: "create" as const,
         key: "lead",
-        resource: "operant/crm:lead",
+        resource: "optd/crm:lead",
         fields: { score: 1 },
       },
       {
         op: "comment" as const,
-        resource: "operant/crm:lead",
+        resource: "optd/crm:lead",
         object_id: { $ref: "lead.object_id" },
         body: "x",
       },
@@ -209,13 +209,13 @@ Deno.test("normalization allocates fresh IDs and rejects mutation conflicts", as
         operations: [
           {
             op: "update",
-            resource: "operant/crm:lead",
+            resource: "optd/crm:lead",
             object_id: generated[0],
             set: { score: 1 },
           },
           {
             op: "update",
-            resource: "operant/crm:lead",
+            resource: "optd/crm:lead",
             object_id: generated[0],
             set: { score: 2 },
           },
@@ -231,12 +231,12 @@ Deno.test("normalization allocates fresh IDs and rejects mutation conflicts", as
         operations: [
           {
             op: "archive",
-            resource: "operant/crm:lead",
+            resource: "optd/crm:lead",
             object_id: generated[0],
           },
           {
             op: "update",
-            resource: "operant/crm:lead",
+            resource: "optd/crm:lead",
             object_id: generated[0],
             set: { score: 2 },
           },
@@ -252,7 +252,7 @@ Deno.test("normalization enforces all operational limits", async () => {
     project_id: project,
     operations: [{
       op: "create" as const,
-      resource: "operant/crm:lead",
+      resource: "optd/crm:lead",
       fields: { name: "abcd" },
     }],
   };

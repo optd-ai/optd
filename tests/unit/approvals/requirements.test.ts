@@ -10,7 +10,7 @@ const project = "019b7a2e-7c10-7000-8000-000000000001";
 const now = new Date("2026-01-01T00:00:00.000Z");
 const base = {
   key: "manager_discount",
-  role: "operant/crm:sales_manager",
+  role: "optd/crm:sales_manager",
   boundary: { type: "project", project_id: project },
   reason: "reviewed customer impact",
 };

@@ -1,5 +1,5 @@
 kind: Resource
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: project
 spec:
@@ -33,9 +33,9 @@ spec:
     target_date:
       type: date
   axi:
-    purpose: project guidance for the operant/projects pack.
+    purpose: project guidance for the optd/projects pack.
     whenToUse:
-      - Use operant/projects:project when working with project records.
+      - Use optd/projects:project when working with project records.
     identity:
       title: ${name}
       labelFields:
@@ -50,7 +50,7 @@ spec:
       empty:
         message: No project records found.
         help:
-          - optctl --project ${project} create operant/projects:project --input object.json --stage
+          - optctl --project ${project} create optd/projects:project --input object.json --stage
     detail:
       sections:
         - title: project
@@ -61,11 +61,11 @@ spec:
             - owner_id
             - visibility
       help:
-        - optctl --project ${project} query operant/projects:project --where 'id == "${id}"'
+        - optctl --project ${project} query optd/projects:project --where 'id == "${id}"'
     help:
       list:
-        - optctl --project ${project} query operant/projects:project
+        - optctl --project ${project} query optd/projects:project
       view:
-        - optctl --project ${project} view operant/projects:project ${id}
+        - optctl --project ${project} view optd/projects:project ${id}
       created:
-        - optctl --project ${project} view operant/projects:project ${id}
+        - optctl --project ${project} view optd/projects:project ${id}

@@ -1,9 +1,9 @@
 kind: Seed
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: task_stages
 spec:
-  resource: operant/projects:task_stage
+  resource: optd/projects:task_stage
   key: name
   mode: changeset
   rows:
@@ -24,8 +24,8 @@ spec:
       sequence: 90
       folded: true
   axi:
-    purpose: task stages guidance for the operant/projects pack.
+    purpose: task stages guidance for the optd/projects pack.
     whenToUse:
       - Inspect seed task_stages behavior and guidance before relying on it.
     help:
-      - optctl metadata seed operant/projects:task_stages
+      - optctl metadata seed optd/projects:task_stages

@@ -143,7 +143,7 @@ Deno.test("immutable candidates are reused while every preview persists a distin
             }
           >(
             tx,
-            "select definition_kind,definition_name,table_name from pack_runtime_tables where publisher='operant' and pack_name='crm' order by definition_kind,definition_name",
+            "select definition_kind,definition_name,table_name from pack_runtime_tables where publisher='optd' and pack_name='crm' order by definition_kind,definition_name",
           );
           assert(tables.rows.some((row) => row.definition_kind === "resource"));
           assert(
@@ -229,7 +229,7 @@ Deno.test("immutable candidates are reused while every preview persists a distin
             `select t.definition_name,c.conname,pg_get_constraintdef(c.oid) definition
              from pg_constraint c
              join pack_runtime_tables t on c.conrelid=t.table_name::regclass
-             where t.publisher='operant' and t.pack_name='crm'
+             where t.publisher='optd' and t.pack_name='crm'
                and t.definition_kind='resource'
                and c.conname=any($1::text[])
              order by c.conname`,
@@ -276,12 +276,12 @@ Deno.test("immutable candidates are reused while every preview persists a distin
     });
     const leadTable = (await query<{ table_name: string }>(
       sql,
-      "select table_name from pack_runtime_tables where publisher='operant' and pack_name='crm' and definition_kind='resource' and definition_name='lead'",
+      "select table_name from pack_runtime_tables where publisher='optd' and pack_name='crm' and definition_kind='resource' and definition_name='lead'",
     )).rows[0].table_name;
     const candidateV2 = structuredClone(candidate);
     candidateV2.version = "0.2.0";
     candidateV2.sourceDigest = `sha256:${"a".repeat(64)}`;
-    candidateV2.revision = `operant/crm@0.2.0:sha256:${"b".repeat(64)}`;
+    candidateV2.revision = `optd/crm@0.2.0:sha256:${"b".repeat(64)}`;
     delete (candidateV2.resources.lead.spec.fields as Record<string, unknown>)
       .phone;
     delete ((candidateV2.resources.lead.document.spec as Record<

@@ -17,7 +17,7 @@ if (!opportunityId || !input.lost_reason_id) {
   const operations: Array<Record<string, unknown>> = [
     {
       op: "transition",
-      resource: "operant/crm:opportunity",
+      resource: "optd/crm:opportunity",
       object_id: opportunityId,
       to: "lost",
       expected_version: input.expected_version,
@@ -27,7 +27,7 @@ if (!opportunityId || !input.lost_reason_id) {
   if (input.note) {
     operations.push({
       op: "create",
-      resource: "operant/crm:note",
+      resource: "optd/crm:note",
       fields: {
         body: input.note,
         opportunity_id: opportunityId,

@@ -322,7 +322,7 @@ async function setupHook(
     enabled?: boolean;
   } = {},
 ) {
-  const hookIdentity = options.hookIdentity ?? `operant/test:${suffix}`;
+  const hookIdentity = options.hookIdentity ?? `optd/test:${suffix}`;
   const revision = options.revision ?? `${suffix}-${uuidV7()}`;
   const grantId = uuidV7();
   const value = {

@@ -1,7 +1,7 @@
 kind: Pack
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
-  publisher: operant
+  publisher: optd
   name: projects
   version: 0.1.0
 spec:
@@ -10,18 +10,18 @@ spec:
     purpose: Project and task management resources for agent-operated work tracking.
     home:
       resources:
-        - operant/projects:project
-        - operant/projects:project_member
-        - operant/projects:project_milestone
-        - operant/projects:task
-        - operant/projects:task_stage
-        - operant/projects:task_tag
-        - operant/projects:timesheet
+        - optd/projects:project
+        - optd/projects:project_member
+        - optd/projects:project_milestone
+        - optd/projects:task
+        - optd/projects:task_stage
+        - optd/projects:task_tag
+        - optd/projects:timesheet
       actions:
-        - operant/projects:block_task
-        - operant/projects:complete_task
-        - operant/projects:start_task
+        - optd/projects:block_task
+        - optd/projects:complete_task
+        - optd/projects:start_task
       help:
         - optctl resources
-        - optctl --project ${project} list operant/projects:project
-        - optctl metadata pack operant/projects
+        - optctl --project ${project} list optd/projects:project
+        - optctl metadata pack optd/projects

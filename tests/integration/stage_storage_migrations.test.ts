@@ -456,7 +456,7 @@ Deno.test({
         {
           path: "pack.yaml",
           text: `kind: Pack
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata: { publisher: test, name: current, version: 1.0.0 }
 spec: { purpose: Current repository proof., axi: {} }
 `,
@@ -464,7 +464,7 @@ spec: { purpose: Current repository proof., axi: {} }
         {
           path: "resources/item.yaml",
           text: `kind: Resource
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata: { name: item }
 spec:
   fields:
@@ -475,7 +475,7 @@ spec:
         {
           path: "hooks/guard.yaml",
           text: `kind: Hook
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata: { name: guard }
 spec:
   script: guard.ts

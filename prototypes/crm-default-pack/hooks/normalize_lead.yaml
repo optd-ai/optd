@@ -1,5 +1,5 @@
 kind: Hook
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: normalize_lead
 spec:
@@ -15,16 +15,16 @@ spec:
     schema: patch.v1
   attachments:
     - phase: changeset.before_stage
-      resource: operant/crm:lead
+      resource: optd/crm:lead
       order: 100
       input:
         operation: $operation
   axi:
-    purpose: normalize lead guidance for the operant/crm pack.
+    purpose: normalize lead guidance for the optd/crm pack.
     whenToUse:
       - Inspect hook normalize_lead behavior and guidance before relying on it.
     help:
-      - optctl metadata hook operant/crm:normalize_lead
+      - optctl metadata hook optd/crm:normalize_lead
   secrets: []
   effects:
     operations: []

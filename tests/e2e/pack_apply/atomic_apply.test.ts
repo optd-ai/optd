@@ -62,7 +62,7 @@ Deno.test("compiled optctl completes safe, destructive, stale, timeout, risky, a
     assert(projectsApply.data.application.id);
     const projectsMetadata = await runOk(
       harness,
-      ["metadata", "pack", "operant/projects"],
+      ["metadata", "pack", "optd/projects"],
       secrets,
     );
     assertEquals(projectsMetadata.data.axi_readiness, {
@@ -72,8 +72,8 @@ Deno.test("compiled optctl completes safe, destructive, stale, timeout, risky, a
     assertEquals(projectsMetadata.data.resources.includes("task"), true);
     const aggregatedHome = await runOk(harness, ["home"], secrets);
     assertEquals(aggregatedHome.data.system.active_packs, [
-      "operant/crm@0.1.0",
-      "operant/projects@0.1.0",
+      "optd/crm@0.1.0",
+      "optd/projects@0.1.0",
     ]);
 
     for (const slug of ["alpha", "beta"]) {
@@ -296,7 +296,7 @@ Deno.test("compiled optctl completes safe, destructive, stale, timeout, risky, a
     secrets.push(token3);
     const leadTable = (await query<{ table_name: string }>(
       harness.server.sql,
-      "select table_name from pack_runtime_tables where publisher='operant' and pack_name='crm' and definition_kind='resource' and definition_name='lead'",
+      "select table_name from pack_runtime_tables where publisher='optd' and pack_name='crm' and definition_kind='resource' and definition_name='lead'",
     )).rows[0].table_name;
     const projectId = (await query<{ id: string }>(
       harness.server.sql,
@@ -379,7 +379,7 @@ Deno.test("compiled optctl completes safe, destructive, stale, timeout, risky, a
 
     const lockedTable = (await query<{ table_name: string }>(
       harness.server.sql,
-      "select table_name from pack_runtime_tables where publisher='operant' and pack_name='crm' order by case definition_kind when 'resource' then 0 else 1 end,definition_name,table_name limit 1",
+      "select table_name from pack_runtime_tables where publisher='optd' and pack_name='crm' order by case definition_kind when 'resource' then 0 else 1 end,definition_name,table_name limit 1",
     )).rows[0].table_name;
     const acquired = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();
@@ -457,7 +457,7 @@ Deno.test("compiled optctl completes safe, destructive, stale, timeout, risky, a
       await waitForPackApplyLock(harness);
       await query(
         harness.server.sql,
-        "update pack_active_revisions set candidate_revision_id=$1,activated_at=now() where publisher='operant' and pack_name='crm'",
+        "update pack_active_revisions set candidate_revision_id=$1,activated_at=now() where publisher='optd' and pack_name='crm'",
         [initial.to_pack_revision_id],
       );
     } finally {
@@ -473,7 +473,7 @@ Deno.test("compiled optctl completes safe, destructive, stale, timeout, risky, a
     assertNoSecrets(stalePackResult, secrets);
     await query(
       harness.server.sql,
-      "update pack_active_revisions set candidate_revision_id=$1,activated_at=now() where publisher='operant' and pack_name='crm'",
+      "update pack_active_revisions set candidate_revision_id=$1,activated_at=now() where publisher='optd' and pack_name='crm'",
       [riskyPackApply.data.plan.to_pack_revision_id],
     );
 
@@ -482,7 +482,7 @@ Deno.test("compiled optctl completes safe, destructive, stale, timeout, risky, a
       const metadata = await runOk(harness, [
         "metadata",
         "resource",
-        "operant/crm:lead",
+        "optd/crm:lead",
       ], secrets);
       assertEquals(metadata.data.schema.fields.phone, undefined);
     }

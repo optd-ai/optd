@@ -7,7 +7,7 @@ import type {
 import type { CompletePublicFlowBackend } from "./backend.ts";
 import { runJson } from "./helpers.ts";
 
-const CRM = "operant/crm";
+const CRM = "optd/crm";
 
 export async function runCompleteCrmMigration(
   harness: CompletePublicFlowBackend,

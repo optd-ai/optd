@@ -1,5 +1,5 @@
 kind: Hook
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: start_task
 spec:
@@ -15,20 +15,20 @@ spec:
     schema: changeset.operations.v1
   attachments:
     - phase: action.stage
-      action: operant/projects:start_task
+      action: optd/projects:start_task
       order: 100
       input:
         action_input: $action.input
         task: $reads.task
   axi:
-    purpose: start task guidance for the operant/projects pack.
+    purpose: start task guidance for the optd/projects pack.
     whenToUse:
       - Inspect hook start_task behavior and guidance before relying on it.
     help:
-      - optctl metadata hook operant/projects:start_task
+      - optctl metadata hook optd/projects:start_task
   secrets: []
   effects:
     operations:
-      - resource: operant/projects:task
+      - resource: optd/projects:task
         ops:
           - transition

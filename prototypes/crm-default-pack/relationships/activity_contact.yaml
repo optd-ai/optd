@@ -1,19 +1,19 @@
 kind: Relationship
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: activity_contact
 spec:
   from:
-    resource: operant/crm:activity
+    resource: optd/crm:activity
   to:
-    resource: operant/crm:contact
+    resource: optd/crm:contact
   fields: {}
   axi:
-    purpose: activity contact guidance for the operant/crm pack.
+    purpose: activity contact guidance for the optd/crm pack.
     whenToUse:
       - Inspect relationship activity_contact behavior and guidance before relying on it.
     help:
-      - optctl metadata relationship operant/crm:activity_contact
+      - optctl metadata relationship optd/crm:activity_contact
   unique:
     - from
     - to

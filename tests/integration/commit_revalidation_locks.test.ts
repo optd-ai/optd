@@ -688,12 +688,12 @@ async function writeUnrelatedPack(
   await Deno.mkdir(`${root}/resources`, { recursive: true });
   await Deno.writeTextFile(
     `${root}/pack.yaml`,
-    `kind: Pack\napiVersion: operant.dev/v1\nmetadata: { publisher: other, name: independent, version: ${version} }\nspec: { purpose: Unrelated lock proof., axi: {} }\n`,
+    `kind: Pack\napiVersion: optd.dev/v1\nmetadata: { publisher: other, name: independent, version: ${version} }\nspec: { purpose: Unrelated lock proof., axi: {} }\n`,
   );
   for (const name of ["one", "two"]) {
     await Deno.writeTextFile(
       `${root}/resources/${name}.yaml`,
-      `kind: Resource\napiVersion: operant.dev/v1\nmetadata: { name: ${name} }\nspec:\n  fields:\n    key: { type: string, required: true, unique: true }\n${
+      `kind: Resource\napiVersion: optd.dev/v1\nmetadata: { name: ${name} }\nspec:\n  fields:\n    key: { type: string, required: true, unique: true }\n${
         changed && name === "one" ? "    note: { type: string }\n" : ""
       }  axi: {}\n`,
     );

@@ -822,7 +822,7 @@ async function applyAuthorityPack(harness: LiveHarness) {
     join(pack, "pack.yaml"),
     JSON.stringify({
       kind: "Pack",
-      apiVersion: "operant.dev/v1",
+      apiVersion: "optd.dev/v1",
       metadata: { publisher: "test", name: "stage", version: "1.0.0" },
       spec: { purpose: "ordinary authority", axi: {} },
     }),
@@ -831,7 +831,7 @@ async function applyAuthorityPack(harness: LiveHarness) {
     join(pack, "resources", "item.yaml"),
     JSON.stringify({
       kind: "Resource",
-      apiVersion: "operant.dev/v1",
+      apiVersion: "optd.dev/v1",
       metadata: { name: "item" },
       spec: {
         fields: {
@@ -846,7 +846,7 @@ async function applyAuthorityPack(harness: LiveHarness) {
     join(pack, "relationships", "viewer.yaml"),
     JSON.stringify({
       kind: "Relationship",
-      apiVersion: "operant.dev/v1",
+      apiVersion: "optd.dev/v1",
       metadata: { name: "viewer" },
       spec: {
         from: { resource: "test/stage:item" },

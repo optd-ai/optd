@@ -1,5 +1,5 @@
 kind: Resource
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: task
 spec:
@@ -16,11 +16,11 @@ spec:
       type: string
     opportunity_id:
       type: string
-      ref: operant/crm:opportunity
+      ref: optd/crm:opportunity
   axi:
-    purpose: task guidance for the operant/crm pack.
+    purpose: task guidance for the optd/crm pack.
     whenToUse:
-      - Use operant/crm:task when working with task records.
+      - Use optd/crm:task when working with task records.
     identity:
       title: ${title}
       labelFields:
@@ -35,7 +35,7 @@ spec:
       empty:
         message: No task records found.
         help:
-          - optctl --project ${project} create operant/crm:task --input object.json --stage
+          - optctl --project ${project} create optd/crm:task --input object.json --stage
     detail:
       sections:
         - title: task
@@ -46,11 +46,11 @@ spec:
             - owner_id
             - opportunity_id
       help:
-        - optctl --project ${project} query operant/crm:task --where 'id == "${id}"'
+        - optctl --project ${project} query optd/crm:task --where 'id == "${id}"'
     help:
       list:
-        - optctl --project ${project} query operant/crm:task
+        - optctl --project ${project} query optd/crm:task
       view:
-        - optctl --project ${project} view operant/crm:task ${id}
+        - optctl --project ${project} view optd/crm:task ${id}
       created:
-        - optctl --project ${project} view operant/crm:task ${id}
+        - optctl --project ${project} view optd/crm:task ${id}

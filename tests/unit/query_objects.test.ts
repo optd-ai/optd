@@ -90,7 +90,7 @@ Deno.test("query contract is strict, Project-scoped, and bounded", () => {
     project_id: "019b7a2e-7c10-7000-8000-000000000002",
     definition: {
       kind: "resource",
-      publisher: "operant",
+      publisher: "optd",
       pack: "crm",
       name: "lead",
     },
@@ -122,7 +122,7 @@ Deno.test("query application owns definition-aware projection and sort validatio
       name: { type: "string" },
     },
     packFields: ["name"],
-    identity: "operant/crm:lead",
+    identity: "optd/crm:lead",
   };
   let pageCalls = 0;
   let cursorFactoryCalls = 0;
@@ -164,7 +164,7 @@ Deno.test("query application owns definition-aware projection and sort validatio
     project_id: "019b7a2e-7c10-7000-8000-000000000002",
     definition: {
       kind: "resource" as const,
-      publisher: "operant",
+      publisher: "optd",
       pack: "crm",
       name: "lead",
     },
@@ -198,11 +198,11 @@ const auth: AuthContext = {
 };
 const projectId = "019b7a2e-7c10-7000-8000-000000000020";
 const objectId = "019b7a2e-7c10-7000-8000-000000000021";
-const action = "action:operant/projects:start_task";
+const action = "action:optd/projects:start_task";
 const taskTarget = {
   definition: {
     kind: "resource" as const,
-    publisher: "operant",
+    publisher: "optd",
     pack: "projects",
     name: "task",
   },
@@ -250,7 +250,7 @@ function policySql(options: {
           assignment_owner_id: auth.principalId,
           assignment_active: true,
           assignment_version: 1,
-          role_id: "operant/projects:member",
+          role_id: "optd/projects:member",
           system_role_active: true,
           version_id: "role-version",
           version: 1,
@@ -272,13 +272,13 @@ function policySql(options: {
         return [{
           id: "rule",
           rule_name: "targeted",
-          role_id: "operant/projects:member",
+          role_id: "optd/projects:member",
           capability: action,
           resource: options.resource,
           condition_kind: mode,
           predicate: mode === "abac" ? "assignee_id == actor.id" : null,
           relation_relationship: mode === "rebac"
-            ? "operant/projects:task_member"
+            ? "optd/projects:task_member"
             : null,
           relation_object_side: mode === "rebac" ? "from" : null,
           relation_subject_side: mode === "rebac" ? "to" : null,
@@ -303,7 +303,7 @@ function policySql(options: {
           table_name: "task_member_table",
           document: {
             spec: {
-              from: { resource: "operant/projects:task" },
+              from: { resource: "optd/projects:task" },
               to: { resource: "system:principal" },
             },
           },
@@ -311,7 +311,7 @@ function policySql(options: {
       }
       if (text.includes('select exists(select 1 from "task_table"')) {
         return [{
-          allowed: options.resource === "operant/projects:task" &&
+          allowed: options.resource === "optd/projects:task" &&
             options.objectAllowed !== false,
         }];
       }
@@ -321,7 +321,7 @@ function policySql(options: {
 }
 
 Deno.test("targeted semantic policy allows the exact task object", async () => {
-  const sql = policySql({ resource: "operant/projects:task" });
+  const sql = policySql({ resource: "optd/projects:task" });
   const result = await evaluateTargetedActionPolicy(
     sql,
     { projectId, action, targets: [taskTarget] },
@@ -333,7 +333,7 @@ Deno.test("targeted semantic policy allows the exact task object", async () => {
   )!;
   assertEquals(policyQuery.params.slice(1, 5), [
     action,
-    "operant/projects:task",
+    "optd/projects:task",
     projectId,
     true,
   ]);
@@ -341,7 +341,7 @@ Deno.test("targeted semantic policy allows the exact task object", async () => {
 });
 
 Deno.test("Project policy SQL keeps system boundaries isolated", async () => {
-  const humanSql = policySql({ resource: "operant/projects:task" });
+  const humanSql = policySql({ resource: "optd/projects:task" });
   await evaluateTargetedActionPolicy(
     humanSql,
     { projectId, action, targets: [taskTarget] },
@@ -369,7 +369,7 @@ Deno.test("Project policy SQL keeps system boundaries isolated", async () => {
     false,
   );
 
-  const agentSql = policySql({ resource: "operant/projects:task" });
+  const agentSql = policySql({ resource: "optd/projects:task" });
   await evaluateTargetedActionPolicy(
     agentSql,
     { projectId, action, targets: [taskTarget] },
@@ -418,14 +418,14 @@ Deno.test("Project policy SQL keeps system boundaries isolated", async () => {
 
 Deno.test("targeted semantic policy rejects wrong resources and ABAC false", async () => {
   const wrong = await evaluateTargetedActionPolicy(
-    policySql({ resource: "operant/projects:project" }),
+    policySql({ resource: "optd/projects:project" }),
     { projectId, action, targets: [taskTarget] },
     auth,
   );
   assertEquals(wrong.allowed, false);
   const abac = await evaluateTargetedActionPolicy(
     policySql({
-      resource: "operant/projects:task",
+      resource: "optd/projects:task",
       mode: "abac",
       objectAllowed: false,
     }),
@@ -436,7 +436,7 @@ Deno.test("targeted semantic policy rejects wrong resources and ABAC false", asy
 });
 
 Deno.test("targeted semantic policy lowers direct ReBAC with the server actor", async () => {
-  const sql = policySql({ resource: "operant/projects:task", mode: "rebac" });
+  const sql = policySql({ resource: "optd/projects:task", mode: "rebac" });
   const result = await evaluateTargetedActionPolicy(
     sql,
     { projectId, action, targets: [taskTarget] },
@@ -452,7 +452,7 @@ Deno.test("targeted semantic policy lowers direct ReBAC with the server actor", 
 
 Deno.test("targeted semantic policy requires all targets and exact unconditional zero-read rules", async () => {
   const multi = await evaluateTargetedActionPolicy(
-    policySql({ resource: "operant/projects:task" }),
+    policySql({ resource: "optd/projects:task" }),
     {
       projectId,
       action,
@@ -466,13 +466,13 @@ Deno.test("targeted semantic policy requires all targets and exact unconditional
   assertEquals(multi.allowed, false);
 
   const unconditional = await evaluateTargetedActionPolicy(
-    policySql({ resource: "operant/projects:task" }),
+    policySql({ resource: "optd/projects:task" }),
     { projectId, action, targets: [{ definition: taskTarget.definition }] },
     auth,
   );
   assertEquals(unconditional.allowed, true);
   const conditional = await evaluateTargetedActionPolicy(
-    policySql({ resource: "operant/projects:task", mode: "abac" }),
+    policySql({ resource: "optd/projects:task", mode: "abac" }),
     { projectId, action, targets: [{ definition: taskTarget.definition }] },
     auth,
   );

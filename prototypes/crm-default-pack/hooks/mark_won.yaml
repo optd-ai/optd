@@ -1,5 +1,5 @@
 kind: Hook
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: mark_won
 spec:
@@ -17,16 +17,16 @@ spec:
     - phase: action.stage
       input:
         action_input: $action.input
-      action: operant/crm:mark_won
+      action: optd/crm:mark_won
   axi:
-    purpose: mark won guidance for the operant/crm pack.
+    purpose: mark won guidance for the optd/crm pack.
     whenToUse:
       - Inspect hook mark_won behavior and guidance before relying on it.
     help:
-      - optctl metadata hook operant/crm:mark_won
+      - optctl metadata hook optd/crm:mark_won
   secrets: []
   effects:
     operations:
-      - resource: operant/crm:opportunity
+      - resource: optd/crm:opportunity
         ops:
           - transition

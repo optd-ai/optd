@@ -1,5 +1,5 @@
 kind: Hook
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: complete_task
 spec:
@@ -15,24 +15,24 @@ spec:
     schema: changeset.operations.v1
   attachments:
     - phase: action.stage
-      action: operant/projects:complete_task
+      action: optd/projects:complete_task
       order: 100
       input:
         action_input: $action.input
         actor: $actor
         task: $reads.task
   axi:
-    purpose: complete task guidance for the operant/projects pack.
+    purpose: complete task guidance for the optd/projects pack.
     whenToUse:
       - Inspect hook complete_task behavior and guidance before relying on it.
     help:
-      - optctl metadata hook operant/projects:complete_task
+      - optctl metadata hook optd/projects:complete_task
   secrets: []
   effects:
     operations:
-      - resource: operant/projects:task
+      - resource: optd/projects:task
         ops:
           - transition
-      - resource: operant/projects:timesheet
+      - resource: optd/projects:timesheet
         ops:
           - create

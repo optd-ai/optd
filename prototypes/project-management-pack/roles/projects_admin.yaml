@@ -1,13 +1,13 @@
 kind: Role
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: projects_admin
 spec:
   display_name: Projects Admin
   description: projects_admin responsibility for the projects proof pack.
   axi:
-    purpose: projects admin guidance for the operant/projects pack.
+    purpose: projects admin guidance for the optd/projects pack.
     whenToUse:
       - Inspect role projects_admin behavior and guidance before relying on it.
     help:
-      - optctl metadata role operant/projects:projects_admin
+      - optctl metadata role optd/projects:projects_admin

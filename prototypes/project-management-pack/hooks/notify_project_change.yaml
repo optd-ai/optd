@@ -1,5 +1,5 @@
 kind: Hook
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: notify_project_change
 spec:
@@ -20,11 +20,11 @@ spec:
       input:
         event: $event
   axi:
-    purpose: notify project change guidance for the operant/projects pack.
+    purpose: notify project change guidance for the optd/projects pack.
     whenToUse:
       - Inspect hook notify_project_change behavior and guidance before relying on it.
     help:
-      - optctl metadata hook operant/projects:notify_project_change
+      - optctl metadata hook optd/projects:notify_project_change
   secrets: []
   effects:
     operations: []

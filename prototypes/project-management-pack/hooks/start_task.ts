@@ -5,7 +5,7 @@ console.error(`start_task transitioning ${input.task_id}`);
 console.log(JSON.stringify({
   operations: [{
     op: "transition",
-    resource: "operant/projects:task",
+    resource: "optd/projects:task",
     object_id: input.task_id,
     to: "in_progress",
     expected_version: task.version,

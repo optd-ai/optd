@@ -1,5 +1,5 @@
 kind: Hook
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: log_activity
 spec:
@@ -18,19 +18,19 @@ spec:
       input:
         action_input: $action.input
         actor: $actor
-      action: operant/crm:log_activity
+      action: optd/crm:log_activity
   axi:
-    purpose: log activity guidance for the operant/crm pack.
+    purpose: log activity guidance for the optd/crm pack.
     whenToUse:
       - Inspect hook log_activity behavior and guidance before relying on it.
     help:
-      - optctl metadata hook operant/crm:log_activity
+      - optctl metadata hook optd/crm:log_activity
   secrets: []
   effects:
     operations:
-      - resource: operant/crm:activity
+      - resource: optd/crm:activity
         ops:
           - create
-      - resource: operant/crm:note
+      - resource: optd/crm:note
         ops:
           - create

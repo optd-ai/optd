@@ -11,18 +11,18 @@ import {
 import { compilePackDdl } from "../../src/adapters/outbound/postgres/resource_ddl.ts";
 
 const root = `kind: Pack
-apiVersion: operant.dev/v1
-metadata: { publisher: operant, name: test, version: 0.1.0 }
+apiVersion: optd.dev/v1
+metadata: { publisher: optd, name: test, version: 0.1.0 }
 spec:
   purpose: Strict test pack.
   axi:
     purpose: Strict test pack guidance.
     home:
-      resources: [operant/test:lead]
+      resources: [optd/test:lead]
       help: ["optctl resources"]
 `;
 const resource = `kind: Resource
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata: { name: lead }
 spec:
   fields:
@@ -35,13 +35,13 @@ spec:
       defaultFields: [id, project, name]
       empty:
         message: No test leads found.
-        help: ["optctl --project \${project} create operant/test:lead --input object.json --stage"]
+        help: ["optctl --project \${project} create optd/test:lead --input object.json --stage"]
     detail:
-      help: ["optctl --project \${project} view operant/test:lead \${id}"]
+      help: ["optctl --project \${project} view optd/test:lead \${id}"]
     help:
-      list: ["optctl --project \${project} query operant/test:lead"]
-      view: ["optctl --project \${project} view operant/test:lead \${id}"]
-      created: ["optctl --project \${project} view operant/test:lead \${id}"]
+      list: ["optctl --project \${project} query optd/test:lead"]
+      view: ["optctl --project \${project} view optd/test:lead \${id}"]
+      created: ["optctl --project \${project} view optd/test:lead \${id}"]
 `;
 
 Deno.test("strict pack loader rejects legacy identities and unknown fields", async () => {
@@ -49,7 +49,7 @@ Deno.test("strict pack loader rejects legacy identities and unknown fields", asy
     () =>
       loadPackFromFiles([{
         path: "pack.yaml",
-        text: root.replace("publisher: operant", "namespace: default"),
+        text: root.replace("publisher: optd", "namespace: default"),
       }]),
     Error,
     "additional properties",
@@ -123,7 +123,7 @@ Deno.test("strict pack loader rejects numeric decimal seed values", async () => 
     "name: { type: string, required: true }\n    amount: { type: decimal, required: true }\n  constraints:\n    - { name: lead_active_name, kind: unique, fields: [name], where: 'active()' }",
   );
   const seed =
-    `kind: Seed\napiVersion: operant.dev/v1\nmetadata: {name: leads}\nspec:\n  resource: lead\n  key: name\n  mode: changeset\n  rows: [{name: first, amount: 1.25}]\n  axi: {}\n`;
+    `kind: Seed\napiVersion: optd.dev/v1\nmetadata: {name: leads}\nspec:\n  resource: lead\n  key: name\n  mode: changeset\n  rows: [{name: first, amount: 1.25}]\n  axi: {}\n`;
   await assertRejects(
     () =>
       loadPackFromFiles([
@@ -138,7 +138,7 @@ Deno.test("strict pack loader rejects numeric decimal seed values", async () => 
 
 Deno.test("seed keys require exactly one named active-only uniqueness constraint", async () => {
   const seed =
-    `kind: Seed\napiVersion: operant.dev/v1\nmetadata: {name: leads}\nspec:\n  resource: lead\n  key: name\n  mode: changeset\n  rows: [{name: first}]\n  axi: {}\n`;
+    `kind: Seed\napiVersion: optd.dev/v1\nmetadata: {name: leads}\nspec:\n  resource: lead\n  key: name\n  mode: changeset\n  rows: [{name: first}]\n  axi: {}\n`;
   const withConstraint = (
     constraint: string,
     field = "name: { type: string, required: true }",
@@ -220,7 +220,7 @@ Deno.test("strict pack loader broadly rejects superseded schema and unsafe sourc
       name: "missing apiVersion",
       files: [{
         path: "pack.yaml",
-        text: root.replace("apiVersion: operant.dev/v1\n", ""),
+        text: root.replace("apiVersion: optd.dev/v1\n", ""),
       }],
       message: "apiVersion",
     },
@@ -259,7 +259,7 @@ Deno.test("strict pack loader broadly rejects superseded schema and unsafe sourc
       files: [{ path: "pack.yaml", text: root }, {
         path: "actions/run.yaml",
         text:
-          `kind: Action\napiVersion: operant.dev/v1\nmetadata: {name: run}\nspec: {hook: run, input: [id], axi: {}}\n`,
+          `kind: Action\napiVersion: optd.dev/v1\nmetadata: {name: run}\nspec: {hook: run, input: [id], axi: {}}\n`,
       }],
       message: "additional properties",
     },
@@ -268,7 +268,7 @@ Deno.test("strict pack loader broadly rejects superseded schema and unsafe sourc
       files: [{ path: "pack.yaml", text: root }, {
         path: "policies/access.yaml",
         text:
-          `kind: Policy\napiVersion: operant.dev/v1\nmetadata: {name: access}\nspec: {rules: [{role: admin, allow: ['*']}], axi: {}}\n`,
+          `kind: Policy\napiVersion: optd.dev/v1\nmetadata: {name: access}\nspec: {rules: [{role: admin, allow: ['*']}], axi: {}}\n`,
       }],
       message: "default_assignment",
     },
@@ -277,7 +277,7 @@ Deno.test("strict pack loader broadly rejects superseded schema and unsafe sourc
       files: [{ path: "pack.yaml", text: root }, {
         path: "relationships/link.yaml",
         text:
-          `kind: Relationship\napiVersion: operant.dev/v1\nmetadata: {name: link}\nspec: {from: {resource: lead, field: id}, to: {resource: lead}, axi: {}}\n`,
+          `kind: Relationship\napiVersion: optd.dev/v1\nmetadata: {name: link}\nspec: {from: {resource: lead, field: id}, to: {resource: lead}, axi: {}}\n`,
       }],
       message: "additional properties",
     },
@@ -356,7 +356,7 @@ Deno.test("strict pack loader broadly rejects superseded schema and unsafe sourc
 
 Deno.test("relationship policy targets resolve canonically with strict vocabulary", async () => {
   const role = `kind: Role
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata: {name: manager}
 spec:
   display_name: Manager
@@ -364,7 +364,7 @@ spec:
   axi: {}
 `;
   const relationship = `kind: Relationship
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata: {name: lead_link}
 spec:
   from: {resource: lead}
@@ -377,7 +377,7 @@ spec:
     clause = "",
   ) =>
     `kind: Policy
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata: {name: access}
 spec:
   default_assignment: all_projects
@@ -402,26 +402,26 @@ ${clause}
     { path: "policies/access.yaml", text: policy(target, actions, clause) },
   ];
 
-  for (const target of ["lead_link", "operant/test:lead_link"]) {
+  for (const target of ["lead_link", "optd/test:lead_link"]) {
     const loaded = await loadPackFromFiles(files(target));
     const rule = (loaded.policies.access.spec.rules as Array<{
       actions: string[];
       resources: string[];
     }>)[0];
     assertEquals(rule.actions, ["link", "unlink"]);
-    assertEquals(rule.resources, ["operant/test:lead_link"]);
+    assertEquals(rule.resources, ["optd/test:lead_link"]);
     assertEquals(
       ((loaded.normalized.policies as Record<string, Record<string, unknown>>)
         .access.spec as { rules: Array<{ resources: string[] }> }).rules[0]
         .resources,
-      ["operant/test:lead_link"],
+      ["optd/test:lead_link"],
     );
   }
 
   for (
     const target of [
       "missing_link",
-      "operant/test:missing_link",
+      "optd/test:missing_link",
       "other/pack:lead_link",
     ]
   ) {
@@ -477,7 +477,7 @@ ${clause}
 
 Deno.test("approval policy vocabulary is exact, paired, and canonically preserved", async () => {
   const role = `kind: Role
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata: {name: manager}
 spec:
   display_name: Manager
@@ -486,7 +486,7 @@ spec:
 `;
   const policy = (action: string, policyResource: string) =>
     `kind: Policy
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata: {name: approval}
 spec:
   default_assignment: all_projects
@@ -519,7 +519,7 @@ spec:
     actions: string[];
     resources: string[];
   }>)[0];
-  assertEquals(rule.roles, ["operant/test:manager"]);
+  assertEquals(rule.roles, ["optd/test:manager"]);
   assertEquals(rule.actions, ["changeset.approval.decide"]);
   assertEquals(rule.resources, ["system:changeset-approval"]);
   assertEquals(
@@ -560,7 +560,7 @@ spec:
     [
       "Relationship",
       parseYamlJsonObject(
-        `kind: Relationship\napiVersion: operant.dev/v1\nmetadata: {name: bad}\nspec: {from: {resource: system:changeset-approval}, to: {resource: lead}, axi: {}}\n`,
+        `kind: Relationship\napiVersion: optd.dev/v1\nmetadata: {name: bad}\nspec: {from: {resource: system:changeset-approval}, to: {resource: lead}, axi: {}}\n`,
         "relationship",
       ),
     ],
@@ -572,14 +572,14 @@ spec:
 
 Deno.test("lifecycle cross-invariants reject every invalid graph and mutation", async () => {
   const lifecycleResource =
-    `kind: Resource\napiVersion: operant.dev/v1\nmetadata: {name: ticket}\nspec:\n  fields:\n    state: {type: string, required: true, enum: [open, closed]}\n    title: {type: string, required: true, maxLength: 8}\n    count: {type: integer, minimum: 0, maximum: 10}\n    amount: {type: decimal, precision: 4, scale: 2}\n    note: {type: string}\n  axi:\n    purpose: Test tickets.\n    whenToUse: [Use test tickets.]\n    identity: {title: "\${title}", labelFields: [title]}\n    list:\n      defaultFields: [id, state, title]\n      empty: {message: No tickets found., help: ["optctl --project \${project} create operant/test:ticket --input object.json --stage"]}\n    detail: {help: ["optctl --project \${project} view operant/test:ticket \${id}"]}\n    help:\n      list: ["optctl --project \${project} query operant/test:ticket"]\n      view: ["optctl --project \${project} view operant/test:ticket \${id}"]\n      created: ["optctl --project \${project} view operant/test:ticket \${id}"]\n`;
+    `kind: Resource\napiVersion: optd.dev/v1\nmetadata: {name: ticket}\nspec:\n  fields:\n    state: {type: string, required: true, enum: [open, closed]}\n    title: {type: string, required: true, maxLength: 8}\n    count: {type: integer, minimum: 0, maximum: 10}\n    amount: {type: decimal, precision: 4, scale: 2}\n    note: {type: string}\n  axi:\n    purpose: Test tickets.\n    whenToUse: [Use test tickets.]\n    identity: {title: "\${title}", labelFields: [title]}\n    list:\n      defaultFields: [id, state, title]\n      empty: {message: No tickets found., help: ["optctl --project \${project} create optd/test:ticket --input object.json --stage"]}\n    detail: {help: ["optctl --project \${project} view optd/test:ticket \${id}"]}\n    help:\n      list: ["optctl --project \${project} query optd/test:ticket"]\n      view: ["optctl --project \${project} view optd/test:ticket \${id}"]\n      created: ["optctl --project \${project} view optd/test:ticket \${id}"]\n`;
   const lifecycle = (
     states: string,
     transitions: string,
     initial = "open",
     field = "state",
   ) =>
-    `kind: Lifecycle\napiVersion: operant.dev/v1\nmetadata: {name: ticket_flow}\nspec:\n  resource: ticket\n  field: ${field}\n  initial: ${initial}\n  states: ${states}\n  transitions: ${transitions}\n  axi: {}\n`;
+    `kind: Lifecycle\napiVersion: optd.dev/v1\nmetadata: {name: ticket_flow}\nspec:\n  resource: ticket\n  field: ${field}\n  initial: ${initial}\n  states: ${states}\n  transitions: ${transitions}\n  axi: {}\n`;
   const invalid: Array<[string, string, string, string?]> = [
     [
       "terminal initial",
@@ -806,7 +806,7 @@ Deno.test("strict pack loader canonicalizes bounded YAML aliases", async () => {
     code: { required: true, type: "string" },
     name: { required: true, type: "string" },
   });
-  assert(pack.revision.startsWith("operant/test@0.1.0:sha256:"));
+  assert(pack.revision.startsWith("optd/test@0.1.0:sha256:"));
 });
 
 Deno.test("every AXI kind accepts only exact empty or complete guidance", async () => {
@@ -872,7 +872,7 @@ Deno.test("strict AXI readiness and safe placeholders fail pack preview", async 
     "unknown AXI placeholder 'missing'",
   );
   const action =
-    `kind: Action\napiVersion: operant.dev/v1\nmetadata: {name: run}\nspec:\n  input: {value: {type: string, required: true}}\n  axi:\n    purpose: Run the test action.\n    successHelp: ["optctl changeset inspect \${stage_id}"]\n`;
+    `kind: Action\napiVersion: optd.dev/v1\nmetadata: {name: run}\nspec:\n  input: {value: {type: string, required: true}}\n  axi:\n    purpose: Run the test action.\n    successHelp: ["optctl changeset inspect \${stage_id}"]\n`;
   await assertRejects(
     () =>
       loadPackFromFiles([
@@ -887,9 +887,9 @@ Deno.test("strict AXI readiness and safe placeholders fail pack preview", async 
 
 Deno.test("strict pack loader accepts both publisher-qualified proof packs", async () => {
   for (
-    const [dir, expected] of [["prototypes/crm-default-pack", "operant/crm"], [
+    const [dir, expected] of [["prototypes/crm-default-pack", "optd/crm"], [
       "prototypes/project-management-pack",
-      "operant/projects",
+      "optd/projects",
     ]] as const
   ) {
     const files: UploadedPackFile[] = [];
@@ -917,8 +917,8 @@ Deno.test("strict pack loader accepts both publisher-qualified proof packs", asy
       object.ddl.includes('where "archived_at" is null') &&
       object.ddl.includes("_active_name")
     );
-    assertEquals(activeSeedIndexes.length, expected === "operant/crm" ? 5 : 2);
-    if (expected === "operant/projects") {
+    assertEquals(activeSeedIndexes.length, expected === "optd/crm" ? 5 : 2);
+    if (expected === "optd/projects") {
       const member = ddl.find((object) => object.name === "project_member")!;
       assert(
         member.ddl.includes(

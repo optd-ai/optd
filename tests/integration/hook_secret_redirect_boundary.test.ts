@@ -112,11 +112,11 @@ async function writeRedirectPack(
   await Deno.mkdir(`${root}/hooks`);
   await Deno.writeTextFile(
     `${root}/pack.yaml`,
-    `kind: Pack\napiVersion: operant.dev/v1\nmetadata: { publisher: test, name: redirect, version: 1.0.0 }\nspec: { purpose: Redirect boundary proof., axi: {} }\n`,
+    `kind: Pack\napiVersion: optd.dev/v1\nmetadata: { publisher: test, name: redirect, version: 1.0.0 }\nspec: { purpose: Redirect boundary proof., axi: {} }\n`,
   );
   await Deno.writeTextFile(
     `${root}/resources/item.yaml`,
-    `kind: Resource\napiVersion: operant.dev/v1\nmetadata: { name: item }\nspec:\n  fields:\n    name: { type: string, required: true }\n  axi: {}\n`,
+    `kind: Resource\napiVersion: optd.dev/v1\nmetadata: { name: item }\nspec:\n  fields:\n    name: { type: string, required: true }\n  axi: {}\n`,
   );
   const endpoints = [
     `127.0.0.1:${sourcePort}`,
@@ -124,7 +124,7 @@ async function writeRedirectPack(
   ].sort();
   await Deno.writeTextFile(
     `${root}/hooks/redirect.yaml`,
-    `kind: Hook\napiVersion: operant.dev/v1\nmetadata: { name: redirect }\nspec:\n  script: redirect.ts\n  permissions: { net: [${
+    `kind: Hook\napiVersion: optd.dev/v1\nmetadata: { name: redirect }\nspec:\n  script: redirect.ts\n  permissions: { net: [${
       endpoints.join(", ")
     }], env: false, read: false, write: false, run: false }\n  secrets: []\n  effects: { operations: [] }\n  output: { schema: validation.v1 }\n  attachments:\n    - { phase: changeset.validate, resource: item, input: { proposed: '$proposed' } }\n  axi: {}\n`,
   );

@@ -1,5 +1,5 @@
 kind: Policy
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: project_access
 spec:
@@ -8,7 +8,7 @@ spec:
     - name: projects_admin
       effect: allow
       roles:
-        - operant/projects:projects_admin
+        - optd/projects:projects_admin
       actions:
         - read
         - history.read
@@ -19,23 +19,23 @@ spec:
         - link
         - unlink
         - comment
-        - action:operant/projects:block_task
-        - action:operant/projects:complete_task
-        - action:operant/projects:start_task
+        - action:optd/projects:block_task
+        - action:optd/projects:complete_task
+        - action:optd/projects:start_task
       resources:
-        - operant/projects:project
-        - operant/projects:project_member
-        - operant/projects:project_milestone
-        - operant/projects:task
-        - operant/projects:task_stage
-        - operant/projects:task_tag
-        - operant/projects:timesheet
+        - optd/projects:project
+        - optd/projects:project_member
+        - optd/projects:project_milestone
+        - optd/projects:task
+        - optd/projects:task_stage
+        - optd/projects:task_tag
+        - optd/projects:timesheet
       axi:
         summary: Projects administrators may manage every Projects pack resource.
     - name: project_manager_approval
       effect: allow
       roles:
-        - operant/projects:project_manager
+        - optd/projects:project_manager
       actions:
         - changeset.approval.decide
       resources:
@@ -45,7 +45,7 @@ spec:
     - name: project_manager
       effect: allow
       roles:
-        - operant/projects:project_manager
+        - optd/projects:project_manager
       actions:
         - read
         - history.read
@@ -54,79 +54,79 @@ spec:
         - archive
         - transition
         - comment
-        - action:operant/projects:block_task
-        - action:operant/projects:complete_task
-        - action:operant/projects:start_task
+        - action:optd/projects:block_task
+        - action:optd/projects:complete_task
+        - action:optd/projects:start_task
       resources:
-        - operant/projects:project
-        - operant/projects:project_member
-        - operant/projects:project_milestone
-        - operant/projects:task
-        - operant/projects:task_stage
-        - operant/projects:task_tag
-        - operant/projects:timesheet
+        - optd/projects:project
+        - optd/projects:project_member
+        - optd/projects:project_milestone
+        - optd/projects:task
+        - optd/projects:task_stage
+        - optd/projects:task_tag
+        - optd/projects:timesheet
       axi:
         summary: Project managers may manage resources within their assigned Project boundary.
     - name: project_member_read
       effect: allow
       roles:
-        - operant/projects:project_member
+        - optd/projects:project_member
       actions:
         - read
         - history.read
         - create
       resources:
-        - operant/projects:project
-        - operant/projects:project_milestone
-        - operant/projects:task
-        - operant/projects:task_stage
-        - operant/projects:task_tag
+        - optd/projects:project
+        - optd/projects:project_milestone
+        - optd/projects:task
+        - optd/projects:task_stage
+        - optd/projects:task_tag
       axi:
         summary: Project members may read project content and create work items in their boundary.
     - name: assigned_task_work
       effect: allow
       roles:
-        - operant/projects:project_member
+        - optd/projects:project_member
       actions:
         - update
         - transition
         - comment
-        - action:operant/projects:block_task
-        - action:operant/projects:complete_task
-        - action:operant/projects:start_task
+        - action:optd/projects:block_task
+        - action:optd/projects:complete_task
+        - action:optd/projects:start_task
       resources:
-        - operant/projects:task
+        - optd/projects:task
       where: assignee_id == actor.id
       axi:
         summary: Project members may change only tasks assigned to their principal.
     - name: own_timesheet
       effect: allow
       roles:
-        - operant/projects:project_member
+        - optd/projects:project_member
       actions:
         - read
         - create
         - update
       resources:
-        - operant/projects:timesheet
+        - optd/projects:timesheet
       where: principal_id == actor.id
       axi:
         summary: Project members may manage only timesheets owned by their principal.
     - name: project_viewer
       effect: allow
       roles:
-        - operant/projects:viewer
+        - optd/projects:viewer
       actions:
         - read
         - history.read
       resources:
-        - operant/projects:project
-        - operant/projects:project_member
-        - operant/projects:project_milestone
-        - operant/projects:task
-        - operant/projects:task_stage
-        - operant/projects:task_tag
-        - operant/projects:timesheet
+        - optd/projects:project
+        - optd/projects:project_member
+        - optd/projects:project_milestone
+        - optd/projects:task
+        - optd/projects:task_stage
+        - optd/projects:task_tag
+        - optd/projects:timesheet
       axi:
         summary: Viewers have read-only access within their assigned Project boundary.
   axi:
@@ -134,4 +134,4 @@ spec:
     whenToUse:
       - Inspect Projects access before assigning a role at a Project boundary.
     help:
-      - optctl metadata policy operant/projects:project_access
+      - optctl metadata policy optd/projects:project_access

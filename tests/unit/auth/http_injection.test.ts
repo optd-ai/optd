@@ -157,21 +157,21 @@ Deno.test("changeset business fields allow principal references without granting
     project_id: uuidV7(),
     operations: [{
       op: "create",
-      resource: "operant/projects:project_member",
+      resource: "optd/projects:project_member",
       fields: { principal_id: uuidV7(), role: "contributor" },
     }, {
       op: "create",
-      resource: "operant/projects:timesheet",
+      resource: "optd/projects:timesheet",
       fields: { principal_id: uuidV7(), comments: "roles are not authority" },
     }, {
       op: "link",
-      relationship: "operant/projects:project_member",
+      relationship: "optd/projects:project_member",
       from: uuidV7(),
       to: uuidV7(),
       fields: { principal_id: uuidV7(), nested: { roles: ["domain-value"] } },
     }, {
       op: "update",
-      resource: "operant/projects:timesheet",
+      resource: "optd/projects:timesheet",
       object_id: uuidV7(),
       set: { principal_id: uuidV7() },
     }],
@@ -191,7 +191,7 @@ Deno.test("changeset business fields allow principal references without granting
       {
         operations: [{
           op: "create",
-          resource: "operant/projects:timesheet",
+          resource: "optd/projects:timesheet",
           fields: {},
           principal_id: "spoofed",
         }],
@@ -199,7 +199,7 @@ Deno.test("changeset business fields allow principal references without granting
       {
         operations: [{
           op: "transition",
-          resource: "operant/projects:timesheet",
+          resource: "optd/projects:timesheet",
           object_id: uuidV7(),
           to: "submitted",
           set: { principal_id: "spoofed" },
@@ -208,7 +208,7 @@ Deno.test("changeset business fields allow principal references without granting
       {
         operations: [{
           op: "create",
-          resource: "operant/projects:timesheet",
+          resource: "optd/projects:timesheet",
           fields: [{ principal_id: "spoofed" }],
         }],
       },
@@ -237,7 +237,7 @@ Deno.test("action inputs remain recursively protected and auth roles are exact",
     ]
   ) {
     assertEquals(
-      (await post("/api/v1/actions/operant/projects/start_task/stage", input))
+      (await post("/api/v1/actions/optd/projects/start_task/stage", input))
         .status,
       422,
     );
@@ -302,13 +302,13 @@ Deno.test("authenticated JSON replaces all caller authority with server context"
       "content-type": "application/json; charset=utf-8",
     },
     body: JSON.stringify({
-      resource: "operant/crm:lead",
+      resource: "optd/crm:lead",
       filter: { state: "open" },
     }),
   });
   assertEquals(response.status, 200);
   const input = (await response.json()).input;
-  assertEquals(input.resource, "operant/crm:lead");
+  assertEquals(input.resource, "optd/crm:lead");
   assertEquals(input.actor.id, context.principalId);
   assertEquals(input.actor_context.auth_context_id, context.id);
   assertEquals(input.actor.roles, ["super_admin"]);

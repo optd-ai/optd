@@ -1,5 +1,5 @@
 kind: Action
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: convert_lead
 spec:
@@ -21,11 +21,11 @@ spec:
         - sales_team_id
       required: true
   axi:
-    purpose: convert lead guidance for the operant/crm pack.
+    purpose: convert lead guidance for the optd/crm pack.
     whenToUse:
-      - Use operant/crm:convert_lead when its declared operation should be staged.
+      - Use optd/crm:convert_lead when its declared operation should be staged.
     stageFirst: true
     examples:
-      - optctl --project ${project} action stage operant/crm:convert_lead --input action.json
+      - optctl --project ${project} action stage optd/crm:convert_lead --input action.json
     successHelp:
       - optctl changeset inspect ${stage_id}

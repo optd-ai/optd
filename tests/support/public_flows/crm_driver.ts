@@ -18,7 +18,7 @@ import {
 import { isUuidV7, loginProcess, runJson } from "./helpers.ts";
 import { runCompleteCrmMigration } from "./crm_migration.ts";
 
-const CRM = "operant/crm";
+const CRM = "optd/crm";
 
 export async function runCompleteCrmPublicFlow(
   harness: CompletePublicFlowBackend,

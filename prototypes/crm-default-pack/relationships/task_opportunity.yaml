@@ -1,19 +1,19 @@
 kind: Relationship
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: task_opportunity
 spec:
   from:
-    resource: operant/crm:task
+    resource: optd/crm:task
   to:
-    resource: operant/crm:opportunity
+    resource: optd/crm:opportunity
   fields: {}
   axi:
-    purpose: task opportunity guidance for the operant/crm pack.
+    purpose: task opportunity guidance for the optd/crm pack.
     whenToUse:
       - Inspect relationship task_opportunity behavior and guidance before relying on it.
     help:
-      - optctl metadata relationship operant/crm:task_opportunity
+      - optctl metadata relationship optd/crm:task_opportunity
   unique:
     - from
     - to

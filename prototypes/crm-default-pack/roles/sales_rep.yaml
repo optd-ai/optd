@@ -1,13 +1,13 @@
 kind: Role
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: sales_rep
 spec:
   display_name: Sales Rep
   description: sales_rep responsibility for the crm proof pack.
   axi:
-    purpose: sales rep guidance for the operant/crm pack.
+    purpose: sales rep guidance for the optd/crm pack.
     whenToUse:
       - Inspect role sales_rep behavior and guidance before relying on it.
     help:
-      - optctl metadata role operant/crm:sales_rep
+      - optctl metadata role optd/crm:sales_rep

@@ -1,19 +1,19 @@
 kind: Relationship
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: activity_lead
 spec:
   from:
-    resource: operant/crm:activity
+    resource: optd/crm:activity
   to:
-    resource: operant/crm:lead
+    resource: optd/crm:lead
   fields: {}
   axi:
-    purpose: activity lead guidance for the operant/crm pack.
+    purpose: activity lead guidance for the optd/crm pack.
     whenToUse:
       - Inspect relationship activity_lead behavior and guidance before relying on it.
     help:
-      - optctl metadata relationship operant/crm:activity_lead
+      - optctl metadata relationship optd/crm:activity_lead
   unique:
     - from
     - to

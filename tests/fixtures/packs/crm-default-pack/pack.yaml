@@ -1,6 +1,6 @@
 {
   "kind": "Pack",
-  "apiVersion": "operant.dev/v1",
+  "apiVersion": "optd.dev/v1",
   "metadata": { "namespace": "default", "name": "crm", "version": "0.1.0" },
   "spec": {
     "purpose": "Prototype headless CRM pack for leads, contacts, companies, opportunities, activities, tasks, and safe agent operations.",

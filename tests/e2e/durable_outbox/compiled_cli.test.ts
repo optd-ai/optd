@@ -1967,16 +1967,16 @@ async function writePack(
   await Deno.mkdir(`${root}/hooks`, { recursive: true });
   await Deno.writeTextFile(
     `${root}/pack.yaml`,
-    `kind: Pack\napiVersion: operant.dev/v1\nmetadata: { publisher: test, name: durableoutbox, version: ${version} }\nspec: { purpose: Durable outbox E2E., axi: {} }\n`,
+    `kind: Pack\napiVersion: optd.dev/v1\nmetadata: { publisher: test, name: durableoutbox, version: ${version} }\nspec: { purpose: Durable outbox E2E., axi: {} }\n`,
   );
   await Deno.writeTextFile(
     `${root}/resources/item.yaml`,
-    `kind: Resource\napiVersion: operant.dev/v1\nmetadata: { name: item }\nspec:\n  fields:\n    key: { type: string, required: true, unique: true }\n    mode: { type: string, required: true }\n  axi: {}\n`,
+    `kind: Resource\napiVersion: optd.dev/v1\nmetadata: { name: item }\nspec:\n  fields:\n    key: { type: string, required: true, unique: true }\n    mode: { type: string, required: true }\n  axi: {}\n`,
   );
   const host = new URL(providerUrl).host;
   await Deno.writeTextFile(
     `${root}/hooks/deliver.yaml`,
-    `kind: Hook\napiVersion: operant.dev/v1\nmetadata: { name: deliver }\nspec:\n  script: deliver.ts\n  timeout: ${
+    `kind: Hook\napiVersion: optd.dev/v1\nmetadata: { name: deliver }\nspec:\n  script: deliver.ts\n  timeout: ${
       marker === "V2" ? "10s" : "1s"
     }\n  permissions: { net: [${host}], env: false, read: false, write: false, run: false }\n  secrets: [{ slot: token, env: OUTBOX_TOKEN }]\n  effects: { operations: [] }\n  output: { schema: delivery.v1 }\n  attachments:\n    - phase: event.after_commit\n      event: object.created\n      order: 10\n      condition: 'active() && event_type == "object.created" && version == 1 && object_version_id != null && actor.id != null'\n      input: { event: '$event', object_version: '$object_version', actor: '$actor' }\n    - phase: event.after_commit\n      event: object.created\n      order: 11\n      condition: 'false && event_type == "object.created"'\n      input: { event: '$event' }\n  axi: {}\n`,
   );
@@ -2014,7 +2014,7 @@ async function addHookB(root: string, providerUrl: string) {
   const host = new URL(providerUrl).host;
   await Deno.writeTextFile(
     `${root}/hooks/deliver_b.yaml`,
-    `kind: Hook\napiVersion: operant.dev/v1\nmetadata: { name: deliver_b }\nspec:\n  script: deliver_b.ts\n  timeout: 10s\n  permissions: { net: [${host}], env: false, read: false, write: false, run: false }\n  secrets: []\n  effects: { operations: [] }\n  output: { schema: delivery.v1 }\n  attachments:\n    - phase: event.after_commit\n      event: object.updated\n      order: 20\n      condition: 'event_type == "object.updated"'\n      input: { event: '$event' }\n    - phase: event.after_commit\n      event: object.updated\n      order: 21\n      condition: 'event_type == "object.updated"'\n      input: { event: '$event' }\n  axi: {}\n`,
+    `kind: Hook\napiVersion: optd.dev/v1\nmetadata: { name: deliver_b }\nspec:\n  script: deliver_b.ts\n  timeout: 10s\n  permissions: { net: [${host}], env: false, read: false, write: false, run: false }\n  secrets: []\n  effects: { operations: [] }\n  output: { schema: delivery.v1 }\n  attachments:\n    - phase: event.after_commit\n      event: object.updated\n      order: 20\n      condition: 'event_type == "object.updated"'\n      input: { event: '$event' }\n    - phase: event.after_commit\n      event: object.updated\n      order: 21\n      condition: 'event_type == "object.updated"'\n      input: { event: '$event' }\n  axi: {}\n`,
   );
   await Deno.writeTextFile(
     `${root}/hooks/deliver_b.ts`,

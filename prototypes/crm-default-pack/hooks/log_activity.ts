@@ -28,14 +28,14 @@ if (resource === "opportunity") fields.opportunity_id = objectId;
 if (resource === "contact") fields.contact_id = objectId;
 const operations: Array<Record<string, unknown>> = [{
   op: "create",
-  resource: "operant/crm:activity",
+  resource: "optd/crm:activity",
   key: "activity",
   fields,
 }];
 if (input.note) {
   operations.push({
     op: "create",
-    resource: "operant/crm:note",
+    resource: "optd/crm:note",
     fields: {
       body: input.note,
       [`${resource}_id`]: objectId,

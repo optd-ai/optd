@@ -1,6 +1,6 @@
 {
   "kind": "Hook",
-  "apiVersion": "operant.dev/v1",
+  "apiVersion": "optd.dev/v1",
   "metadata": {
     "name": "mark_lost",
   },

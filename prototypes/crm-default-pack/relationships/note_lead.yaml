@@ -1,19 +1,19 @@
 kind: Relationship
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: note_lead
 spec:
   from:
-    resource: operant/crm:note
+    resource: optd/crm:note
   to:
-    resource: operant/crm:lead
+    resource: optd/crm:lead
   fields: {}
   axi:
-    purpose: note lead guidance for the operant/crm pack.
+    purpose: note lead guidance for the optd/crm pack.
     whenToUse:
       - Inspect relationship note_lead behavior and guidance before relying on it.
     help:
-      - optctl metadata relationship operant/crm:note_lead
+      - optctl metadata relationship optd/crm:note_lead
   unique:
     - from
     - to

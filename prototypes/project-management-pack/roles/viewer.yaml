@@ -1,13 +1,13 @@
 kind: Role
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: viewer
 spec:
   display_name: Viewer
   description: viewer responsibility for the projects proof pack.
   axi:
-    purpose: viewer guidance for the operant/projects pack.
+    purpose: viewer guidance for the optd/projects pack.
     whenToUse:
       - Inspect role viewer behavior and guidance before relying on it.
     help:
-      - optctl metadata role operant/projects:viewer
+      - optctl metadata role optd/projects:viewer

@@ -1,9 +1,9 @@
 kind: Lifecycle
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: opportunity_pipeline
 spec:
-  resource: operant/crm:opportunity
+  resource: optd/crm:opportunity
   field: stage
   states:
     - name: new
@@ -31,9 +31,9 @@ spec:
         - proposal
       to: lost
   axi:
-    purpose: opportunity pipeline guidance for the operant/crm pack.
+    purpose: opportunity pipeline guidance for the optd/crm pack.
     whenToUse:
       - Inspect lifecycle opportunity_pipeline behavior and guidance before relying on it.
     help:
-      - optctl metadata lifecycle operant/crm:opportunity_pipeline
+      - optctl metadata lifecycle optd/crm:opportunity_pipeline
   initial: new

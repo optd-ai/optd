@@ -1,5 +1,5 @@
 kind: Hook
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: mark_lost
 spec:
@@ -18,19 +18,19 @@ spec:
       input:
         action_input: $action.input
         actor: $actor
-      action: operant/crm:mark_lost
+      action: optd/crm:mark_lost
   axi:
-    purpose: mark lost guidance for the operant/crm pack.
+    purpose: mark lost guidance for the optd/crm pack.
     whenToUse:
       - Inspect hook mark_lost behavior and guidance before relying on it.
     help:
-      - optctl metadata hook operant/crm:mark_lost
+      - optctl metadata hook optd/crm:mark_lost
   secrets: []
   effects:
     operations:
-      - resource: operant/crm:note
+      - resource: optd/crm:note
         ops:
           - create
-      - resource: operant/crm:opportunity
+      - resource: optd/crm:opportunity
         ops:
           - transition

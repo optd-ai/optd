@@ -1,6 +1,6 @@
 {
   "kind": "Action",
-  "apiVersion": "operant.dev/v1",
+  "apiVersion": "optd.dev/v1",
   "metadata": {
     "name": "log_activity",
   },

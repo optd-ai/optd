@@ -1,5 +1,5 @@
 kind: Resource
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: contact
 spec:
@@ -16,9 +16,9 @@ spec:
     owner_id:
       type: string
   axi:
-    purpose: contact guidance for the operant/crm pack.
+    purpose: contact guidance for the optd/crm pack.
     whenToUse:
-      - Use operant/crm:contact when working with contact records.
+      - Use optd/crm:contact when working with contact records.
     identity:
       title: ${name}
       labelFields:
@@ -33,7 +33,7 @@ spec:
       empty:
         message: No contact records found.
         help:
-          - optctl --project ${project} create operant/crm:contact --input object.json --stage
+          - optctl --project ${project} create optd/crm:contact --input object.json --stage
     detail:
       sections:
         - title: contact
@@ -44,11 +44,11 @@ spec:
             - title
             - owner_id
       help:
-        - optctl --project ${project} query operant/crm:contact --where 'id == "${id}"'
+        - optctl --project ${project} query optd/crm:contact --where 'id == "${id}"'
     help:
       list:
-        - optctl --project ${project} query operant/crm:contact
+        - optctl --project ${project} query optd/crm:contact
       view:
-        - optctl --project ${project} view operant/crm:contact ${id}
+        - optctl --project ${project} view optd/crm:contact ${id}
       created:
-        - optctl --project ${project} view operant/crm:contact ${id}
+        - optctl --project ${project} view optd/crm:contact ${id}

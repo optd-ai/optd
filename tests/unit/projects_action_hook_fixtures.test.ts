@@ -12,12 +12,12 @@ for (
     {
       name: "start_task",
       input: { task_id: taskId, stage_id: stageId },
-      effects: new Map([["operant/projects:task", new Set(["transition"])]]),
+      effects: new Map([["optd/projects:task", new Set(["transition"])]]),
     },
     {
       name: "block_task",
       input: { task_id: taskId, stage_id: stageId, blocked_reason: "waiting" },
-      effects: new Map([["operant/projects:task", new Set(["transition"])]]),
+      effects: new Map([["optd/projects:task", new Set(["transition"])]]),
     },
     {
       name: "complete_task",
@@ -28,8 +28,8 @@ for (
         entry_date: "2026-07-24",
       },
       effects: new Map([
-        ["operant/projects:task", new Set(["transition"])],
-        ["operant/projects:timesheet", new Set(["create"])],
+        ["optd/projects:task", new Set(["transition"])],
+        ["optd/projects:timesheet", new Set(["create"])],
       ]),
     },
   ]
@@ -40,7 +40,7 @@ for (
     );
     const runner = new DenoHookRunner({ cacheDir: await Deno.makeTempDir() });
     const result = await runner.run({
-      namespace: "operant/projects",
+      namespace: "optd/projects",
       name: fixture.name,
       revision: "fixture",
       scriptPath: `hooks/${fixture.name}.ts`,
@@ -50,7 +50,7 @@ for (
       timeoutMs: 30_000,
       permissions: {},
     }, {
-      hook: `operant/projects:${fixture.name}`,
+      hook: `optd/projects:${fixture.name}`,
       phase: "action.stage",
       input: {
         action_input: fixture.input,

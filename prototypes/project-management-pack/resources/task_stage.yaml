@@ -1,5 +1,5 @@
 kind: Resource
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: task_stage
 spec:
@@ -26,9 +26,9 @@ spec:
       fields: [name]
       where: active()
   axi:
-    purpose: task stage guidance for the operant/projects pack.
+    purpose: task stage guidance for the optd/projects pack.
     whenToUse:
-      - Use operant/projects:task_stage when working with task stage records.
+      - Use optd/projects:task_stage when working with task stage records.
     identity:
       title: ${name}
       labelFields:
@@ -43,7 +43,7 @@ spec:
       empty:
         message: No task stage records found.
         help:
-          - optctl --project ${project} create operant/projects:task_stage --input object.json
+          - optctl --project ${project} create optd/projects:task_stage --input object.json
             --stage
     detail:
       sections:
@@ -54,11 +54,11 @@ spec:
             - sequence
             - folded
       help:
-        - optctl --project ${project} query operant/projects:task_stage --where 'id == "${id}"'
+        - optctl --project ${project} query optd/projects:task_stage --where 'id == "${id}"'
     help:
       list:
-        - optctl --project ${project} query operant/projects:task_stage
+        - optctl --project ${project} query optd/projects:task_stage
       view:
-        - optctl --project ${project} view operant/projects:task_stage ${id}
+        - optctl --project ${project} view optd/projects:task_stage ${id}
       created:
-        - optctl --project ${project} view operant/projects:task_stage ${id}
+        - optctl --project ${project} view optd/projects:task_stage ${id}

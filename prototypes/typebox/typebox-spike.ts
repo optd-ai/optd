@@ -188,7 +188,7 @@ export const OperationSchema = Type.Union([
   CommentOperation,
 ], { $id: "ChangesetOperation" });
 export const ChangesetPreviewRequestSchema = Type.Object({
-  apiVersion: Type.Literal("operant.dev/v1"),
+  apiVersion: Type.Literal("optd.dev/v1"),
   actor: ActorSchema,
   idempotencyKey: Type.Optional(Type.String()),
   reason: Type.Optional(Type.String()),
@@ -196,13 +196,13 @@ export const ChangesetPreviewRequestSchema = Type.Object({
 }, { additionalProperties: false, $id: "ChangesetPreviewRequest" });
 export const ChangesetCommitRequestSchema = Type.Union([
   Type.Object({
-    apiVersion: Type.Literal("operant.dev/v1"),
+    apiVersion: Type.Literal("optd.dev/v1"),
     actor: ActorSchema,
     idempotencyKey: Type.String(),
     previewId: Type.String(),
   }, { additionalProperties: false }),
   Type.Object({
-    apiVersion: Type.Literal("operant.dev/v1"),
+    apiVersion: Type.Literal("optd.dev/v1"),
     actor: ActorSchema,
     idempotencyKey: Type.String(),
     reason: Type.Optional(Type.String()),

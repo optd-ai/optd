@@ -1,5 +1,5 @@
 kind: Hook
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: notify_crm_change
 spec:
@@ -35,11 +35,11 @@ spec:
       input:
         event: $event
   axi:
-    purpose: notify crm change guidance for the operant/crm pack.
+    purpose: notify crm change guidance for the optd/crm pack.
     whenToUse:
       - Inspect hook notify_crm_change behavior and guidance before relying on it.
     help:
-      - optctl metadata hook operant/crm:notify_crm_change
+      - optctl metadata hook optd/crm:notify_crm_change
   secrets:
     - slot: crm_webhook_token
       env: CRM_WEBHOOK_TOKEN

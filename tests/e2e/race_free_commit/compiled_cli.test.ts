@@ -389,18 +389,18 @@ async function writeCommitPack(root: string) {
   await Deno.mkdir(`${root}/lifecycles`);
   await Deno.writeTextFile(
     `${root}/pack.yaml`,
-    `kind: Pack\napiVersion: operant.dev/v1\nmetadata: { publisher: test, name: commitproof, version: 1.0.0 }\nspec: { purpose: Canonical commit acceptance., axi: {} }\n`,
+    `kind: Pack\napiVersion: optd.dev/v1\nmetadata: { publisher: test, name: commitproof, version: 1.0.0 }\nspec: { purpose: Canonical commit acceptance., axi: {} }\n`,
   );
   await Deno.writeTextFile(
     `${root}/resources/item.yaml`,
-    `kind: Resource\napiVersion: operant.dev/v1\nmetadata: { name: item }\nspec:\n  fields:\n    name: { type: string, required: true, unique: true }\n    status: { type: string, required: true }\n    note: { type: string }\n  axi: {}\n`,
+    `kind: Resource\napiVersion: optd.dev/v1\nmetadata: { name: item }\nspec:\n  fields:\n    name: { type: string, required: true, unique: true }\n    status: { type: string, required: true }\n    note: { type: string }\n  axi: {}\n`,
   );
   await Deno.writeTextFile(
     `${root}/relationships/item_link.yaml`,
-    `kind: Relationship\napiVersion: operant.dev/v1\nmetadata: { name: item_link }\nspec:\n  from: { resource: item }\n  to: { resource: item }\n  fields:\n    label: { type: string }\n  unique: [from, to]\n  axi: {}\n`,
+    `kind: Relationship\napiVersion: optd.dev/v1\nmetadata: { name: item_link }\nspec:\n  from: { resource: item }\n  to: { resource: item }\n  fields:\n    label: { type: string }\n  unique: [from, to]\n  axi: {}\n`,
   );
   await Deno.writeTextFile(
     `${root}/lifecycles/item_status.yaml`,
-    `kind: Lifecycle\napiVersion: operant.dev/v1\nmetadata: { name: item_status }\nspec:\n  resource: item\n  field: status\n  initial: new\n  states:\n    - { name: new, terminal: false }\n    - { name: active, terminal: false }\n  transitions:\n    - name: activate\n      from: [new]\n      to: active\n      set: { note: transitioned }\n  axi: {}\n`,
+    `kind: Lifecycle\napiVersion: optd.dev/v1\nmetadata: { name: item_status }\nspec:\n  resource: item\n  field: status\n  initial: new\n  states:\n    - { name: new, terminal: false }\n    - { name: active, terminal: false }\n  transitions:\n    - name: activate\n      from: [new]\n      to: active\n      set: { note: transitioned }\n  axi: {}\n`,
   );
 }

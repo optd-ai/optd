@@ -224,7 +224,7 @@ async function objectAndReadDependenciesCannotSlip(admin: Sql, nextClient: () =>
 
 async function packApplyWaitsForCommit(admin: Sql, nextClient: () => Sql) {
   await admin.unsafe(
-    "update proto_pack_installations set active_revision=1 where pack='operant/test'",
+    "update proto_pack_installations set active_revision=1 where pack='optd/test'",
   );
   const objectId = id(50);
   await insertObject(admin, "proto_a", objectId, "before");
@@ -257,7 +257,7 @@ async function packApplyWaitsForCommit(admin: Sql, nextClient: () => Sql) {
 
 async function commitWaitingForPackBecomesStale(admin: Sql, nextClient: () => Sql) {
   await admin.unsafe(
-    "update proto_pack_installations set active_revision=1 where pack='operant/test'",
+    "update proto_pack_installations set active_revision=1 where pack='optd/test'",
   );
   const objectId = id(60);
   await insertObject(admin, "proto_a", objectId, "before");
@@ -290,7 +290,7 @@ async function commitWaitingForPackBecomesStale(admin: Sql, nextClient: () => Sq
 
 async function differentRowsRemainConcurrent(admin: Sql, nextClient: () => Sql) {
   await admin.unsafe(
-    "update proto_pack_installations set active_revision=1 where pack='operant/test'",
+    "update proto_pack_installations set active_revision=1 where pack='optd/test'",
   );
   const firstObject = id(70);
   const secondObject = id(71);

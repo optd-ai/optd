@@ -1,20 +1,20 @@
 kind: Relationship
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: task_milestone
 spec:
   from:
-    resource: operant/projects:task
+    resource: optd/projects:task
   to:
-    resource: operant/projects:project_milestone
+    resource: optd/projects:project_milestone
   fields:
     note:
       type: string
   axi:
-    purpose: task milestone guidance for the operant/projects pack.
+    purpose: task milestone guidance for the optd/projects pack.
     whenToUse:
       - Inspect relationship task_milestone behavior and guidance before relying on it.
     help:
-      - optctl metadata relationship operant/projects:task_milestone
+      - optctl metadata relationship optd/projects:task_milestone
   unique:
     - from

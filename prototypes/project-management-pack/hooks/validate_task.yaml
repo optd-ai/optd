@@ -1,5 +1,5 @@
 kind: Hook
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: validate_task
 spec:
@@ -15,7 +15,7 @@ spec:
     schema: validation.v1
   attachments:
     - phase: changeset.validate
-      resource: operant/projects:task
+      resource: optd/projects:task
       order: 100
       input:
         operation: $operation
@@ -23,7 +23,7 @@ spec:
         current: $current
         proposed: $proposed
     - phase: changeset.validate
-      resource: operant/projects:timesheet
+      resource: optd/projects:timesheet
       order: 100
       input:
         operation: $operation
@@ -31,11 +31,11 @@ spec:
         current: $current
         proposed: $proposed
   axi:
-    purpose: validate task guidance for the operant/projects pack.
+    purpose: validate task guidance for the optd/projects pack.
     whenToUse:
       - Inspect hook validate_task behavior and guidance before relying on it.
     help:
-      - optctl metadata hook operant/projects:validate_task
+      - optctl metadata hook optd/projects:validate_task
   secrets: []
   effects:
     operations: []

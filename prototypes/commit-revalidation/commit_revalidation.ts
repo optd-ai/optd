@@ -136,7 +136,7 @@ export async function installSchema(sql: Sql): Promise<void> {
       version integer not null,
       value text
     )`,
-    "insert into proto_pack_installations values ('operant/test', 1)",
+    "insert into proto_pack_installations values ('optd/test', 1)",
   ];
   await sql.begin(async (tx) => {
     for (const statement of statements) await tx.unsafe(statement);
@@ -202,7 +202,7 @@ export async function commitStage(
         // Re-read revision only after acquiring table locks. READ COMMITTED gives
         // this statement a current snapshot after waiting for pack apply.
         const packs = await tx.unsafe(
-          "select active_revision from proto_pack_installations where pack = 'operant/test'",
+          "select active_revision from proto_pack_installations where pack = 'optd/test'",
         );
         if (Number(packs[0]?.active_revision) !== Number(stage.pack_revision)) {
           return {
@@ -369,7 +369,7 @@ export async function applyPackRevision(
       }
       await options.hooks?.afterTableLocks?.();
       await tx.unsafe(
-        "update proto_pack_installations set active_revision = $1 where pack = 'operant/test'",
+        "update proto_pack_installations set active_revision = $1 where pack = 'optd/test'",
         [revision],
       );
       return "applied" as const;

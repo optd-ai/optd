@@ -1,5 +1,5 @@
 kind: Hook
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: approve_opportunity
 spec:
@@ -18,7 +18,7 @@ spec:
     schema: validation.v1
   attachments:
     - phase: changeset.validate
-      resource: operant/crm:opportunity
+      resource: optd/crm:opportunity
       order: 200
       input:
         operation: $operation
@@ -30,4 +30,4 @@ spec:
     whenToUse:
       - Inspect this hook when reviewing opportunity approval requirements.
     help:
-      - optctl metadata hook operant/crm:approve_opportunity
+      - optctl metadata hook optd/crm:approve_opportunity

@@ -847,19 +847,19 @@ async function writeRacePack(root: string): Promise<void> {
   await Deno.mkdir(`${root}/hooks`);
   await Deno.writeTextFile(
     `${root}/pack.yaml`,
-    `kind: Pack\napiVersion: operant.dev/v1\nmetadata: { publisher: test, name: races, version: 1.0.0 }\nspec: { purpose: Deterministic approval race evidence., axi: {} }\n`,
+    `kind: Pack\napiVersion: optd.dev/v1\nmetadata: { publisher: test, name: races, version: 1.0.0 }\nspec: { purpose: Deterministic approval race evidence., axi: {} }\n`,
   );
   await Deno.writeTextFile(
     `${root}/roles/reviewer.yaml`,
-    `kind: Role\napiVersion: operant.dev/v1\nmetadata: { name: reviewer }\nspec:\n  display_name: Race Reviewer\n  description: Exact reviewer role for deterministic approval races.\n  axi: {}\n`,
+    `kind: Role\napiVersion: optd.dev/v1\nmetadata: { name: reviewer }\nspec:\n  display_name: Race Reviewer\n  description: Exact reviewer role for deterministic approval races.\n  axi: {}\n`,
   );
   await Deno.writeTextFile(
     `${root}/resources/approval_case.yaml`,
-    `kind: Resource\napiVersion: operant.dev/v1\nmetadata: { name: approval_case }\nspec:\n  fields:\n    name: { type: string, required: true, unique: true }\n    minimum: { type: integer, required: true }\n    allow_initiator: { type: boolean, required: true }\n    principal_kind: { type: string, required: true }\n    expires_at: { type: string, required: true }\n  axi: {}\n`,
+    `kind: Resource\napiVersion: optd.dev/v1\nmetadata: { name: approval_case }\nspec:\n  fields:\n    name: { type: string, required: true, unique: true }\n    minimum: { type: integer, required: true }\n    allow_initiator: { type: boolean, required: true }\n    principal_kind: { type: string, required: true }\n    expires_at: { type: string, required: true }\n  axi: {}\n`,
   );
   await Deno.writeTextFile(
     `${root}/hooks/approval.yaml`,
-    `kind: Hook\napiVersion: operant.dev/v1\nmetadata: { name: approval }\nspec:\n  script: approval.ts\n  permissions: { net: false, env: false, read: false, write: false, run: false }\n  secrets: []\n  effects: { operations: [] }\n  output: { schema: validation.v1 }\n  attachments:\n    - { phase: changeset.validate, resource: approval_case, input: { proposed: '$proposed' } }\n  axi: {}\n`,
+    `kind: Hook\napiVersion: optd.dev/v1\nmetadata: { name: approval }\nspec:\n  script: approval.ts\n  permissions: { net: false, env: false, read: false, write: false, run: false }\n  secrets: []\n  effects: { operations: [] }\n  output: { schema: validation.v1 }\n  attachments:\n    - { phase: changeset.validate, resource: approval_case, input: { proposed: '$proposed' } }\n  axi: {}\n`,
   );
   await Deno.writeTextFile(
     `${root}/hooks/approval.ts`,

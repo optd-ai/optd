@@ -1,9 +1,9 @@
 kind: Seed
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: lost_reasons
 spec:
-  resource: operant/crm:lost_reason
+  resource: optd/crm:lost_reason
   key: name
   mode: changeset
   rows:
@@ -20,8 +20,8 @@ spec:
       label: No response
       active: true
   axi:
-    purpose: lost reasons guidance for the operant/crm pack.
+    purpose: lost reasons guidance for the optd/crm pack.
     whenToUse:
       - Inspect seed lost_reasons behavior and guidance before relying on it.
     help:
-      - optctl metadata seed operant/crm:lost_reasons
+      - optctl metadata seed optd/crm:lost_reasons

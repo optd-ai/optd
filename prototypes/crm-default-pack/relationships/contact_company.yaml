@@ -1,23 +1,23 @@
 kind: Relationship
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: contact_company
 spec:
   from:
-    resource: operant/crm:contact
+    resource: optd/crm:contact
   to:
-    resource: operant/crm:company
+    resource: optd/crm:company
   fields:
     role:
       type: string
     primary:
       type: boolean
   axi:
-    purpose: contact company guidance for the operant/crm pack.
+    purpose: contact company guidance for the optd/crm pack.
     whenToUse:
       - Inspect relationship contact_company behavior and guidance before relying on it.
     help:
-      - optctl metadata relationship operant/crm:contact_company
+      - optctl metadata relationship optd/crm:contact_company
   unique:
     - from
     - to

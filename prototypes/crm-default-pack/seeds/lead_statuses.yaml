@@ -1,9 +1,9 @@
 kind: Seed
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: lead_statuses
 spec:
-  resource: operant/crm:lead_status
+  resource: optd/crm:lead_status
   key: name
   mode: changeset
   rows:
@@ -28,8 +28,8 @@ spec:
       sort_order: 50
       terminal: true
   axi:
-    purpose: lead statuses guidance for the operant/crm pack.
+    purpose: lead statuses guidance for the optd/crm pack.
     whenToUse:
       - Inspect seed lead_statuses behavior and guidance before relying on it.
     help:
-      - optctl metadata seed operant/crm:lead_statuses
+      - optctl metadata seed optd/crm:lead_statuses

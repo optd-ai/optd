@@ -1972,12 +1972,12 @@ export async function writePack(
   await Deno.mkdir(`${root}/lifecycles`);
   await Deno.writeTextFile(
     `${root}/pack.yaml`,
-    `kind: Pack\napiVersion: operant.dev/v1\nmetadata: { publisher: test, name: actionproof, version: 1.0.0 }\nspec: { purpose: Action stage integration proof., axi: {} }\n`,
+    `kind: Pack\napiVersion: optd.dev/v1\nmetadata: { publisher: test, name: actionproof, version: 1.0.0 }\nspec: { purpose: Action stage integration proof., axi: {} }\n`,
   );
   for (const name of ["source", "target"]) {
     await Deno.writeTextFile(
       `${root}/resources/${name}.yaml`,
-      `kind: Resource\napiVersion: operant.dev/v1\nmetadata: { name: ${name} }\nspec:\n  fields:\n    name: { type: string, required: true${
+      `kind: Resource\napiVersion: optd.dev/v1\nmetadata: { name: ${name} }\nspec:\n  fields:\n    name: { type: string, required: true${
         name === "source" ? ", unique: true" : ""
       } }\n    status: { type: string, required: true }\n    note: { type: string }\n${
         name === "target"
@@ -1988,35 +1988,35 @@ export async function writePack(
   }
   await Deno.writeTextFile(
     `${root}/relationships/source_actor.yaml`,
-    `kind: Relationship\napiVersion: operant.dev/v1\nmetadata: { name: source_actor }\nspec:\n  from: { resource: source }\n  to: { resource: system:principal }\n  fields: {}\n  unique: [from, to]\n  axi: {}\n`,
+    `kind: Relationship\napiVersion: optd.dev/v1\nmetadata: { name: source_actor }\nspec:\n  from: { resource: source }\n  to: { resource: system:principal }\n  fields: {}\n  unique: [from, to]\n  axi: {}\n`,
   );
   await Deno.writeTextFile(
     `${root}/roles/operator.yaml`,
-    `kind: Role\napiVersion: operant.dev/v1\nmetadata: { name: operator }\nspec:\n  display_name: Action Operator\n  description: Exercises exact targeted action authority.\n  axi: {}\n`,
+    `kind: Role\napiVersion: optd.dev/v1\nmetadata: { name: operator }\nspec:\n  display_name: Action Operator\n  description: Exercises exact targeted action authority.\n  axi: {}\n`,
   );
   await Deno.writeTextFile(
     `${root}/policies/action_access.yaml`,
-    `kind: Policy\napiVersion: operant.dev/v1\nmetadata: { name: action_access }\nspec:\n  default_assignment: all_projects\n  rules:\n    - name: action_operator\n      effect: allow\n      roles: [test/actionproof:operator]\n      actions: [read, action:test/actionproof:generate]\n      resources: [test/actionproof:source]\n      axi: { summary: Action operators may exercise the exact reviewed source. }\n    - name: effect_operator\n      effect: allow\n      roles: [test/actionproof:operator]\n      actions: [create, update]\n      resources: [test/actionproof:target]\n      axi: { summary: Direct changes may mutate fixture targets. }\n    - name: relationship_operator\n      effect: allow\n      roles: [test/actionproof:operator]\n      actions: [link, unlink]\n      resources: [test/actionproof:source_actor]\n      axi: { summary: Action operators may manage fixture relationships. }\n  axi: {}\n`,
+    `kind: Policy\napiVersion: optd.dev/v1\nmetadata: { name: action_access }\nspec:\n  default_assignment: all_projects\n  rules:\n    - name: action_operator\n      effect: allow\n      roles: [test/actionproof:operator]\n      actions: [read, action:test/actionproof:generate]\n      resources: [test/actionproof:source]\n      axi: { summary: Action operators may exercise the exact reviewed source. }\n    - name: effect_operator\n      effect: allow\n      roles: [test/actionproof:operator]\n      actions: [create, update]\n      resources: [test/actionproof:target]\n      axi: { summary: Direct changes may mutate fixture targets. }\n    - name: relationship_operator\n      effect: allow\n      roles: [test/actionproof:operator]\n      actions: [link, unlink]\n      resources: [test/actionproof:source_actor]\n      axi: { summary: Action operators may manage fixture relationships. }\n  axi: {}\n`,
   );
   await Deno.writeTextFile(
     `${root}/lifecycles/source_status.yaml`,
-    `kind: Lifecycle\napiVersion: operant.dev/v1\nmetadata: { name: source_status }\nspec:\n  resource: source\n  field: status\n  initial: ready\n  states:\n    - { name: ready, terminal: false }\n    - { name: blocked, terminal: true }\n  transitions:\n    - { name: block, from: [ready], to: blocked }\n  axi: {}\n`,
+    `kind: Lifecycle\napiVersion: optd.dev/v1\nmetadata: { name: source_status }\nspec:\n  resource: source\n  field: status\n  initial: ready\n  states:\n    - { name: ready, terminal: false }\n    - { name: blocked, terminal: true }\n  transitions:\n    - { name: block, from: [ready], to: blocked }\n  axi: {}\n`,
   );
   await Deno.writeTextFile(
     `${root}/seeds/targets.yaml`,
-    `kind: Seed\napiVersion: operant.dev/v1\nmetadata: { name: targets }\nspec:\n  resource: target\n  key: name\n  mode: changeset\n  rows:\n    - { name: Seeded Target, status: ready }\n  axi: {}\n`,
+    `kind: Seed\napiVersion: optd.dev/v1\nmetadata: { name: targets }\nspec:\n  resource: target\n  key: name\n  mode: changeset\n  rows:\n    - { name: Seeded Target, status: ready }\n  axi: {}\n`,
   );
   await Deno.writeTextFile(
     `${root}/seeds/targets_alt.yaml`,
-    `kind: Seed\napiVersion: operant.dev/v1\nmetadata: { name: targets_alt }\nspec:\n  resource: target\n  key: name\n  mode: changeset\n  rows:\n    - { name: Alternate Target, status: ready }\n  axi: {}\n`,
+    `kind: Seed\napiVersion: optd.dev/v1\nmetadata: { name: targets_alt }\nspec:\n  resource: target\n  key: name\n  mode: changeset\n  rows:\n    - { name: Alternate Target, status: ready }\n  axi: {}\n`,
   );
   await Deno.writeTextFile(
     `${root}/actions/generate.yaml`,
-    `kind: Action\napiVersion: operant.dev/v1\nmetadata: { name: generate }\nspec:\n  input:\n    source_id: { type: string, required: true, format: uuid }\n  reads:\n    source:\n      resource: source\n      id_from: '$action.input.source_id'\n      fields: [name, status]\n      required: true\n  availability:\n    resource: source\n    states: [ready]\n    condition: 'status == "ready"'\n  axi: {}\n`,
+    `kind: Action\napiVersion: optd.dev/v1\nmetadata: { name: generate }\nspec:\n  input:\n    source_id: { type: string, required: true, format: uuid }\n  reads:\n    source:\n      resource: source\n      id_from: '$action.input.source_id'\n      fields: [name, status]\n      required: true\n  availability:\n    resource: source\n    states: [ready]\n    condition: 'status == "ready"'\n  axi: {}\n`,
   );
   await Deno.writeTextFile(
     `${root}/hooks/generate.yaml`,
-    `kind: Hook\napiVersion: operant.dev/v1\nmetadata: { name: generate }\nspec:\n  script: generate.ts\n  timeout: 5s\n  permissions: { net: [${endpoint}], env: false, read: false, write: false, run: false }\n  secrets: []\n  effects:\n    operations:\n      - { resource: test/actionproof:target, ops: [create, update] }\n  output: { schema: changeset.operations.v1 }\n  attachments:\n    - phase: action.stage\n      action: test/actionproof:generate\n      order: 10\n      input: { actor: '$actor', read: '$reads.source', request: '$action.input' }\n  axi: {}\n`,
+    `kind: Hook\napiVersion: optd.dev/v1\nmetadata: { name: generate }\nspec:\n  script: generate.ts\n  timeout: 5s\n  permissions: { net: [${endpoint}], env: false, read: false, write: false, run: false }\n  secrets: []\n  effects:\n    operations:\n      - { resource: test/actionproof:target, ops: [create, update] }\n  output: { schema: changeset.operations.v1 }\n  attachments:\n    - phase: action.stage\n      action: test/actionproof:generate\n      order: 10\n      input: { actor: '$actor', read: '$reads.source', request: '$action.input' }\n  axi: {}\n`,
   );
   await Deno.writeTextFile(
     `${root}/hooks/generate.ts`,

@@ -1,9 +1,9 @@
 kind: Seed
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: activity_types
 spec:
-  resource: operant/crm:activity_type
+  resource: optd/crm:activity_type
   key: name
   mode: changeset
   rows:
@@ -20,8 +20,8 @@ spec:
       label: To Do
       default_deadline_days: 2
   axi:
-    purpose: activity types guidance for the operant/crm pack.
+    purpose: activity types guidance for the optd/crm pack.
     whenToUse:
       - Inspect seed activity_types behavior and guidance before relying on it.
     help:
-      - optctl metadata seed operant/crm:activity_types
+      - optctl metadata seed optd/crm:activity_types

@@ -94,12 +94,12 @@ async function writeFailurePack(root: string): Promise<void> {
   await Deno.mkdir(`${root}/hooks`);
   await Deno.writeTextFile(
     `${root}/pack.yaml`,
-    `kind: Pack\napiVersion: operant.dev/v1\nmetadata: { publisher: test, name: failures, version: 1.0.0 }\nspec: { purpose: Hook failure matrix., axi: {} }\n`,
+    `kind: Pack\napiVersion: optd.dev/v1\nmetadata: { publisher: test, name: failures, version: 1.0.0 }\nspec: { purpose: Hook failure matrix., axi: {} }\n`,
   );
   for (const name of [...CASES.map((item) => item.name), "stderr"]) {
     await Deno.writeTextFile(
       `${root}/resources/${name}.yaml`,
-      `kind: Resource\napiVersion: operant.dev/v1\nmetadata: { name: ${name} }\nspec:\n  fields:\n    name: { type: string, required: true }\n  axi: {}\n`,
+      `kind: Resource\napiVersion: optd.dev/v1\nmetadata: { name: ${name} }\nspec:\n  fields:\n    name: { type: string, required: true }\n  axi: {}\n`,
     );
   }
   const definitions = [
@@ -151,7 +151,7 @@ async function writeFailurePack(root: string): Promise<void> {
   for (const definition of definitions) {
     await Deno.writeTextFile(
       `${root}/hooks/${definition.name}.yaml`,
-      `kind: Hook\napiVersion: operant.dev/v1\nmetadata: { name: ${definition.name} }\nspec:\n  script: ${definition.name}.ts\n${definition.timeout}  permissions: { ${definition.permissions}, read: false, write: false, run: false }\n  secrets: []\n  effects: { operations: [] }\n  output: { schema: validation.v1 }\n  attachments:\n    - { phase: changeset.validate, resource: ${definition.name}, input: { proposed: '$proposed' } }\n  axi: {}\n`,
+      `kind: Hook\napiVersion: optd.dev/v1\nmetadata: { name: ${definition.name} }\nspec:\n  script: ${definition.name}.ts\n${definition.timeout}  permissions: { ${definition.permissions}, read: false, write: false, run: false }\n  secrets: []\n  effects: { operations: [] }\n  output: { schema: validation.v1 }\n  attachments:\n    - { phase: changeset.validate, resource: ${definition.name}, input: { proposed: '$proposed' } }\n  axi: {}\n`,
     );
     await Deno.writeTextFile(
       `${root}/hooks/${definition.name}.ts`,

@@ -16,7 +16,7 @@ import {
 } from "./backend.ts";
 import { isUuidV7, runJson } from "./helpers.ts";
 
-const PROJECTS = "operant/projects";
+const PROJECTS = "optd/projects";
 const SYNCHRONOUS_HOOK_BUDGET_MS = 2_000;
 
 export async function runCompleteProjectsPublicFlow(
@@ -185,7 +185,7 @@ export async function runCompleteProjectsPublicFlow(
           "grant",
           "projects_provider",
           "--hook",
-          "operant/projects:deliver",
+          "optd/projects:deliver",
           "--slot",
           "projects_provider_token",
         ]),
@@ -754,7 +754,7 @@ export async function runCompleteProjectsPublicFlow(
           "create",
           String(createdReader.id),
           "--role",
-          "operant/projects:linked_reader",
+          "optd/projects:linked_reader",
           "--project",
           projectId,
         ]),
@@ -778,7 +778,7 @@ export async function runCompleteProjectsPublicFlow(
             operations: [{
               op: "link",
               project_id: projectId,
-              relationship: "operant/projects:task_viewer",
+              relationship: "optd/projects:task_viewer",
               from: taskId,
               to: readers[0].principalId,
             }],
@@ -1402,7 +1402,7 @@ async function waitOutboxDeliveryStatus(
           "outbox",
           "list",
           "--hook",
-          "operant/projects:deliver",
+          "optd/projects:deliver",
           "--limit",
           "100",
         ]),

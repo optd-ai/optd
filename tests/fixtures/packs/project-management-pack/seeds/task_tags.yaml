@@ -1,6 +1,6 @@
 {
   "kind": "Seed",
-  "apiVersion": "operant.dev/v1",
+  "apiVersion": "optd.dev/v1",
   "metadata": { "name": "task_tags" },
   "spec": {
     "resource": "task_tag",

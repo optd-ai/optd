@@ -1,5 +1,5 @@
 kind: Resource
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: lost_reason
 spec:
@@ -18,9 +18,9 @@ spec:
       fields: [name]
       where: active()
   axi:
-    purpose: lost reason guidance for the operant/crm pack.
+    purpose: lost reason guidance for the optd/crm pack.
     whenToUse:
-      - Use operant/crm:lost_reason when working with lost reason records.
+      - Use optd/crm:lost_reason when working with lost reason records.
     identity:
       title: ${name}
       labelFields:
@@ -34,7 +34,7 @@ spec:
       empty:
         message: No lost reason records found.
         help:
-          - optctl --project ${project} create operant/crm:lost_reason --input object.json --stage
+          - optctl --project ${project} create optd/crm:lost_reason --input object.json --stage
     detail:
       sections:
         - title: lost reason
@@ -43,11 +43,11 @@ spec:
             - label
             - active
       help:
-        - optctl --project ${project} query operant/crm:lost_reason --where 'id == "${id}"'
+        - optctl --project ${project} query optd/crm:lost_reason --where 'id == "${id}"'
     help:
       list:
-        - optctl --project ${project} query operant/crm:lost_reason
+        - optctl --project ${project} query optd/crm:lost_reason
       view:
-        - optctl --project ${project} view operant/crm:lost_reason ${id}
+        - optctl --project ${project} view optd/crm:lost_reason ${id}
       created:
-        - optctl --project ${project} view operant/crm:lost_reason ${id}
+        - optctl --project ${project} view optd/crm:lost_reason ${id}

@@ -1,7 +1,7 @@
 kind: Pack
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
-  publisher: operant
+  publisher: optd
   name: crm
   version: 0.1.0
 spec:
@@ -12,24 +12,24 @@ spec:
       tasks, and safe agent operations.
     home:
       resources:
-        - operant/crm:activity
-        - operant/crm:activity_type
-        - operant/crm:company
-        - operant/crm:contact
-        - operant/crm:lead
-        - operant/crm:lead_status
-        - operant/crm:lost_reason
-        - operant/crm:note
-        - operant/crm:opportunity
-        - operant/crm:opportunity_stage
-        - operant/crm:sales_team
-        - operant/crm:task
+        - optd/crm:activity
+        - optd/crm:activity_type
+        - optd/crm:company
+        - optd/crm:contact
+        - optd/crm:lead
+        - optd/crm:lead_status
+        - optd/crm:lost_reason
+        - optd/crm:note
+        - optd/crm:opportunity
+        - optd/crm:opportunity_stage
+        - optd/crm:sales_team
+        - optd/crm:task
       actions:
-        - operant/crm:convert_lead
-        - operant/crm:log_activity
-        - operant/crm:mark_lost
-        - operant/crm:mark_won
+        - optd/crm:convert_lead
+        - optd/crm:log_activity
+        - optd/crm:mark_lost
+        - optd/crm:mark_won
       help:
         - optctl resources
-        - optctl --project ${project} query operant/crm:activity
-        - optctl metadata pack operant/crm
+        - optctl --project ${project} query optd/crm:activity
+        - optctl metadata pack optd/crm

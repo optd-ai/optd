@@ -1,5 +1,5 @@
 kind: Resource
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: sales_team
 spec:
@@ -21,9 +21,9 @@ spec:
       fields: [name]
       where: active()
   axi:
-    purpose: sales team guidance for the operant/crm pack.
+    purpose: sales team guidance for the optd/crm pack.
     whenToUse:
-      - Use operant/crm:sales_team when working with sales team records.
+      - Use optd/crm:sales_team when working with sales team records.
     identity:
       title: ${name}
       labelFields:
@@ -38,7 +38,7 @@ spec:
       empty:
         message: No sales team records found.
         help:
-          - optctl --project ${project} create operant/crm:sales_team --input object.json --stage
+          - optctl --project ${project} create optd/crm:sales_team --input object.json --stage
     detail:
       sections:
         - title: sales team
@@ -49,11 +49,11 @@ spec:
             - email_alias
             - monthly_target
       help:
-        - optctl --project ${project} query operant/crm:sales_team --where 'id == "${id}"'
+        - optctl --project ${project} query optd/crm:sales_team --where 'id == "${id}"'
     help:
       list:
-        - optctl --project ${project} query operant/crm:sales_team
+        - optctl --project ${project} query optd/crm:sales_team
       view:
-        - optctl --project ${project} view operant/crm:sales_team ${id}
+        - optctl --project ${project} view optd/crm:sales_team ${id}
       created:
-        - optctl --project ${project} view operant/crm:sales_team ${id}
+        - optctl --project ${project} view optd/crm:sales_team ${id}

@@ -113,7 +113,7 @@ Deno.test("compiled pack preview persists inactive reusable candidates and disti
       "--json",
       "metadata",
       "resource",
-      "operant/crm:lead",
+      "optd/crm:lead",
     ]);
     assertEquals(canonicalMetadata.code, 1);
     assertEquals(JSON.parse(canonicalMetadata.stderr).error.code, "not_found");
@@ -146,7 +146,7 @@ Deno.test("compiled pack preview persists inactive reusable candidates and disti
       harness,
       {
         "pack.yaml": strictRoot().replace(
-          "publisher: operant",
+          "publisher: optd",
           "namespace: default",
         ),
       },
@@ -186,7 +186,7 @@ Deno.test("compiled pack preview persists inactive reusable candidates and disti
           "name: {type: string, required: true}\n    amount: {type: decimal, required: true}\n  constraints:\n    - {name: strict_lead_active_name, kind: unique, fields: [name], where: 'active()'}",
         ),
         "seeds/leads.yaml":
-          `kind: Seed\napiVersion: operant.dev/v1\nmetadata: {name: leads}\nspec: {resource: lead, key: name, mode: changeset, rows: [{name: first, amount: 1.25}], axi: {}}\n`,
+          `kind: Seed\napiVersion: optd.dev/v1\nmetadata: {name: leads}\nspec: {resource: lead, key: name, mode: changeset, rows: [{name: first, amount: 1.25}], axi: {}}\n`,
       },
       "seeds/leads.yaml",
       "only JSON safe integers",
@@ -288,10 +288,10 @@ Deno.test("compiled pack preview persists inactive reusable candidates and disti
 });
 
 function strictRoot() {
-  return `kind: Pack\napiVersion: operant.dev/v1\nmetadata: {publisher: operant, name: malformed, version: 0.1.0}\nspec: {purpose: Malformed strict pack., axi: {}}\n`;
+  return `kind: Pack\napiVersion: optd.dev/v1\nmetadata: {publisher: optd, name: malformed, version: 0.1.0}\nspec: {purpose: Malformed strict pack., axi: {}}\n`;
 }
 function strictResource() {
-  return `kind: Resource\napiVersion: operant.dev/v1\nmetadata: {name: lead}\nspec:\n  fields:\n    name: {type: string, required: true}\n  axi: {}\n`;
+  return `kind: Resource\napiVersion: optd.dev/v1\nmetadata: {name: lead}\nspec:\n  fields:\n    name: {type: string, required: true}\n  axi: {}\n`;
 }
 async function assertMalformedPack(
   harness: LiveHarness,

@@ -38,7 +38,7 @@ Deno.test("action policy targets require every resolved read", () => {
   const task = {
     definition: {
       kind: "resource" as const,
-      publisher: "operant",
+      publisher: "optd",
       pack: "projects",
       name: "task",
     },
@@ -47,7 +47,7 @@ Deno.test("action policy targets require every resolved read", () => {
   const stage = {
     definition: {
       kind: "resource" as const,
-      publisher: "operant",
+      publisher: "optd",
       pack: "projects",
       name: "project_stage",
     },
@@ -61,7 +61,7 @@ Deno.test("action policy targets require every resolved read", () => {
 
 Deno.test("absent optional reads and zero-read actions never derive authority from effects", () => {
   assertEquals(
-    resolveActionPolicyTargets([], [{ resource: "operant/projects:task" }]),
+    resolveActionPolicyTargets([], [{ resource: "optd/projects:task" }]),
     null,
   );
   assertEquals(resolveActionPolicyTargets([], []), null);
@@ -74,8 +74,8 @@ Deno.test("absent optional reads and zero-read actions never derive authority fr
 Deno.test("effect manifests cannot substitute reviewed authorization targets", () => {
   assertEquals(
     resolveActionPolicyTargets([], [
-      { resource: "operant/projects:task" },
-      { resource: "operant/projects:timesheet" },
+      { resource: "optd/projects:task" },
+      { resource: "optd/projects:timesheet" },
     ]),
     null,
   );

@@ -1,13 +1,13 @@
 kind: Role
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: crm_admin
 spec:
   display_name: Crm Admin
   description: crm_admin responsibility for the crm proof pack.
   axi:
-    purpose: crm admin guidance for the operant/crm pack.
+    purpose: crm admin guidance for the optd/crm pack.
     whenToUse:
       - Inspect role crm_admin behavior and guidance before relying on it.
     help:
-      - optctl metadata role operant/crm:crm_admin
+      - optctl metadata role optd/crm:crm_admin

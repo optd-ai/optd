@@ -14,7 +14,7 @@ Deno.test("object and relationship read DTOs are strict and UUIDv7 typed", () =>
     id,
     project_id: id,
     resource: {
-      publisher: "operant",
+      publisher: "optd",
       pack: "crm",
       name: "lead",
       revision_id: id,
@@ -31,7 +31,7 @@ Deno.test("object and relationship read DTOs are strict and UUIDv7 typed", () =>
     id,
     project_id: id,
     relationship: {
-      publisher: "operant",
+      publisher: "optd",
       pack: "crm",
       name: "contact_company",
       revision_id: id,
@@ -51,7 +51,7 @@ Deno.test("object and relationship read DTOs are strict and UUIDv7 typed", () =>
       id: id.toUpperCase(),
       project_id: id,
       resource: {
-        publisher: "operant",
+        publisher: "optd",
         pack: "crm",
         name: "lead",
         revision_id: id,
@@ -71,7 +71,7 @@ Deno.test("object and relationship read DTOs are strict and UUIDv7 typed", () =>
       id,
       project_id: id,
       resource: {
-        publisher: "operant",
+        publisher: "optd",
         pack: "crm",
         name: "lead",
         revision_id: id,

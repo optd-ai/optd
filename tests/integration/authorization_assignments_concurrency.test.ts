@@ -44,22 +44,22 @@ Deno.test("assignment disable ordering preserves immutable contexts and cuts off
     const policyVersion = uuidV7();
     await query(
       harness.server.sql,
-      "insert into system_roles(id,display_name,active) values('operant/test:operator','Operator',true)",
+      "insert into system_roles(id,display_name,active) values('optd/test:operator','Operator',true)",
     );
     await query(
       harness.server.sql,
-      "insert into role_definition_versions(id,role_id,version,active) values($1,'operant/test:operator',1,true)",
+      "insert into role_definition_versions(id,role_id,version,active) values($1,'optd/test:operator',1,true)",
       [roleVersion],
     );
     await query(
       harness.server.sql,
-      "insert into policy_definition_versions(id,policy_id,version,active) values($1,'operant/test:race_policy',1,true)",
+      "insert into policy_definition_versions(id,policy_id,version,active) values($1,'optd/test:race_policy',1,true)",
       [policyVersion],
     );
     await query(
       harness.server.sql,
       `insert into policy_rules(id,policy_definition_version_id,role_id,capability,resource,condition_kind)
-       values($1,$2,'operant/test:operator','auth.request.decide','*','unconditional')`,
+       values($1,$2,'optd/test:operator','auth.request.decide','*','unconditional')`,
       [uuidV7(), policyVersion],
     );
     const roleCreated = await harness.runOptctl([
@@ -69,7 +69,7 @@ Deno.test("assignment disable ordering preserves immutable contexts and cuts off
       "create",
       user.id,
       "--role",
-      "operant/test:operator",
+      "optd/test:operator",
       "--boundary",
       "all_projects",
     ]);
@@ -101,7 +101,7 @@ Deno.test("assignment disable ordering preserves immutable contexts and cuts off
     );
     const grantBeforeRole = await grantability.current({
       auth: actorContext,
-      roles: ["operant/test:operator"],
+      roles: ["optd/test:operator"],
       boundary: { type: "project", projectId: project },
     });
     assertEquals(grantBeforeRole.ok && grantBeforeRole.value.canDecide, true);
@@ -126,7 +126,7 @@ Deno.test("assignment disable ordering preserves immutable contexts and cuts off
       0,
     );
     const beforeRole = await authority(harness, actor, project);
-    assertEquals(beforeRole.effective_roles, ["operant/test:operator"]);
+    assertEquals(beforeRole.effective_roles, ["optd/test:operator"]);
     assertEquals(
       beforeRole.capabilities.some((item: Record<string, unknown>) =>
         item.action === "auth.request.decide"
@@ -140,7 +140,7 @@ Deno.test("assignment disable ordering preserves immutable contexts and cuts off
     assertEquals(afterRole.effective_roles, []);
     const grantAfterRole = await grantability.current({
       auth: actorContext,
-      roles: ["operant/test:operator"],
+      roles: ["optd/test:operator"],
       boundary: { type: "project", projectId: project },
     });
     assertEquals(grantAfterRole.ok && grantAfterRole.value.canDecide, false);
@@ -151,7 +151,7 @@ Deno.test("assignment disable ordering preserves immutable contexts and cuts off
     assertEquals(
       (await query<{ count: number }>(
         harness.server.sql,
-        "select count(*)::int count from auth_context_role_assignments where auth_context_id=$1 and role_id='operant/test:operator'",
+        "select count(*)::int count from auth_context_role_assignments where auth_context_id=$1 and role_id='optd/test:operator'",
         [beforeRole.auth_context_id],
       )).rows[0].count,
       1,
@@ -159,7 +159,7 @@ Deno.test("assignment disable ordering preserves immutable contexts and cuts off
     assertEquals(
       (await query<{ count: number }>(
         harness.server.sql,
-        "select count(*)::int count from auth_context_role_assignments where auth_context_id=$1 and role_id='operant/test:operator'",
+        "select count(*)::int count from auth_context_role_assignments where auth_context_id=$1 and role_id='optd/test:operator'",
         [afterRole.auth_context_id],
       )).rows[0].count,
       0,
@@ -177,14 +177,14 @@ Deno.test("assignment disable ordering preserves immutable contexts and cuts off
       root,
       `/api/v1/auth/users/${user.id}/role-assignments`,
       {
-        role: "operant/test:operator",
+        role: "optd/test:operator",
         boundary: { type: "all_projects" },
       },
     );
     assertEquals(replacementRole.status, 201);
     const grantBeforePolicy = await grantability.current({
       auth: actorContext,
-      roles: ["operant/test:operator"],
+      roles: ["optd/test:operator"],
       boundary: { type: "project", projectId: project },
     });
     assertEquals(
@@ -215,17 +215,17 @@ Deno.test("assignment disable ordering preserves immutable contexts and cuts off
       0,
     );
     const beforePolicy = await authority(harness, actor, project);
-    assertEquals(beforePolicy.effective_roles, ["operant/test:operator"]);
+    assertEquals(beforePolicy.effective_roles, ["optd/test:operator"]);
     assertEquals(beforePolicy.capabilities.length, 1);
     policyLock.release();
     assertEquals((await disablePolicy).status, 200);
     await policyLock.done;
     const afterPolicy = await authority(harness, actor, project);
-    assertEquals(afterPolicy.effective_roles, ["operant/test:operator"]);
+    assertEquals(afterPolicy.effective_roles, ["optd/test:operator"]);
     assertEquals(afterPolicy.capabilities, []);
     const grantAfterPolicy = await grantability.current({
       auth: actorContext,
-      roles: ["operant/test:operator"],
+      roles: ["optd/test:operator"],
       boundary: { type: "project", projectId: project },
     });
     assertEquals(
