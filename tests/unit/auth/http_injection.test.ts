@@ -1,5 +1,5 @@
-import { assertEquals } from "jsr:@std/assert";
-import { Hono } from "npm:hono";
+import { assertEquals } from "@std/assert";
+import { Hono } from "hono";
 import { authenticatedJson } from "../../../src/adapters/inbound/http-hono/app.ts";
 import {
   type AuthVariables,

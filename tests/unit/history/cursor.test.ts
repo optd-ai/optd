@@ -1,4 +1,4 @@
-import { assertEquals, assertRejects, assertThrows } from "jsr:@std/assert";
+import { assertEquals, assertRejects, assertThrows } from "@std/assert";
 import { HistoryCursorSigner } from "../../../src/domain/history/cursor.ts";
 
 const position = {

@@ -3,7 +3,7 @@ import {
   FilesystemLocalAuthStore,
   normalizeOrigin,
 } from "../../outbound/local-auth-store/filesystem.ts";
-import { dirname, join } from "jsr:@std/path";
+import { dirname, join } from "@std/path";
 import { platformProcessInspector } from "../../outbound/process-inspection/linux.ts";
 import type { LocalCredential } from "../../../application/ports/local_auth.ts";
 import type { ProcessIdentity } from "../../../application/ports/process_inspection.ts";

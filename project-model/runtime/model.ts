@@ -745,7 +745,7 @@ function validateProjections(
   const viewIds = new Set<string>();
   const paths = new Set<string>();
   const placed = new Map<string, string>();
-  for (const view of views as any[]) {
+  for (const view of views) {
     if (!view || typeof view !== "object") {
       errors.push("projection must be an object");
       continue;
@@ -816,7 +816,7 @@ function validateProjections(
     for (const id of childIds) {
       if (typeof id !== "string") {
         errors.push(`${label}.childViewIds must contain strings`);
-      } else if (!views.some((candidate: any) => candidate?.id === id)) {
+      } else if (!views.some((candidate) => candidate?.id === id)) {
         errors.push(`${label} references missing child view ${id}`);
       }
     }

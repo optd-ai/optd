@@ -3,7 +3,7 @@ import {
   assertEquals,
   assertRejects,
   assertStringIncludes,
-} from "jsr:@std/assert";
+} from "@std/assert";
 import {
   closePostgresClient,
   createPostgresClient,

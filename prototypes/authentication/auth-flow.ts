@@ -1,5 +1,5 @@
-import { hash, verify } from "npm:@node-rs/argon2";
-import { Hono } from "npm:hono";
+import { hash, verify } from "@node-rs/argon2";
+import { Hono } from "hono";
 
 type Boundary =
   | { type: "project"; project_id: string }

@@ -93,8 +93,7 @@ export class SpecProjector {
     for (const absolute of files) {
       const relative = posixify(absolute.slice(`${this.root}/`.length));
       if (declared.has(relative)) continue;
-      let content: string;
-      content = await readFile(absolute, "utf8");
+      const content = await readFile(absolute, "utf8");
       if (isGeneratedContent(content)) stale.push(relative);
     }
     return stale.sort();
@@ -306,8 +305,8 @@ async function assertSafeTarget(root: string, target: string) {
       if ((await lstat(current)).isSymbolicLink()) {
         throw new Error(`Refusing projection path through symlink: ${current}`);
       }
-    } catch (error: any) {
-      if (error?.code !== "ENOENT") throw error;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") throw error;
       break;
     }
   }
@@ -316,8 +315,7 @@ async function assertSafeTarget(root: string, target: string) {
 async function markdownFiles(root: string): Promise<string[]> {
   const output: string[] = [];
   const walk = async (directory: string) => {
-    let entries;
-    entries = await readdir(directory, { withFileTypes: true });
+    const entries = await readdir(directory, { withFileTypes: true });
     for (const entry of entries) {
       const path = join(directory, entry.name);
       if (entry.isSymbolicLink()) {

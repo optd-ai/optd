@@ -1,4 +1,4 @@
-import { assertEquals, assertRejects } from "jsr:@std/assert";
+import { assertEquals, assertRejects } from "@std/assert";
 import { makeProcessTreeLauncher } from "../../support/live_harness.ts";
 
 Deno.test("persistent launchers repeatedly run and close without stream leaks", async () => {

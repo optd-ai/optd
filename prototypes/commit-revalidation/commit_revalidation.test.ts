@@ -1,8 +1,5 @@
-import {
-  assert,
-  assertEquals,
-} from "jsr:@std/assert";
-import postgres from "npm:postgres";
+import { assert, assertEquals } from "@std/assert";
+import postgres from "postgres";
 import {
   findPostgresBins,
   startManagedPostgres,
@@ -75,7 +72,9 @@ Deno.test({
       await failedRevalidationLeavesNoPartialFacts(admin, nextClient);
       await postgresDeadlockIsDetectedAndRetryable(nextClient);
     } finally {
-      await Promise.all(clients.map((sql) => sql.end({ timeout: 2 }).catch(() => undefined)));
+      await Promise.all(
+        clients.map((sql) => sql.end({ timeout: 2 }).catch(() => undefined)),
+      );
       await stopManagedPostgres(pg).catch(() => undefined);
       await Deno.remove(root, { recursive: true }).catch(() => undefined);
     }
@@ -94,19 +93,24 @@ async function sameStageCommitsOnce(admin: Sql, nextClient: () => Sql) {
   const locked = deferred();
   const release = deferred();
   const first = commitStage(nextClient(), stageId, {
-    hooks: { afterStageLock: async () => {
-      locked.resolve();
-      await release.promise;
-    } },
+    hooks: {
+      afterStageLock: async () => {
+        locked.resolve();
+        await release.promise;
+      },
+    },
   });
   await locked.promise;
   const second = commitStage(nextClient(), stageId);
   release.resolve();
   const results = await Promise.all([first, second]);
-  assertEquals(new Set(results.map((result) => result.status)), new Set([
-    "committed",
-    "already_committed",
-  ]));
+  assertEquals(
+    new Set(results.map((result) => result.status)),
+    new Set([
+      "committed",
+      "already_committed",
+    ]),
+  );
   const counts = await admin.unsafe(
     "select count(*)::int count from proto_commits where stage_id=$1",
     [stageId],
@@ -114,7 +118,10 @@ async function sameStageCommitsOnce(admin: Sql, nextClient: () => Sql) {
   assertEquals(counts[0].count, 1);
 }
 
-async function commitAndCancellationHaveOneWinner(admin: Sql, nextClient: () => Sql) {
+async function commitAndCancellationHaveOneWinner(
+  admin: Sql,
+  nextClient: () => Sql,
+) {
   const objectId = id(20);
   await insertObject(admin, "proto_a", objectId, "before");
   const stageId = id(21);
@@ -126,10 +133,12 @@ async function commitAndCancellationHaveOneWinner(admin: Sql, nextClient: () => 
   const locked = deferred();
   const release = deferred();
   const committing = commitStage(nextClient(), stageId, {
-    hooks: { afterStageLock: async () => {
-      locked.resolve();
-      await release.promise;
-    } },
+    hooks: {
+      afterStageLock: async () => {
+        locked.resolve();
+        await release.promise;
+      },
+    },
   });
   await locked.promise;
   const cancelling = cancelStage(nextClient(), stageId);
@@ -144,10 +153,16 @@ async function commitAndCancellationHaveOneWinner(admin: Sql, nextClient: () => 
     operations: [op("proto_a", objectId, "mutate", 2, "never")],
   });
   assertEquals(await cancelStage(admin, cancelledStage), "cancelled");
-  assertEquals((await commitStage(admin, cancelledStage)).status, "stage_cancelled");
+  assertEquals(
+    (await commitStage(admin, cancelledStage)).status,
+    "stage_cancelled",
+  );
 }
 
-async function approvalMutationUsesStageLock(admin: Sql, nextClient: () => Sql) {
+async function approvalMutationUsesStageLock(
+  admin: Sql,
+  nextClient: () => Sql,
+) {
   const objectId = id(30);
   await insertObject(admin, "proto_a", objectId, "before");
   const stageId = id(31);
@@ -159,10 +174,12 @@ async function approvalMutationUsesStageLock(admin: Sql, nextClient: () => Sql) 
   const locked = deferred();
   const release = deferred();
   const commit = commitStage(nextClient(), stageId, {
-    hooks: { afterStageLock: async () => {
-      locked.resolve();
-      await release.promise;
-    } },
+    hooks: {
+      afterStageLock: async () => {
+        locked.resolve();
+        await release.promise;
+      },
+    },
   });
   await locked.promise;
   let approvalFinished = false;
@@ -177,7 +194,10 @@ async function approvalMutationUsesStageLock(admin: Sql, nextClient: () => Sql) 
   assertEquals(await revoke, "already_committed");
 }
 
-async function objectAndReadDependenciesCannotSlip(admin: Sql, nextClient: () => Sql) {
+async function objectAndReadDependenciesCannotSlip(
+  admin: Sql,
+  nextClient: () => Sql,
+) {
   const objectA = id(40);
   const objectB = id(41);
   await insertObject(admin, "proto_a", objectA, "before-a");
@@ -194,10 +214,12 @@ async function objectAndReadDependenciesCannotSlip(admin: Sql, nextClient: () =>
   const locked = deferred();
   const release = deferred();
   const commit = commitStage(nextClient(), stageId, {
-    hooks: { afterDependencyLocks: async () => {
-      locked.resolve();
-      await release.promise;
-    } },
+    hooks: {
+      afterDependencyLocks: async () => {
+        locked.resolve();
+        await release.promise;
+      },
+    },
   });
   await locked.promise;
   let updateFinished = false;
@@ -237,17 +259,21 @@ async function packApplyWaitsForCommit(admin: Sql, nextClient: () => Sql) {
   const locked = deferred();
   const release = deferred();
   const commit = commitStage(nextClient(), stageId, {
-    hooks: { afterTableLocks: async () => {
-      locked.resolve();
-      await release.promise;
-    } },
+    hooks: {
+      afterTableLocks: async () => {
+        locked.resolve();
+        await release.promise;
+      },
+    },
   });
   await locked.promise;
   let applyFinished = false;
-  const apply = applyPackRevision(nextClient(), 2, ["proto_b", "proto_a"]).then((result) => {
-    applyFinished = true;
-    return result;
-  });
+  const apply = applyPackRevision(nextClient(), 2, ["proto_b", "proto_a"]).then(
+    (result) => {
+      applyFinished = true;
+      return result;
+    },
+  );
   await delay(75);
   assertEquals(applyFinished, false);
   release.resolve();
@@ -255,7 +281,10 @@ async function packApplyWaitsForCommit(admin: Sql, nextClient: () => Sql) {
   assertEquals(await apply, "applied");
 }
 
-async function commitWaitingForPackBecomesStale(admin: Sql, nextClient: () => Sql) {
+async function commitWaitingForPackBecomesStale(
+  admin: Sql,
+  nextClient: () => Sql,
+) {
   await admin.unsafe(
     "update proto_pack_installations set active_revision=1 where pack='optd/test'",
   );
@@ -271,10 +300,12 @@ async function commitWaitingForPackBecomesStale(admin: Sql, nextClient: () => Sq
   const locked = deferred();
   const release = deferred();
   const apply = applyPackRevision(nextClient(), 2, ["proto_a", "proto_b"], {
-    hooks: { afterTableLocks: async () => {
-      locked.resolve();
-      await release.promise;
-    } },
+    hooks: {
+      afterTableLocks: async () => {
+        locked.resolve();
+        await release.promise;
+      },
+    },
   });
   await locked.promise;
   const commit = commitStage(nextClient(), stageId);
@@ -288,7 +319,10 @@ async function commitWaitingForPackBecomesStale(admin: Sql, nextClient: () => Sq
   }
 }
 
-async function differentRowsRemainConcurrent(admin: Sql, nextClient: () => Sql) {
+async function differentRowsRemainConcurrent(
+  admin: Sql,
+  nextClient: () => Sql,
+) {
   await admin.unsafe(
     "update proto_pack_installations set active_revision=1 where pack='optd/test'",
   );
@@ -310,10 +344,12 @@ async function differentRowsRemainConcurrent(admin: Sql, nextClient: () => Sql) 
   });
   const bothLocked = countdown(2);
   const release = deferred();
-  const hook = { afterTableLocks: async () => {
-    bothLocked.arrive();
-    await release.promise;
-  } };
+  const hook = {
+    afterTableLocks: async () => {
+      bothLocked.arrive();
+      await release.promise;
+    },
+  };
   const first = commitStage(nextClient(), firstStage, { hooks: hook });
   const second = commitStage(nextClient(), secondStage, { hooks: hook });
   await bothLocked.promise;
@@ -322,7 +358,10 @@ async function differentRowsRemainConcurrent(admin: Sql, nextClient: () => Sql) 
   assertEquals((await second).status, "committed");
 }
 
-async function oppositeAuthoredOrdersDoNotDeadlock(admin: Sql, nextClient: () => Sql) {
+async function oppositeAuthoredOrdersDoNotDeadlock(
+  admin: Sql,
+  nextClient: () => Sql,
+) {
   const a = id(80);
   const b = id(81);
   await insertObject(admin, "proto_a", a, "a");
@@ -354,7 +393,10 @@ async function oppositeAuthoredOrdersDoNotDeadlock(admin: Sql, nextClient: () =>
   assert(!results.some((result) => result.status === "commit_retry_exhausted"));
 }
 
-async function authorizationHasOneStatementCutoff(admin: Sql, nextClient: () => Sql) {
+async function authorizationHasOneStatementCutoff(
+  admin: Sql,
+  nextClient: () => Sql,
+) {
   const deniedObject = id(90);
   await insertObject(admin, "proto_a", deniedObject, "before");
   const deniedStage = id(91);
@@ -379,15 +421,19 @@ async function authorizationHasOneStatementCutoff(admin: Sql, nextClient: () => 
     stageId: overlapStage,
     projectId: PROJECT,
     actorId: "revoked-overlap",
-    operations: [op("proto_a", overlapObject, "mutate", 1, "allowed-at-cutoff")],
+    operations: [
+      op("proto_a", overlapObject, "mutate", 1, "allowed-at-cutoff"),
+    ],
   });
   const authorized = deferred();
   const release = deferred();
   const commit = commitStage(nextClient(), overlapStage, {
-    hooks: { afterAuthorization: async () => {
-      authorized.resolve();
-      await release.promise;
-    } },
+    hooks: {
+      afterAuthorization: async () => {
+        authorized.resolve();
+        await release.promise;
+      },
+    },
   });
   await authorized.promise;
   await nextClient().unsafe(
@@ -397,7 +443,10 @@ async function authorizationHasOneStatementCutoff(admin: Sql, nextClient: () => 
   assertEquals((await commit).status, "committed");
 }
 
-async function requestLockTimeoutOverridesDefault(admin: Sql, nextClient: () => Sql) {
+async function requestLockTimeoutOverridesDefault(
+  admin: Sql,
+  nextClient: () => Sql,
+) {
   const objectId = id(100);
   await insertObject(admin, "proto_a", objectId, "before");
   const shortStage = id(101);
@@ -415,7 +464,8 @@ async function requestLockTimeoutOverridesDefault(admin: Sql, nextClient: () => 
   });
   await holderReady.promise;
   assertEquals(
-    (await commitStage(nextClient(), shortStage, { lockTimeoutMs: 100 })).status,
+    (await commitStage(nextClient(), shortStage, { lockTimeoutMs: 100 }))
+      .status,
     "commit_busy",
   );
 
@@ -431,7 +481,10 @@ async function requestLockTimeoutOverridesDefault(admin: Sql, nextClient: () => 
   assertEquals((await long).status, "committed");
 }
 
-async function failedRevalidationLeavesNoPartialFacts(admin: Sql, nextClient: () => Sql) {
+async function failedRevalidationLeavesNoPartialFacts(
+  admin: Sql,
+  nextClient: () => Sql,
+) {
   const objectId = id(110);
   await insertObject(admin, "proto_a", objectId, "before");
   const stageId = id(111);
@@ -440,7 +493,10 @@ async function failedRevalidationLeavesNoPartialFacts(admin: Sql, nextClient: ()
     projectId: PROJECT,
     operations: [op("proto_a", objectId, "mutate", 99, "never")],
   });
-  assertEquals((await commitStage(nextClient(), stageId)).status, "stage_stale");
+  assertEquals(
+    (await commitStage(nextClient(), stageId)).status,
+    "stage_stale",
+  );
   const partials = await admin.unsafe(
     `select
        (select count(*)::int from proto_commits where stage_id=$1) commits,
@@ -473,12 +529,18 @@ async function postgresDeadlockIsDetectedAndRetryable(nextClient: () => Sql) {
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
         await sql.begin(async (tx) => {
-          await tx.unsafe("update proto_deadlock set value=value+1 where id=$1", [firstId]);
+          await tx.unsafe(
+            "update proto_deadlock set value=value+1 where id=$1",
+            [firstId],
+          );
           if (attempt === 1) {
             barrier.arrive();
             await barrier.promise;
           }
-          await tx.unsafe("update proto_deadlock set value=value+1 where id=$1", [secondId]);
+          await tx.unsafe(
+            "update proto_deadlock set value=value+1 where id=$1",
+            [secondId],
+          );
         });
         return attempt;
       } catch (error) {
@@ -520,7 +582,12 @@ function id(n: number): string {
   return `019bef41-0000-7000-8000-${String(n).padStart(12, "0")}`;
 }
 
-async function insertObject(sql: Sql, table: "proto_a" | "proto_b", objectId: string, value: string) {
+async function insertObject(
+  sql: Sql,
+  table: "proto_a" | "proto_b",
+  objectId: string,
+  value: string,
+) {
   await sql.unsafe(
     `insert into ${table}(id,version,value) values ($1,1,$2)`,
     [objectId, value],

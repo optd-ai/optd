@@ -1,4 +1,4 @@
-import { assertEquals } from "jsr:@std/assert";
+import { assertEquals } from "@std/assert";
 import { validatePassword } from "../../../src/domain/auth/validation.ts";
 import { loadPasswordPolicy } from "../../../src/application/services/auth/human.ts";
 import { transitionPasswordReset } from "../../../src/domain/auth/password_reset_state.ts";

@@ -1,4 +1,4 @@
-import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert";
+import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import { loadRuntimeConfig, OPTD_VERSION } from "../../src/config/runtime.ts";
 import {
   findPostgresBins,

@@ -32,9 +32,9 @@ export function validateOperationScope(
       scope.objectIds.some((id) => typeof id !== "string"))
   ) throw new Error("scope.objectIds must be a string array");
   const ids = new Set(
-    Object.values(model).filter(Array.isArray).flat().map((object: any) =>
-      object.id
-    ),
+    Object.values(model).filter(Array.isArray).flat().map((
+      object: { id: string },
+    ) => object.id),
   );
   for (const id of scope.objectIds ?? []) {
     if (!ids.has(id)) throw new Error(`Unknown scope object: ${id}`);
@@ -44,17 +44,17 @@ export function validateOperationScope(
 // Historical inputs may be partial patches and refer to objects no longer present.
 // Validate their structure without replaying them into today's canonical model.
 function validDirection(
-  direction: any,
+  direction: unknown,
   states: Record<string, ReadonlySet<string>>,
   materialized = false,
 ): boolean {
   const text = (v: unknown) => typeof v === "string" && Boolean(v.trim());
-  const record = (v: any) =>
+  const record = (v: unknown): v is Record<string, unknown> =>
     v !== null && typeof v === "object" && !Array.isArray(v);
-  const strings = (v: any) =>
+  const strings = (v: unknown): v is string[] =>
     Array.isArray(v) && v.every((s: unknown) => typeof s === "string");
   if (
-    !record(direction) ||
+    !record(direction) || typeof direction.collection !== "string" ||
     !["intents", "concepts", "scenarios", "decisions", "commitments"].includes(
       direction.collection,
     )
@@ -73,12 +73,13 @@ function validDirection(
   };
   if (
     [direction.id, direction.newId].some((id) =>
-      id !== undefined && !id.startsWith(prefixes[direction.collection])
+      id !== undefined &&
+      !(id as string).startsWith(prefixes[direction.collection as string])
     )
   ) return false;
   if (
     direction.state !== undefined &&
-    !states[direction.collection]?.has(direction.state)
+    !states[direction.collection]?.has(direction.state as string)
   ) return false;
   if (
     materialized &&
@@ -104,12 +105,13 @@ function validDirection(
     )
   ) return false;
   if (
-    value.state !== undefined && !states[direction.collection]?.has(value.state)
+    value.state !== undefined &&
+    !states[direction.collection]?.has(value.state as string)
   ) return false;
   if (
     value.scope !== undefined &&
     (!record(value.scope) ||
-      !["repository", "workstreams"].includes(value.scope.kind) ||
+      !["repository", "workstreams"].includes(value.scope.kind as string) ||
       (value.scope.kind === "workstreams" &&
         (!strings(value.scope.workstreamIds) ||
           !value.scope.workstreamIds.length ||
@@ -136,7 +138,7 @@ function validDirection(
   ) return false;
   if (
     value.confidence !== undefined &&
-    !["low", "medium", "high"].includes(value.confidence)
+    !["low", "medium", "high"].includes(value.confidence as string)
   ) return false;
   const kinds: Record<string, string[]> = {
     intents: ["outcome", "priority", "value", "success_signal", "non_goal"],
@@ -145,12 +147,12 @@ function validDirection(
   if (
     kinds[direction.collection] &&
     ((materialized || !direction.id || value.kind !== undefined) &&
-      !kinds[direction.collection].includes(value.kind))
+      !kinds[direction.collection].includes(value.kind as string))
   ) return false;
   if (
     value.relationships !== undefined &&
     (!Array.isArray(value.relationships) ||
-      value.relationships.some((r: any) =>
+      value.relationships.some((r: unknown) =>
         !record(r) ||
         ![
           "supports",
@@ -161,7 +163,7 @@ function validDirection(
           "supersedes",
           "affects",
           "related_to",
-        ].includes(r.kind) || !text(r.targetId) ||
+        ].includes(r.kind as string) || !text(r.targetId) ||
         (r.note !== undefined && typeof r.note !== "string")
       ))
   ) return false;

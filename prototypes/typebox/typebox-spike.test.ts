@@ -1,4 +1,4 @@
-import { assertEquals } from "jsr:@std/assert";
+import { assertEquals } from "@std/assert";
 import {
   ChangesetCommitRequestSchema,
   ChangesetOperationsOutputSchema,
@@ -160,22 +160,22 @@ Deno.test("hook envelope and output schemas validate versioned hook contracts", 
 
 Deno.test("metadata can be derived from TypeBox-backed resource schemas", () => {
   const resource = {
-    kind: "Resource",
+    kind: "Resource" as const,
     metadata: { name: "lead" },
     spec: {
       fields: {
-        name: { type: "string", required: true },
-        email: { type: "string" },
+        name: { type: "string" as const, required: true },
+        email: { type: "string" as const },
       },
       axi: { list: { fields: ["id", "name"] } },
     },
   };
   const validation = validateWithSchema(ResourceSchema, resource);
   if (!validation.ok) throw new Error(JSON.stringify(validation.errors));
-  const metadata = metadataForResource(resource as any);
+  const metadata = metadataForResource(resource);
   assertEquals(metadata.fields.name.required, true);
   assertEquals(metadata.fields.email.type, "string");
-  assertEquals((metadata.axi as any).list.fields[1], "name");
+  assertEquals((metadata.axi as typeof resource.spec.axi).list.fields[1], "name");
 });
 
 Deno.test("Hono boundary validates request body and returns stable errors", async () => {

@@ -4,8 +4,8 @@ import {
   assertExists,
   assertMatch,
   assertThrows,
-} from "jsr:@std/assert";
-import { join } from "jsr:@std/path";
+} from "@std/assert";
+import { join } from "@std/path";
 import { query } from "../../../src/adapters/outbound/postgres/client.ts";
 import {
   type LiveHarness,

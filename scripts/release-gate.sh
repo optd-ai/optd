@@ -496,7 +496,9 @@ cleanup_registered_images() {
     [[ -f "$state_root/before/docker/images" ]] || return 1
     atomic_sorted_command "$state_root/cleanup-current-images" docker image ls --all --no-trunc --quiet || return 1
     cmp -s -- "$state_root/before/docker/images" "$state_root/cleanup-current-images" || return 1
-    return
+    # Bare return in an EXIT trap inherits the primary failure status, even
+    # after a successful comparison. Report this cleanup operation explicitly.
+    return 0
   fi
   # One trusted helper owns all safe authority descriptors from complete
   # preflight through child-to-parent exact-ID action. It re-snapshots and
@@ -678,7 +680,10 @@ cleanup_and_compare() {
     fi
     # Image authority is independently preflighted only after owned containers
     # are gone. One helper keeps the trusted authority in memory through action.
-    cleanup_registered_images || cleanup_status=1
+    cleanup_registered_images || {
+      status_message "exact image cleanup or pre-build inventory comparison failed"
+      cleanup_status=1
+    }
 
     cd "$repo_root" || cleanup_status=1
     if [[ -n "$source_root" && -e "$source_root/.git" ]]; then
@@ -834,6 +839,7 @@ printf '%s\t%s\n' "$artifact_dir" artifacts >>"$state_root/registry/temps"
 sync -f "$state_root/registry/temps"
 
 snapshot_docker "$state_root/before/docker"
+python3 "$repo_root/scripts/release-image-accounting.py" references --state "$state_root"
 snapshot_host "$state_root/before/host"
 baseline_ready=true
 
@@ -895,7 +901,37 @@ verify_source
 printf '\n== exact one-time release image build ==\n'
 release_version="release-gate-${release_revision:0:12}"
 release_image_tag="optd:${release_version}-${run_id}"
-printf 'COMMAND: docker build --pull=false --no-cache ... --tag %s - < immutable git archive\n' "$release_image_tag"
+# The approved existing Docker driver retains its normal BuildKit cache. Only
+# daemon objects belong to the four-set cleanup contract, never shared cache.
+docker buildx inspect default >"$state_root/builder-inspect.txt"
+grep -Eq '^Driver:[[:space:]]+docker$' "$state_root/builder-inspect.txt"
+python3 - "$state_root" "$(docker info --format '{{.DockerRootDir}}')" <<'PY'
+import json
+import os
+import pathlib
+import sys
+
+# Observed optd layers total about 2 GiB per no-cache build. Budget 8 GiB for
+# build/load overlap, compiled test artifacts and database data, plus 4 GiB
+# untouched reserve. Reassess independently on every invocation and replay.
+peak = 8 * 1024**3
+reserve = 4 * 1024**3
+measurements = []
+for path in (sys.argv[1], sys.argv[2]):
+    usage = os.statvfs(path)
+    free = usage.f_bavail * usage.f_frsize
+    measurements.append({'path': path, 'free_bytes': free})
+report = {'peak_bytes': peak, 'reserve_bytes': reserve, 'filesystems': measurements}
+path = pathlib.Path(sys.argv[1]) / 'capacity.json'
+with path.open('x') as stream:
+    json.dump(report, stream, sort_keys=True)
+    stream.flush()
+    os.fsync(stream.fileno())
+print(json.dumps(report, sort_keys=True))
+if any(item['free_bytes'] < peak + reserve for item in measurements):
+    raise SystemExit('insufficient build/test storage headroom; no cleanup attempted')
+PY
+printf 'COMMAND: docker buildx build --builder default --load --pull=false --no-cache ... --tag %s - < immutable git archive\n' "$release_image_tag"
 append_registry images "pending:$release_image_tag" "$release_image_tag"
 verify_source_archive
 build_transcript="$state_root/build-transcript"
@@ -903,7 +939,8 @@ build_accounting_started=true
 capture_status=0
 if run_owned image-build python3 "$source_root/scripts/release-image-accounting.py" capture \
   --transcript "$build_transcript" --stdin "$source_archive" -- \
-  docker build --pull=false --no-cache \
+  docker buildx build --builder default --load --pull=false --no-cache \
+  --iidfile "$state_root/build.iid" --metadata-file "$state_root/build.metadata.json" \
   --label "$gate_label_key=$run_id" --build-arg "OPTD_REVISION=$release_revision" \
   --build-arg "OPTD_VERSION=$release_version" --tag "$release_image_tag" -; then
   capture_status=0
@@ -925,7 +962,7 @@ fi
 account_status=0
 account_build_images || account_status=$?
 if ((account_status != 0)); then
-  status_message "legacy builder image authority is ambiguous; retaining transcript evidence and refusing image deletion"
+  status_message "builder image authority is ambiguous; retaining transcript evidence and refusing image deletion"
   exit "$account_status"
 fi
 if ((build_status != 0)); then

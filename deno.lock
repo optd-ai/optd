@@ -7,21 +7,28 @@
     "jsr:@cliffy/table@1.2.1": "1.2.1",
     "jsr:@std/assert@*": "1.0.19",
     "jsr:@std/assert@1": "1.0.19",
+    "jsr:@std/assert@1.0.19": "1.0.19",
     "jsr:@std/fmt@^1.0.10": "1.0.10",
     "jsr:@std/fs@*": "1.0.24",
+    "jsr:@std/fs@1.0.24": "1.0.24",
     "jsr:@std/internal@^1.0.12": "1.0.14",
     "jsr:@std/internal@^1.0.14": "1.0.14",
     "jsr:@std/path@*": "1.1.6",
+    "jsr:@std/path@1.1.6": "1.1.6",
     "jsr:@std/path@^1.1.5": "1.1.6",
     "jsr:@std/text@^1.0.19": "1.0.19",
     "jsr:@std/yaml@*": "1.1.2",
     "npm:@bufbuild/cel@*": "0.6.0_@bufbuild+protobuf@2.12.1",
     "npm:@node-rs/argon2@*": "2.0.2",
+    "npm:@node-rs/argon2@2.0.2": "2.0.2",
     "npm:@sinclair/typebox@0.34.38": "0.34.38",
     "npm:@toon-format/toon@*": "2.3.0",
     "npm:ajv@*": "8.20.0",
+    "npm:ajv@8.20.0": "8.20.0",
     "npm:hono@*": "4.12.28",
+    "npm:hono@4.12.28": "4.12.28",
     "npm:postgres@*": "3.4.9",
+    "npm:postgres@3.4.9": "3.4.9",
     "npm:yaml@2": "2.9.0"
   },
   "jsr": {
@@ -267,5 +274,17 @@
       "integrity": "sha512-2AvhNX3mb8zd6Zy7INTtSpl1F15HW6Wnqj0srWlkKLcpYl/gMIMJiyuGq2KeI2YFxUPjdlB+3Lc10seMLtL4cA==",
       "bin": true
     }
+  },
+  "workspace": {
+    "dependencies": [
+      "jsr:@std/assert@1.0.19",
+      "jsr:@std/fs@1.0.24",
+      "jsr:@std/path@1.1.6",
+      "npm:@node-rs/argon2@2.0.2",
+      "npm:@sinclair/typebox@0.34.38",
+      "npm:ajv@8.20.0",
+      "npm:hono@4.12.28",
+      "npm:postgres@3.4.9"
+    ]
   }
 }

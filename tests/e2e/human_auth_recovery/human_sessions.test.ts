@@ -1,4 +1,4 @@
-import { assertEquals, assertFalse, assertRejects } from "jsr:@std/assert";
+import { assertEquals, assertFalse, assertRejects } from "@std/assert";
 import { startLiveHarness } from "../../support/live_harness.ts";
 import { query } from "../../../src/adapters/outbound/postgres/client.ts";
 import { isUuidV7 } from "../../../src/domain/ids/uuid_v7.ts";

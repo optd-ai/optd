@@ -1,5 +1,5 @@
-import { assert, assertEquals } from "jsr:@std/assert";
-import postgres from "npm:postgres";
+import { assert, assertEquals } from "@std/assert";
+import postgres from "postgres";
 import {
   findPostgresBins,
   startManagedPostgres,
@@ -9,13 +9,13 @@ import {
   cancelDelivery,
   claimOne,
   enqueueDelivery,
+  type ExecutionContext,
   fullJitterBackoffMs,
   installOutboxPrototypeSchema,
   pollUntilIdle,
   processNext,
   registerPinnedHook,
   retryDeadLetter,
-  type ExecutionContext,
   type Sql,
   uuidV7,
 } from "./outbox_delivery.ts";
@@ -26,14 +26,20 @@ Deno.test({
   sanitizeResources: false,
   fn: async () => {
     if (!await findPostgresBins()) {
-      console.warn("SKIP outbox-delivery prototype: run in nix-shell for real Postgres");
+      console.warn(
+        "SKIP outbox-delivery prototype: run in nix-shell for real Postgres",
+      );
       return;
     }
     const root = await Deno.makeTempDir({ prefix: "operant-outbox-contract-" });
     const pg = await startManagedPostgres(root);
     const clients: Sql[] = [];
     const nextClient = () => {
-      const sql = postgres(pg.databaseUrl, { max: 1, idle_timeout: 5, connect_timeout: 5 });
+      const sql = postgres(pg.databaseUrl, {
+        max: 1,
+        idle_timeout: 5,
+        connect_timeout: 5,
+      });
       clients.push(sql);
       return sql;
     };
@@ -42,7 +48,10 @@ Deno.test({
       await installOutboxPrototypeSchema(admin);
       assert(/^.{14}7/.test(uuidV7()), "generated identity is UUIDv7");
       assertEquals(fullJitterBackoffMs(1, () => 0.5), 2_500);
-      assertEquals(fullJitterBackoffMs(20, () => 0.999, 5_000, 3_600_000), 3_596_400);
+      assertEquals(
+        fullJitterBackoffMs(20, () => 0.999, 5_000, 3_600_000),
+        3_596_400,
+      );
 
       await concurrentClaimsRunOnce(admin, nextClient);
       await expiredLeaseIsReclaimed(admin, nextClient);
@@ -54,7 +63,9 @@ Deno.test({
       await pollingLoopProcessesWithoutNotify(admin, nextClient);
       await noOrderingGuaranteeIsReal(admin, nextClient);
     } finally {
-      await Promise.all(clients.map((sql) => sql.end({ timeout: 2 }).catch(() => undefined)));
+      await Promise.all(
+        clients.map((sql) => sql.end({ timeout: 2 }).catch(() => undefined)),
+      );
       await stopManagedPostgres(pg).catch(() => undefined);
       await Deno.remove(root, { recursive: true }).catch(() => undefined);
     }
@@ -93,7 +104,7 @@ async function expiredLeaseIsReclaimed(admin: Sql, nextClient: () => Sql) {
   const result = await processNext(
     nextClient(),
     "restarted-server",
-    async () => ({ outcome: "succeeded" }),
+    () => Promise.resolve({ outcome: "succeeded" }),
     { now: recoveredAt, leaseMs: 1_000 },
   );
   assertEquals(result.status, "succeeded");
@@ -101,11 +112,17 @@ async function expiredLeaseIsReclaimed(admin: Sql, nextClient: () => Sql) {
     "select outcome from proto_attempts where delivery_id=$1 order by total_attempt_number",
     [deliveryId],
   );
-  assertEquals(attempts.map((row) => row.outcome), ["lease_expired", "succeeded"]);
+  assertEquals(attempts.map((row) => row.outcome), [
+    "lease_expired",
+    "succeeded",
+  ]);
   assertEquals((await delivery(admin, deliveryId)).total_attempts, 2);
 }
 
-async function stableIdempotencySurvivesAmbiguousFailure(admin: Sql, nextClient: () => Sql) {
+async function stableIdempotencySurvivesAmbiguousFailure(
+  admin: Sql,
+  nextClient: () => Sql,
+) {
   const hook = await setupHook(admin, "idempotency");
   const base = new Date("2026-07-14T01:00:00Z");
   const { deliveryId } = await enqueue(admin, hook, { now: base });
@@ -148,27 +165,35 @@ async function stableIdempotencySurvivesAmbiguousFailure(admin: Sql, nextClient:
   }
 }
 
-async function structuredOutcomesAndPermanentFailures(admin: Sql, nextClient: () => Sql) {
+async function structuredOutcomesAndPermanentFailures(
+  admin: Sql,
+  nextClient: () => Sql,
+) {
   const retryHook = await setupHook(admin, "outcomes");
   const start = new Date("2026-07-14T02:00:00Z");
   const retryDelivery = await enqueue(admin, retryHook, { now: start });
   const retry = await processNext(
     nextClient(),
     "loop",
-    async () => ({
-      outcome: "retry",
-      code: "provider_busy",
-      message: "try later",
-      retry_after_ms: 30_000,
-    }),
+    () =>
+      Promise.resolve({
+        outcome: "retry",
+        code: "provider_busy",
+        message: "try later",
+        retry_after_ms: 30_000,
+      }),
     { now: start, random: () => 0 },
   );
   assertEquals(retry.status, "retry_wait");
   assertEquals(
-    new Date((await delivery(admin, retryDelivery.deliveryId)).available_at).toISOString(),
+    new Date((await delivery(admin, retryDelivery.deliveryId)).available_at)
+      .toISOString(),
     new Date(start.getTime() + 30_000).toISOString(),
   );
-  assertEquals(await cancelDelivery(admin, retryDelivery.deliveryId, start), "cancelled");
+  assertEquals(
+    await cancelDelivery(admin, retryDelivery.deliveryId, start),
+    "cancelled",
+  );
 
   const permanentDelivery = await enqueue(admin, retryHook, {
     now: new Date(start.getTime() + 1),
@@ -177,27 +202,34 @@ async function structuredOutcomesAndPermanentFailures(admin: Sql, nextClient: ()
     (await processNext(
       nextClient(),
       "loop",
-      async () => ({
-        outcome: "dead_letter",
-        code: "invalid_destination",
-        message: "provider rejected destination",
-      }),
+      () =>
+        Promise.resolve({
+          outcome: "dead_letter",
+          code: "invalid_destination",
+          message: "provider rejected destination",
+        }),
       { now: new Date(start.getTime() + 1) },
     )).status,
     "dead_letter",
   );
-  assertEquals((await delivery(admin, permanentDelivery.deliveryId)).total_attempts, 1);
+  assertEquals(
+    (await delivery(admin, permanentDelivery.deliveryId)).total_attempts,
+    1,
+  );
 
   const disabledHook = await setupHook(admin, "disabled", { enabled: false });
   const disabledDelivery = await enqueue(admin, disabledHook);
   let ran = false;
-  const disabled = await processNext(nextClient(), "loop", async () => {
+  const disabled = await processNext(nextClient(), "loop", () => {
     ran = true;
-    return { outcome: "succeeded" };
+    return Promise.resolve({ outcome: "succeeded" });
   });
   assertEquals(disabled.status, "dead_letter");
   assertEquals(ran, false);
-  assertEquals((await delivery(admin, disabledDelivery.deliveryId)).last_error_code, "pinned_hook_disabled");
+  assertEquals(
+    (await delivery(admin, disabledDelivery.deliveryId)).last_error_code,
+    "pinned_hook_disabled",
+  );
 }
 
 async function cancellationHasOneWinner(admin: Sql, nextClient: () => Sql) {
@@ -207,32 +239,46 @@ async function cancellationHasOneWinner(admin: Sql, nextClient: () => Sql) {
 
   const running = await enqueue(admin, hook);
   assert(await claimOne(nextClient(), "loop"));
-  assertEquals(await cancelDelivery(admin, running.deliveryId), "delivery_in_progress");
+  assertEquals(
+    await cancelDelivery(admin, running.deliveryId),
+    "delivery_in_progress",
+  );
 }
 
 async function manualRetryPreservesHistory(admin: Sql, nextClient: () => Sql) {
   const hook = await setupHook(admin, "manual");
   const firstAt = new Date("2026-07-14T03:00:00Z");
-  const { deliveryId } = await enqueue(admin, hook, { now: firstAt, maxAttempts: 1 });
+  const { deliveryId } = await enqueue(admin, hook, {
+    now: firstAt,
+    maxAttempts: 1,
+  });
   assertEquals(
     (await processNext(
       nextClient(),
       "loop",
-      async () => ({ outcome: "retry", code: "timeout", message: "timeout" }),
+      () =>
+        Promise.resolve({
+          outcome: "retry",
+          code: "timeout",
+          message: "timeout",
+        }),
       { now: firstAt },
     )).status,
     "dead_letter",
   );
-  assertEquals(await retryDeadLetter(admin, deliveryId, new Date(firstAt.getTime() + 1)), "pending");
+  assertEquals(
+    await retryDeadLetter(admin, deliveryId, new Date(firstAt.getTime() + 1)),
+    "pending",
+  );
   assertEquals(
     (await processNext(
       nextClient(),
       "loop",
-      async (context) => {
+      (context) => {
         assertEquals(context.idempotency_key, deliveryId);
         assertEquals(context.retry_generation, 1);
         assertEquals(context.attempt_number, 1);
-        return { outcome: "succeeded" };
+        return Promise.resolve({ outcome: "succeeded" });
       },
       { now: new Date(firstAt.getTime() + 2) },
     )).status,
@@ -250,7 +296,10 @@ async function manualRetryPreservesHistory(admin: Sql, nextClient: () => Sql) {
   assertEquals(attempts[0].idempotency_key, attempts[1].idempotency_key);
 }
 
-async function pinnedOldRevisionUsesCurrentSecretVersion(admin: Sql, nextClient: () => Sql) {
+async function pinnedOldRevisionUsesCurrentSecretVersion(
+  admin: Sql,
+  nextClient: () => Sql,
+) {
   const old = await setupHook(admin, "upgrade-old", { revision: "upgrade-v1" });
   const { deliveryId } = await enqueue(admin, old);
   await setupHook(admin, "upgrade-new", {
@@ -263,9 +312,9 @@ async function pinnedOldRevisionUsesCurrentSecretVersion(admin: Sql, nextClient:
   );
   let seen: ExecutionContext | undefined;
   assertEquals(
-    (await processNext(nextClient(), "loop", async (context) => {
+    (await processNext(nextClient(), "loop", (context) => {
       seen = context;
-      return { outcome: "succeeded" };
+      return Promise.resolve({ outcome: "succeeded" });
     })).status,
     "succeeded",
   );
@@ -274,25 +323,34 @@ async function pinnedOldRevisionUsesCurrentSecretVersion(admin: Sql, nextClient:
   assertEquals((await delivery(admin, deliveryId)).hook_revision, "upgrade-v1");
 }
 
-async function pollingLoopProcessesWithoutNotify(admin: Sql, nextClient: () => Sql) {
+async function pollingLoopProcessesWithoutNotify(
+  admin: Sql,
+  nextClient: () => Sql,
+) {
   const hook = await setupHook(admin, "poll");
   const controller = new AbortController();
   const loop = pollUntilIdle(
     nextClient(),
     "in-process-server-loop",
-    async () => ({ outcome: "succeeded" }),
+    () => Promise.resolve({ outcome: "succeeded" }),
     { signal: controller.signal, intervalMs: 10 },
   );
   const { deliveryId } = await enqueue(admin, hook);
-  await waitFor(async () => (await delivery(admin, deliveryId)).status === "succeeded");
+  await waitFor(async () =>
+    (await delivery(admin, deliveryId)).status === "succeeded"
+  );
   controller.abort();
   await loop;
 }
 
 async function noOrderingGuaranteeIsReal(admin: Sql, nextClient: () => Sql) {
   const hook = await setupHook(admin, "unordered");
-  const first = await enqueue(admin, hook, { now: new Date("2026-07-14T04:00:00.000Z") });
-  const second = await enqueue(admin, hook, { now: new Date("2026-07-14T04:00:00.001Z") });
+  const first = await enqueue(admin, hook, {
+    now: new Date("2026-07-14T04:00:00.000Z"),
+  });
+  const second = await enqueue(admin, hook, {
+    now: new Date("2026-07-14T04:00:00.001Z"),
+  });
   const entered = deferred();
   const release = deferred();
   const firstProcess = processNext(nextClient(), "loop-a", async (context) => {
@@ -304,7 +362,11 @@ async function noOrderingGuaranteeIsReal(admin: Sql, nextClient: () => Sql) {
   });
   await entered.promise;
   assertEquals(
-    (await processNext(nextClient(), "loop-b", async () => ({ outcome: "succeeded" }))).status,
+    (await processNext(
+      nextClient(),
+      "loop-b",
+      () => Promise.resolve({ outcome: "succeeded" }),
+    )).status,
     "succeeded",
   );
   assertEquals((await delivery(admin, second.deliveryId)).status, "succeeded");
@@ -353,8 +415,18 @@ function enqueue(
 }
 
 async function delivery(sql: Sql, id: string) {
-  const rows = await sql.unsafe("select * from proto_deliveries where id=$1", [id]);
-  return rows[0] as Record<string, any>; // deno-lint-ignore no-explicit-any
+  const rows = await sql.unsafe("select * from proto_deliveries where id=$1", [
+    id,
+  ]);
+  return rows[0] as unknown as {
+    available_at: string | Date;
+    total_attempts: number;
+    attempts_in_generation: number;
+    retry_generation: number;
+    status: string;
+    last_error_code: string;
+    hook_revision: string;
+  };
 }
 
 function fakeIdempotentProvider() {
@@ -375,7 +447,10 @@ function fakeIdempotentProvider() {
       seen.add(key);
       effects++;
     }
-    return Response.json({ accepted: true, duplicate: keys.filter((value) => value === key).length > 1 });
+    return Response.json({
+      accepted: true,
+      duplicate: keys.filter((value) => value === key).length > 1,
+    });
   });
   return {
     get url() {

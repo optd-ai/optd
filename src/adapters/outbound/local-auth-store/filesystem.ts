@@ -1,4 +1,4 @@
-import { basename, dirname, isAbsolute, join, resolve } from "jsr:@std/path";
+import { basename, dirname, isAbsolute, join, resolve } from "@std/path";
 import type {
   DoctorFinding,
   DoctorReport,

@@ -1,6 +1,6 @@
-import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert";
-import { walk } from "jsr:@std/fs/walk";
-import { join, relative } from "jsr:@std/path";
+import { assert, assertEquals, assertStringIncludes } from "@std/assert";
+import { walk } from "@std/fs/walk";
+import { join, relative } from "@std/path";
 import {
   query,
   quoteIdentifier,

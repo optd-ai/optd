@@ -1,5 +1,5 @@
-import { assertEquals, assertRejects } from "jsr:@std/assert";
-import { join } from "jsr:@std/path";
+import { assertEquals, assertRejects } from "@std/assert";
+import { join } from "@std/path";
 import {
   query,
   type Queryable,

@@ -1,12 +1,27 @@
-import {
-  assert,
-  assertEquals,
-  assertExists,
-  assertFalse,
-} from "jsr:@std/assert@1";
+import { assert, assertEquals, assertExists, assertFalse } from "@std/assert";
 import { createAuthPrototype } from "./auth-flow.ts";
 
-type Json = Record<string, any>;
+interface Json {
+  data: {
+    authorization: { id: string; roles: string[] };
+    credential_kind: string;
+    human_session: { id: string; token: string };
+    id: string;
+    request_credential: { id: string; token?: string; status?: string };
+    revoked: string;
+    revoked_all: boolean;
+    session: { token: string };
+    state: string;
+    status: string;
+    supersedes: string;
+    token: string;
+    worked: boolean;
+  };
+  error: {
+    code: string;
+    details: { reason: string; suggested_roles: string[]; suggestion: string };
+  };
+}
 
 async function call(
   app: {
@@ -390,8 +405,14 @@ Deno.test("complete public auth lifecycle", async () => {
 
   assert(state.contexts.length > 0);
   for (const context of state.contexts) {
-    assertEquals((context as any).pid, undefined);
-    assertEquals((context as any).cwd, undefined);
+    assertEquals(
+      (context as unknown as Record<string, unknown>).pid,
+      undefined,
+    );
+    assertEquals(
+      (context as unknown as Record<string, unknown>).cwd,
+      undefined,
+    );
     assertExists(context.principalId);
   }
   assert(

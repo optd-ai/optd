@@ -3,7 +3,7 @@ import {
   assertNotEquals,
   assertRejects,
   assertThrows,
-} from "jsr:@std/assert@1";
+} from "@std/assert";
 import {
   authoredOperationContract,
   stageRequestContract,

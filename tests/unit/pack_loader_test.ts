@@ -1,4 +1,4 @@
-import { assert, assertEquals, assertRejects } from "jsr:@std/assert";
+import { assert, assertEquals, assertRejects } from "@std/assert";
 import {
   loadPackFromFiles,
   parseYamlJsonObject,
@@ -893,7 +893,7 @@ Deno.test("strict pack loader accepts both publisher-qualified proof packs", asy
     ]] as const
   ) {
     const files: UploadedPackFile[] = [];
-    async function collect(path: string, prefix = "") {
+    const collect = async (path: string, prefix = "") => {
       for await (const entry of Deno.readDir(path)) {
         const child = `${path}/${entry.name}`;
         const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
@@ -902,7 +902,7 @@ Deno.test("strict pack loader accepts both publisher-qualified proof packs", asy
           files.push({ path: relative, text: await Deno.readTextFile(child) });
         }
       }
-    }
+    };
     await collect(dir);
     const pack = await loadPackFromFiles(files);
     assertEquals(`${pack.publisher}/${pack.name}`, expected);

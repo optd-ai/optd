@@ -291,10 +291,19 @@ def command_capture(args: argparse.Namespace) -> int:
     stdout = state.create_bytes(f"{transcript_rel}/stdout", b"")
     stderr = state.create_bytes(f"{transcript_rel}/stderr", b"")
     started_ns = time.time_ns()
-    state.create_json(
-        f"{transcript_rel}/invocation.json",
-        {"argv": args.command, "started_ns": started_ns, "stdin": args.stdin},
-    )
+    invocation = {"argv": args.command, "started_ns": started_ns, "stdin": args.stdin}
+    if args.command[:3] == ["docker", "buildx", "build"]:
+        archive = state.hold(state_relative(state.path, args.stdin), 0o400)
+        invocation["archive_sha256"] = hashlib.sha256(state.bytes(archive)).hexdigest()
+        identities = exact_images()
+        references = {identity: image_references(inspect_image(identity)) for identity in identities}
+        if references != state.json("baseline-image-references.json"):
+            raise RuntimeError("image references changed since the initial gate snapshot")
+        tag = args.command[args.command.index("--tag") + 1]
+        if any(tag in value["tags"] for value in references.values()):
+            raise RuntimeError("build tag already exists; refusing replacement")
+        state.create_json(f"{transcript_rel}/baseline-references.json", references)
+    state.create_json(f"{transcript_rel}/invocation.json", invocation)
 
     child: subprocess.Popen[bytes] | None = None
     forwarded_signal = 0
@@ -369,6 +378,10 @@ def command_capture(args: argparse.Namespace) -> int:
                 "stdout_sha256": hashlib.sha256(state.bytes(stdout)).hexdigest(),
             },
         )
+        if args.command[:3] == ["docker", "buildx", "build"] and returncode == 0:
+            for flag in ("--iidfile", "--metadata-file"):
+                held = state.hold(state_relative(state.path, args.command[args.command.index(flag) + 1]), 0o644 if flag == "--metadata-file" else 0o600)
+                os.fsync(held.fd)
         state.revalidate()
         state.close()
     return status
@@ -702,6 +715,8 @@ def command_account(args: argparse.Namespace) -> int:
     if hashlib.sha256(stdout).hexdigest() != result.get("stdout_sha256") or hashlib.sha256(stderr).hexdigest() != result.get("stderr_sha256"):
         raise RuntimeError("durable transcript hash mismatch")
     status = int(result["status"])
+    if invocation.get("argv", [])[:3] == ["docker", "buildx", "build"]:
+        return account_buildkit(args, state, paths, baseline, post, dockerfile_data, invocation, result)
     expected_steps = dockerfile_steps(dockerfile_data) + [f"LABEL {LABEL}={args.run_id}"]
     frames, success_token = parse_protocol(stdout, stderr, expected_steps, status)
     if not set(baseline) <= set(post):
@@ -822,6 +837,95 @@ def command_account(args: argparse.Namespace) -> int:
     return 0
 
 
+def image_references(item: dict[str, Any]) -> dict[str, list[str]]:
+    return {"tags": sorted(item.get("RepoTags") or []), "digests": sorted(item.get("RepoDigests") or [])}
+
+
+def buildkit_identity(iid: str, metadata: dict[str, Any], item: dict[str, Any]) -> str:
+    """Buildx IID may name the manifest, not the daemon's config/image ID."""
+    identity = item.get("Id", "")
+    manifest = metadata.get("containerimage.digest", "")
+    config = metadata.get("containerimage.config.digest", "")
+    if not FULL_ID.fullmatch(identity) or not FULL_ID.fullmatch(iid):
+        raise RuntimeError("malformed BuildKit IID or daemon image ID")
+    if manifest and not FULL_ID.fullmatch(manifest):
+        raise RuntimeError("malformed BuildKit manifest digest")
+    if config and config != identity:
+        raise RuntimeError("BuildKit config digest differs from loaded daemon image")
+    if iid != identity and (not config or iid != manifest):
+        raise RuntimeError("BuildKit IID is not bound to the loaded config/image ID")
+    descriptor = metadata.get("containerimage.descriptor")
+    if descriptor is not None and descriptor.get("digest") != manifest:
+        raise RuntimeError("BuildKit manifest descriptor disagrees with digest")
+    return identity
+
+
+def account_buildkit(args: argparse.Namespace, state: TrustedState, paths: dict[str, str],
+                     baseline: list[str], post: list[str], dockerfile: bytes,
+                     invocation: dict[str, Any], result: dict[str, Any]) -> int:
+    transcript = paths["transcript"]
+    registry = paths["registry"]
+    argv = invocation["argv"]
+    archive = state.bytes(state.hold(state_relative(state.path, invocation["stdin"]), 0o400))
+    if hashlib.sha256(archive).hexdigest() != invocation.get("archive_sha256"):
+        raise RuntimeError("BuildKit archive identity changed")
+    references = state.json(f"{transcript}/baseline-references.json")
+    if sorted(references) != baseline:
+        raise RuntimeError("pre-build image inventory differs from gate baseline")
+    for identity in baseline:
+        if image_references(inspect_image(identity)) != references[identity]:
+            raise RuntimeError("baseline image references changed during build")
+    if not set(baseline) <= set(post):
+        raise RuntimeError("baseline image disappeared during BuildKit build")
+    # A failed or interrupted load has no complete authority. Do not guess even
+    # if the daemon delta happens to contain a run-labelled image.
+    if result.get("status") != 0:
+        raise RuntimeError("incomplete BuildKit build/load; retaining evidence and images")
+    iid_relative = state_relative(state.path, argv[argv.index("--iidfile") + 1])
+    metadata_relative = state_relative(state.path, argv[argv.index("--metadata-file") + 1])
+    iid = state.text(iid_relative).strip()
+    metadata = json.loads(state.text(metadata_relative, 0o644))
+    item = json.loads(docker_output(["image", "inspect", args.tag]))[0]
+    identity = buildkit_identity(iid, metadata, item)
+    delta = sorted(set(post) - set(baseline))
+    if delta != [identity]:
+        raise RuntimeError("BuildKit daemon delta contains missing, preexisting, or independently unproven IDs")
+    labels = image_labels(item)
+    revision = next(value.split("=", 1)[1] for value in argv if value.startswith("OPTD_REVISION="))
+    if labels.get(LABEL) != args.run_id or labels.get("org.opencontainers.image.revision") != revision:
+        raise RuntimeError("BuildKit loaded image source/run label mismatch")
+    if image_references(item) != {"tags": [args.tag], "digests": []}:
+        raise RuntimeError("BuildKit loaded image gained foreign references")
+    # BuildKit honors SOURCE_DATE_EPOCH, so Created is not a wall-clock proof.
+    # Ownership instead requires the initially absent tag/ID, unique run label,
+    # immutable archive invocation, successful load, and IID/config agreement.
+    parse_created(item.get("Created"))
+    history = image_history(identity)
+    if not history or history[0].get("ID") != identity:
+        raise RuntimeError("BuildKit image history identity mismatch")
+    dockerfile_hash = hashlib.sha256(dockerfile).hexdigest()
+    proof = {
+        "id": identity, "run_id": args.run_id, "role": "final", "tag": args.tag,
+        "parent": item.get("Parent") or "", "created": item.get("Created"),
+        "created_by": history[0].get("CreatedBy"), "labels": labels,
+        "dockerfile_sha256": dockerfile_hash,
+    }
+    state.create_json(f"{registry}/image-evidence/{identity[7:]}.json", proof)
+    state.append(f"{registry}/images", f"{identity}\tfinal\n".encode())
+    state.create_json(f"{registry}/image-accounting.json", {
+        "baseline": baseline, "delta": delta, "proven": delta, "errors": [],
+        "final_id": identity, "status": 0, "dockerfile_sha256": dockerfile_hash,
+        "buildkit": {"iid": iid, "metadata": metadata, "archive_sha256": invocation["archive_sha256"],
+                     "references": references},
+    })
+    state.create_json(f"{registry}/image-authority.json", {
+        "final_id": identity, "ids": delta, "run_id": args.run_id, "status": 0,
+    })
+    state.revalidate()
+    state.close()
+    return 0
+
+
 def normalized_list(value: Any) -> list[str]:
     return [] if value is None else value
 
@@ -887,6 +991,23 @@ def validate_cleanup_world(
             f"concurrent image mutation before exact removal: added={sorted(set(current)-expected)!r} missing={sorted(expected-set(current))!r}"
         )
     inspected = {identity: inspect_image(identity) for identity in current}
+    registry_rel = state_relative(state.path, args.registry)
+    report = state.json(f"{registry_rel}/image-accounting.json")
+    buildkit = report.get("buildkit")
+    if buildkit:
+        transcript_rel = state_relative(state.path, args.transcript)
+        invocation = state.json(f"{transcript_rel}/invocation.json")
+        argv = invocation["argv"]
+        iid = state.text(state_relative(state.path, argv[argv.index("--iidfile") + 1])).strip()
+        metadata = json.loads(state.text(state_relative(state.path, argv[argv.index("--metadata-file") + 1]), 0o644))
+        archive = state.bytes(state.hold(state_relative(state.path, invocation["stdin"]), 0o400))
+        if iid != buildkit["iid"] or metadata != buildkit["metadata"] or hashlib.sha256(archive).hexdigest() != buildkit["archive_sha256"]:
+            raise RuntimeError("BuildKit durable identity changed before cleanup")
+        for identity in baseline:
+            if image_references(inspected[identity]) != buildkit["references"].get(identity):
+                raise RuntimeError("baseline image references changed before cleanup")
+        if args.final_id not in removed:
+            buildkit_identity(iid, metadata, inspected[args.final_id])
     for identity in set(registered) - removed:
         proof = evidence[identity]
         actual = inspected[identity]
@@ -904,7 +1025,7 @@ def validate_cleanup_world(
         if digests:
             raise RuntimeError(f"registered image gained RepoDigests: {identity} {digests!r}")
         if proof.get("role") == "final":
-            if identity != args.final_id or image_labels(actual).get(LABEL) != args.run_id or tags != [args.tag]:
+            if identity != args.final_id or image_labels(actual).get(LABEL) != args.run_id or tags != [args.tag] or (buildkit and image_labels(actual) != proof.get("labels")):
                 raise RuntimeError(f"final image identity/label/tags changed: {identity} {tags!r}")
             tag_id = docker_output(["image", "inspect", args.tag, "--format", "{{.Id}}"]).decode().strip()
             if tag_id != identity:
@@ -963,6 +1084,7 @@ def command_cleanup(args: argparse.Namespace) -> int:
             raise RuntimeError(f"exact image removal failed ({result.returncode}): {identity}")
         removed.add(identity)
     state.revalidate()
+    validate_cleanup_world(args, state, registered, baseline, evidence, removed)
     final = exact_images()
     if set(final) != baseline:
         raise RuntimeError("exact image baseline equality failed after partial/full cleanup")
@@ -970,9 +1092,23 @@ def command_cleanup(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_references(args: argparse.Namespace) -> int:
+    state = TrustedState(pathlib.Path(args.state))
+    identities = exact_images()
+    state.create_json("baseline-image-references.json", {
+        identity: image_references(inspect_image(identity)) for identity in identities
+    })
+    state.revalidate()
+    state.close()
+    return 0
+
+
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser()
     subparsers = root.add_subparsers(dest="action", required=True)
+    references = subparsers.add_parser("references")
+    references.add_argument("--state", required=True)
+    references.set_defaults(handler=command_references)
     pin = subparsers.add_parser("pin-dockerfile")
     pin.add_argument("--source", required=True)
     pin.add_argument("--destination", required=True)

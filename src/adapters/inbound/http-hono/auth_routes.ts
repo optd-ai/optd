@@ -1,5 +1,5 @@
-import type { Hono } from "npm:hono";
-import { upgradeWebSocket } from "npm:hono/deno";
+import type { Hono } from "hono";
+import { upgradeWebSocket } from "hono/deno";
 import type { Result } from "../../../domain/errors/result.ts";
 import type {
   AgentAuthorization,

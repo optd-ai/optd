@@ -1,8 +1,8 @@
-import * as AjvModule from "npm:ajv/dist/2020.js";
-import type { ErrorObject } from "npm:ajv";
-import { type Static, type TSchema, Type } from "npm:@sinclair/typebox";
-import { Value } from "npm:@sinclair/typebox/value";
-import { Hono } from "npm:hono";
+import { Ajv2020 } from "ajv/dist/2020.js";
+import type { ErrorObject } from "ajv";
+import { type Static, type TSchema, Type } from "@sinclair/typebox";
+import { Value } from "@sinclair/typebox/value";
+import { Hono } from "hono";
 
 const Identifier = Type.String({ pattern: "^[a-z_][a-z0-9_]*$" });
 const DottedIdentifier = Type.String({
@@ -245,8 +245,7 @@ export type ChangesetPreviewRequest = Static<
   typeof ChangesetPreviewRequestSchema
 >;
 
-const AjvCtor = (AjvModule as any).default ?? AjvModule;
-const ajv = new AjvCtor({
+const ajv = new Ajv2020({
   allErrors: true,
   strict: true,
   allowUnionTypes: true,
@@ -287,7 +286,7 @@ export function validatePackFile(path: string, value: unknown) {
   }
   const result = validateWithSchema(schema, value, path);
   if (!result.ok) return result;
-  const metadataName = (value as any).metadata?.name;
+  const metadataName = (value as Static<typeof ResourceSchema>).metadata?.name;
   const basename = path.split("/").pop()!.replace(/\.yaml$/, "");
   if (path !== "pack.yaml" && metadataName !== basename) {
     return {
@@ -403,10 +402,10 @@ function normalizeAjvErrors(errors: ErrorObject[], source: string) {
 
 function humanMessage(error: ErrorObject) {
   if (error.keyword === "additionalProperties") {
-    return `unexpected property ${(error.params as any).additionalProperty}`;
+    return `unexpected property ${error.params.additionalProperty}`;
   }
   if (error.keyword === "required") {
-    return `missing required property ${(error.params as any).missingProperty}`;
+    return `missing required property ${error.params.missingProperty}`;
   }
   return error.message ?? "schema validation failed";
 }

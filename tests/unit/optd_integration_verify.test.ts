@@ -15,7 +15,7 @@ async function copyTree(source: string, target: string) {
   }
 }
 
-Deno.test("prefix verifier propagates real formatting, model, type, regression and host failures", async () => {
+Deno.test("composed verifier propagates real prefix failures and unconditionally invokes image gate", async () => {
   const fixture = await Deno.makeTempDir({ prefix: "optd-verifier-test-" });
   const write = (path: string, text: string) =>
     Deno.writeTextFile(join(fixture, path), text);
@@ -86,12 +86,19 @@ Deno.test("prefix verifier propagates real formatting, model, type, regression a
         "tests/full.test.ts",
       ]
     ) await write(path, passing);
-    const baseline = await run();
-    assert.equal(baseline.code, 0, decode(baseline));
-    assert.match(
-      decode(baseline),
-      /PREFIX CHECKS PASSED; image\/release acceptance has not been run/,
+    // Passing host checks and any receipt cannot substitute for an image gate.
+    await write("image-receipt.json", '{"passed":true}\n');
+    const missing = await run();
+    assert.notEqual(missing.code, 0, decode(missing));
+    assert.match(decode(missing), /optd-release-verify.sh/);
+    await write(
+      "scripts/optd-release-verify.sh",
+      "#!/usr/bin/env bash\necho deliberate-image-gate-failure >&2\nexit 47\n",
     );
+    const baseline = await run();
+    assert.equal(baseline.code, 47, decode(baseline));
+    assert.match(decode(baseline), /deliberate-image-gate-failure/);
+    assert.ok(!decode(baseline).includes("COMPOSED VERIFICATION PASSED"));
 
     for (
       const failure of [
@@ -143,7 +150,7 @@ Deno.test("prefix verifier propagates real formatting, model, type, regression a
       const result = await run();
       const output = decode(result);
       assert.notEqual(result.code, 0, `${failure}: ${output}`);
-      assert.ok(!output.includes("PREFIX CHECKS PASSED"), output);
+      assert.ok(!output.includes("COMPOSED VERIFICATION PASSED"), output);
       assert.match(
         output,
         {
@@ -169,7 +176,7 @@ Deno.test("prefix verifier propagates real formatting, model, type, regression a
     const postTestDrift = await run();
     assert.notEqual(postTestDrift.code, 0, decode(postTestDrift));
     assert.match(decode(postTestDrift), /Specification drift/);
-    assert.ok(!decode(postTestDrift).includes("PREFIX CHECKS PASSED"));
+    assert.ok(!decode(postTestDrift).includes("COMPOSED VERIFICATION PASSED"));
   } finally {
     await Deno.remove(fixture, { recursive: true });
   }

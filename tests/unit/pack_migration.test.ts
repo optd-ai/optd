@@ -1,4 +1,4 @@
-import { assertEquals, assertMatch } from "jsr:@std/assert";
+import { assertEquals, assertMatch } from "@std/assert";
 import { loadPackFromFiles } from "../../src/adapters/outbound/yaml/pack_loader.ts";
 import { buildMigrationPlan } from "../../src/domain/migrations/pack_migration.ts";
 import { uuidV7 } from "../../src/domain/ids/uuid_v7.ts";

@@ -2,12 +2,12 @@ import {
   assertEquals,
   assertNotEquals,
   assertStringIncludes,
-} from "jsr:@std/assert";
+} from "@std/assert";
 import {
   type LiveHarness,
   startLiveHarness,
 } from "../../support/live_harness.ts";
-import { dirname, join } from "jsr:@std/path";
+import { dirname, join } from "@std/path";
 import { query } from "../../../src/adapters/outbound/postgres/client.ts";
 
 Deno.test("compiled pack preview persists inactive reusable candidates and distinct plans for both proof packs", async () => {

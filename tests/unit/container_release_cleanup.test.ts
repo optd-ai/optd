@@ -107,3 +107,48 @@ Deno.test("auxiliary container cleanup aggregates every fallback failure", async
     assertStrictEquals(wrapped.cause, failure);
   }
 });
+
+Deno.test("pre-build image cleanup reports its own result inside a failing EXIT trap", async () => {
+  const gate = await Deno.readTextFile(
+    new URL("../../scripts/release-gate.sh", import.meta.url),
+  );
+  const start = gate.indexOf("cleanup_registered_images() {");
+  const end = gate.indexOf("\ninspect_label() {", start);
+  if (start < 0 || end < 0) throw new Error("image cleanup function missing");
+  const fixture = await Deno.makeTempDir({ prefix: "optd-prebuild-cleanup-" });
+  try {
+    await Deno.mkdir(`${fixture}/before/docker`, { recursive: true });
+    await Deno.writeTextFile(`${fixture}/before/docker/images`, "baseline\n");
+    for (
+      const [inventory, expected] of [["baseline", 0], ["changed", 1]] as const
+    ) {
+      const result = await new Deno.Command("bash", {
+        args: [
+          "-c",
+          `
+set -eu
+state_root=$1
+build_accounting_started=false
+${gate.slice(start, end)}
+# Substitute only inventory acquisition; execute the real cleanup and EXIT trap.
+atomic_sorted_command() { printf '%s\\n' "$INVENTORY" > "$1"; }
+trap 'set +e; cleanup_registered_images; result=$?; echo "cleanup=$result"; exit 37' EXIT
+exit 37
+`,
+          "fixture",
+          fixture,
+        ],
+        env: { INVENTORY: inventory },
+        stdout: "piped",
+        stderr: "piped",
+      }).output();
+      assertEquals(result.code, 37);
+      assertEquals(
+        new TextDecoder().decode(result.stdout),
+        `cleanup=${expected}\n`,
+      );
+    }
+  } finally {
+    await Deno.remove(fixture, { recursive: true });
+  }
+});

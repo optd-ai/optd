@@ -220,7 +220,7 @@ Deno.test("successful status with an incomplete Step is rejected without image a
     assertEquals((await resourceIds(fixture, "images")).length, 1);
     assertStringIncludes(
       result.stderr,
-      "legacy builder image authority is ambiguous",
+      "builder image authority is ambiguous",
     );
     assert(
       !(await readLog(fixture, "docker.log")).includes(
@@ -242,7 +242,7 @@ Deno.test("a result after an incomplete Step is rejected as spoofed protocol", a
     assertEquals((await resourceIds(fixture, "images")).length, 1);
     assertStringIncludes(
       result.stderr,
-      "legacy builder image authority is ambiguous",
+      "builder image authority is ambiguous",
     );
     assert(
       !(await readLog(fixture, "docker.log")).includes(
@@ -270,7 +270,7 @@ Deno.test("multiple or non-final incomplete Steps are rejected", async () => {
       );
       assertStringIncludes(
         result.stderr,
-        "legacy builder image authority is ambiguous",
+        "builder image authority is ambiguous",
       );
       assert(
         !(await readLog(fixture, "docker.log")).includes(
@@ -298,7 +298,7 @@ Deno.test("an unreported image from an incomplete Step blocks cleanup authority"
     );
     assertStringIncludes(
       result.stderr,
-      "legacy builder image authority is ambiguous",
+      "builder image authority is ambiguous",
     );
     assert(
       !(await readLog(fixture, "docker.log")).includes(
@@ -368,7 +368,7 @@ Deno.test("unknown deltas and spoofed or ambiguous transcript IDs fail closed wi
       );
       assertStringIncludes(
         result.stderr,
-        "legacy builder image authority is ambiguous",
+        "builder image authority is ambiguous",
       );
     } finally {
       await removeFixture(fixture);
@@ -1080,9 +1080,19 @@ async function createFixture(): Promise<Fixture> {
   for (const dir of ["scripts", "src", "tests", "docs", "k8s"]) {
     await Deno.mkdir(`${root}/${dir}`, { recursive: true });
   }
-  await Deno.copyFile(
-    "scripts/release-gate.sh",
+  // Retain historical transcript/parser adversaries without offering a legacy
+  // production switch. BuildKit authority is exercised independently by the
+  // exact-image tests; this fixture's fake daemon emits legacy Step frames.
+  const gate = await Deno.readTextFile("scripts/release-gate.sh");
+  await Deno.writeTextFile(
     `${root}/scripts/release-gate.sh`,
+    gate.replace(
+      /# The approved existing Docker driver[\s\S]*?(?=printf 'COMMAND: docker buildx)/,
+      "",
+    ).replace(
+      /docker buildx build --builder default --load --pull=false --no-cache \\\n {2}--iidfile[^\n]*\\\n/,
+      "docker build --pull=false --no-cache \\\n",
+    ),
   );
   await Deno.copyFile(
     "scripts/release-artifacts.sh",

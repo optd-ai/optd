@@ -1,4 +1,4 @@
-import postgres from "npm:postgres";
+import postgres from "postgres";
 
 export type Sql = ReturnType<typeof postgres>;
 type Tx = {
@@ -71,7 +71,9 @@ export function requestedLockTimeoutMs(
 ): number {
   if (requested === undefined) return serverDefault;
   if (!Number.isSafeInteger(requested) || requested <= 0) {
-    throw new Error("lock timeout must be a positive integer number of milliseconds");
+    throw new Error(
+      "lock timeout must be a positive integer number of milliseconds",
+    );
   }
   return requested;
 }
@@ -195,7 +197,9 @@ export async function commitStage(
           : stage.operations;
         const tables = canonicalTableOrder(operations.map((op) => op.table));
         for (const table of tables) {
-          await tx.unsafe(`lock table ${quoteIdentifier(table)} in row exclusive mode`);
+          await tx.unsafe(
+            `lock table ${quoteIdentifier(table)} in row exclusive mode`,
+          );
         }
         await options.hooks?.afterTableLocks?.();
 
@@ -222,7 +226,9 @@ export async function commitStage(
         for (const dependency of canonicalDependencyOrder(operations)) {
           const mode = dependency.mode === "mutate" ? "update" : "share";
           await tx.unsafe(
-            `select id from ${quoteIdentifier(dependency.table)} where id = $1 for ${mode}`,
+            `select id from ${
+              quoteIdentifier(dependency.table)
+            } where id = $1 for ${mode}`,
             [dependency.object_id],
           );
         }
@@ -251,10 +257,14 @@ export async function commitStage(
 
         for (const dependency of canonicalDependencyOrder(operations)) {
           const rows = await tx.unsafe(
-            `select version from ${quoteIdentifier(dependency.table)} where id = $1`,
+            `select version from ${
+              quoteIdentifier(dependency.table)
+            } where id = $1`,
             [dependency.object_id],
           );
-          if (Number(rows[0]?.version) !== Number(dependency.expected_version)) {
+          if (
+            Number(rows[0]?.version) !== Number(dependency.expected_version)
+          ) {
             return {
               status: "stage_stale" as const,
               reason: "object_version_changed",
@@ -267,7 +277,9 @@ export async function commitStage(
           "insert into proto_commits(id, stage_id) values ($1,$2)",
           [commitId, stageId],
         );
-        for (const operation of operations.filter((op) => op.mode === "mutate")) {
+        for (
+          const operation of operations.filter((op) => op.mode === "mutate")
+        ) {
           await tx.unsafe(
             `update ${quoteIdentifier(operation.table)}
                 set value = $2, version = version + 1
@@ -275,7 +287,9 @@ export async function commitStage(
             [operation.object_id, operation.value ?? null],
           );
           const rows = await tx.unsafe(
-            `select version, value from ${quoteIdentifier(operation.table)} where id = $1`,
+            `select version, value from ${
+              quoteIdentifier(operation.table)
+            } where id = $1`,
             [operation.object_id],
           );
           await tx.unsafe(
@@ -322,7 +336,9 @@ export async function commitStage(
 
 export async function cancelStage(sql: Sql, stageId: string) {
   return await sql.begin(async (tx) => {
-    await tx.unsafe("select id from proto_stages where id = $1 for update", [stageId]);
+    await tx.unsafe("select id from proto_stages where id = $1 for update", [
+      stageId,
+    ]);
     const committed = await tx.unsafe(
       "select id from proto_commits where stage_id = $1",
       [stageId],
@@ -336,9 +352,15 @@ export async function cancelStage(sql: Sql, stageId: string) {
   });
 }
 
-export async function setApproval(sql: Sql, stageId: string, approved: boolean) {
+export async function setApproval(
+  sql: Sql,
+  stageId: string,
+  approved: boolean,
+) {
   return await sql.begin(async (tx) => {
-    await tx.unsafe("select id from proto_stages where id = $1 for update", [stageId]);
+    await tx.unsafe("select id from proto_stages where id = $1 for update", [
+      stageId,
+    ]);
     const committed = await tx.unsafe(
       "select id from proto_commits where stage_id = $1",
       [stageId],
@@ -421,7 +443,9 @@ export async function seedScenario(
 }
 
 async function setLockTimeout(tx: Tx, milliseconds: number) {
-  await tx.unsafe("select set_config('lock_timeout', $1, true)", [`${milliseconds}ms`]);
+  await tx.unsafe("select set_config('lock_timeout', $1, true)", [
+    `${milliseconds}ms`,
+  ]);
 }
 
 function quoteIdentifier(identifier: string): string {

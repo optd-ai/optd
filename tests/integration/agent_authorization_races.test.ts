@@ -1,5 +1,5 @@
-import { assertEquals, assertExists, assertRejects } from "jsr:@std/assert";
-import { join } from "jsr:@std/path";
+import { assertEquals, assertExists, assertRejects } from "@std/assert";
+import { join } from "@std/path";
 import type { Sql } from "../../src/adapters/outbound/postgres/client.ts";
 import { query } from "../../src/adapters/outbound/postgres/client.ts";
 import { opaqueToken, tokenDigest } from "../../src/domain/auth/token.ts";

@@ -1,4 +1,4 @@
-import { assert, assertEquals } from "jsr:@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import { query } from "../../src/adapters/outbound/postgres/client.ts";
 import { findPostgresBins } from "../../src/adapters/outbound/postgres-process/lifecycle.ts";
 import { startAuthenticatedHarness } from "../support/authenticated_harness.ts";

@@ -1,5 +1,5 @@
-import { assertEquals, assertMatch } from "jsr:@std/assert";
-import { join } from "jsr:@std/path";
+import { assertEquals, assertMatch } from "@std/assert";
+import { join } from "@std/path";
 import {
   type LiveHarness,
   startLiveHarness,

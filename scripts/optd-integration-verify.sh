@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Prefix verification only. This does not establish image or release readiness.
+# Verify the composed proposal, including its own exact-source image gate.
 set -euo pipefail
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
 if (( $# != 0 )); then
-  echo 'Usage: bash scripts/optd-integration-verify.sh (prefix checks only)' >&2
+  echo 'Usage: bash scripts/optd-integration-verify.sh' >&2
   exit 2
 fi
 deno fmt --check src tests docs project-model deno.json
@@ -15,4 +15,5 @@ deno test -A tests/e2e/full_crm/compiled_cli.test.ts
 deno test -A tests/support/public_flows/equivalence.test.ts
 deno task test
 deno task model:check
-printf '%s\n' 'PREFIX CHECKS PASSED; image/release acceptance has not been run.'
+bash scripts/optd-release-verify.sh
+printf '%s\n' 'COMPOSED VERIFICATION PASSED, including the exact-source release gate.'

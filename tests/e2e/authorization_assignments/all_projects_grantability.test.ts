@@ -1,5 +1,5 @@
-import { assertEquals } from "jsr:@std/assert";
-import { join } from "jsr:@std/path";
+import { assertEquals } from "@std/assert";
+import { join } from "@std/path";
 import { query } from "../../../src/adapters/outbound/postgres/client.ts";
 import { uuidV7 } from "../../../src/domain/ids/uuid_v7.ts";
 import {

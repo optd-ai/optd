@@ -23,6 +23,22 @@
     ]
   },
   "lint": {
-    "include": ["src/", "tests/"]
+    "include": [
+      "src/",
+      "tests/"
+    ]
+  },
+  "imports": {
+    "@std/assert": "jsr:@std/assert@1.0.19",
+    "@std/path": "jsr:@std/path@1.1.6",
+    "@std/fs/walk": "jsr:@std/fs@1.0.24/walk",
+    "@node-rs/argon2": "npm:@node-rs/argon2@2.0.2",
+    "hono": "npm:hono@4.12.28",
+    "hono/deno": "npm:hono@4.12.28/deno",
+    "postgres": "npm:postgres@3.4.9",
+    "ajv": "npm:ajv@8.20.0",
+    "ajv/dist/2020.js": "npm:ajv@8.20.0/dist/2020.js",
+    "@sinclair/typebox": "npm:@sinclair/typebox@0.34.38",
+    "@sinclair/typebox/value": "npm:@sinclair/typebox@0.34.38/value"
   }
 }

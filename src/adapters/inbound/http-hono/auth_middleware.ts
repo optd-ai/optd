@@ -1,4 +1,4 @@
-import type { Context, Next } from "npm:hono";
+import type { Context, Next } from "hono";
 import type { RequestAuthenticator } from "../../../application/ports/authentication.ts";
 import type { AuthContext } from "../../../domain/auth/model.ts";
 import { policyActorFromAuthContext } from "../../../domain/auth/policy_actor.ts";
