@@ -15,9 +15,17 @@ deno test -A tests/unit/optd_distribution.test.ts
 deno test -A tests/e2e/foundation/compiled_cli_smoke.test.ts
 ```
 
-The integration verifier is intentionally prefix-safe. It must not claim final
-host or image acceptance. Subsequent host and exact-image acceptance must extend
-it to the mandatory real gate before final release readiness can be claimed.
+The integration verifier requires the fresh-state host CRM and Projects shared
+public-flow matrix using a current compiled `optctl`, independent driver/adapter
+equivalence checks, and the full unit/integration/e2e/scenario suite. Host tests
+require real PostgreSQL binaries (select them with `OPTD_PG_BIN_DIR`); no host
+coverage may be skipped or replaced with mocks. Each shared flow owns a fresh
+service and checks quiescent cleanup.
+
+The verifier is still intentionally prefix-safe: its success is not image or
+release readiness. The subsequent image acceptance step must extend it to the
+mandatory full exact-image release gate on the composed clean HEAD before final
+release readiness can be claimed.
 
 The full local gate is `deno task release-gate`. It requires Docker, the
 supported builder, Deno, existing PostgreSQL binaries for host tests, and the

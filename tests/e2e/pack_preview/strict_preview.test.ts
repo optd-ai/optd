@@ -276,7 +276,7 @@ Deno.test("compiled pack preview persists inactive reusable candidates and disti
     } finally {
       await Deno.remove(unknownDir, { recursive: true });
     }
-    await assertMalformedMultipart(
+    await assertInvalidMultipartPath(
       harness,
       "../pack.yaml",
       "invalid pack path ../pack.yaml",
@@ -329,7 +329,7 @@ async function harnessToken(harness: LiveHarness): Promise<string> {
   );
   return store.origins[new URL(harness.baseUrl).origin].token;
 }
-async function assertMalformedMultipart(
+async function assertInvalidMultipartPath(
   harness: LiveHarness,
   filename: string,
   expected: string,
@@ -341,8 +341,10 @@ async function assertMalformedMultipart(
     headers: { authorization: `Bearer ${await harnessToken(harness)}` },
     body: form,
   });
-  assertEquals(response.status, 400);
+  // A valid multipart envelope with an invalid Pack path fails domain validation.
+  assertEquals(response.status, 422);
   const body = await response.json();
+  assertEquals(body.ok, false);
   assertEquals(body.error.code, "bad_pack");
   assertStringIncludes(body.error.message, expected);
 }
@@ -354,8 +356,9 @@ async function assertUnknownMultipartName(harness: LiveHarness) {
     headers: { authorization: `Bearer ${await harnessToken(harness)}` },
     body: form,
   });
-  assertEquals(response.status, 400);
+  assertEquals(response.status, 422);
   const body = await response.json();
+  assertEquals(body.ok, false);
   assertEquals(body.error.code, "bad_pack");
   assertEquals(
     body.error.message,

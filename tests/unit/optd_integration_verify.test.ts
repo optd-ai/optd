@@ -15,7 +15,7 @@ async function copyTree(source: string, target: string) {
   }
 }
 
-Deno.test("prefix verifier propagates real formatting, model, type and regression failures", async () => {
+Deno.test("prefix verifier propagates real formatting, model, type, regression and host failures", async () => {
   const fixture = await Deno.makeTempDir({ prefix: "optd-verifier-test-" });
   const write = (path: string, text: string) =>
     Deno.writeTextFile(join(fixture, path), text);
@@ -55,6 +55,7 @@ Deno.test("prefix verifier propagates real formatting, model, type and regressio
             "model:check":
               "deno run --allow-read scripts/project-model.ts check",
             check: "deno check src/check.ts",
+            test: "deno test tests/full.test.ts",
           },
         },
         null,
@@ -69,13 +70,20 @@ Deno.test("prefix verifier propagates real formatting, model, type and regressio
       "tests/unit/optd_integration_verify.test.ts",
       'Deno.test("fixture second regression", () => {});\n',
     );
-    await Deno.mkdir(join(fixture, "tests/e2e/foundation"), {
-      recursive: true,
-    });
+    for (
+      const path of [
+        "tests/e2e/foundation",
+        "tests/e2e/full_crm",
+        "tests/support/public_flows",
+      ]
+    ) await Deno.mkdir(join(fixture, path), { recursive: true });
     for (
       const path of [
         "tests/unit/optd_distribution.test.ts",
         "tests/e2e/foundation/compiled_cli_smoke.test.ts",
+        "tests/e2e/full_crm/compiled_cli.test.ts",
+        "tests/support/public_flows/equivalence.test.ts",
+        "tests/full.test.ts",
       ]
     ) await write(path, passing);
     const baseline = await run();
@@ -93,12 +101,21 @@ Deno.test("prefix verifier propagates real formatting, model, type and regressio
         "regression",
         "distribution",
         "compiled",
+        "host",
+        "equivalence",
+        "full",
       ] as const
     ) {
       const path = failure === "distribution"
         ? "tests/unit/optd_distribution.test.ts"
         : failure === "compiled"
         ? "tests/e2e/foundation/compiled_cli_smoke.test.ts"
+        : failure === "host"
+        ? "tests/e2e/full_crm/compiled_cli.test.ts"
+        : failure === "equivalence"
+        ? "tests/support/public_flows/equivalence.test.ts"
+        : failure === "full"
+        ? "tests/full.test.ts"
         : failure === "model"
         ? "spec/README.md"
         : failure === "regression"
@@ -115,6 +132,12 @@ Deno.test("prefix verifier propagates real formatting, model, type and regressio
           'Deno.test("compiled failure", () => {\n  throw new Error("deliberate compiled failure");\n});\n',
         regression:
           'Deno.test("fixture regression", () => {\n  throw new Error("deliberate regression failure");\n});\n',
+        host:
+          'Deno.test("host failure", () => {\n  throw new Error("deliberate host failure");\n});\n',
+        equivalence:
+          'Deno.test("equivalence failure", () => {\n  throw new Error("deliberate equivalence failure");\n});\n',
+        full:
+          'Deno.test("full failure", () => {\n  throw new Error("deliberate full failure");\n});\n',
       }[failure];
       await write(path, broken);
       const result = await run();
@@ -130,6 +153,9 @@ Deno.test("prefix verifier propagates real formatting, model, type and regressio
           regression: /deliberate regression failure/,
           distribution: /deliberate distribution failure/,
           compiled: /deliberate compiled failure/,
+          host: /deliberate host failure/,
+          equivalence: /deliberate equivalence failure/,
+          full: /deliberate full failure/,
         }[failure],
       );
       assert.equal(await Deno.readTextFile(join(fixture, path)), broken);

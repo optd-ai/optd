@@ -68,14 +68,16 @@ Deno.test({
         'for p in /proc/[0-9]*; do pid=${p##*/}; ppid=$(sed -n \'s/^PPid:[[:space:]]*//p\' "$p/status"); comm=$(cat "$p/comm"); args=$(tr \'\\000\' \' \' < "$p/cmdline"); printf \'%s %s %s %s\\n\' "$pid" "$ppid" "$comm" "$args"; done',
       ]);
       const lines = processes.stdout.trim().split("\n");
+      // Match comm, not argv: tini and PostgreSQL also mention optd.
+      const servers = lines.filter((line) => /^\d+ \d+ optd /.test(line));
+      assertEquals(servers.length, 1, processes.stdout);
+      assertEquals(servers[0].split(" ")[1], "1", processes.stdout);
       assertEquals(
-        lines.filter((line) => /optd/.test(line)).length,
+        lines.filter((line) =>
+          /^\d+ \d+ postgres .*\/data\/postgres\/data/.test(line)
+        ).length,
         1,
-      );
-      assertEquals(
-        lines.filter((line) => /postgres .*\/data\/postgres\/data/.test(line))
-          .length,
-        1,
+        processes.stdout,
       );
       assertEquals(
         lines.filter((line) => /outbox.*worker/i.test(line)).length,

@@ -662,9 +662,10 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
       { headers: { authorization: `Bearer ${fullToken}` } },
     );
     const invalidMetadataQueryBody = await invalidMetadataQuery.json();
-    assertEquals(invalidMetadataQuery.status, 400);
+    // Well-formed queries with invalid values are schema failures, not transport errors.
+    assertEquals(invalidMetadataQuery.status, 422);
     assertEquals(invalidMetadataQueryBody.ok, false);
-    assertEquals(invalidMetadataQueryBody.error.code, "bad_request");
+    assertEquals(invalidMetadataQueryBody.error.code, "validation_failed");
     const denied = await fetch(
       `${harness.baseUrl}/api/v1/projects/${projectOne}/objects/optd/crm/lead/${ids.object}`,
       {
