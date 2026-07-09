@@ -1,12 +1,19 @@
 import { SystemClock } from "./ports/clock.ts";
-import { BootstrapMetadataRepository } from "./ports/metadata_repository.ts";
 import { makeInspectMetadataService } from "./services/inspect_metadata.ts";
+import { makePackServices } from "./services/pack_services.ts";
 import { OPERANT_VERSION } from "../config/runtime.ts";
+import type { Queryable, Sql } from "../adapters/outbound/postgres/client.ts";
+import { PostgresTransactionManager } from "../adapters/outbound/postgres/transaction_manager.ts";
 
-export function makeApplication() {
+export function makeApplication(sql: Sql) {
   const clock = new SystemClock();
-  const metadata = new BootstrapMetadataRepository(OPERANT_VERSION);
+  const tx = new PostgresTransactionManager(sql);
   return {
-    metadata: makeInspectMetadataService({ metadata, clock }),
+    metadata: makeInspectMetadataService({
+      sql,
+      clock,
+      version: OPERANT_VERSION,
+    }),
+    packs: makePackServices({ sql: sql as Queryable, tx }),
   };
 }

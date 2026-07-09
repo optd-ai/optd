@@ -31,8 +31,82 @@ export const platformMigrations: PlatformMigration[] = [
     sql: `
       create table if not exists pack_revisions (
         revision text primary key,
+        namespace text not null,
+        name text not null,
+        version text not null,
+        active boolean not null,
         manifest jsonb not null,
+        normalized jsonb not null,
         created_at timestamptz not null default now()
+      );
+      create index if not exists pack_revisions_active_idx on pack_revisions(namespace, name, active);
+      create table if not exists pack_source_files (
+        revision text not null references pack_revisions(revision) on delete cascade,
+        path text not null,
+        digest text not null,
+        kind text not null,
+        content text not null,
+        primary key(revision, path)
+      );
+      create table if not exists resource_definitions (
+        revision text not null references pack_revisions(revision) on delete cascade,
+        namespace text not null,
+        name text not null,
+        spec jsonb not null,
+        document jsonb not null,
+        primary key(revision, namespace, name)
+      );
+      create table if not exists relationship_definitions (
+        revision text not null references pack_revisions(revision) on delete cascade,
+        namespace text not null,
+        name text not null,
+        spec jsonb not null,
+        document jsonb not null,
+        primary key(revision, namespace, name)
+      );
+      create table if not exists lifecycle_definitions (
+        revision text not null references pack_revisions(revision) on delete cascade,
+        namespace text not null,
+        name text not null,
+        spec jsonb not null,
+        document jsonb not null,
+        primary key(revision, namespace, name)
+      );
+      create table if not exists action_definitions (
+        revision text not null references pack_revisions(revision) on delete cascade,
+        namespace text not null,
+        name text not null,
+        spec jsonb not null,
+        document jsonb not null,
+        primary key(revision, namespace, name)
+      );
+      create table if not exists hook_definitions (
+        revision text not null references pack_revisions(revision) on delete cascade,
+        namespace text not null,
+        name text not null,
+        script_path text not null,
+        script_digest text not null,
+        spec jsonb not null,
+        document jsonb not null,
+        primary key(revision, namespace, name)
+      );
+      create table if not exists policy_definitions (
+        revision text not null references pack_revisions(revision) on delete cascade,
+        namespace text not null,
+        name text not null,
+        spec jsonb not null,
+        document jsonb not null,
+        primary key(revision, namespace, name)
+      );
+      create table if not exists seed_definitions (
+        revision text not null references pack_revisions(revision) on delete cascade,
+        namespace text not null,
+        name text not null,
+        resource text not null,
+        key_field text not null,
+        spec jsonb not null,
+        document jsonb not null,
+        primary key(revision, namespace, name)
       )
     `,
   },

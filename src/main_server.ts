@@ -25,9 +25,9 @@ export type StartedServer = {
 };
 
 export async function createFetchHandler() {
-  const application = makeApplication();
   const postgresRuntime = await startPostgresRuntime();
   const sql = createPostgresClient(postgresRuntime.databaseUrl);
+  const application = makeApplication(sql);
   let migrationResult: MigrationApplyResult;
   try {
     migrationResult = await sql.begin(async (tx) =>
@@ -40,6 +40,7 @@ export async function createFetchHandler() {
   }
   const app = makeHttpApp({
     metadata: application.metadata,
+    packs: application.packs,
     health: makeHealthService(sql, postgresRuntime, migrationResult),
     version: OPERANT_VERSION,
   });

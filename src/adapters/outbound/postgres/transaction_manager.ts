@@ -6,6 +6,6 @@ export class PostgresTransactionManager
   constructor(private readonly sql: Sql) {}
 
   async transaction<T>(fn: (tx: Queryable) => Promise<T>): Promise<T> {
-    return await this.sql.begin(async (tx) => await fn(tx));
+    return await this.sql.begin(async (tx) => await fn(tx)) as T;
   }
 }

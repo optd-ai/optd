@@ -1,10 +1,25 @@
 import { Hono } from "npm:hono";
 import { type Result, toHttpStatus } from "../../../domain/errors/result.ts";
 import type { HomeDto } from "../../../application/services/inspect_metadata.ts";
+import type {
+  PackApplyDto,
+  PackPreviewDto,
+} from "../../../application/services/pack_services.ts";
+import type { UploadedPackFile } from "../../outbound/yaml/pack_loader.ts";
 
 export type HttpDependencies = {
   metadata: {
     home(): Promise<Result<HomeDto>>;
+    packs(): Promise<Result<unknown>>;
+    pack(namespace: string, name: string): Promise<Result<unknown>>;
+    resource(namespace: string, name: string): Promise<Result<unknown>>;
+    action(namespace: string, name: string): Promise<Result<unknown>>;
+    hook(namespace: string, name: string): Promise<Result<unknown>>;
+    policy(namespace: string, name: string): Promise<Result<unknown>>;
+  };
+  packs: {
+    preview(files: UploadedPackFile[]): Promise<Result<PackPreviewDto>>;
+    apply(files: UploadedPackFile[]): Promise<Result<PackApplyDto>>;
   };
   health: {
     inspect(): Promise<Record<string, unknown>>;
@@ -25,19 +40,93 @@ export function makeHttpApp(deps: HttpDependencies): Hono {
 
   app.get("/health", async (c) => {
     const health = await deps.health.inspect();
-    return c.json({
-      ok: true,
-      data: {
-        version: deps.version,
-        ...health,
-      },
-    });
+    return c.json({ ok: true, data: { version: deps.version, ...health } });
   });
 
   app.get(
     "/metadata/home",
     async (c) => resultJson(c, await deps.metadata.home()),
   );
+  app.get(
+    "/metadata/packs",
+    async (c) => resultJson(c, await deps.metadata.packs()),
+  );
+  app.get(
+    "/metadata/packs/:namespace/:name",
+    async (c) =>
+      resultJson(
+        c,
+        await deps.metadata.pack(c.req.param("namespace"), c.req.param("name")),
+      ),
+  );
+  app.get(
+    "/metadata/resources/:namespace/:resource",
+    async (c) =>
+      resultJson(
+        c,
+        await deps.metadata.resource(
+          c.req.param("namespace"),
+          c.req.param("resource"),
+        ),
+      ),
+  );
+  app.get(
+    "/metadata/actions/:namespace/:action",
+    async (c) =>
+      resultJson(
+        c,
+        await deps.metadata.action(
+          c.req.param("namespace"),
+          c.req.param("action"),
+        ),
+      ),
+  );
+  app.get(
+    "/metadata/hooks/:namespace/:hook",
+    async (c) =>
+      resultJson(
+        c,
+        await deps.metadata.hook(c.req.param("namespace"), c.req.param("hook")),
+      ),
+  );
+  app.get(
+    "/metadata/policies/:namespace/:policy",
+    async (c) =>
+      resultJson(
+        c,
+        await deps.metadata.policy(
+          c.req.param("namespace"),
+          c.req.param("policy"),
+        ),
+      ),
+  );
+
+  app.post(
+    "/packs/preview",
+    async (c) =>
+      resultJson(c, await deps.packs.preview(await multipartFiles(c.req.raw))),
+  );
+  app.post(
+    "/packs/apply",
+    async (c) =>
+      resultJson(c, await deps.packs.apply(await multipartFiles(c.req.raw))),
+  );
 
   return app;
+}
+
+async function multipartFiles(request: Request): Promise<UploadedPackFile[]> {
+  const form = await request.formData();
+  const files: UploadedPackFile[] = [];
+  for (const [key, value] of form.entries()) {
+    if (value instanceof File) {
+      const path = key === "file" ? value.name : key;
+      files.push({
+        path,
+        text: await value.text(),
+        kind: path.endsWith(".ts") ? "script" : "config",
+      });
+    }
+  }
+  return files;
 }
