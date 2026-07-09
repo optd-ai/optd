@@ -1,14 +1,15 @@
 {
   "tasks": {
     "fmt": "deno fmt src tests deno.json",
-    "check": "deno check src/main_server.ts src/main_optctl.ts tests/scenarios/00_bootstrap.ts tests/scenarios/00_postgres_bootstrap.ts tests/scenarios/01_pack_preview_apply_crm.ts tests/scenarios/02_changeset_crm_lead_flow.ts tests/scenarios/03_query_policy_pagination.ts tests/unit/pack_loader_test.ts tests/unit/expression_lowerer.test.ts tests/unit/query_objects.test.ts",
-    "test": "deno test --allow-read --allow-write --allow-env --allow-net --allow-run tests/unit tests/integration tests/scenarios/00_bootstrap.ts tests/scenarios/00_postgres_bootstrap.ts tests/scenarios/01_pack_preview_apply_crm.ts tests/scenarios/02_changeset_crm_lead_flow.ts tests/scenarios/03_query_policy_pagination.ts",
+    "check": "deno check src/main_server.ts src/main_optctl.ts tests/scenarios/00_bootstrap.ts tests/scenarios/00_postgres_bootstrap.ts tests/scenarios/01_pack_preview_apply_crm.ts tests/scenarios/02_changeset_crm_lead_flow.ts tests/scenarios/03_query_policy_pagination.ts tests/scenarios/04_action_hooks_outbox.ts tests/unit/pack_loader_test.ts tests/unit/expression_lowerer.test.ts tests/unit/query_objects.test.ts tests/integration/outbox_worker.test.ts",
+    "test": "deno test --allow-read --allow-write --allow-env --allow-net --allow-run tests/unit tests/integration tests/scenarios/00_bootstrap.ts tests/scenarios/00_postgres_bootstrap.ts tests/scenarios/01_pack_preview_apply_crm.ts tests/scenarios/02_changeset_crm_lead_flow.ts tests/scenarios/03_query_policy_pagination.ts tests/scenarios/04_action_hooks_outbox.ts",
     "server": "deno run --allow-read --allow-write --allow-env --allow-net --allow-run src/main_server.ts",
     "optctl": "deno run --allow-read --allow-env --allow-net src/main_optctl.ts",
     "scenario:bootstrap": "deno test --allow-read --allow-write --allow-env --allow-net --allow-run tests/scenarios/00_bootstrap.ts",
     "scenario:pack": "deno test --allow-read --allow-write --allow-env --allow-net --allow-run tests/scenarios/01_pack_preview_apply_crm.ts",
     "scenario:changesets": "deno test --allow-read --allow-write --allow-env --allow-net --allow-run tests/scenarios/02_changeset_crm_lead_flow.ts",
-    "scenario:queries": "deno test --allow-read --allow-write --allow-env --allow-net --allow-run tests/scenarios/03_query_policy_pagination.ts"
+    "scenario:queries": "deno test --allow-read --allow-write --allow-env --allow-net --allow-run tests/scenarios/03_query_policy_pagination.ts",
+    "scenario:outbox": "deno test --allow-read --allow-write --allow-env --allow-net --allow-run tests/scenarios/04_action_hooks_outbox.ts"
   },
   "fmt": {
     "include": ["src/", "tests/", "deno.json"]

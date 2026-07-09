@@ -180,14 +180,37 @@ Deno.test("CRM hooks normalize/validate leads and convert_lead action enqueues o
       ),
     );
 
+    const statusBefore = await runOptctl([
+      "--server",
+      server.url,
+      "outbox",
+      "status",
+      "--json",
+    ]);
+    assertEquals(statusBefore.code, 0, statusBefore.stderr);
+    const statusBeforeJson = JSON.parse(statusBefore.stdout);
+    assert(Number(statusBeforeJson.data.totals.pending ?? 0) >= 1);
+
+    const drain = await runOptctl([
+      "--server",
+      server.url,
+      "outbox",
+      "drain",
+      "--json",
+    ]);
+    assertEquals(drain.code, 0, drain.stderr);
+    const drainJson = JSON.parse(drain.stdout);
+    assert(drainJson.data.claimed >= 1);
+    assert(drainJson.data.succeeded >= 1);
+
     const outbox = await query<{ count: string }>(
       server.sql,
-      "select count(*)::text as count from outbox where phase='event.after_commit' and hook='default.notify_crm_change'",
+      "select count(*)::text as count from outbox where phase='event.after_commit' and hook='default.notify_crm_change' and status='succeeded'",
     );
     assert(Number(outbox.rows[0]?.count ?? 0) >= 1);
     const executions = await query<{ phase: string; status: string }>(
       server.sql,
-      "select phase,status from hook_executions where hook in ('default.normalize_lead','default.validate_lead','default.convert_lead')",
+      "select phase,status from hook_executions where hook in ('default.normalize_lead','default.validate_lead','default.convert_lead','default.notify_crm_change')",
     );
     assert(
       executions.rows.some((row) =>
@@ -202,6 +225,11 @@ Deno.test("CRM hooks normalize/validate leads and convert_lead action enqueues o
     assert(
       executions.rows.some((row) =>
         row.phase === "action.commit" && row.status === "succeeded"
+      ),
+    );
+    assert(
+      executions.rows.some((row) =>
+        row.phase === "event.after_commit" && row.status === "succeeded"
       ),
     );
   } finally {

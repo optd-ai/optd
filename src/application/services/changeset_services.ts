@@ -979,25 +979,75 @@ async function enqueueAfterCommitHooks(
     undefined,
     undefined,
   );
-  for (const hook of hooks) {
-    await query(
-      sql,
-      `insert into outbox(id,hook,phase,payload_json) values ($1,$2,'event.after_commit',$3::jsonb)`,
-      [
-        crypto.randomUUID(),
-        `${hook.namespace}.${hook.name}`,
-        JSON.stringify({
-          changeset_id: changesetId,
-          actor_id: actorId,
-          operations: planned.map((op) => ({
-            op: op.op,
-            resource: op.resource,
-            relationship: op.relationship,
-            id: op.objectId ?? op.id,
-          })),
-        }),
-      ],
-    );
+  if (!hooks.length) return;
+  const events = await query<{
+    id: string;
+    event_type: string;
+    resource: string | null;
+    object_id: string | null;
+    object_version_id: string | null;
+    payload_json: unknown;
+  }>(
+    sql,
+    `select id,event_type,resource,object_id,object_version_id,payload_json
+     from events where changeset_id=$1 order by occurred_at,id`,
+    [changesetId],
+  );
+  const operations = planned.map((op) => ({
+    op: op.op,
+    resource: op.resource,
+    relationship: op.relationship,
+    id: op.objectId ?? op.id,
+  }));
+  for (const event of events.rows) {
+    for (const hook of hooks) {
+      const eventPayload = {
+        id: event.id,
+        event_id: event.id,
+        type: event.event_type,
+        event_type: event.event_type,
+        resource: event.resource,
+        object_id: event.object_id,
+        object_version_id: event.object_version_id,
+        payload: event.payload_json,
+        changeset_id: changesetId,
+      };
+      await query(
+        sql,
+        `insert into outbox(id,event_id,hook,phase,hook_revision,script_digest,payload_json,envelope_json)
+         values ($1,$2,$3,'event.after_commit',$4,$5,$6::jsonb,$7::jsonb)`,
+        [
+          crypto.randomUUID(),
+          event.id,
+          `${hook.namespace}.${hook.name}`,
+          hook.revision,
+          hook.scriptDigest,
+          JSON.stringify({
+            changeset_id: changesetId,
+            actor_id: actorId,
+            operations,
+            event: eventPayload,
+            event_id: event.id,
+          }),
+          JSON.stringify({
+            hook: hook.name,
+            phase: "event.after_commit",
+            input: {
+              actor_id: actorId,
+              changeset_id: changesetId,
+              operations,
+              event: eventPayload,
+              event_id: event.id,
+            },
+            metadata: {
+              pack_revision: hook.revision,
+              script_digest: hook.scriptDigest,
+              event_id: event.id,
+            },
+          }),
+        ],
+      );
+    }
   }
 }
 

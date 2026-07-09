@@ -66,6 +66,13 @@ export type HttpDependencies = {
     ): Promise<Result<unknown>>;
     history(resource: string, id: string): Promise<Result<unknown>>;
   };
+  outbox: {
+    list(): Promise<Result<unknown>>;
+    drain(
+      input?: { limit?: number; worker_id?: string },
+    ): Promise<Result<unknown>>;
+    retry(id: string): Promise<Result<unknown>>;
+  };
   health: {
     inspect(): Promise<Record<string, unknown>>;
   };
@@ -257,6 +264,24 @@ export function makeHttpApp(deps: HttpDependencies): Hono {
           c.req.param("id"),
         ),
       ),
+  );
+
+  app.get("/outbox", async (c) => resultJson(c, await deps.outbox.list()));
+  app.post("/outbox/drain", async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    return resultJson(
+      c,
+      await deps.outbox.drain({
+        limit: typeof body?.limit === "number" ? body.limit : undefined,
+        worker_id: typeof body?.worker_id === "string"
+          ? body.worker_id
+          : undefined,
+      }),
+    );
+  });
+  app.post(
+    "/outbox/:id/retry",
+    async (c) => resultJson(c, await deps.outbox.retry(c.req.param("id"))),
   );
 
   return app;

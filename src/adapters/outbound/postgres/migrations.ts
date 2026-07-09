@@ -256,6 +256,19 @@ export const platformMigrations: PlatformMigration[] = [
       create index if not exists pack_migration_plans_digest_idx on pack_migration_plans(plan_digest)
     `,
   },
+  {
+    id: "0007_durable_outbox_lifecycle",
+    sql: `
+      alter table outbox add column if not exists event_id text null references events(id);
+      alter table outbox add column if not exists hook_revision text null;
+      alter table outbox add column if not exists script_digest text null;
+      alter table outbox add column if not exists envelope_json jsonb not null default '{}'::jsonb;
+      alter table outbox add column if not exists updated_at timestamptz not null default now();
+      create index if not exists outbox_claim_idx on outbox(status, available_at, created_at, id);
+      create index if not exists outbox_event_idx on outbox(event_id);
+      create index if not exists hook_executions_hook_phase_idx on hook_executions(hook, phase, created_at desc)
+    `,
+  },
 ];
 
 export async function applyPlatformMigrations(
