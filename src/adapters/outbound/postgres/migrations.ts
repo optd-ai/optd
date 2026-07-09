@@ -110,6 +110,22 @@ export const platformMigrations: PlatformMigration[] = [
       )
     `,
   },
+  {
+    id: "0003_generated_sql_objects",
+    sql: `
+      create table if not exists generated_sql_objects (
+        revision text not null references pack_revisions(revision) on delete cascade,
+        kind text not null check (kind in ('resource_table', 'relationship_table')),
+        namespace text not null,
+        name text not null,
+        table_name text not null,
+        ddl text not null,
+        created_at timestamptz not null default now(),
+        primary key(revision, kind, namespace, name)
+      );
+      create index if not exists generated_sql_objects_table_name_idx on generated_sql_objects(table_name)
+    `,
+  },
 ];
 
 export async function applyPlatformMigrations(

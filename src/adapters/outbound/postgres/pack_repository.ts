@@ -1,4 +1,5 @@
 import { query, type Queryable } from "./client.ts";
+import { applyPackDdl, compilePackDdl } from "./resource_ddl.ts";
 import type { LoadedPack, NormalizedDefinition } from "../yaml/pack_loader.ts";
 
 export type PackSummary = {
@@ -59,6 +60,7 @@ export async function applyLoadedPack(
   sql: Queryable,
   pack: LoadedPack,
 ): Promise<PackSummary> {
+  const ddlObjects = compilePackDdl(pack);
   await query(
     sql,
     "update pack_revisions set active=false where namespace=$1 and name=$2",
@@ -146,6 +148,7 @@ export async function applyLoadedPack(
       ],
     );
   }
+  await applyPackDdl(sql, pack.revision, ddlObjects);
   return summarizePack(pack);
 }
 

@@ -14,6 +14,7 @@ import {
   type PackSummary,
   summarizePack,
 } from "../../adapters/outbound/postgres/pack_repository.ts";
+import { compilePackDdl } from "../../adapters/outbound/postgres/resource_ddl.ts";
 import type { TransactionManager } from "../ports/transaction_manager.ts";
 import type { Queryable } from "../../adapters/outbound/postgres/client.ts";
 
@@ -25,14 +26,15 @@ export type PackPreviewDto = {
     operation: "first_install" | "replace_active_revision";
     summary: PackSummary;
     creates: Record<string, number>;
-    ddl_deferred: true;
+    ddl_deferred: false;
+    generated_tables: Array<{ kind: string; name: string; table_name: string }>;
   };
 };
 
 export type PackApplyDto = {
   applied: true;
   summary: PackSummary;
-  ddl_deferred: true;
+  ddl_deferred: false;
 };
 
 export function makePackServices(
@@ -44,6 +46,7 @@ export function makePackServices(
         const before = await countPackRevisions(deps.sql);
         const pack = await loadPackFromFiles(files);
         const summary = summarizePack(pack);
+        const ddlObjects = compilePackDdl(pack);
         const after = await countPackRevisions(deps.sql);
         return ok({
           mutating: false,
@@ -63,7 +66,12 @@ export function makePackServices(
               policies: summary.policies.length,
               seeds: summary.seeds.length,
             },
-            ddl_deferred: true,
+            ddl_deferred: false,
+            generated_tables: ddlObjects.map((object) => ({
+              kind: object.kind,
+              name: `${object.namespace}.${object.name}`,
+              table_name: object.tableName,
+            })),
           },
         });
       } catch (error) {
@@ -81,7 +89,7 @@ export function makePackServices(
         const summary = await deps.tx.transaction((tx) =>
           applyLoadedPack(tx, pack)
         );
-        return ok({ applied: true, summary, ddl_deferred: true });
+        return ok({ applied: true, summary, ddl_deferred: false });
       } catch (error) {
         return err(
           validationError(
