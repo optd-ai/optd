@@ -14,6 +14,12 @@ import {
   type Queryable,
   quoteIdentifier,
 } from "../../adapters/outbound/postgres/client.ts";
+import {
+  actorExpressionFields,
+  auditPolicy,
+  compilePolicyPredicate,
+  normalizeActor,
+} from "../../domain/policies/policy_engine.ts";
 
 export type QuerySort = { field: string; direction?: "asc" | "desc" };
 export type QueryActor = string | {
@@ -102,7 +108,7 @@ export async function runQuery(
   if (input.include_archived && !actor.roles.includes("super_admin")) {
     throw new QueryError(
       "include_archived_denied",
-      "include_archived requires super_admin until policy integration",
+      "include_archived requires super_admin",
     );
   }
 
@@ -111,7 +117,7 @@ export async function runQuery(
   if (input.where?.trim()) {
     const lowered = lowerCelToSql(input.where, {
       fields: selectable,
-      actor: actorFields(actor),
+      actor: actorExpressionFields(actor),
       allowSelfAlias: true,
       maxNodes: 80,
       maxLength: 1_000,
@@ -120,13 +126,28 @@ export async function runQuery(
     params.push(...lowered.params);
   }
   if (!input.include_archived) whereParts.push(`${qi("archived_at")} is null`);
+  const policy = await compilePolicyPredicate(sql, {
+    actor,
+    resource: input.resource,
+    action: "read",
+    fields: selectable,
+  });
+  whereParts.push(offsetParams(policy.sql, params.length));
+  params.push(...policy.params);
+  if (policy.decision.bypassed) {
+    await auditPolicy(
+      sql,
+      { actor, resource: input.resource, action: "read" },
+      policy.decision,
+    );
+  }
 
   const digest = await queryDigest({
     resource: input.resource,
     where: input.where?.trim() || null,
     sort,
     fields: selected,
-    actor_policy: actorPolicyDigest(actor),
+    actor_policy: policy.decision.digest,
     include_archived: input.include_archived === true,
   });
   const cursor = input.cursor ? decodeCursor(input.cursor) : null;
@@ -178,8 +199,8 @@ export async function runQuery(
     },
     filter: { where: input.where?.trim() || null },
     policy: {
-      digest: actorPolicyDigest(actor),
-      summary: "policy pending; super_admin may include archived",
+      digest: policy.decision.digest,
+      summary: policy.decision.reason,
     },
   };
 }
@@ -292,28 +313,6 @@ function normalizeLimit(limit: unknown): number {
   }
   return Math.min(value, 100);
 }
-function normalizeActor(
-  actor: QueryActor | undefined,
-): { id: string; roles: string[] } {
-  if (typeof actor === "string") {
-    return { id: actor, roles: actor === "super_admin" ? ["super_admin"] : [] };
-  }
-  if (actor && typeof actor === "object") {
-    return {
-      id: typeof actor.id === "string" ? actor.id : "anonymous",
-      roles: Array.isArray(actor.roles)
-        ? actor.roles.filter((r) => typeof r === "string")
-        : [],
-    };
-  }
-  return { id: "anonymous", roles: [] };
-}
-function actorFields(actor: { id: string; roles: string[] }) {
-  return {
-    id: { type: "string" as const, value: actor.id },
-    roles: { type: "string" as const, array: true, value: actor.roles },
-  };
-}
 function keysetPredicate(
   sort: Required<QuerySort>[],
   values: Record<string, unknown>,
@@ -371,9 +370,6 @@ async function queryDigest(value: unknown): Promise<string> {
   const bytes = new TextEncoder().encode(JSON.stringify(value));
   const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
   return Array.from(hash).map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-function actorPolicyDigest(actor: { id: string; roles: string[] }) {
-  return `pending:${actor.id}:${actor.roles.slice().sort().join(",")}`;
 }
 function offsetParams(sql: string, offset: number) {
   return sql.replace(/\$(\d+)/g, (_, n) => `$${Number(n) + offset}`);

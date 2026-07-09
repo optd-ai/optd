@@ -10,6 +10,15 @@ import {
   quoteIdentifier,
 } from "../../adapters/outbound/postgres/client.ts";
 import type { TransactionManager } from "../ports/transaction_manager.ts";
+import {
+  type ActorContext,
+  assertPolicyAllowed,
+  auditPolicy,
+  authorizeObjectRuntime,
+  normalizeActor,
+  PolicyDeniedError,
+} from "../../domain/policies/policy_engine.ts";
+import type { FieldSpec } from "../../domain/queries/expression_lowerer.ts";
 
 type JsonRecord = Record<string, unknown>;
 export type ChangesetOperation = {
@@ -32,8 +41,9 @@ export type ChangesetOperation = {
   body?: string;
 };
 export type ChangesetRequest = {
-  actor?: string;
+  actor?: string | Record<string, unknown>;
   actor_id?: string;
+  actor_context?: Record<string, unknown>;
   idempotency_key?: string;
   source?: string;
   operations: ChangesetOperation[];
@@ -93,15 +103,15 @@ export function makeChangesetServices(
     ): Promise<Result<ChangesetPreviewDto>> {
       try {
         const actor = actorOf(input);
-        const plan = await planChangeset(deps.sql, input);
-        const preview = previewDto(crypto.randomUUID(), actor, plan);
+        const plan = await planChangeset(deps.sql, input, actor);
+        const preview = previewDto(crypto.randomUUID(), actor.id, plan);
         await query(
           deps.sql,
           `insert into changesets(id, actor_id, status, request_json, preview_json, source)
            values ($1,$2,'previewed',$3::jsonb,$4::jsonb,$5)`,
           [
             preview.id,
-            actor,
+            actor.id,
             JSON.stringify(input),
             JSON.stringify(preview),
             input.source ?? null,
@@ -114,13 +124,16 @@ export function makeChangesetServices(
           [
             crypto.randomUUID(),
             preview.id,
-            actor,
+            actor.id,
             preview.committable ? "allowed" : "failed",
             JSON.stringify(preview.validation),
           ],
         );
         return ok(preview);
       } catch (error) {
+        if (error instanceof PolicyDeniedError) {
+          return err(validationError(error.code, error.message, error.details));
+        }
         return err(validationError("bad_changeset", message(error)));
       }
     },
@@ -131,6 +144,23 @@ export function makeChangesetServices(
         );
         return ok(result);
       } catch (error) {
+        if (error instanceof PolicyDeniedError) {
+          const actor = actorOf(input);
+          await auditPolicy(
+            deps.sql,
+            { actor, resource: "changeset", action: "commit" },
+            {
+              allowed: false,
+              bypassed: false,
+              digest: "denied",
+              matched_rules: [],
+              checked_rules: [],
+              reason: error.message,
+            },
+            "policy.denied",
+          );
+          return err(validationError(error.code, error.message, error.details));
+        }
         return err(validationError("bad_changeset", message(error)));
       }
     },
@@ -138,6 +168,7 @@ export function makeChangesetServices(
       resourceId: string,
       id: string,
       includeArchived = false,
+      actorInput?: unknown,
     ): Promise<Result<unknown>> {
       try {
         const meta = await getResourceMeta(deps.sql, resourceId);
@@ -156,8 +187,24 @@ export function makeChangesetServices(
             severity: "not_found",
           });
         }
+        const actor = normalizeActor(actorInput ?? "anonymous");
+        const decision = await authorizeObjectRuntime(deps.sql, {
+          actor,
+          resource: resourceId,
+          action: "read",
+          fields: fieldContext(meta),
+          object: row,
+        });
+        await assertPolicyAllowed(
+          deps.sql,
+          decision,
+          { actor, resource: resourceId, action: "read", object_id: id },
+        );
         return ok({ resource: resourceId, object: row });
       } catch (error) {
+        if (error instanceof PolicyDeniedError) {
+          return err(validationError(error.code, error.message, error.details));
+        }
         return err(validationError("bad_view", message(error)));
       }
     },
@@ -200,7 +247,10 @@ export function makeChangesetServices(
 
 export async function applySeedDefinitionsThroughChangesets(
   sql: Queryable,
-  actor = "system:seed",
+  actor: string | Record<string, unknown> = {
+    id: "system:seed",
+    roles: ["super_admin"],
+  },
 ): Promise<{ planned: number; committed: number; skipped: number }> {
   const seeds = await query<
     {
@@ -287,9 +337,18 @@ async function commitPlanned(
   input: ChangesetRequest,
 ): Promise<ChangesetCommitDto> {
   const actor = actorOf(input);
-  const plan = await planChangeset(sql, input);
-  const preview = previewDto(crypto.randomUUID(), actor, plan);
+  const plan = await planChangeset(sql, input, actor);
+  const preview = previewDto(crypto.randomUUID(), actor.id, plan);
   if (!preview.committable) {
+    const policyError = preview.validation.errors.find((e) =>
+      e.code === "policy_denied"
+    );
+    if (policyError) {
+      throw new PolicyDeniedError(policyError.message, {
+        actor_id: actor.id,
+        checked_errors: preview.validation.errors,
+      });
+    }
     throw new Error(
       preview.validation.errors.map((e) => `${e.code}: ${e.message}`).join(
         "; ",
@@ -302,7 +361,7 @@ async function commitPlanned(
     >(
       sql,
       "select request_json, preview_json, status from changesets where actor_id=$1 and idempotency_key=$2",
-      [actor, input.idempotency_key],
+      [actor.id, input.idempotency_key],
     );
     if (existing.rows[0]) {
       if (
@@ -317,7 +376,7 @@ async function commitPlanned(
     `insert into changesets(id, actor_id, status, request_json, preview_json, idempotency_key, source, committed_at) values ($1,$2,'committed',$3::jsonb,$4::jsonb,$5,$6,now())`,
     [
       changesetId,
-      actor,
+      actor.id,
       JSON.stringify(input),
       JSON.stringify(preview),
       input.idempotency_key ?? null,
@@ -327,10 +386,10 @@ async function commitPlanned(
   const objectVersions: ChangesetCommitDto["object_versions"] = [];
   for (const op of plan.planned) {
     if (op.meta) {
-      const ov = await commitObjectOperation(sql, changesetId, actor, op);
+      const ov = await commitObjectOperation(sql, changesetId, actor.id, op);
       if (ov) objectVersions.push(ov);
     } else if (op.relationshipMeta) {
-      await commitRelationshipOperation(sql, changesetId, actor, op);
+      await commitRelationshipOperation(sql, changesetId, actor.id, op);
     }
   }
   const committed = {
@@ -348,7 +407,7 @@ async function commitPlanned(
     [
       crypto.randomUUID(),
       changesetId,
-      actor,
+      actor.id,
       JSON.stringify(preview.validation),
     ],
   );
@@ -367,6 +426,7 @@ async function commitPlanned(
 async function planChangeset(
   sql: Queryable,
   input: ChangesetRequest,
+  actor: ActorContext,
 ): Promise<{ errors: ValidationIssue[]; planned: PlannedOperation[] }> {
   if (!Array.isArray(input.operations) || input.operations.length === 0) {
     throw new Error("operations must be a non-empty array");
@@ -436,6 +496,35 @@ async function planChangeset(
         }
       }
       const after = buildAfter(op.op, before, { ...fields, id: objectId });
+      const action = policyAction(op.op);
+      const decision = await authorizeObjectRuntime(sql, {
+        actor,
+        resource: op.resource ?? "",
+        action,
+        fields: fieldContext(meta),
+        object: after,
+      });
+      if (!decision.allowed) {
+        errors.push(
+          issue(
+            path,
+            "policy_denied",
+            `actor is not allowed to ${action} ${op.resource}`,
+          ),
+        );
+        await auditPolicy(
+          sql,
+          { actor, resource: op.resource ?? "", action, object_id: objectId },
+          decision,
+          "policy.denied",
+        );
+      } else if (decision.bypassed) {
+        await assertPolicyAllowed(
+          sql,
+          decision,
+          { actor, resource: op.resource ?? "", action, object_id: objectId },
+        );
+      }
       if (op.as) aliases.set(op.as, objectId);
       planned.push({
         ...op,
@@ -850,8 +939,44 @@ function resolveRef(
   if (!value) return "";
   return aliases.get(value) ?? value;
 }
-function actorOf(input: ChangesetRequest): string {
-  return input.actor_id ?? input.actor ?? "anonymous";
+function actorOf(input: ChangesetRequest): ActorContext {
+  if (input.actor_context) return normalizeActor(input.actor_context);
+  if (input.actor && typeof input.actor === "object") {
+    return normalizeActor(input.actor);
+  }
+  if (input.actor_id) return normalizeActor(input.actor_id);
+  return normalizeActor(input.actor ?? "anonymous");
+}
+function policyAction(op: ChangesetOperation["op"]): string {
+  if (op === "transition") return "transition";
+  if (op === "archive") return "archive";
+  if (op === "comment") return "comment";
+  if (op === "link") return "link";
+  if (op === "unlink") return "unlink";
+  if (op === "create") return "create";
+  return "update";
+}
+function fieldContext(meta: ResourceMeta): Record<string, FieldSpec> {
+  const fields: Record<string, FieldSpec> = {
+    id: { type: "string" },
+    version: { type: "integer" },
+    archived_at: { type: "timestamp", nullable: true },
+    archived_by: { type: "string", nullable: true },
+    current_object_version_id: { type: "string", nullable: true },
+    created_at: { type: "timestamp" },
+    updated_at: { type: "timestamp" },
+  };
+  for (const [name, spec] of Object.entries(meta.fields)) {
+    fields[name] = { type: mapFieldType(spec.type), nullable: !spec.required };
+  }
+  return fields;
+}
+function mapFieldType(type: unknown): FieldSpec["type"] {
+  if (
+    type === "integer" || type === "decimal" || type === "boolean" ||
+    type === "timestamp" || type === "date"
+  ) return type;
+  return "string";
 }
 function issue(path: string, code: string, message: string): ValidationIssue {
   return { level: "error", path, code, message };

@@ -40,6 +40,7 @@ export type HttpDependencies = {
       resource: string,
       id: string,
       includeArchived?: boolean,
+      actor?: unknown,
     ): Promise<Result<unknown>>;
     history(resource: string, id: string): Promise<Result<unknown>>;
   };
@@ -158,6 +159,7 @@ export function makeHttpApp(deps: HttpDependencies): Hono {
           `${c.req.param("namespace")}.${c.req.param("resource")}`,
           c.req.param("id"),
           c.req.query("include_archived") === "true",
+          parseActorQuery(c.req.query("actor")),
         ),
       ),
   );
@@ -174,6 +176,19 @@ export function makeHttpApp(deps: HttpDependencies): Hono {
   );
 
   return app;
+}
+
+function parseActorQuery(value: string | undefined): unknown {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  if (trimmed.startsWith("{")) {
+    try {
+      return JSON.parse(trimmed);
+    } catch {
+      return value;
+    }
+  }
+  return value;
 }
 
 async function multipartFiles(request: Request): Promise<UploadedPackFile[]> {

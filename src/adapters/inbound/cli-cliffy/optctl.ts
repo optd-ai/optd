@@ -105,9 +105,9 @@ function parseQueryPayload(
     else if (arg.startsWith("--cursor=")) {
       payload.cursor = arg.slice("--cursor=".length);
     } else if (arg === "--include-archived") payload.include_archived = true;
-    else if (arg === "--actor") payload.actor = next();
+    else if (arg === "--actor") payload.actor = parseActorArg(next());
     else if (arg.startsWith("--actor=")) {
-      payload.actor = arg.slice("--actor=".length);
+      payload.actor = parseActorArg(arg.slice("--actor=".length));
     } else throw new Error(`unknown query option ${arg}`);
   }
   if (fields.length) payload.fields = fields;
@@ -117,6 +117,27 @@ function parseQueryPayload(
 function parseSortArg(value: string): { field: string; direction: string } {
   const [field, direction = "asc"] = value.split(":");
   return { field, direction };
+}
+function parseActorArg(value: string): unknown {
+  const trimmed = value.trim();
+  if (trimmed.startsWith("{")) return JSON.parse(trimmed);
+  if (trimmed.includes(":")) {
+    const [id, roles = ""] = trimmed.split(":");
+    return { id, roles: roles.split(",").filter(Boolean) };
+  }
+  return value;
+}
+function appendActorQuery(base: string, args: string[]): string {
+  const index = args.findIndex((arg) =>
+    arg === "--actor" || arg.startsWith("--actor=")
+  );
+  if (index < 0) return base;
+  const raw = args[index] === "--actor"
+    ? args[index + 1]
+    : args[index].slice("--actor=".length);
+  const parsed = parseActorArg(raw ?? "");
+  const value = typeof parsed === "string" ? parsed : JSON.stringify(parsed);
+  return `${base}?actor=${encodeURIComponent(value)}`;
 }
 
 function helpText(): string {
@@ -158,7 +179,10 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
     } else if (cmd === "view" && sub && value) {
       const [namespace, name] = splitDotted(sub);
       result = await getJson(
-        `${parsed.server}/objects/${namespace}/${name}/${value}`,
+        appendActorQuery(
+          `${parsed.server}/objects/${namespace}/${name}/${value}`,
+          parsed.positional.slice(3),
+        ),
       );
     } else if (cmd === "history" && sub && value) {
       const [namespace, name] = splitDotted(sub);

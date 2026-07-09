@@ -77,7 +77,11 @@ Deno.test("CRM lead changeset preview/commit/view/history and auditable idempote
     await Deno.writeTextFile(
       createPath,
       JSON.stringify({
-        actor: "agent_1",
+        actor_context: {
+          id: "agent_1",
+          roles: ["sales_rep"],
+          sales_team_ids: ["direct"],
+        },
         idempotency_key: "lead-live-create",
         operations: [{
           op: "create",
@@ -89,6 +93,7 @@ Deno.test("CRM lead changeset preview/commit/view/history and auditable idempote
             email: "jane@example.com",
             status: "new",
             source: "scenario",
+            owner_id: "agent_1",
           },
         }],
       }),
@@ -123,7 +128,11 @@ Deno.test("CRM lead changeset preview/commit/view/history and auditable idempote
     await Deno.writeTextFile(
       updatePath,
       JSON.stringify({
-        actor: "agent_1",
+        actor_context: {
+          id: "agent_1",
+          roles: ["sales_rep"],
+          sales_team_ids: ["direct"],
+        },
         operations: [{
           op: "update",
           resource: "default.lead",
@@ -147,7 +156,11 @@ Deno.test("CRM lead changeset preview/commit/view/history and auditable idempote
     await Deno.writeTextFile(
       conflictPath,
       JSON.stringify({
-        actor: "agent_1",
+        actor_context: {
+          id: "agent_1",
+          roles: ["sales_rep"],
+          sales_team_ids: ["direct"],
+        },
         operations: [{
           op: "update",
           resource: "default.lead",
@@ -172,7 +185,11 @@ Deno.test("CRM lead changeset preview/commit/view/history and auditable idempote
     await Deno.writeTextFile(
       commentPath,
       JSON.stringify({
-        actor: "agent_1",
+        actor_context: {
+          id: "agent_1",
+          roles: ["sales_rep"],
+          sales_team_ids: ["direct"],
+        },
         operations: [{
           op: "comment",
           resource: "default.lead",
@@ -198,6 +215,8 @@ Deno.test("CRM lead changeset preview/commit/view/history and auditable idempote
       "view",
       "default.lead",
       leadId,
+      "--actor",
+      "agent_1:sales_rep",
       "--json",
     ]);
     assertEquals(view.code, 0, view.stderr);
@@ -213,7 +232,11 @@ Deno.test("CRM lead changeset preview/commit/view/history and auditable idempote
     await Deno.writeTextFile(
       archivePath,
       JSON.stringify({
-        actor: "agent_1",
+        actor_context: {
+          id: "agent_1",
+          roles: ["sales_rep"],
+          sales_team_ids: ["direct"],
+        },
         operations: [{
           op: "archive",
           resource: "default.lead",
@@ -238,6 +261,8 @@ Deno.test("CRM lead changeset preview/commit/view/history and auditable idempote
       "history",
       "default.lead",
       leadId,
+      "--actor",
+      "agent_1:sales_rep",
       "--json",
     ]);
     assertEquals(history.code, 0, history.stderr);
