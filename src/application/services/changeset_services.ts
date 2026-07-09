@@ -66,6 +66,7 @@ type ResourceMeta = {
   revision: string;
   tableName: string;
   fields: Record<string, { type?: string; required?: boolean }>;
+  lifecycleField?: string;
 };
 type RelationshipMeta = {
   namespace: string;
@@ -352,6 +353,26 @@ async function commitPlanned(
   hookRunner?: DenoHookRunner,
 ): Promise<ChangesetCommitDto> {
   const actor = actorOf(input);
+  const originalInput = structuredClone(input);
+  if (originalInput.idempotency_key) {
+    const existing = await query<
+      { request_json: unknown; preview_json: unknown; status: string }
+    >(
+      sql,
+      "select request_json, preview_json, status from changesets where actor_id=$1 and idempotency_key=$2",
+      [actor.id, originalInput.idempotency_key],
+    );
+    if (existing.rows[0]) {
+      if (
+        stableJson(existing.rows[0].request_json) !== stableJson(originalInput)
+      ) {
+        throw new Error("idempotency key reused with different payload");
+      }
+      return parseStoredJson(
+        existing.rows[0].preview_json,
+      ) as ChangesetCommitDto;
+    }
+  }
   const plan = await planChangeset(sql, input, actor, hookRunner);
   const preview = previewDto(crypto.randomUUID(), actor.id, plan);
   if (!preview.committable) {
@@ -370,21 +391,6 @@ async function commitPlanned(
       ),
     );
   }
-  if (input.idempotency_key) {
-    const existing = await query<
-      { request_json: unknown; preview_json: unknown; status: string }
-    >(
-      sql,
-      "select request_json, preview_json, status from changesets where actor_id=$1 and idempotency_key=$2",
-      [actor.id, input.idempotency_key],
-    );
-    if (existing.rows[0]) {
-      if (
-        JSON.stringify(existing.rows[0].request_json) !== JSON.stringify(input)
-      ) throw new Error("idempotency key reused with different payload");
-      return existing.rows[0].preview_json as ChangesetCommitDto;
-    }
-  }
   const changesetId = preview.id;
   await query(
     sql,
@@ -392,10 +398,10 @@ async function commitPlanned(
     [
       changesetId,
       actor.id,
-      JSON.stringify(input),
+      JSON.stringify(originalInput),
       JSON.stringify(preview),
-      input.idempotency_key ?? null,
-      input.source ?? null,
+      originalInput.idempotency_key ?? null,
+      originalInput.source ?? null,
     ],
   );
   const objectVersions: ChangesetCommitDto["object_versions"] = [];
@@ -495,8 +501,8 @@ async function planChangeset(
       op = await runResourcePatchHooks(sql, hookRunner, op, actor, path);
       const fields = op.op === "transition"
         ? {
-          [String((meta as ResourceMeta).fields.status ? "status" : "state")]:
-            op.to ?? op.fields?.to ?? op.fields?.state ?? op.fields?.status,
+          [transitionField(meta)]: op.to ?? op.fields?.to ?? op.fields?.state ??
+            op.fields?.status ?? op.fields?.stage,
         }
         : (op.fields ?? {});
       validateFields(path, meta, fields, errors, op.op === "create");
@@ -1139,6 +1145,9 @@ async function getResourceMeta(
     revision: row.revision,
     tableName: row.table_name,
     fields: asRecord(spec.fields) as ResourceMeta["fields"],
+    lifecycleField: typeof asRecord(spec.lifecycle).field === "string"
+      ? String(asRecord(spec.lifecycle).field)
+      : undefined,
   };
 }
 async function getRelationshipMeta(
@@ -1178,6 +1187,11 @@ async function readObject(
   );
   return result.rows[0] ?? null;
 }
+function transitionField(meta: ResourceMeta): string {
+  return meta.lifecycleField ??
+    (meta.fields.status ? "status" : meta.fields.stage ? "stage" : "state");
+}
+
 function validateFields(
   path: string,
   meta: ResourceMeta,
@@ -1306,6 +1320,34 @@ function mapFieldType(type: unknown): FieldSpec["type"] {
 function issue(path: string, code: string, message: string): ValidationIssue {
   return { level: "error", path, code, message };
 }
+function parseStoredJson(value: unknown): unknown {
+  if (typeof value !== "string") return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+}
+
+function stableJson(value: unknown): string {
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      if (parsed && typeof parsed === "object") return stableJson(parsed);
+    } catch {
+      // Treat non-JSON strings as ordinary scalar JSON values.
+    }
+  }
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  const record = value as Record<string, unknown>;
+  return `{${
+    Object.keys(record).sort().map((key) =>
+      `${JSON.stringify(key)}:${stableJson(record[key])}`
+    ).join(",")
+  }}`;
+}
+
 function asRecord(value: unknown): JsonRecord {
   if (typeof value === "string") {
     try {
