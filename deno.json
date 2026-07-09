@@ -1,0 +1,16 @@
+{
+  "tasks": {
+    "fmt": "deno fmt src tests deno.json",
+    "check": "deno check src/main_server.ts src/main_optctl.ts tests/scenarios/00_bootstrap.ts",
+    "test": "deno test --allow-read --allow-write --allow-env --allow-net --allow-run tests/unit tests/integration tests/scenarios/00_bootstrap.ts",
+    "server": "deno run --allow-read --allow-write --allow-env --allow-net --allow-run src/main_server.ts",
+    "optctl": "deno run --allow-read --allow-env --allow-net src/main_optctl.ts",
+    "scenario:bootstrap": "deno test --allow-read --allow-write --allow-env --allow-net --allow-run tests/scenarios/00_bootstrap.ts"
+  },
+  "fmt": {
+    "include": ["src/", "tests/", "deno.json"]
+  },
+  "lint": {
+    "include": ["src/", "tests/"]
+  }
+}
