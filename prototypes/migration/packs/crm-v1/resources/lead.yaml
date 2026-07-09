@@ -1,0 +1,17 @@
+{
+  "kind": "Resource",
+  "metadata": { "name": "lead" },
+  "spec": {
+    "fields": {
+      "name": { "type": "string", "required": true },
+      "email": { "type": "string" },
+      "company_name": { "type": "string" },
+      "score": { "type": "integer" },
+      "status": { "type": "string" },
+    },
+    "lifecycle": {
+      "field": "status",
+      "states": ["new", "contacted", "qualified", "converted", "disqualified"],
+    },
+  },
+}

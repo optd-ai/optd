@@ -1,0 +1,5 @@
+{
+  "kind": "Hook",
+  "metadata": { "name": "old_hook" },
+  "spec": { "script": "old_hook.ts" },
+}

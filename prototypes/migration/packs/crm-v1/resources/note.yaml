@@ -1,0 +1,10 @@
+{
+  "kind": "Resource",
+  "metadata": { "name": "note" },
+  "spec": {
+    "fields": {
+      "body": { "type": "string", "required": true },
+      "lead_id": { "type": "string", "ref": "lead" },
+    },
+  },
+}

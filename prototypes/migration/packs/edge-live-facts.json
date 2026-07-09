@@ -1,0 +1,20 @@
+{
+  "rows": { "lead": 1000, "note": 5, "activity": 20, "invoice": 12 },
+  "tableSize": { "lead": "large" },
+  "presentValues": { "lead.source": 990, "note.body": 5 },
+  "violations": {
+    "required:lead.required_code": 1000,
+    "maxlength:lead.name": 3,
+    "constraint:lead.lead_company_fk": 9,
+    "constraint:lead.lead_email_shape": 20,
+    "state:lead.converted": 10
+  },
+  "duplicates": {},
+  "references": {
+    "note": ["axi:home"],
+    "lead.source": ["hook:route_lead"],
+    "transition:lead.contacted->qualified": ["action:qualify_lead"],
+    "action:old_action": ["axi:help"],
+    "hook:old_hook": ["action:old_action"]
+  }
+}

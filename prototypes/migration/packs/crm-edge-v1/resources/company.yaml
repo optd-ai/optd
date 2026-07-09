@@ -1,0 +1,10 @@
+{
+  "kind": "Resource",
+  "metadata": { "name": "company" },
+  "spec": {
+    "fields": {
+      "name": { "type": "string", "required": true },
+      "domain": { "type": "string" },
+    },
+  },
+}

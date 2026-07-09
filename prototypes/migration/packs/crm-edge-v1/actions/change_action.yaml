@@ -1,0 +1,5 @@
+{
+  "kind": "Action",
+  "metadata": { "name": "change_action" },
+  "spec": { "hook": "change_hook", "version": 1 },
+}

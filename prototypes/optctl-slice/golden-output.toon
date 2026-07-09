@@ -1,0 +1,70 @@
+# optctl query crm.lead --where 'status == "qualified" && active()' --fields id,name,status --limit 2
+query:
+  resource: crm.lead
+  endpoint: POST /queries
+  filter: status == "qualified" && active()
+  fields: [id,name,status]
+  fields_source: explicit
+  policy: pushed_down
+items[2]:
+  - id: lead_123
+    name: Ada Lovelace
+    status: qualified
+  - id: lead_456
+    name: Grace Hopper
+    status: qualified
+page:
+  limit: 2
+  has_more: true
+  next_cursor: cur_opaque
+help[2]:
+  - use --cursor cur_opaque for the next page
+  - use optctl view crm.lead <id> for full details
+
+# optctl changeset preview --file change.json
+changeset:
+  id: cs_preview_123
+  status: previewed
+  operations: 2
+validation:
+  ok: true
+  warnings: 1
+policy:
+  decision: allowed
+hooks:
+  before_preview: [normalize_lead]
+  validate: [validate_lead]
+diffs[2]:
+  - resource: crm.lead
+    id: lead_123
+    op: update
+    fields: [status,score]
+  - resource: crm.note
+    id: note_new
+    op: create
+events_preview[2]:
+  - object.updated
+  - object.created
+outbox_preview[1]:
+  - hook: notify_lead_change
+help[2]:
+  - commit with optctl changeset commit cs_preview_123
+  - inspect hook logs with --verbose
+
+# optctl history crm.lead lead_123
+history:
+  resource: crm.lead
+  object_id: lead_123
+versions[2]:
+  - version: 2
+    object_version_id: ov_2
+    operation: transition
+    actor_id: agent_2
+    changed_fields: [status]
+  - version: 1
+    object_version_id: ov_1
+    operation: create
+    actor_id: agent_1
+    changed_fields: [id,name,email,status]
+help[1]:
+  - use optctl history show <object_version_id> to inspect a snapshot

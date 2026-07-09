@@ -1,0 +1,30 @@
+{
+  "kind": "Hook",
+  "apiVersion": "operant.dev/v1",
+  "metadata": {
+    "name": "notify_crm_change",
+  },
+  "spec": {
+    "script": "notify_crm_change.ts",
+    "timeout": "2s",
+    "permissions": {
+      "net": false,
+      "read": false,
+      "write": false,
+      "env": false,
+      "run": false,
+    },
+    "output": {
+      "schema": "validation.v1",
+    },
+    "attachments": [
+      {
+        "phase": "after_commit",
+      },
+    ],
+    "axi": {
+      "purpose": "notify_crm_change hook for CRM prototype.",
+      "whenToUse": "Runs from metadata-driven attachment points; agents normally invoke actions instead.",
+    },
+  },
+}

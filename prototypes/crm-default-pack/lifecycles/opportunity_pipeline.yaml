@@ -1,0 +1,42 @@
+{
+  "kind": "Lifecycle",
+  "apiVersion": "operant.dev/v1",
+  "metadata": {
+    "name": "opportunity_pipeline",
+  },
+  "spec": {
+    "resource": "opportunity",
+    "field": "stage",
+    "states": [
+      "new",
+      "qualified",
+      "proposal",
+      "won",
+      "lost",
+    ],
+    "transitions": [
+      {
+        "from": "new",
+        "to": "qualified",
+      },
+      {
+        "from": "qualified",
+        "to": "proposal",
+      },
+      {
+        "from": "proposal",
+        "to": "won",
+      },
+      {
+        "from": "proposal",
+        "to": "lost",
+      },
+    ],
+    "axi": {
+      "help": [
+        "optctl action preview default.mark_won --input ...",
+        "optctl action preview default.mark_lost --input ...",
+      ],
+    },
+  },
+}

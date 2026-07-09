@@ -1,0 +1,5 @@
+{
+  "kind": "Resource",
+  "metadata": { "name": "invoice" },
+  "spec": { "fields": { "number": { "type": "string", "required": true } } },
+}

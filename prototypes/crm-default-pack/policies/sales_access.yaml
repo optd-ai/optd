@@ -1,0 +1,41 @@
+{
+  "kind": "Policy",
+  "apiVersion": "operant.dev/v1",
+  "metadata": {
+    "name": "sales_access",
+  },
+  "spec": {
+    "model": "sql_lowerable.v1",
+    "rules": [
+      {
+        "role": "admin",
+        "allow": [
+          "*",
+        ],
+      },
+      {
+        "role": "sales_manager",
+        "allow": [
+          "read",
+          "create",
+          "update",
+          "action",
+        ],
+        "where": "true",
+      },
+      {
+        "role": "sales_rep",
+        "allow": [
+          "read",
+          "create",
+          "update",
+          "action",
+        ],
+        "where": "owner_id == actor.id || sales_team_id in actor.sales_team_ids",
+      },
+    ],
+    "axi": {
+      "purpose": "Minimal CRM RBAC/ABAC policy fixture.",
+    },
+  },
+}

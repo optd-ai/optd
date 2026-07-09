@@ -1,0 +1,25 @@
+{
+  "kind": "Resource",
+  "metadata": { "name": "lead" },
+  "spec": {
+    "fields": {
+      "name": { "type": "string", "required": true },
+      "email": { "type": "string", "required": true },
+      "organization_name": { "type": "string" },
+      "score": { "type": "string" },
+      "status": { "type": "string" },
+    },
+    "indexes": [
+      {
+        "name": "lead_email_unique_when_present",
+        "type": "unique",
+        "fields": ["email"],
+        "where": "present(email)",
+      },
+    ],
+    "lifecycle": {
+      "field": "status",
+      "states": ["new", "qualified", "converted", "disqualified"],
+    },
+  },
+}

@@ -1,0 +1,8 @@
+{
+  "kind": "Hook",
+  "metadata": { "name": "convert_lead" },
+  "spec": {
+    "script": "convert_lead.ts",
+    "output": { "schema": "changeset.operations.v1" },
+  },
+}

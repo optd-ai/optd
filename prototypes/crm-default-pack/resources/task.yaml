@@ -1,0 +1,43 @@
+{
+  "kind": "Resource",
+  "apiVersion": "operant.dev/v1",
+  "metadata": {
+    "name": "task",
+  },
+  "spec": {
+    "fields": {
+      "title": {
+        "type": "string",
+        "required": true,
+      },
+      "status": {
+        "type": "string",
+        "required": true,
+      },
+      "due_at": {
+        "type": "timestamp",
+      },
+      "owner_id": {
+        "type": "string",
+      },
+      "opportunity_id": {
+        "type": "string",
+        "ref": "opportunity",
+      },
+    },
+    "axi": {
+      "list": {
+        "fields": [
+          "id",
+          "title",
+          "status",
+          "due_at",
+        ],
+      },
+      "help": [
+        "optctl query default.task",
+        "optctl metadata resource default.task",
+      ],
+    },
+  },
+}

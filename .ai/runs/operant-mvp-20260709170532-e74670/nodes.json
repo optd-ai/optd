@@ -1,0 +1,122 @@
+{
+  "scaffold-harness": {
+    "id": "scaffold-harness",
+    "status": "pending",
+    "flow": "implementation",
+    "currentFlowIndex": 0,
+    "attempts": [],
+    "updatedAt": "2026-07-09T17:05:32.655Z"
+  },
+  "postgres-foundation": {
+    "id": "postgres-foundation",
+    "status": "pending",
+    "flow": "implementation",
+    "currentFlowIndex": 0,
+    "attempts": [],
+    "updatedAt": "2026-07-09T17:05:32.655Z"
+  },
+  "pack-metadata": {
+    "id": "pack-metadata",
+    "status": "pending",
+    "flow": "implementation",
+    "currentFlowIndex": 0,
+    "attempts": [],
+    "updatedAt": "2026-07-09T17:05:32.655Z"
+  },
+  "resource-ddl": {
+    "id": "resource-ddl",
+    "status": "pending",
+    "flow": "implementation",
+    "currentFlowIndex": 0,
+    "attempts": [],
+    "updatedAt": "2026-07-09T17:05:32.655Z"
+  },
+  "changesets-history-seeds": {
+    "id": "changesets-history-seeds",
+    "status": "pending",
+    "flow": "implementation",
+    "currentFlowIndex": 0,
+    "attempts": [],
+    "updatedAt": "2026-07-09T17:05:32.655Z"
+  },
+  "query-expression-pagination": {
+    "id": "query-expression-pagination",
+    "status": "pending",
+    "flow": "implementation",
+    "currentFlowIndex": 0,
+    "attempts": [],
+    "updatedAt": "2026-07-09T17:05:32.655Z"
+  },
+  "policy-integration": {
+    "id": "policy-integration",
+    "status": "pending",
+    "flow": "implementation",
+    "currentFlowIndex": 0,
+    "attempts": [],
+    "updatedAt": "2026-07-09T17:05:32.655Z"
+  },
+  "hooks-actions": {
+    "id": "hooks-actions",
+    "status": "pending",
+    "flow": "implementation",
+    "currentFlowIndex": 0,
+    "attempts": [],
+    "updatedAt": "2026-07-09T17:05:32.655Z"
+  },
+  "outbox-worker": {
+    "id": "outbox-worker",
+    "status": "pending",
+    "flow": "implementation",
+    "currentFlowIndex": 0,
+    "attempts": [],
+    "updatedAt": "2026-07-09T17:05:32.655Z"
+  },
+  "secrets-encryption": {
+    "id": "secrets-encryption",
+    "status": "pending",
+    "flow": "implementation",
+    "currentFlowIndex": 0,
+    "attempts": [],
+    "updatedAt": "2026-07-09T17:05:32.655Z"
+  },
+  "pack-migrations": {
+    "id": "pack-migrations",
+    "status": "pending",
+    "flow": "implementation",
+    "currentFlowIndex": 0,
+    "attempts": [],
+    "updatedAt": "2026-07-09T17:05:32.655Z"
+  },
+  "project-pack": {
+    "id": "project-pack",
+    "status": "pending",
+    "flow": "implementation",
+    "currentFlowIndex": 0,
+    "attempts": [],
+    "updatedAt": "2026-07-09T17:05:32.655Z"
+  },
+  "cli-complete": {
+    "id": "cli-complete",
+    "status": "pending",
+    "flow": "implementation",
+    "currentFlowIndex": 0,
+    "attempts": [],
+    "updatedAt": "2026-07-09T17:05:32.655Z"
+  },
+  "container-runtime": {
+    "id": "container-runtime",
+    "status": "pending",
+    "flow": "implementation",
+    "currentFlowIndex": 0,
+    "attempts": [],
+    "updatedAt": "2026-07-09T17:05:32.655Z"
+  },
+  "full-e2e": {
+    "id": "full-e2e",
+    "status": "pending",
+    "flow": "final_validation",
+    "currentFlowIndex": 0,
+    "attempts": [],
+    "updatedAt": "2026-07-09T17:05:32.655Z"
+  }
+}

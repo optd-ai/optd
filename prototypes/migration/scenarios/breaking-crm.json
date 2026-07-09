@@ -1,0 +1,74 @@
+{
+  "name": "large breaking CRM migration",
+  "current": {
+    "resources": {
+      "lead": {
+        "fields": {
+          "name": { "type": "string", "required": true },
+          "email": { "type": "string" },
+          "company_name": { "type": "string" },
+          "score": { "type": "integer" },
+          "status": { "type": "string" }
+        },
+        "lifecycle": {
+          "field": "status",
+          "states": [
+            "new",
+            "contacted",
+            "qualified",
+            "converted",
+            "disqualified"
+          ]
+        }
+      }
+    },
+    "actions": {
+      "convert_lead": { "hook": "convert_lead", "input": ["lead_id"] }
+    },
+    "hooks": { "convert_lead": { "digest": "old" } }
+  },
+  "desired": {
+    "resources": {
+      "lead": {
+        "fields": {
+          "name": { "type": "string", "required": true },
+          "email": { "type": "string", "required": true },
+          "organization_name": { "type": "string" },
+          "status": { "type": "string" }
+        },
+        "indexes": [
+          {
+            "name": "lead_email_unique_when_present",
+            "type": "unique",
+            "fields": ["email"],
+            "where": "present(email)"
+          }
+        ],
+        "lifecycle": {
+          "field": "status",
+          "states": ["new", "qualified", "converted", "disqualified"]
+        }
+      }
+    },
+    "actions": {
+      "convert_lead": {
+        "hook": "convert_lead",
+        "input": ["lead_id"],
+        "version": 2
+      }
+    },
+    "hooks": { "convert_lead": { "digest": "new" } }
+  },
+  "live": {
+    "rows": { "lead": 913 },
+    "tableSize": { "lead": "large" },
+    "presentValues": { "lead.score": 900, "lead.company_name": 700 },
+    "violations": { "required:lead.email": 128, "state:lead.contacted": 42 },
+    "duplicates": { "lead.lead_email_unique_when_present": 7 },
+    "references": {
+      "lead.score": ["axi:list", "hook:score_lead"],
+      "lead.company_name": ["hook:convert_lead"],
+      "hook:convert_lead": ["action:convert_lead"]
+    }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "kind": "Relationship",
+  "apiVersion": "operant.dev/v1",
+  "metadata": {
+    "name": "note_lead",
+  },
+  "spec": {
+    "from": {
+      "resource": "note",
+      "field": "id",
+    },
+    "to": {
+      "resource": "lead",
+      "field": "id",
+    },
+    "fields": {},
+    "axi": {
+      "help": [
+        "optctl metadata relationship default.note_lead",
+      ],
+    },
+  },
+}

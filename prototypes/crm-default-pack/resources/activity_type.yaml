@@ -1,0 +1,36 @@
+{
+  "kind": "Resource",
+  "apiVersion": "operant.dev/v1",
+  "metadata": {
+    "name": "activity_type",
+  },
+  "spec": {
+    "fields": {
+      "name": {
+        "type": "string",
+        "required": true,
+      },
+      "label": {
+        "type": "string",
+        "required": true,
+      },
+      "default_deadline_days": {
+        "type": "integer",
+      },
+    },
+    "axi": {
+      "list": {
+        "fields": [
+          "id",
+          "name",
+          "label",
+          "default_deadline_days",
+        ],
+      },
+      "help": [
+        "optctl query default.activity_type",
+        "optctl metadata resource default.activity_type",
+      ],
+    },
+  },
+}

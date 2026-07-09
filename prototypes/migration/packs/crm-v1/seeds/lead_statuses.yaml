@@ -1,0 +1,15 @@
+{
+  "kind": "Seed",
+  "metadata": { "name": "lead_statuses" },
+  "spec": {
+    "resource": "lead_status",
+    "key": "name",
+    "rows": [
+      { "name": "new", "label": "New", "sort_order": 10 },
+      { "name": "contacted", "label": "Contacted", "sort_order": 20 },
+      { "name": "qualified", "label": "Qualified", "sort_order": 30 },
+      { "name": "converted", "label": "Converted", "sort_order": 40 },
+      { "name": "disqualified", "label": "Disqualified", "sort_order": 50 },
+    ],
+  },
+}

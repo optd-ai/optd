@@ -1,0 +1,30 @@
+{
+  "kind": "Hook",
+  "apiVersion": "operant.dev/v1",
+  "metadata": {
+    "name": "normalize_lead",
+  },
+  "spec": {
+    "script": "normalize_lead.ts",
+    "timeout": "2s",
+    "permissions": {
+      "net": false,
+      "read": false,
+      "write": false,
+      "env": false,
+      "run": false,
+    },
+    "output": {
+      "schema": "patch.v1",
+    },
+    "attachments": [
+      {
+        "phase": "before_preview",
+      },
+    ],
+    "axi": {
+      "purpose": "normalize_lead hook for CRM prototype.",
+      "whenToUse": "Runs from metadata-driven attachment points; agents normally invoke actions instead.",
+    },
+  },
+}

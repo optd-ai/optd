@@ -1,0 +1,5 @@
+{
+  "kind": "Action",
+  "metadata": { "name": "convert_lead" },
+  "spec": { "hook": "convert_lead", "input": ["lead_id"], "version": 2 },
+}

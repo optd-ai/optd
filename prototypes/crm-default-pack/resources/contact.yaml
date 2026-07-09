@@ -1,0 +1,41 @@
+{
+  "kind": "Resource",
+  "apiVersion": "operant.dev/v1",
+  "metadata": {
+    "name": "contact",
+  },
+  "spec": {
+    "fields": {
+      "name": {
+        "type": "string",
+        "required": true,
+      },
+      "email": {
+        "type": "string",
+      },
+      "phone": {
+        "type": "string",
+      },
+      "title": {
+        "type": "string",
+      },
+      "owner_id": {
+        "type": "string",
+      },
+    },
+    "axi": {
+      "list": {
+        "fields": [
+          "id",
+          "name",
+          "email",
+          "phone",
+        ],
+      },
+      "help": [
+        "optctl query default.contact",
+        "optctl metadata resource default.contact",
+      ],
+    },
+  },
+}

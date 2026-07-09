@@ -1,0 +1,41 @@
+{
+  "name": "safe additive CRM changes",
+  "current": {
+    "resources": {
+      "lead": {
+        "fields": {
+          "name": { "type": "string", "required": true },
+          "email": { "type": "string" },
+          "status": { "type": "string" }
+        }
+      }
+    },
+    "actions": {},
+    "hooks": {}
+  },
+  "desired": {
+    "resources": {
+      "lead": {
+        "fields": {
+          "name": { "type": "string", "required": true },
+          "email": { "type": "string" },
+          "status": { "type": "string" },
+          "competitor": { "type": "string" }
+        },
+        "indexes": [{ "name": "lead_status_idx", "fields": ["status"] }]
+      },
+      "quote": {
+        "fields": {
+          "name": { "type": "string", "required": true },
+          "lead_id": { "type": "ref", "ref": "lead" }
+        }
+      }
+    },
+    "actions": { "create_quote": { "resource": "quote" } },
+    "hooks": { "normalize_quote": { "script": "normalize_quote.ts" } }
+  },
+  "live": {
+    "rows": { "lead": 25, "quote": 0 },
+    "tableSize": { "lead": "small" }
+  }
+}

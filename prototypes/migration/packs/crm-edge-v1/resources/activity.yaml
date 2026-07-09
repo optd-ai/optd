@@ -1,0 +1,15 @@
+{
+  "kind": "Resource",
+  "metadata": { "name": "activity" },
+  "spec": {
+    "fields": {
+      "subject": { "type": "string", "required": true },
+      "status": { "type": "string" },
+    },
+    "lifecycle": {
+      "field": "status",
+      "states": ["open", "done"],
+      "transitions": [{ "from": "open", "to": "done" }],
+    },
+  },
+}

@@ -1,0 +1,11 @@
+{
+  "kind": "Relationship",
+  "metadata": { "name": "contact_company" },
+  "spec": {
+    "from": { "resource": "note", "field": "lead_id" },
+    "to": { "resource": "lead", "field": "id" },
+    "fields": {
+      "role": { "type": "string" },
+    },
+  },
+}

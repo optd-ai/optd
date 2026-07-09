@@ -1,0 +1,52 @@
+{
+  "kind": "Seed",
+  "apiVersion": "operant.dev/v1",
+  "metadata": {
+    "name": "opportunity_stages",
+  },
+  "spec": {
+    "resource": "opportunity_stage",
+    "key": "name",
+    "mode": "changeset",
+    "rows": [
+      {
+        "name": "new",
+        "label": "New",
+        "probability": 10,
+        "sort_order": 10,
+        "terminal": false,
+      },
+      {
+        "name": "qualified",
+        "label": "Qualified",
+        "probability": 30,
+        "sort_order": 20,
+        "terminal": false,
+      },
+      {
+        "name": "proposal",
+        "label": "Proposal",
+        "probability": 60,
+        "sort_order": 30,
+        "terminal": false,
+      },
+      {
+        "name": "won",
+        "label": "Won",
+        "probability": 100,
+        "sort_order": 90,
+        "terminal": true,
+      },
+      {
+        "name": "lost",
+        "label": "Lost",
+        "probability": 0,
+        "sort_order": 100,
+        "terminal": true,
+      },
+    ],
+    "axi": {
+      "purpose": "Seed opportunity_stage reference data through ordinary changeset operations.",
+    },
+  },
+}

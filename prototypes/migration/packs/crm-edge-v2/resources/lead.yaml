@@ -1,0 +1,36 @@
+{
+  "kind": "Resource",
+  "metadata": { "name": "lead" },
+  "spec": {
+    "fields": {
+      "name": { "type": "string", "required": true, "maxLength": 80 },
+      "email": { "type": "string" },
+      "score": { "type": "decimal" },
+      "company_id": { "type": "ref", "ref": "company" },
+      "status": { "type": "string" },
+      "required_code": { "type": "string", "required": true },
+      "nickname": { "type": "string" },
+    },
+    "indexes": [
+      { "name": "lead_active_idx", "fields": ["status"], "where": "active()" },
+    ],
+    "constraints": [
+      {
+        "name": "lead_company_fk",
+        "type": "foreign_key",
+        "field": "company_id",
+        "ref": "company",
+      },
+      {
+        "name": "lead_email_shape",
+        "type": "check",
+        "expression": "present(email)",
+      },
+    ],
+    "lifecycle": {
+      "field": "status",
+      "states": ["new", "contacted", "qualified"],
+      "transitions": [{ "from": "new", "to": "contacted" }],
+    },
+  },
+}

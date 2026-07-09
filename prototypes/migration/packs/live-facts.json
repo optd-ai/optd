@@ -1,0 +1,12 @@
+{
+  "rows": { "lead": 913, "note": 2 },
+  "tableSize": { "lead": "large" },
+  "presentValues": { "lead.score": 900, "lead.company_name": 700 },
+  "violations": { "required:lead.email": 128, "state:lead.contacted": 42 },
+  "duplicates": { "lead.lead_email_unique_when_present": 7 },
+  "references": {
+    "lead.score": ["axi:list", "hook:score_lead"],
+    "lead.company_name": ["hook:convert_lead"],
+    "hook:convert_lead": ["action:convert_lead"]
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "kind": "Resource",
+  "apiVersion": "operant.dev/v1",
+  "metadata": {
+    "name": "sales_team",
+  },
+  "spec": {
+    "fields": {
+      "name": {
+        "type": "string",
+        "required": true,
+      },
+      "label": {
+        "type": "string",
+      },
+      "leader_id": {
+        "type": "string",
+      },
+      "email_alias": {
+        "type": "string",
+      },
+      "monthly_target": {
+        "type": "decimal",
+      },
+    },
+    "axi": {
+      "list": {
+        "fields": [
+          "id",
+          "name",
+          "leader_id",
+          "email_alias",
+        ],
+      },
+      "help": [
+        "optctl query default.sales_team",
+        "optctl metadata resource default.sales_team",
+      ],
+    },
+  },
+}

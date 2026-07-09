@@ -1,0 +1,23 @@
+{
+  "kind": "Relationship",
+  "apiVersion": "operant.dev/v1",
+  "metadata": {
+    "name": "task_opportunity",
+  },
+  "spec": {
+    "from": {
+      "resource": "task",
+      "field": "id",
+    },
+    "to": {
+      "resource": "opportunity",
+      "field": "id",
+    },
+    "fields": {},
+    "axi": {
+      "help": [
+        "optctl metadata relationship default.task_opportunity",
+      ],
+    },
+  },
+}

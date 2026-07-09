@@ -1,0 +1,10 @@
+{
+  "kind": "Resource",
+  "metadata": { "name": "activity" },
+  "spec": {
+    "fields": {
+      "subject": { "type": "string", "required": true },
+      "status": { "type": "string" },
+    },
+  },
+}

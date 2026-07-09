@@ -1,0 +1,34 @@
+{
+  "kind": "Resource",
+  "metadata": { "name": "lead" },
+  "spec": {
+    "fields": {
+      "name": { "type": "string", "required": true, "maxLength": 240 },
+      "email": { "type": "string", "required": true },
+      "score": { "type": "integer" },
+      "source": { "type": "string", "required": true },
+      "company_id": { "type": "ref", "ref": "company" },
+      "status": { "type": "string" },
+    },
+    "indexes": [
+      { "name": "lead_email_unique", "type": "unique", "fields": ["email"] },
+      { "name": "lead_status_idx", "fields": ["status"] },
+    ],
+    "constraints": [
+      {
+        "name": "lead_score_non_negative",
+        "type": "check",
+        "expression": "score >= 0",
+      },
+    ],
+    "lifecycle": {
+      "field": "status",
+      "states": ["new", "contacted", "qualified", "converted"],
+      "transitions": [
+        { "from": "new", "to": "contacted" },
+        { "from": "contacted", "to": "qualified" },
+        { "from": "qualified", "to": "converted" },
+      ],
+    },
+  },
+}

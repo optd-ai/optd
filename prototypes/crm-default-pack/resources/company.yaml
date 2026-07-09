@@ -1,0 +1,44 @@
+{
+  "kind": "Resource",
+  "apiVersion": "operant.dev/v1",
+  "metadata": {
+    "name": "company",
+  },
+  "spec": {
+    "fields": {
+      "name": {
+        "type": "string",
+        "required": true,
+      },
+      "website": {
+        "type": "string",
+      },
+      "email": {
+        "type": "string",
+      },
+      "phone": {
+        "type": "string",
+      },
+      "industry": {
+        "type": "string",
+      },
+      "owner_id": {
+        "type": "string",
+      },
+    },
+    "axi": {
+      "list": {
+        "fields": [
+          "id",
+          "name",
+          "website",
+          "email",
+        ],
+      },
+      "help": [
+        "optctl query default.company",
+        "optctl metadata resource default.company",
+      ],
+    },
+  },
+}
