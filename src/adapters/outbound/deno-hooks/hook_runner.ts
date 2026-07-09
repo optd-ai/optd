@@ -46,6 +46,7 @@ export type DenoHookRunnerOptions = {
   cacheDir?: string;
   globalPolicy?: Required<HookPermissions>;
   secretValues?: Record<string, string>;
+  secretResolver?: (name: string) => Promise<string | undefined>;
 };
 
 const defaultGlobalPolicy: Required<HookPermissions> = {
@@ -60,12 +61,14 @@ export class DenoHookRunner {
   #cacheDir: string;
   #globalPolicy: Required<HookPermissions>;
   #secretValues: Record<string, string>;
+  #secretResolver?: (name: string) => Promise<string | undefined>;
 
   constructor(options: DenoHookRunnerOptions = {}) {
     this.#cacheDir = options.cacheDir ??
       `${Deno.env.get("TMPDIR") ?? "/tmp"}/operant-hook-cache`;
     this.#globalPolicy = options.globalPolicy ?? defaultGlobalPolicy;
     this.#secretValues = options.secretValues ?? {};
+    this.#secretResolver = options.secretResolver;
   }
 
   async run(
@@ -99,7 +102,7 @@ export class DenoHookRunner {
         {},
       );
     }
-    const secretEnv = this.#resolveSecretEnv(hook);
+    const secretEnv = await this.#resolveSecretEnv(hook);
     if ("error" in secretEnv) {
       return failure(
         hook,
@@ -243,14 +246,31 @@ export class DenoHookRunner {
     return null;
   }
 
-  #resolveSecretEnv(
+  async #resolveSecretEnv(
     hook: HookDefinition,
-  ): { env: Record<string, string> } | {
-    error: NonNullable<HookRunResult["error"]>;
-  } {
+  ): Promise<
+    { env: Record<string, string> } | {
+      error: NonNullable<HookRunResult["error"]>;
+    }
+  > {
     const env: Record<string, string> = {};
     for (const ref of hook.secrets ?? []) {
-      const value = this.#secretValues[ref.name];
+      let value: string | undefined = this.#secretValues[ref.name];
+      if (value === undefined && this.#secretResolver) {
+        try {
+          value = await this.#secretResolver(ref.name);
+        } catch (error) {
+          return {
+            error: {
+              code: error instanceof Error && "code" in error
+                ? String(error.code)
+                : "secret_resolution_failed",
+              message: error instanceof Error ? error.message : String(error),
+              details: { secret: ref.name, env: ref.env },
+            },
+          };
+        }
+      }
       if (value === undefined) {
         return {
           error: {

@@ -269,6 +269,24 @@ export const platformMigrations: PlatformMigration[] = [
       create index if not exists hook_executions_hook_phase_idx on hook_executions(hook, phase, created_at desc)
     `,
   },
+  {
+    id: "0008_platform_secrets",
+    sql: `
+      create table if not exists platform_secrets(
+        name text primary key,
+        description text,
+        ciphertext bytea not null,
+        nonce bytea not null,
+        algorithm text not null,
+        key_id text not null,
+        created_by text not null,
+        updated_by text,
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now()
+      );
+      create index if not exists platform_secrets_updated_at_idx on platform_secrets(updated_at desc)
+    `,
+  },
 ];
 
 export async function applyPlatformMigrations(

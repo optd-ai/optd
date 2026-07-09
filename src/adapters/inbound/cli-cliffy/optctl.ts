@@ -172,6 +172,44 @@ function appendActorQuery(base: string, args: string[]): string {
   return `${base}?actor=${encodeURIComponent(value)}`;
 }
 
+async function parseSecretSetPayload(
+  args: string[],
+): Promise<Record<string, unknown>> {
+  const payload: Record<string, unknown> = {};
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    const next = () => args[++i] ?? "";
+    if (arg === "--value") payload.value = next();
+    else if (arg.startsWith("--value=")) {
+      payload.value = arg.slice("--value=".length);
+    } else if (arg === "--value-file") {
+      payload.value = await Deno.readTextFile(next());
+    } else if (arg.startsWith("--value-file=")) {
+      payload.value = await Deno.readTextFile(
+        arg.slice("--value-file=".length),
+      );
+    } else if (arg === "--description") payload.description = next();
+    else if (arg.startsWith("--description=")) {
+      payload.description = arg.slice("--description=".length);
+    } else if (arg === "--actor") payload.actor = parseActorArg(next());
+    else if (arg.startsWith("--actor=")) {
+      payload.actor = parseActorArg(arg.slice("--actor=".length));
+    } else throw new Error(`unknown secret option ${arg}`);
+  }
+  return payload;
+}
+function parseSecretActorPayload(args: string[]): Record<string, unknown> {
+  const payload: Record<string, unknown> = {};
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "--actor") payload.actor = parseActorArg(args[++i] ?? "");
+    else if (arg.startsWith("--actor=")) {
+      payload.actor = parseActorArg(arg.slice("--actor=".length));
+    } else throw new Error(`unknown secret option ${arg}`);
+  }
+  return payload;
+}
+
 function helpText(): string {
   return new Command()
     .name("optctl")
@@ -201,6 +239,35 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
         `${parsed.server}/actions/${namespace}/${name}/${sub}`,
         await resolveActionPayload(parsed.positional.slice(3)),
       );
+    } else if (cmd === "secret" && sub === "list") {
+      result = await getJson(
+        appendActorQuery(
+          `${parsed.server}/secrets`,
+          parsed.positional.slice(2),
+        ),
+      );
+    } else if (cmd === "secret" && sub === "set" && value) {
+      result = await postJson(`${parsed.server}/secrets`, {
+        name: value,
+        ...await parseSecretSetPayload(parsed.positional.slice(3)),
+      });
+    } else if (cmd === "secret" && sub === "delete" && value) {
+      result = await fetch(
+        `${parsed.server}/secrets/${encodeURIComponent(value)}`,
+        {
+          method: "DELETE",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(
+            parseSecretActorPayload(parsed.positional.slice(3)),
+          ),
+        },
+      ).then(async (response) => {
+        const body = await response.json().catch(() => undefined);
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${JSON.stringify(body)}`);
+        }
+        return body;
+      });
     } else if (cmd === "outbox" && sub === "status") {
       result = await getJson(`${parsed.server}/outbox`);
     } else if (cmd === "outbox" && sub === "drain") {
@@ -276,7 +343,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       );
     } else {
       throw new Error(
-        "usage: optctl home | pack preview/apply <dir> | metadata resource/action/hook/policy <namespace.name> | action preview/commit <namespace.action> --input '{...}' | outbox status/drain/retry | migration inspect/apply/confirm <id> | query <namespace.resource> [--where expr] [--fields a,b] [--sort field:desc] [--limit n] [--cursor c] | changeset preview/commit <json-file> | view <namespace.resource> <id> | history <namespace.resource> <id>",
+        "usage: optctl home | pack preview/apply <dir> | metadata resource/action/hook/policy <namespace.name> | secret list/set/delete | action preview/commit <namespace.action> --input '{...}' | outbox status/drain/retry | migration inspect/apply/confirm <id> | query <namespace.resource> [--where expr] [--fields a,b] [--sort field:desc] [--limit n] [--cursor c] | changeset preview/commit <json-file> | view <namespace.resource> <id> | history <namespace.resource> <id>",
       );
     }
     return { stdout: render(result, parsed.json), stderr: "", code: 0 };

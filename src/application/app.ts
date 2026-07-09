@@ -7,6 +7,7 @@ import { makeRunActionService } from "./services/run_action.ts";
 import { makeMigrationServices } from "./services/migration_services.ts";
 import { makeProcessOutboxService } from "./services/process_outbox.ts";
 import { DenoHookRunner } from "../adapters/outbound/deno-hooks/hook_runner.ts";
+import { makeSecretService } from "./services/manage_secret.ts";
 import { OPERANT_VERSION } from "../config/runtime.ts";
 import type { Queryable, Sql } from "../adapters/outbound/postgres/client.ts";
 import { PostgresTransactionManager } from "../adapters/outbound/postgres/transaction_manager.ts";
@@ -14,7 +15,10 @@ import { PostgresTransactionManager } from "../adapters/outbound/postgres/transa
 export function makeApplication(sql: Sql) {
   const clock = new SystemClock();
   const tx = new PostgresTransactionManager(sql);
-  const hookRunner = new DenoHookRunner();
+  const secrets = makeSecretService({ sql: sql as Queryable, tx });
+  const hookRunner = new DenoHookRunner({
+    secretResolver: (name) => secrets.resolveSecret(name),
+  });
   const changesets = makeChangesetServices({
     sql: sql as Queryable,
     tx,
@@ -35,6 +39,7 @@ export function makeApplication(sql: Sql) {
       tx,
       hookRunner,
     }),
+    secrets,
     actions: makeRunActionService({
       sql: sql as Queryable,
       hookRunner,

@@ -101,6 +101,43 @@ Deno.test("DenoHookRunner reports timeouts", async () => {
   assertEquals(result.error?.code, "timeout");
 });
 
+Deno.test("DenoHookRunner injects only declared secret env vars", async () => {
+  const runner = new DenoHookRunner({
+    cacheDir: await Deno.makeTempDir(),
+    secretValues: { api_token: "shh-value", other_token: "must-not-leak" },
+  });
+  const result = await runner.run(
+    hook(
+      "secret_env",
+      `const token = Deno.env.get("API_TOKEN");
+       let otherAllowed = false;
+       try { otherAllowed = Deno.env.get("OTHER_TOKEN") !== undefined; } catch { otherAllowed = false; }
+       console.log(JSON.stringify({ errors: token === "shh-value" && !otherAllowed ? [] : ["bad env"] }));`,
+      { secrets: [{ name: "api_token", env: "API_TOKEN" }] },
+    ),
+    { hook: "secret_env", phase: "changeset.validate", input: {} },
+  );
+  assertEquals(result.ok, true);
+  assertEquals(result.output?.errors, []);
+});
+
+Deno.test("DenoHookRunner fails before spawn when a declared secret is missing", async () => {
+  const runner = new DenoHookRunner({ cacheDir: await Deno.makeTempDir() });
+  const result = await runner.run(
+    hook(
+      "missing_secret",
+      `console.error("spawned"); console.log(JSON.stringify({ errors: [] }));`,
+      {
+        secrets: [{ name: "api_token", env: "API_TOKEN" }],
+      },
+    ),
+    { hook: "missing_secret", phase: "changeset.validate", input: {} },
+  );
+  assertEquals(result.ok, false);
+  assertEquals(result.error?.code, "missing_secret");
+  assertEquals(result.logs, "");
+});
+
 Deno.test("DenoHookRunner reports bad JSON and invalid schema", async () => {
   const runner = new DenoHookRunner({ cacheDir: await Deno.makeTempDir() });
   const badJson = await runner.run(hook("bad_json", `console.log("nope");`), {

@@ -13,6 +13,7 @@ import {
   type MigrationApplyResult,
   type MigrationStatus,
 } from "./adapters/outbound/postgres/migrations.ts";
+import { assertSecretSubsystemReady } from "./application/services/manage_secret.ts";
 import {
   type PostgresRuntime,
   startPostgresRuntime,
@@ -27,17 +28,18 @@ export type StartedServer = {
 export async function createFetchHandler() {
   const postgresRuntime = await startPostgresRuntime();
   const sql = createPostgresClient(postgresRuntime.databaseUrl);
-  const application = makeApplication(sql);
   let migrationResult: MigrationApplyResult;
   try {
     migrationResult = await sql.begin(async (tx) =>
       await applyPlatformMigrations(tx)
     );
+    await assertSecretSubsystemReady(sql);
   } catch (error) {
     await closePostgresClient(sql).catch(() => undefined);
     await postgresRuntime.stop().catch(() => undefined);
     throw error;
   }
+  const application = makeApplication(sql);
   const app = makeHttpApp({
     metadata: application.metadata,
     packs: application.packs,
@@ -46,6 +48,7 @@ export async function createFetchHandler() {
     actions: application.actions,
     changesets: application.changesets,
     outbox: application.outbox,
+    secrets: application.secrets,
     health: makeHealthService(sql, postgresRuntime, migrationResult),
     version: OPERANT_VERSION,
   });

@@ -73,6 +73,11 @@ export type HttpDependencies = {
     ): Promise<Result<unknown>>;
     retry(id: string): Promise<Result<unknown>>;
   };
+  secrets: {
+    list(input?: { actor?: unknown }): Promise<Result<unknown>>;
+    set(input: unknown): Promise<Result<unknown>>;
+    delete(name: string, input?: unknown): Promise<Result<unknown>>;
+  };
   health: {
     inspect(): Promise<Record<string, unknown>>;
   };
@@ -283,6 +288,25 @@ export function makeHttpApp(deps: HttpDependencies): Hono {
     "/outbox/:id/retry",
     async (c) => resultJson(c, await deps.outbox.retry(c.req.param("id"))),
   );
+
+  app.get(
+    "/secrets",
+    async (c) =>
+      resultJson(
+        c,
+        await deps.secrets.list({
+          actor: parseActorQuery(c.req.query("actor")),
+        }),
+      ),
+  );
+  app.post(
+    "/secrets",
+    async (c) => resultJson(c, await deps.secrets.set(await c.req.json())),
+  );
+  app.delete("/secrets/:name", async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    return resultJson(c, await deps.secrets.delete(c.req.param("name"), body));
+  });
 
   return app;
 }
