@@ -218,7 +218,9 @@ function assertIdentifier(identifier: string, context: string): void {
 }
 
 function createTableSql(tableName: string, columns: string[]): string {
-  return `create table ${qi(tableName)} (\n  ${columns.join(",\n  ")}\n)`;
+  return `create table if not exists ${qi(tableName)} (\n  ${
+    columns.join(",\n  ")
+  }\n)`;
 }
 
 function qi(identifier: string): string {

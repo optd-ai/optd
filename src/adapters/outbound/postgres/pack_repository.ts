@@ -69,7 +69,8 @@ export async function applyLoadedPack(
   await query(
     sql,
     `insert into pack_revisions(revision, namespace, name, version, active, manifest, normalized)
-    values ($1,$2,$3,$4,true,$5::jsonb,$6::jsonb)`,
+    values ($1,$2,$3,$4,true,$5::jsonb,$6::jsonb)
+    on conflict (revision) do update set active=true, manifest=excluded.manifest, normalized=excluded.normalized`,
     [
       pack.revision,
       pack.namespace,
@@ -82,7 +83,7 @@ export async function applyLoadedPack(
   for (const file of pack.sourceFiles) {
     await query(
       sql,
-      "insert into pack_source_files(revision,path,digest,kind,content) values ($1,$2,$3,$4,$5)",
+      "insert into pack_source_files(revision,path,digest,kind,content) values ($1,$2,$3,$4,$5) on conflict (revision,path) do update set digest=excluded.digest, kind=excluded.kind, content=excluded.content",
       [pack.revision, file.path, file.digest, file.kind, file.content],
     );
   }
@@ -120,7 +121,8 @@ export async function applyLoadedPack(
     await query(
       sql,
       `insert into hook_definitions(revision,namespace,name,script_path,script_digest,spec,document)
-      values ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb)`,
+      values ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb)
+      on conflict (revision,namespace,name) do update set script_path=excluded.script_path, script_digest=excluded.script_digest, spec=excluded.spec, document=excluded.document`,
       [
         pack.revision,
         hook.namespace,
@@ -136,7 +138,8 @@ export async function applyLoadedPack(
     await query(
       sql,
       `insert into seed_definitions(revision,namespace,name,resource,key_field,spec,document)
-      values ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb)`,
+      values ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb)
+      on conflict (revision,namespace,name) do update set resource=excluded.resource, key_field=excluded.key_field, spec=excluded.spec, document=excluded.document`,
       [
         pack.revision,
         seed.namespace,
@@ -161,7 +164,8 @@ async function insertDefinitions(
   for (const def of Object.values(defs)) {
     await query(
       sql,
-      `insert into ${table}(revision,namespace,name,spec,document) values ($1,$2,$3,$4::jsonb,$5::jsonb)`,
+      `insert into ${table}(revision,namespace,name,spec,document) values ($1,$2,$3,$4::jsonb,$5::jsonb)
+       on conflict (revision,namespace,name) do update set spec=excluded.spec, document=excluded.document`,
       [
         revision,
         def.namespace,

@@ -1,0 +1,888 @@
+import {
+  err,
+  ok,
+  type Result,
+  validationError,
+} from "../../domain/errors/result.ts";
+import {
+  query,
+  type Queryable,
+  quoteIdentifier,
+} from "../../adapters/outbound/postgres/client.ts";
+import type { TransactionManager } from "../ports/transaction_manager.ts";
+
+type JsonRecord = Record<string, unknown>;
+export type ChangesetOperation = {
+  op:
+    | "create"
+    | "update"
+    | "archive"
+    | "transition"
+    | "link"
+    | "unlink"
+    | "comment";
+  resource?: string;
+  relationship?: string;
+  id?: string;
+  as?: string;
+  fields?: JsonRecord;
+  expected_version?: number;
+  from?: string;
+  to?: string;
+  body?: string;
+};
+export type ChangesetRequest = {
+  actor?: string;
+  actor_id?: string;
+  idempotency_key?: string;
+  source?: string;
+  operations: ChangesetOperation[];
+};
+
+type ValidationIssue = {
+  level: "error";
+  path: string;
+  code: string;
+  message: string;
+};
+type ResourceMeta = {
+  namespace: string;
+  name: string;
+  revision: string;
+  tableName: string;
+  fields: Record<string, { type?: string; required?: boolean }>;
+};
+type RelationshipMeta = {
+  namespace: string;
+  name: string;
+  revision: string;
+  tableName: string;
+};
+
+type PlannedOperation = ChangesetOperation & {
+  index: number;
+  meta?: ResourceMeta;
+  relationshipMeta?: RelationshipMeta;
+  objectId?: string;
+  before?: JsonRecord | null;
+  after?: JsonRecord | null;
+  changed_fields?: string[];
+};
+
+export type ChangesetPreviewDto = {
+  id: string;
+  actor_id: string;
+  committable: boolean;
+  validation: { errors: ValidationIssue[]; warnings: unknown[] };
+  operations: Array<Record<string, unknown>>;
+};
+
+export type ChangesetCommitDto = ChangesetPreviewDto & {
+  committed: boolean;
+  object_versions: Array<
+    { id: string; resource: string; object_id: string; version: number }
+  >;
+};
+
+export function makeChangesetServices(
+  deps: { sql: Queryable; tx: TransactionManager<Queryable> },
+) {
+  return {
+    async preview(
+      input: ChangesetRequest,
+    ): Promise<Result<ChangesetPreviewDto>> {
+      try {
+        const actor = actorOf(input);
+        const plan = await planChangeset(deps.sql, input);
+        const preview = previewDto(crypto.randomUUID(), actor, plan);
+        await query(
+          deps.sql,
+          `insert into changesets(id, actor_id, status, request_json, preview_json, source)
+           values ($1,$2,'previewed',$3::jsonb,$4::jsonb,$5)`,
+          [
+            preview.id,
+            actor,
+            JSON.stringify(input),
+            JSON.stringify(preview),
+            input.source ?? null,
+          ],
+        );
+        await query(
+          deps.sql,
+          `insert into audit_events(id, changeset_id, actor_id, event_type, action, decision, validation_summary_json)
+           values ($1,$2,$3,'changeset.previewed','changeset.preview',$4,$5::jsonb)`,
+          [
+            crypto.randomUUID(),
+            preview.id,
+            actor,
+            preview.committable ? "allowed" : "failed",
+            JSON.stringify(preview.validation),
+          ],
+        );
+        return ok(preview);
+      } catch (error) {
+        return err(validationError("bad_changeset", message(error)));
+      }
+    },
+    async commit(input: ChangesetRequest): Promise<Result<ChangesetCommitDto>> {
+      try {
+        const result = await deps.tx.transaction((tx) =>
+          commitPlanned(tx, input)
+        );
+        return ok(result);
+      } catch (error) {
+        return err(validationError("bad_changeset", message(error)));
+      }
+    },
+    async view(
+      resourceId: string,
+      id: string,
+      includeArchived = false,
+    ): Promise<Result<unknown>> {
+      try {
+        const meta = await getResourceMeta(deps.sql, resourceId);
+        if (!meta) {
+          return err({
+            code: "not_found",
+            message: `resource ${resourceId} not found`,
+            severity: "not_found",
+          });
+        }
+        const row = await readObject(deps.sql, meta, id, includeArchived);
+        if (!row) {
+          return err({
+            code: "not_found",
+            message: `${resourceId} ${id} not found`,
+            severity: "not_found",
+          });
+        }
+        return ok({ resource: resourceId, object: row });
+      } catch (error) {
+        return err(validationError("bad_view", message(error)));
+      }
+    },
+    async history(resourceId: string, id: string): Promise<Result<unknown>> {
+      const versions = await query(
+        deps.sql,
+        `select id, version, previous_version_id, changeset_id, operation, snapshot_json, changed_fields, actor_id, created_at
+         from object_versions where resource=$1 and object_id=$2 order by version`,
+        [resourceId, id],
+      );
+      const audits = await query(
+        deps.sql,
+        `select id, event_type, action, decision, object_version_id, created_at from audit_events
+         where resource=$1 and object_id=$2 order by created_at`,
+        [resourceId, id],
+      );
+      const events = await query(
+        deps.sql,
+        `select id, event_type, object_version_id, payload_json, occurred_at from events
+         where resource=$1 and object_id=$2 order by occurred_at`,
+        [resourceId, id],
+      );
+      const comments = await query(
+        deps.sql,
+        `select id, body, actor_id, object_version_id, created_at from comments
+         where resource=$1 and object_id=$2 order by created_at`,
+        [resourceId, id],
+      );
+      return ok({
+        resource: resourceId,
+        object_id: id,
+        versions: versions.rows,
+        audit_events: audits.rows,
+        events: events.rows,
+        comments: comments.rows,
+      });
+    },
+  };
+}
+
+export async function applySeedDefinitionsThroughChangesets(
+  sql: Queryable,
+  actor = "system:seed",
+): Promise<{ planned: number; committed: number; skipped: number }> {
+  const seeds = await query<
+    {
+      namespace: string;
+      name: string;
+      resource: string;
+      key_field: string;
+      spec: unknown;
+    }
+  >(
+    sql,
+    `select namespace,name,resource,key_field,spec from seed_definitions
+     where revision in (select revision from pack_revisions where active=true)
+     order by namespace,name`,
+  );
+  let planned = 0, committed = 0, skipped = 0;
+  for (const seed of seeds.rows) {
+    const spec = asRecord(seed.spec);
+    const rows = Array.isArray(spec.rows) ? spec.rows.filter(isRecord) : [];
+    const resourceId = `${seed.namespace}.${seed.resource}`;
+    const meta = await getResourceMeta(sql, resourceId);
+    if (!meta) {
+      throw new Error(`seed ${seed.name}: resource ${resourceId} not found`);
+    }
+    for (const row of rows) {
+      planned++;
+      const key = row[seed.key_field];
+      if (key === undefined || key === null) {
+        throw new Error(`seed ${seed.name}: missing key ${seed.key_field}`);
+      }
+      const existing = await query<JsonRecord>(
+        sql,
+        `select * from ${qi(meta.tableName)} where ${
+          qi(seed.key_field)
+        } = $1 and archived_at is null limit 1`,
+        [key],
+      );
+      const existingRow = existing.rows[0];
+      const source = `seed:${seed.namespace}.${seed.name}:${String(key)}`;
+      if (!existingRow) {
+        await commitPlanned(sql, {
+          actor,
+          source,
+          idempotency_key: source,
+          operations: [{
+            op: "create",
+            resource: resourceId,
+            fields: {
+              ...row,
+              id: stableSeedId(
+                seed.namespace,
+                seed.resource,
+                seed.key_field,
+                key,
+              ),
+            },
+          }],
+        });
+        committed++;
+      } else if (diffFields(existingRow, row).length) {
+        await commitPlanned(sql, {
+          actor,
+          source,
+          idempotency_key: source,
+          operations: [{
+            op: "update",
+            resource: resourceId,
+            id: String(existingRow.id),
+            fields: row,
+            expected_version: Number(existingRow.version),
+          }],
+        });
+        committed++;
+      } else {
+        skipped++;
+      }
+    }
+  }
+  return { planned, committed, skipped };
+}
+
+async function commitPlanned(
+  sql: Queryable,
+  input: ChangesetRequest,
+): Promise<ChangesetCommitDto> {
+  const actor = actorOf(input);
+  const plan = await planChangeset(sql, input);
+  const preview = previewDto(crypto.randomUUID(), actor, plan);
+  if (!preview.committable) {
+    throw new Error(
+      preview.validation.errors.map((e) => `${e.code}: ${e.message}`).join(
+        "; ",
+      ),
+    );
+  }
+  if (input.idempotency_key) {
+    const existing = await query<
+      { request_json: unknown; preview_json: unknown; status: string }
+    >(
+      sql,
+      "select request_json, preview_json, status from changesets where actor_id=$1 and idempotency_key=$2",
+      [actor, input.idempotency_key],
+    );
+    if (existing.rows[0]) {
+      if (
+        JSON.stringify(existing.rows[0].request_json) !== JSON.stringify(input)
+      ) throw new Error("idempotency key reused with different payload");
+      return existing.rows[0].preview_json as ChangesetCommitDto;
+    }
+  }
+  const changesetId = preview.id;
+  await query(
+    sql,
+    `insert into changesets(id, actor_id, status, request_json, preview_json, idempotency_key, source, committed_at) values ($1,$2,'committed',$3::jsonb,$4::jsonb,$5,$6,now())`,
+    [
+      changesetId,
+      actor,
+      JSON.stringify(input),
+      JSON.stringify(preview),
+      input.idempotency_key ?? null,
+      input.source ?? null,
+    ],
+  );
+  const objectVersions: ChangesetCommitDto["object_versions"] = [];
+  for (const op of plan.planned) {
+    if (op.meta) {
+      const ov = await commitObjectOperation(sql, changesetId, actor, op);
+      if (ov) objectVersions.push(ov);
+    } else if (op.relationshipMeta) {
+      await commitRelationshipOperation(sql, changesetId, actor, op);
+    }
+  }
+  const committed = {
+    ...preview,
+    committed: true,
+    object_versions: objectVersions,
+  };
+  await query(sql, "update changesets set preview_json=$2::jsonb where id=$1", [
+    changesetId,
+    JSON.stringify(committed),
+  ]);
+  await query(
+    sql,
+    `insert into audit_events(id, changeset_id, actor_id, event_type, action, decision, validation_summary_json) values ($1,$2,$3,'changeset.committed','changeset.commit','committed',$4::jsonb)`,
+    [
+      crypto.randomUUID(),
+      changesetId,
+      actor,
+      JSON.stringify(preview.validation),
+    ],
+  );
+  await query(
+    sql,
+    `insert into events(id, changeset_id, event_type, payload_json) values ($1,$2,'changeset.committed',$3::jsonb)`,
+    [
+      crypto.randomUUID(),
+      changesetId,
+      JSON.stringify({ operation_count: plan.planned.length }),
+    ],
+  );
+  return committed;
+}
+
+async function planChangeset(
+  sql: Queryable,
+  input: ChangesetRequest,
+): Promise<{ errors: ValidationIssue[]; planned: PlannedOperation[] }> {
+  if (!Array.isArray(input.operations) || input.operations.length === 0) {
+    throw new Error("operations must be a non-empty array");
+  }
+  const errors: ValidationIssue[] = [];
+  const planned: PlannedOperation[] = [];
+  const aliases = new Map<string, string>();
+  for (let index = 0; index < input.operations.length; index++) {
+    const op = input.operations[index];
+    const path = `/operations/${index}`;
+    if (
+      ["create", "update", "archive", "transition", "comment"].includes(op.op)
+    ) {
+      const meta = await getResourceMeta(sql, op.resource ?? "");
+      if (!meta) {
+        errors.push(
+          issue(path, "unknown_resource", `unknown resource ${op.resource}`),
+        );
+        continue;
+      }
+      const objectId = op.op === "create"
+        ? String(op.fields?.id ?? crypto.randomUUID())
+        : resolveRef(op.id, aliases);
+      const before = op.op === "create"
+        ? null
+        : await readObject(sql, meta, objectId, true);
+      if (op.op !== "create" && !before) {
+        errors.push(
+          issue(path, "not_found", `${op.resource} ${objectId} not found`),
+        );
+      }
+      if (before?.archived_at && op.op !== "comment") {
+        errors.push(
+          issue(path, "archived", `${op.resource} ${objectId} is archived`),
+        );
+      }
+      if (
+        op.expected_version !== undefined && before &&
+        Number(before.version) !== op.expected_version
+      ) {
+        errors.push(
+          issue(
+            path,
+            "version_conflict",
+            `expected version ${op.expected_version}, found ${before.version}`,
+          ),
+        );
+      }
+      const fields = op.op === "transition"
+        ? {
+          [String((meta as ResourceMeta).fields.status ? "status" : "state")]:
+            op.fields?.to ?? op.fields?.state ?? op.fields?.status,
+        }
+        : (op.fields ?? {});
+      validateFields(path, meta, fields, errors, op.op === "create");
+      if (op.op === "create") {
+        for (const [field, cfg] of Object.entries(meta.fields)) {
+          if (cfg.required && fields[field] === undefined) {
+            errors.push(
+              issue(
+                `${path}/fields/${field}`,
+                "required",
+                `${field} is required`,
+              ),
+            );
+          }
+        }
+      }
+      const after = buildAfter(op.op, before, { ...fields, id: objectId });
+      if (op.as) aliases.set(op.as, objectId);
+      planned.push({
+        ...op,
+        index,
+        meta,
+        objectId,
+        before,
+        after,
+        changed_fields: diffFields(before ?? {}, after ?? {}),
+      });
+    } else if (op.op === "link" || op.op === "unlink") {
+      const relationshipMeta = await getRelationshipMeta(
+        sql,
+        op.relationship ?? "",
+      );
+      if (!relationshipMeta) {
+        errors.push(
+          issue(
+            path,
+            "unknown_relationship",
+            `unknown relationship ${op.relationship}`,
+          ),
+        );
+      }
+      planned.push({
+        ...op,
+        index,
+        relationshipMeta: relationshipMeta ?? undefined,
+        from: resolveRef(op.from, aliases),
+        to: resolveRef(op.to, aliases),
+      });
+    } else {errors.push(
+        issue(
+          path,
+          "unknown_operation",
+          `unknown operation ${(op as { op?: unknown }).op}`,
+        ),
+      );}
+  }
+  return { errors, planned };
+}
+
+async function commitObjectOperation(
+  sql: Queryable,
+  changesetId: string,
+  actor: string,
+  op: PlannedOperation,
+) {
+  const meta = op.meta!;
+  const table = qi(meta.tableName);
+  const objectId = op.objectId!;
+  let row: JsonRecord;
+  if (op.op === "create") {
+    const fields = { ...op.fields, id: objectId } as JsonRecord;
+    const cols = Object.keys(fields).filter((k) =>
+      k in meta.fields || k === "id"
+    );
+    await query(
+      sql,
+      `insert into ${table} (${cols.map(qi).join(",")}) values (${
+        cols.map((_, i) => `$${i + 1}`).join(",")
+      })`,
+      cols.map((c) => fields[c]),
+    );
+  } else if (op.op === "update" || op.op === "transition") {
+    const fields = op.op === "transition"
+      ? (op.after ?? {})
+      : (op.fields ?? {});
+    const cols = Object.keys(fields).filter((k) => k in meta.fields);
+    if (cols.length) {
+      await query(
+        sql,
+        `update ${table} set ${
+          cols.map((c, i) => `${qi(c)}=$${i + 1}`).join(",")
+        }, version=version+1, updated_at=now() where id=$${cols.length + 1}`,
+        [...cols.map((c) => fields[c]), objectId],
+      );
+    }
+  } else if (op.op === "archive") {
+    await query(
+      sql,
+      `update ${table} set archived_at=now(), archived_by=$1, version=version+1, updated_at=now() where id=$2`,
+      [actor, objectId],
+    );
+  } else if (op.op === "comment") {
+    await query(
+      sql,
+      `update ${table} set version=version+1, updated_at=now() where id=$1`,
+      [objectId],
+    );
+  }
+  row = (await readObject(sql, meta, objectId, true))!;
+  const previous = await query<{ id: string }>(
+    sql,
+    "select id from object_versions where resource=$1 and object_id=$2 order by version desc limit 1",
+    [`${meta.namespace}.${meta.name}`, objectId],
+  );
+  const ovId = crypto.randomUUID();
+  await query(
+    sql,
+    `insert into object_versions(id, resource, object_id, version, previous_version_id, changeset_id, operation, resource_revision, snapshot_json, changed_fields, actor_id) values ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11)`,
+    [
+      ovId,
+      `${meta.namespace}.${meta.name}`,
+      objectId,
+      Number(row.version),
+      previous.rows[0]?.id ?? null,
+      changesetId,
+      op.op,
+      meta.revision,
+      JSON.stringify(row),
+      op.changed_fields ?? [],
+      actor,
+    ],
+  );
+  await query(
+    sql,
+    `update ${table} set current_object_version_id=$1 where id=$2`,
+    [ovId, objectId],
+  );
+  if (op.op === "comment") {
+    await query(
+      sql,
+      `insert into comments(id, resource, object_id, changeset_id, object_version_id, actor_id, body) values ($1,$2,$3,$4,$5,$6,$7)`,
+      [
+        crypto.randomUUID(),
+        `${meta.namespace}.${meta.name}`,
+        objectId,
+        changesetId,
+        ovId,
+        actor,
+        op.body ?? "",
+      ],
+    );
+  }
+  const eventType = op.op === "create"
+    ? "object.created"
+    : op.op === "archive"
+    ? "object.archived"
+    : op.op === "comment"
+    ? "comment.added"
+    : op.op === "transition"
+    ? "object.transitioned"
+    : "object.updated";
+  await query(
+    sql,
+    `insert into audit_events(id, changeset_id, object_version_id, actor_id, event_type, resource, object_id, action, decision) values ($1,$2,$3,$4,$5,$6,$7,$8,'committed')`,
+    [
+      crypto.randomUUID(),
+      changesetId,
+      ovId,
+      actor,
+      eventType,
+      `${meta.namespace}.${meta.name}`,
+      objectId,
+      op.op,
+    ],
+  );
+  await query(
+    sql,
+    `insert into events(id, changeset_id, object_version_id, event_type, resource, object_id, payload_json) values ($1,$2,$3,$4,$5,$6,$7::jsonb)`,
+    [
+      crypto.randomUUID(),
+      changesetId,
+      ovId,
+      eventType,
+      `${meta.namespace}.${meta.name}`,
+      objectId,
+      JSON.stringify({ changed_fields: op.changed_fields ?? [] }),
+    ],
+  );
+  return {
+    id: ovId,
+    resource: `${meta.namespace}.${meta.name}`,
+    object_id: objectId,
+    version: Number(row.version),
+  };
+}
+
+async function commitRelationshipOperation(
+  sql: Queryable,
+  changesetId: string,
+  actor: string,
+  op: PlannedOperation,
+) {
+  const meta = op.relationshipMeta!;
+  if (op.op === "link") {
+    const id = op.id ?? crypto.randomUUID();
+    const fields = op.fields ?? {};
+    const cols = [
+      "id",
+      "from_object_id",
+      "to_object_id",
+      ...Object.keys(fields),
+    ];
+    await query(
+      sql,
+      `insert into ${qi(meta.tableName)} (${cols.map(qi).join(",")}) values (${
+        cols.map((_, i) => `$${i + 1}`).join(",")
+      })`,
+      [id, op.from, op.to, ...Object.values(fields)],
+    );
+  } else {
+    await query(
+      sql,
+      `delete from ${
+        qi(meta.tableName)
+      } where from_object_id=$1 and to_object_id=$2`,
+      [op.from, op.to],
+    );
+  }
+  await query(
+    sql,
+    `insert into audit_events(id, changeset_id, actor_id, event_type, resource, object_id, action, decision) values ($1,$2,$3,$4,$5,$6,$7,'committed')`,
+    [
+      crypto.randomUUID(),
+      changesetId,
+      actor,
+      op.op === "link" ? "relationship.created" : "relationship.deleted",
+      `${meta.namespace}.${meta.name}`,
+      `${op.from}->${op.to}`,
+      op.op,
+    ],
+  );
+  await query(
+    sql,
+    `insert into events(id, changeset_id, event_type, resource, object_id, payload_json) values ($1,$2,$3,$4,$5,$6::jsonb)`,
+    [
+      crypto.randomUUID(),
+      changesetId,
+      op.op === "link" ? "relationship.created" : "relationship.deleted",
+      `${meta.namespace}.${meta.name}`,
+      `${op.from}->${op.to}`,
+      JSON.stringify({ from: op.from, to: op.to }),
+    ],
+  );
+}
+
+function previewDto(
+  id: string,
+  actor: string,
+  plan: { errors: ValidationIssue[]; planned: PlannedOperation[] },
+): ChangesetPreviewDto {
+  return {
+    id,
+    actor_id: actor,
+    committable: plan.errors.length === 0,
+    validation: { errors: plan.errors, warnings: [] },
+    operations: plan.planned.map((op) => ({
+      op: op.op,
+      resource: op.resource,
+      relationship: op.relationship,
+      id: op.objectId ?? op.id,
+      from: op.from,
+      to: op.to,
+      before: op.before,
+      after: op.after,
+      changed_fields: op.changed_fields,
+    })),
+  };
+}
+
+async function getResourceMeta(
+  sql: Queryable,
+  id: string,
+): Promise<ResourceMeta | null> {
+  const [namespace, name] = splitId(id);
+  if (!namespace || !name) return null;
+  const rows = await query<
+    {
+      namespace: string;
+      name: string;
+      revision: string;
+      spec: unknown;
+      table_name: string;
+    }
+  >(
+    sql,
+    `select r.namespace,r.name,r.revision,r.spec,g.table_name from resource_definitions r join generated_sql_objects g on g.revision=r.revision and g.namespace=r.namespace and g.name=r.name and g.kind='resource_table' where r.namespace=$1 and r.name=$2 and r.revision=(select revision from pack_revisions where namespace=$1 and active=true order by created_at desc limit 1)`,
+    [namespace, name],
+  );
+  const row = rows.rows[0];
+  if (!row) return null;
+  const spec = asRecord(row.spec);
+  return {
+    namespace,
+    name,
+    revision: row.revision,
+    tableName: row.table_name,
+    fields: asRecord(spec.fields) as ResourceMeta["fields"],
+  };
+}
+async function getRelationshipMeta(
+  sql: Queryable,
+  id: string,
+): Promise<RelationshipMeta | null> {
+  const [namespace, name] = splitId(id);
+  if (!namespace || !name) return null;
+  const rows = await query<
+    { namespace: string; name: string; revision: string; table_name: string }
+  >(
+    sql,
+    `select r.namespace,r.name,r.revision,g.table_name from relationship_definitions r join generated_sql_objects g on g.revision=r.revision and g.namespace=r.namespace and g.name=r.name and g.kind='relationship_table' where r.namespace=$1 and r.name=$2 and r.revision=(select revision from pack_revisions where namespace=$1 and active=true order by created_at desc limit 1)`,
+    [namespace, name],
+  );
+  return rows.rows[0]
+    ? {
+      namespace,
+      name,
+      revision: rows.rows[0].revision,
+      tableName: rows.rows[0].table_name,
+    }
+    : null;
+}
+async function readObject(
+  sql: Queryable,
+  meta: ResourceMeta,
+  id: string,
+  includeArchived: boolean,
+): Promise<JsonRecord | null> {
+  const result = await query<JsonRecord>(
+    sql,
+    `select * from ${qi(meta.tableName)} where id=$1 ${
+      includeArchived ? "" : "and archived_at is null"
+    }`,
+    [id],
+  );
+  return result.rows[0] ?? null;
+}
+function validateFields(
+  path: string,
+  meta: ResourceMeta,
+  fields: JsonRecord,
+  errors: ValidationIssue[],
+  create: boolean,
+) {
+  for (const [key, value] of Object.entries(fields)) {
+    if (key === "id") continue;
+    const field = meta.fields[key];
+    if (!field) {
+      errors.push(
+        issue(`${path}/fields/${key}`, "unknown_field", `unknown field ${key}`),
+      );
+      continue;
+    }
+    if (value === null || value === undefined) continue;
+    const type = field.type;
+    if (type === "string" && typeof value !== "string") {
+      errors.push(
+        issue(`${path}/fields/${key}`, "type", `${key} must be string`),
+      );
+    }
+    if (type === "integer" && !Number.isInteger(value)) {
+      errors.push(
+        issue(`${path}/fields/${key}`, "type", `${key} must be integer`),
+      );
+    }
+    if (type === "boolean" && typeof value !== "boolean") {
+      errors.push(
+        issue(`${path}/fields/${key}`, "type", `${key} must be boolean`),
+      );
+    }
+    if (
+      type === "decimal" &&
+      !(typeof value === "number" ||
+        (typeof value === "string" && value.trim() !== "" &&
+          !Number.isNaN(Number(value))))
+    ) {
+      errors.push(
+        issue(`${path}/fields/${key}`, "type", `${key} must be decimal`),
+      );
+    }
+    if (
+      (type === "timestamp" || type === "date") && typeof value !== "string"
+    ) {
+      errors.push(
+        issue(
+          `${path}/fields/${key}`,
+          "type",
+          `${key} must be string timestamp/date`,
+        ),
+      );
+    }
+  }
+  if (!create) return;
+}
+function buildAfter(
+  op: string,
+  before: JsonRecord | null | undefined,
+  fields: JsonRecord,
+): JsonRecord | null {
+  if (op === "archive") {
+    return before ? { ...before, archived_at: "<archived>" } : null;
+  }
+  if (op === "comment") return before ?? null;
+  return { ...(before ?? {}), ...fields };
+}
+function diffFields(before: JsonRecord, after: JsonRecord): string[] {
+  return Object.keys(after).filter((key) =>
+    JSON.stringify(before[key]) !== JSON.stringify(after[key]) &&
+    !["updated_at", "current_object_version_id", "version"].includes(key)
+  ).sort();
+}
+function splitId(id: string): [string | null, string | null] {
+  const parts = String(id).split(".");
+  return parts.length === 2 ? [parts[0], parts[1]] : [null, null];
+}
+function resolveRef(
+  value: string | undefined,
+  aliases: Map<string, string>,
+): string {
+  if (!value) return "";
+  return aliases.get(value) ?? value;
+}
+function actorOf(input: ChangesetRequest): string {
+  return input.actor_id ?? input.actor ?? "anonymous";
+}
+function issue(path: string, code: string, message: string): ValidationIssue {
+  return { level: "error", path, code, message };
+}
+function asRecord(value: unknown): JsonRecord {
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return isRecord(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  return isRecord(value) ? value : {};
+}
+function isRecord(value: unknown): value is JsonRecord {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+function qi(identifier: string): string {
+  return quoteIdentifier(identifier);
+}
+function message(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+function stableSeedId(
+  namespace: string,
+  resource: string,
+  keyField: string,
+  key: unknown,
+): string {
+  return `seed_${namespace}_${resource}_${keyField}_${
+    String(key).replace(/[^a-zA-Z0-9_]+/g, "_")
+  }`.slice(0, 120);
+}

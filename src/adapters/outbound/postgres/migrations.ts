@@ -126,6 +126,78 @@ export const platformMigrations: PlatformMigration[] = [
       create index if not exists generated_sql_objects_table_name_idx on generated_sql_objects(table_name)
     `,
   },
+  {
+    id: "0004_changesets_history_events_comments",
+    sql: `
+      create table if not exists changesets (
+        id text primary key,
+        actor_id text not null,
+        status text not null check (status in ('previewed', 'committed')),
+        request_json jsonb not null,
+        preview_json jsonb not null default '{}'::jsonb,
+        idempotency_key text,
+        source text,
+        committed_at timestamptz,
+        created_at timestamptz not null default now(),
+        unique(actor_id, idempotency_key)
+      );
+      create table if not exists object_versions (
+        id text primary key,
+        resource text not null,
+        object_id text not null,
+        version integer not null,
+        previous_version_id text null references object_versions(id),
+        changeset_id text not null references changesets(id),
+        operation text not null,
+        resource_revision text not null,
+        snapshot_json jsonb not null,
+        changed_fields text[] not null default '{}',
+        actor_id text not null,
+        created_at timestamptz not null default now(),
+        unique(resource, object_id, version)
+      );
+      create table if not exists audit_events (
+        id text primary key,
+        changeset_id text null references changesets(id),
+        object_version_id text null references object_versions(id),
+        actor_id text not null,
+        event_type text not null,
+        resource text null,
+        object_id text null,
+        action text null,
+        decision text null,
+        policy_summary_json jsonb null,
+        validation_summary_json jsonb null,
+        hook_execution_ids text[] not null default '{}',
+        request_metadata_json jsonb not null default '{}'::jsonb,
+        created_at timestamptz not null default now()
+      );
+      create table if not exists events (
+        id text primary key,
+        changeset_id text not null references changesets(id),
+        object_version_id text null references object_versions(id),
+        event_type text not null,
+        resource text null,
+        object_id text null,
+        occurred_at timestamptz not null default now(),
+        payload_json jsonb not null default '{}'::jsonb
+      );
+      create table if not exists comments (
+        id text primary key,
+        resource text not null,
+        object_id text not null,
+        changeset_id text not null references changesets(id),
+        object_version_id text null references object_versions(id),
+        actor_id text not null,
+        body text not null,
+        created_at timestamptz not null default now()
+      );
+      create index if not exists object_versions_object_idx on object_versions(resource, object_id, version desc);
+      create index if not exists audit_events_object_idx on audit_events(resource, object_id, created_at desc);
+      create index if not exists events_object_idx on events(resource, object_id, occurred_at desc);
+      create index if not exists comments_object_idx on comments(resource, object_id, created_at desc)
+    `,
+  },
 ];
 
 export async function applyPlatformMigrations(

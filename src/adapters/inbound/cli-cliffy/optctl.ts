@@ -14,6 +14,18 @@ async function getJson(url: string): Promise<unknown> {
   }
   return body;
 }
+async function postJson(url: string, payload: unknown): Promise<unknown> {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const body = await response.json().catch(() => undefined);
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${JSON.stringify(body)}`);
+  }
+  return body;
+}
 async function postMultipart(url: string, packDir: string): Promise<unknown> {
   const form = new FormData();
   for await (
@@ -33,6 +45,9 @@ async function postMultipart(url: string, packDir: string): Promise<unknown> {
 }
 function render(value: unknown, asJson?: boolean): string {
   return asJson ? JSON.stringify(value, null, 2) : formatToon(value);
+}
+async function readJsonFile(path: string): Promise<unknown> {
+  return JSON.parse(await Deno.readTextFile(path));
 }
 function splitDotted(id: string): [string, string] {
   const parts = id.split(".");
@@ -80,6 +95,26 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       result = await postMultipart(`${parsed.server}/packs/preview`, value);
     } else if (cmd === "pack" && sub === "apply" && value) {
       result = await postMultipart(`${parsed.server}/packs/apply`, value);
+    } else if (cmd === "changeset" && sub === "preview" && value) {
+      result = await postJson(
+        `${parsed.server}/changesets/preview`,
+        await readJsonFile(value),
+      );
+    } else if (cmd === "changeset" && sub === "commit" && value) {
+      result = await postJson(
+        `${parsed.server}/changesets/commit`,
+        await readJsonFile(value),
+      );
+    } else if (cmd === "view" && sub && value) {
+      const [namespace, name] = splitDotted(sub);
+      result = await getJson(
+        `${parsed.server}/objects/${namespace}/${name}/${value}`,
+      );
+    } else if (cmd === "history" && sub && value) {
+      const [namespace, name] = splitDotted(sub);
+      result = await getJson(
+        `${parsed.server}/history/${namespace}/${name}/${value}`,
+      );
     } else if (cmd === "metadata" && sub && value) {
       const [namespace, name] = splitDotted(value);
       const routeKind = ({
@@ -94,7 +129,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       );
     } else {
       throw new Error(
-        "usage: optctl home | pack preview/apply <dir> | metadata resource/action/hook/policy <namespace.name>",
+        "usage: optctl home | pack preview/apply <dir> | metadata resource/action/hook/policy <namespace.name> | changeset preview/commit <json-file> | view <namespace.resource> <id> | history <namespace.resource> <id>",
       );
     }
     return { stdout: render(result, parsed.json), stderr: "", code: 0 };

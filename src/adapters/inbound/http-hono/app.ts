@@ -2,6 +2,11 @@ import { Hono } from "npm:hono";
 import { type Result, toHttpStatus } from "../../../domain/errors/result.ts";
 import type { HomeDto } from "../../../application/services/inspect_metadata.ts";
 import type {
+  ChangesetCommitDto,
+  ChangesetPreviewDto,
+  ChangesetRequest,
+} from "../../../application/services/changeset_services.ts";
+import type {
   PackApplyDto,
   PackPreviewDto,
 } from "../../../application/services/pack_services.ts";
@@ -20,6 +25,16 @@ export type HttpDependencies = {
   packs: {
     preview(files: UploadedPackFile[]): Promise<Result<PackPreviewDto>>;
     apply(files: UploadedPackFile[]): Promise<Result<PackApplyDto>>;
+  };
+  changesets: {
+    preview(input: ChangesetRequest): Promise<Result<ChangesetPreviewDto>>;
+    commit(input: ChangesetRequest): Promise<Result<ChangesetCommitDto>>;
+    view(
+      resource: string,
+      id: string,
+      includeArchived?: boolean,
+    ): Promise<Result<unknown>>;
+    history(resource: string, id: string): Promise<Result<unknown>>;
   };
   health: {
     inspect(): Promise<Record<string, unknown>>;
@@ -110,6 +125,40 @@ export function makeHttpApp(deps: HttpDependencies): Hono {
     "/packs/apply",
     async (c) =>
       resultJson(c, await deps.packs.apply(await multipartFiles(c.req.raw))),
+  );
+
+  app.post(
+    "/changesets/preview",
+    async (c) =>
+      resultJson(c, await deps.changesets.preview(await c.req.json())),
+  );
+  app.post(
+    "/changesets/commit",
+    async (c) =>
+      resultJson(c, await deps.changesets.commit(await c.req.json())),
+  );
+  app.get(
+    "/objects/:namespace/:resource/:id",
+    async (c) =>
+      resultJson(
+        c,
+        await deps.changesets.view(
+          `${c.req.param("namespace")}.${c.req.param("resource")}`,
+          c.req.param("id"),
+          c.req.query("include_archived") === "true",
+        ),
+      ),
+  );
+  app.get(
+    "/history/:namespace/:resource/:id",
+    async (c) =>
+      resultJson(
+        c,
+        await deps.changesets.history(
+          `${c.req.param("namespace")}.${c.req.param("resource")}`,
+          c.req.param("id"),
+        ),
+      ),
   );
 
   return app;

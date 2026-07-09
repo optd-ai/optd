@@ -1,5 +1,6 @@
 import { SystemClock } from "./ports/clock.ts";
 import { makeInspectMetadataService } from "./services/inspect_metadata.ts";
+import { makeChangesetServices } from "./services/changeset_services.ts";
 import { makePackServices } from "./services/pack_services.ts";
 import { OPERANT_VERSION } from "../config/runtime.ts";
 import type { Queryable, Sql } from "../adapters/outbound/postgres/client.ts";
@@ -15,5 +16,6 @@ export function makeApplication(sql: Sql) {
       version: OPERANT_VERSION,
     }),
     packs: makePackServices({ sql: sql as Queryable, tx }),
+    changesets: makeChangesetServices({ sql: sql as Queryable, tx }),
   };
 }

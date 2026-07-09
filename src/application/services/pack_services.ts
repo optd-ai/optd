@@ -15,6 +15,7 @@ import {
   summarizePack,
 } from "../../adapters/outbound/postgres/pack_repository.ts";
 import { compilePackDdl } from "../../adapters/outbound/postgres/resource_ddl.ts";
+import { applySeedDefinitionsThroughChangesets } from "./changeset_services.ts";
 import type { TransactionManager } from "../ports/transaction_manager.ts";
 import type { Queryable } from "../../adapters/outbound/postgres/client.ts";
 
@@ -35,6 +36,7 @@ export type PackApplyDto = {
   applied: true;
   summary: PackSummary;
   ddl_deferred: false;
+  seeds: { planned: number; committed: number; skipped: number };
 };
 
 export function makePackServices(
@@ -86,10 +88,17 @@ export function makePackServices(
     async apply(files: UploadedPackFile[]): Promise<Result<PackApplyDto>> {
       try {
         const pack = await loadPackFromFiles(files);
-        const summary = await deps.tx.transaction((tx) =>
-          applyLoadedPack(tx, pack)
-        );
-        return ok({ applied: true, summary, ddl_deferred: false });
+        const result = await deps.tx.transaction(async (tx) => {
+          const summary = await applyLoadedPack(tx, pack);
+          const seeds = await applySeedDefinitionsThroughChangesets(tx);
+          return { summary, seeds };
+        });
+        return ok({
+          applied: true,
+          summary: result.summary,
+          ddl_deferred: false,
+          seeds: result.seeds,
+        });
       } catch (error) {
         return err(
           validationError(
