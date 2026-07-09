@@ -4,27 +4,47 @@ import { relative } from "jsr:@std/path";
 import { formatToon } from "../../outbound/toon/format.ts";
 
 export type OptctlRunResult = { stdout: string; stderr: string; code: number };
-type Parsed = { server: string; json: boolean; positional: string[] };
+type Parsed = {
+  server: string;
+  json: boolean;
+  verbose: boolean;
+  positional: string[];
+};
+type StableErrorEnvelope = {
+  ok: false;
+  error: {
+    code: string;
+    message: string;
+    severity?: string;
+    details?: unknown;
+  };
+  help: string[];
+};
 
-async function getJson(url: string): Promise<unknown> {
-  const response = await fetch(url);
+class OptctlError extends Error {
+  constructor(readonly envelope: StableErrorEnvelope, readonly exitCode = 1) {
+    super(envelope.error.message);
+  }
+}
+
+async function decodeJsonResponse(response: Response): Promise<unknown> {
   const body = await response.json().catch(() => undefined);
   if (!response.ok) {
-    throw new Error(`HTTP ${response.status}: ${JSON.stringify(body)}`);
+    throw httpError(response.status, body);
   }
   return body;
 }
+async function getJson(url: string): Promise<unknown> {
+  return await decodeJsonResponse(await fetch(url));
+}
 async function postJson(url: string, payload: unknown): Promise<unknown> {
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  const body = await response.json().catch(() => undefined);
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}: ${JSON.stringify(body)}`);
-  }
-  return body;
+  return await decodeJsonResponse(
+    await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+  );
 }
 async function postMultipart(url: string, packDir: string): Promise<unknown> {
   const form = new FormData();
@@ -36,12 +56,9 @@ async function postMultipart(url: string, packDir: string): Promise<unknown> {
     if (!rel.endsWith(".yaml") && !rel.endsWith(".ts")) continue;
     form.append(rel, new File([await Deno.readFile(entry.path)], rel));
   }
-  const response = await fetch(url, { method: "POST", body: form });
-  const body = await response.json().catch(() => undefined);
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}: ${JSON.stringify(body)}`);
-  }
-  return body;
+  return await decodeJsonResponse(
+    await fetch(url, { method: "POST", body: form }),
+  );
 }
 function render(value: unknown, asJson?: boolean): string {
   return asJson ? JSON.stringify(value, null, 2) : formatToon(value);
@@ -52,7 +69,7 @@ async function readJsonFile(path: string): Promise<unknown> {
 function splitDotted(id: string): [string, string] {
   const parts = id.split(".");
   if (parts.length !== 2 || !parts[0] || !parts[1]) {
-    throw new Error(`expected dotted identifier namespace.name, got ${id}`);
+    throw usageError(`expected dotted identifier namespace.name, got ${id}`);
   }
   return [parts[0], parts[1]];
 }
@@ -60,11 +77,13 @@ function parse(args: string[]): Parsed {
   const parsed: Parsed = {
     server: "http://127.0.0.1:8789",
     json: false,
+    verbose: false,
     positional: [],
   };
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === "--json") parsed.json = true;
+    else if (arg === "--verbose" || arg === "-v") parsed.verbose = true;
     else if (arg === "--server") parsed.server = args[++i] ?? parsed.server;
     else if (arg.startsWith("--server=")) {
       parsed.server = arg.slice("--server=".length);
@@ -108,7 +127,7 @@ function parseQueryPayload(
     else if (arg === "--actor") payload.actor = parseActorArg(next());
     else if (arg.startsWith("--actor=")) {
       payload.actor = parseActorArg(arg.slice("--actor=".length));
-    } else throw new Error(`unknown query option ${arg}`);
+    } else throw usageError(`unknown query option ${arg}`);
   }
   if (fields.length) payload.fields = fields;
   if (sort.length) payload.sort = sort;
@@ -118,6 +137,75 @@ function parseSortArg(value: string): { field: string; direction: string } {
   const [field, direction = "asc"] = value.split(":");
   return { field, direction };
 }
+function httpError(status: number, body: unknown): OptctlError {
+  const bodyRecord = body && typeof body === "object"
+    ? body as Record<string, unknown>
+    : {};
+  const bodyError = bodyRecord.error && typeof bodyRecord.error === "object"
+    ? bodyRecord.error as Record<string, unknown>
+    : undefined;
+  const code = typeof bodyError?.code === "string"
+    ? bodyError.code
+    : `http_${status}`;
+  const message = typeof bodyError?.message === "string"
+    ? bodyError.message
+    : `HTTP ${status}`;
+  const severity = typeof bodyError?.severity === "string"
+    ? bodyError.severity
+    : status === 404
+    ? "not_found"
+    : status === 409
+    ? "conflict"
+    : status >= 500
+    ? "internal"
+    : "validation";
+  return new OptctlError({
+    ok: false,
+    error: {
+      code,
+      message,
+      severity,
+      details: bodyError?.details ?? body,
+    },
+    help: helpForError(code, status),
+  }, 1);
+}
+
+function usageError(message: string): OptctlError {
+  return new OptctlError({
+    ok: false,
+    error: { code: "usage_error", message, severity: "validation" },
+    help: [
+      "optctl --help",
+      "optctl home",
+      "optctl metadata resource <namespace.resource>",
+    ],
+  }, 2);
+}
+
+function helpForError(code: string, status: number): string[] {
+  if (code.includes("cursor")) {
+    return ["optctl query <namespace.resource> --where '<expr>' --limit 20"];
+  }
+  if (status === 404) {
+    return [
+      "optctl home",
+      "optctl metadata resource <namespace.resource>",
+      "optctl metadata action <namespace.action>",
+    ];
+  }
+  if (code.includes("policy")) {
+    return ["optctl metadata policy <namespace.policy>", "optctl home"];
+  }
+  if (code.includes("migration")) {
+    return [
+      "optctl migration inspect <migration_id>",
+      "optctl migration apply <migration_id> --stage",
+    ];
+  }
+  return ["optctl --help", "optctl home"];
+}
+
 function parseActorArg(value: string): unknown {
   const trimmed = value.trim();
   if (trimmed.startsWith("{")) return JSON.parse(trimmed);
@@ -144,7 +232,7 @@ function parseActionPayload(args: string[]): Record<string, unknown> {
     } else if (arg === "--idempotency-key") payload.idempotency_key = next();
     else if (arg.startsWith("--idempotency-key=")) {
       payload.idempotency_key = arg.slice("--idempotency-key=".length);
-    } else throw new Error(`unknown action option ${arg}`);
+    } else throw usageError(`unknown action option ${arg}`);
   }
   return payload;
 }
@@ -194,7 +282,7 @@ async function parseSecretSetPayload(
     } else if (arg === "--actor") payload.actor = parseActorArg(next());
     else if (arg.startsWith("--actor=")) {
       payload.actor = parseActorArg(arg.slice("--actor=".length));
-    } else throw new Error(`unknown secret option ${arg}`);
+    } else throw usageError(`unknown secret option ${arg}`);
   }
   return payload;
 }
@@ -205,9 +293,38 @@ function parseSecretActorPayload(args: string[]): Record<string, unknown> {
     if (arg === "--actor") payload.actor = parseActorArg(args[++i] ?? "");
     else if (arg.startsWith("--actor=")) {
       payload.actor = parseActorArg(arg.slice("--actor=".length));
-    } else throw new Error(`unknown secret option ${arg}`);
+    } else throw usageError(`unknown secret option ${arg}`);
   }
   return payload;
+}
+
+async function readChangesetInput(args: string[]): Promise<unknown> {
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "--file") return await readJsonFile(args[++i] ?? "");
+    if (arg.startsWith("--file=")) {
+      return await readJsonFile(arg.slice("--file=".length));
+    }
+    if (arg === "--input" || arg === "--json-input") {
+      return JSON.parse(args[++i] ?? "");
+    }
+    if (arg.startsWith("--input=")) {
+      return JSON.parse(arg.slice("--input=".length));
+    }
+    if (arg.startsWith("--json-input=")) {
+      return JSON.parse(arg.slice("--json-input=".length));
+    }
+    if (arg === "--actor" || arg === "--idempotency-key") i++;
+    else if (
+      arg.startsWith("--actor=") || arg.startsWith("--idempotency-key=")
+    ) {
+      continue;
+    } else if (!arg.startsWith("--")) return await readJsonFile(arg);
+    else throw usageError(`unknown changeset option ${arg}`);
+  }
+  throw usageError(
+    "changeset preview/commit requires <json-file>, --file, or --input JSON",
+  );
 }
 
 function helpText(): string {
@@ -252,22 +369,18 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
         ...await parseSecretSetPayload(parsed.positional.slice(3)),
       });
     } else if (cmd === "secret" && sub === "delete" && value) {
-      result = await fetch(
-        `${parsed.server}/secrets/${encodeURIComponent(value)}`,
-        {
-          method: "DELETE",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(
-            parseSecretActorPayload(parsed.positional.slice(3)),
-          ),
-        },
-      ).then(async (response) => {
-        const body = await response.json().catch(() => undefined);
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${JSON.stringify(body)}`);
-        }
-        return body;
-      });
+      result = await decodeJsonResponse(
+        await fetch(
+          `${parsed.server}/secrets/${encodeURIComponent(value)}`,
+          {
+            method: "DELETE",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(
+              parseSecretActorPayload(parsed.positional.slice(3)),
+            ),
+          },
+        ),
+      );
     } else if (cmd === "outbox" && sub === "status") {
       result = await getJson(`${parsed.server}/outbox`);
     } else if (cmd === "outbox" && sub === "drain") {
@@ -306,15 +419,15 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
         `${parsed.server}/queries`,
         parseQueryPayload(sub, parsed.positional.slice(2)),
       );
-    } else if (cmd === "changeset" && sub === "preview" && value) {
+    } else if (cmd === "changeset" && sub === "preview") {
       result = await postJson(
         `${parsed.server}/changesets/preview`,
-        await readJsonFile(value),
+        await readChangesetInput(parsed.positional.slice(2)),
       );
-    } else if (cmd === "changeset" && sub === "commit" && value) {
+    } else if (cmd === "changeset" && sub === "commit") {
       result = await postJson(
         `${parsed.server}/changesets/commit`,
-        await readJsonFile(value),
+        await readChangesetInput(parsed.positional.slice(2)),
       );
     } else if (cmd === "view" && sub && value) {
       const [namespace, name] = splitDotted(sub);
@@ -329,6 +442,15 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       result = await getJson(
         `${parsed.server}/history/${namespace}/${name}/${value}`,
       );
+    } else if (cmd === "metadata" && !sub) {
+      result = await getJson(`${parsed.server}/metadata/packs`);
+    } else if (cmd === "metadata" && sub === "packs") {
+      result = await getJson(`${parsed.server}/metadata/packs`);
+    } else if (cmd === "metadata" && sub === "pack" && value) {
+      const [namespace, name] = splitDotted(value);
+      result = await getJson(
+        `${parsed.server}/metadata/packs/${namespace}/${name}`,
+      );
     } else if (cmd === "metadata" && sub && value) {
       const [namespace, name] = splitDotted(value);
       const routeKind = ({
@@ -337,21 +459,40 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
         hook: "hooks",
         policy: "policies",
       } as Record<string, string>)[sub];
-      if (!routeKind) throw new Error(`unknown metadata kind ${sub}`);
+      if (!routeKind) throw usageError(`unknown metadata kind ${sub}`);
       result = await getJson(
         `${parsed.server}/metadata/${routeKind}/${namespace}/${name}`,
       );
     } else {
-      throw new Error(
-        "usage: optctl home | pack preview/apply <dir> | metadata resource/action/hook/policy <namespace.name> | secret list/set/delete | action preview/commit <namespace.action> --input '{...}' | outbox status/drain/retry | migration inspect/apply/confirm <id> | query <namespace.resource> [--where expr] [--fields a,b] [--sort field:desc] [--limit n] [--cursor c] | changeset preview/commit <json-file> | view <namespace.resource> <id> | history <namespace.resource> <id>",
+      throw usageError(
+        "usage: optctl home | pack preview/apply <dir> | metadata [packs] | metadata pack/resource/action/hook/policy <namespace.name> | secret list/set/delete | action preview/commit <namespace.action> --input '{...}' | outbox status/drain/retry | migration inspect/apply/confirm <id> | query <namespace.resource> [--where expr] [--fields a,b] [--sort field:desc] [--limit n] [--cursor c] | changeset preview/commit (--file <json-file>|--input '{...}') | view <namespace.resource> <id> | history <namespace.resource> <id>",
       );
     }
-    return { stdout: render(result, parsed.json), stderr: "", code: 0 };
+    const output = parsed.verbose
+      ? {
+        command: parsed.positional.join(" "),
+        server: parsed.server,
+        response: result,
+      }
+      : result;
+    return { stdout: render(output, parsed.json), stderr: "", code: 0 };
   } catch (error) {
-    return {
-      stdout: "",
-      stderr: error instanceof Error ? error.message : String(error),
-      code: 1,
+    if (error instanceof OptctlError) {
+      return {
+        stdout: "",
+        stderr: render(error.envelope, parse(args).json),
+        code: error.exitCode,
+      };
+    }
+    const envelope: StableErrorEnvelope = {
+      ok: false,
+      error: {
+        code: "internal_error",
+        message: error instanceof Error ? error.message : String(error),
+        severity: "internal",
+      },
+      help: ["optctl --help", "optctl home"],
     };
+    return { stdout: "", stderr: render(envelope, parse(args).json), code: 1 };
   }
 }
