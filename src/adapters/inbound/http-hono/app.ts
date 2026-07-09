@@ -6,6 +6,9 @@ export type HttpDependencies = {
   metadata: {
     home(): Promise<Result<HomeDto>>;
   };
+  health: {
+    inspect(): Promise<Record<string, unknown>>;
+  };
   version: string;
 };
 
@@ -20,12 +23,13 @@ function resultJson<T>(
 export function makeHttpApp(deps: HttpDependencies): Hono {
   const app = new Hono();
 
-  app.get("/health", (c) => {
+  app.get("/health", async (c) => {
+    const health = await deps.health.inspect();
     return c.json({
       ok: true,
       data: {
-        status: "ready",
         version: deps.version,
+        ...health,
       },
     });
   });

@@ -10,7 +10,8 @@
     "jsr:@std/internal@^1.0.12": "1.0.14",
     "jsr:@std/text@^1.0.19": "1.0.19",
     "npm:@toon-format/toon@*": "2.3.0",
-    "npm:hono@*": "4.12.28"
+    "npm:hono@*": "4.12.28",
+    "npm:postgres@*": "3.4.9"
   },
   "jsr": {
     "@cliffy/command@1.2.1": {
@@ -61,6 +62,9 @@
     },
     "hono@4.12.28": {
       "integrity": "sha512-YwUvVpSF7m1yOblFPrU3Hbo8XhPheBoiyfGuII6z19LnOr6JpDnyyp7LFNrfV56wS8tpvtBFGRISHN02pDdLOA=="
+    },
+    "postgres@3.4.9": {
+      "integrity": "sha512-GD3qdB0x1z9xgFI6cdRD6xu2Sp2WCOEoe3mtnyB5Ee0XrrL5Pe+e4CCnJrRMnL1zYtRDZmQQVbvOttLnKDLnaw=="
     }
   }
 }

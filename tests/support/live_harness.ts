@@ -1,4 +1,5 @@
 import { assertEquals } from "jsr:@std/assert";
+import { findPostgresBins } from "../../src/adapters/outbound/postgres-process/lifecycle.ts";
 import { type StartedServer, startServer } from "../../src/main_server.ts";
 
 export type LiveHarness = {
@@ -15,7 +16,15 @@ export async function startLiveHarness(): Promise<LiveHarness> {
   const dataDir = await Deno.makeTempDir({ prefix: "operant-scenario-" });
   const previousDataDir = Deno.env.get("OPERANT_DATA_DIR");
   Deno.env.set("OPERANT_DATA_DIR", dataDir);
-  const server = startServer({ hostname: "127.0.0.1", port: 0 });
+  if (!Deno.env.get("OPERANT_DATABASE_URL") && !await findPostgresBins()) {
+    if (previousDataDir === undefined) Deno.env.delete("OPERANT_DATA_DIR");
+    else Deno.env.set("OPERANT_DATA_DIR", previousDataDir);
+    await Deno.remove(dataDir, { recursive: true }).catch(() => {});
+    throw new Error(
+      "SKIP: postgres binaries not found; set OPERANT_PG_BIN_DIR or enter nix shell",
+    );
+  }
+  const server = await startServer({ hostname: "127.0.0.1", port: 0 });
 
   async function runOptctl(args: string[]) {
     const command = new Deno.Command(Deno.execPath(), {
