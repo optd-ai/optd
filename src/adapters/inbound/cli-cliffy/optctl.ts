@@ -201,6 +201,23 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
         `${parsed.server}/actions/${namespace}/${name}/${sub}`,
         await resolveActionPayload(parsed.positional.slice(3)),
       );
+    } else if (cmd === "migration" && sub === "inspect" && value) {
+      result = await getJson(`${parsed.server}/migrations/${value}`);
+    } else if (cmd === "migration" && sub === "apply" && value) {
+      const mode = parsed.positional.includes("--stage") ? "stage" : "safe";
+      result = await postJson(`${parsed.server}/migrations/${value}/apply`, {
+        mode,
+      });
+    } else if (cmd === "migration" && sub === "confirm" && value) {
+      const tokenFlag = parsed.positional.findIndex((arg) =>
+        arg === "--token" || arg === "--confirm"
+      );
+      const token = tokenFlag >= 0
+        ? parsed.positional[tokenFlag + 1]
+        : parsed.positional[3];
+      result = await postJson(`${parsed.server}/migrations/${value}/confirm`, {
+        token,
+      });
     } else if (cmd === "query" && sub) {
       result = await postJson(
         `${parsed.server}/queries`,
@@ -243,7 +260,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       );
     } else {
       throw new Error(
-        "usage: optctl home | pack preview/apply <dir> | metadata resource/action/hook/policy <namespace.name> | action preview/commit <namespace.action> --input '{...}' | query <namespace.resource> [--where expr] [--fields a,b] [--sort field:desc] [--limit n] [--cursor c] | changeset preview/commit <json-file> | view <namespace.resource> <id> | history <namespace.resource> <id>",
+        "usage: optctl home | pack preview/apply <dir> | metadata resource/action/hook/policy <namespace.name> | action preview/commit <namespace.action> --input '{...}' | migration inspect/apply/confirm <id> | query <namespace.resource> [--where expr] [--fields a,b] [--sort field:desc] [--limit n] [--cursor c] | changeset preview/commit <json-file> | view <namespace.resource> <id> | history <namespace.resource> <id>",
       );
     }
     return { stdout: render(result, parsed.json), stderr: "", code: 0 };

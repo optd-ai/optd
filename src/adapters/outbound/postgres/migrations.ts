@@ -233,6 +233,29 @@ export const platformMigrations: PlatformMigration[] = [
       create index if not exists hook_executions_hook_idx on hook_executions(hook, created_at desc)
     `,
   },
+  {
+    id: "0006_pack_migration_plans",
+    sql: `
+      create table if not exists pack_migration_plans (
+        id text primary key,
+        namespace text not null,
+        name text not null,
+        from_revision text not null references pack_revisions(revision),
+        to_revision text not null,
+        status text not null,
+        plan_digest text not null,
+        candidate_normalized jsonb not null,
+        candidate_manifest jsonb not null,
+        candidate_source_files jsonb not null,
+        plan_json jsonb not null,
+        sql_preview jsonb not null default '[]'::jsonb,
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now()
+      );
+      create index if not exists pack_migration_plans_pack_idx on pack_migration_plans(namespace, name, created_at desc);
+      create index if not exists pack_migration_plans_digest_idx on pack_migration_plans(plan_digest)
+    `,
+  },
 ];
 
 export async function applyPlatformMigrations(

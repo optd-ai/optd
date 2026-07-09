@@ -1,0 +1,9 @@
+kind: Resource
+apiVersion: operant.dev/v1
+metadata:
+  name: account
+spec:
+  fields:
+    name:
+      type: string
+      required: true

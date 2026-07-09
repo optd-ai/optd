@@ -1,0 +1,13 @@
+kind: Resource
+apiVersion: operant.dev/v1
+metadata:
+  name: lead
+spec:
+  fields:
+    email:
+      type: string
+      required: true
+    priority:
+      type: decimal
+    score:
+      type: integer

@@ -41,6 +41,7 @@ export async function createFetchHandler() {
   const app = makeHttpApp({
     metadata: application.metadata,
     packs: application.packs,
+    migrations: application.migrations,
     queries: application.queries,
     actions: application.actions,
     changesets: application.changesets,

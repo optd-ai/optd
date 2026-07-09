@@ -4,6 +4,7 @@ import { makeChangesetServices } from "./services/changeset_services.ts";
 import { makePackServices } from "./services/pack_services.ts";
 import { makeQueryObjectsService } from "./services/query_objects.ts";
 import { makeRunActionService } from "./services/run_action.ts";
+import { makeMigrationServices } from "./services/migration_services.ts";
 import { DenoHookRunner } from "../adapters/outbound/deno-hooks/hook_runner.ts";
 import { OPERANT_VERSION } from "../config/runtime.ts";
 import type { Queryable, Sql } from "../adapters/outbound/postgres/client.ts";
@@ -26,6 +27,7 @@ export function makeApplication(sql: Sql) {
     }),
     packs: makePackServices({ sql: sql as Queryable, tx }),
     changesets,
+    migrations: makeMigrationServices({ sql: sql as Queryable, tx }),
     queries: makeQueryObjectsService({ sql: sql as Queryable }),
     actions: makeRunActionService({
       sql: sql as Queryable,

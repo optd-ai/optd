@@ -11,9 +11,11 @@ import {
 import {
   applyLoadedPack,
   countPackRevisions,
+  getPack,
   type PackSummary,
   summarizePack,
 } from "../../adapters/outbound/postgres/pack_repository.ts";
+import { createPackMigrationPlan } from "../../adapters/outbound/postgres/pack_migration_repository.ts";
 import { compilePackDdl } from "../../adapters/outbound/postgres/resource_ddl.ts";
 import { applySeedDefinitionsThroughChangesets } from "./changeset_services.ts";
 import type { TransactionManager } from "../ports/transaction_manager.ts";
@@ -24,20 +26,29 @@ export type PackPreviewDto = {
   before: { revision_count: number };
   after: { revision_count: number };
   plan: {
-    operation: "first_install" | "replace_active_revision";
+    operation: "first_install" | "migration";
     summary: PackSummary;
-    creates: Record<string, number>;
+    creates?: Record<string, number>;
     ddl_deferred: false;
-    generated_tables: Array<{ kind: string; name: string; table_name: string }>;
+    generated_tables?: Array<
+      { kind: string; name: string; table_name: string }
+    >;
+    migration?: unknown;
   };
 };
 
-export type PackApplyDto = {
-  applied: true;
-  summary: PackSummary;
-  ddl_deferred: false;
-  seeds: { planned: number; committed: number; skipped: number };
-};
+export type PackApplyDto =
+  | {
+    applied: true;
+    summary: PackSummary;
+    ddl_deferred: false;
+    seeds: { planned: number; committed: number; skipped: number };
+  }
+  | {
+    applied: false;
+    migration_required: true;
+    migration: unknown;
+  };
 
 export function makePackServices(
   deps: { sql: Queryable; tx: TransactionManager<Queryable> },
@@ -48,6 +59,22 @@ export function makePackServices(
         const before = await countPackRevisions(deps.sql);
         const pack = await loadPackFromFiles(files);
         const summary = summarizePack(pack);
+        const active = await getPack(deps.sql, pack.namespace, pack.name);
+        if (active) {
+          const migration = await createPackMigrationPlan(deps.sql, pack);
+          const after = await countPackRevisions(deps.sql);
+          return ok({
+            mutating: false,
+            before: { revision_count: before },
+            after: { revision_count: after },
+            plan: {
+              operation: "migration",
+              summary,
+              ddl_deferred: false,
+              migration,
+            },
+          });
+        }
         const ddlObjects = compilePackDdl(pack);
         const after = await countPackRevisions(deps.sql);
         return ok({
@@ -55,9 +82,7 @@ export function makePackServices(
           before: { revision_count: before },
           after: { revision_count: after },
           plan: {
-            operation: before === 0
-              ? "first_install"
-              : "replace_active_revision",
+            operation: "first_install",
             summary,
             creates: {
               resources: summary.resources.length,
@@ -88,6 +113,15 @@ export function makePackServices(
     async apply(files: UploadedPackFile[]): Promise<Result<PackApplyDto>> {
       try {
         const pack = await loadPackFromFiles(files);
+        const active = await getPack(deps.sql, pack.namespace, pack.name);
+        if (active) {
+          const migration = await createPackMigrationPlan(deps.sql, pack);
+          return ok({
+            applied: false,
+            migration_required: true,
+            migration,
+          });
+        }
         const result = await deps.tx.transaction(async (tx) => {
           const summary = await applyLoadedPack(tx, pack);
           const seeds = await applySeedDefinitionsThroughChangesets(tx);

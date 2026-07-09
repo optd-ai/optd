@@ -1,0 +1,8 @@
+kind: Pack
+apiVersion: operant.dev/v1
+metadata:
+  namespace: default
+  name: migration_crm
+  version: 0.1.0
+spec:
+  purpose: migration test fixture

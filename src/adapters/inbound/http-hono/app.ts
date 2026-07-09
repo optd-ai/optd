@@ -34,6 +34,12 @@ export type HttpDependencies = {
     preview(files: UploadedPackFile[]): Promise<Result<PackPreviewDto>>;
     apply(files: UploadedPackFile[]): Promise<Result<PackApplyDto>>;
   };
+  migrations: {
+    preview(files: UploadedPackFile[]): Promise<Result<unknown>>;
+    inspect(id: string): Promise<Result<unknown>>;
+    apply(id: string, mode?: "safe" | "stage"): Promise<Result<unknown>>;
+    confirm(id: string, token: string): Promise<Result<unknown>>;
+  };
   queries: {
     query(input: QueryObjectsRequest): Promise<Result<QueryObjectsDto>>;
   };
@@ -149,6 +155,43 @@ export function makeHttpApp(deps: HttpDependencies): Hono {
     "/packs/apply",
     async (c) =>
       resultJson(c, await deps.packs.apply(await multipartFiles(c.req.raw))),
+  );
+
+  app.post(
+    "/migrations/preview",
+    async (c) =>
+      resultJson(
+        c,
+        await deps.migrations.preview(await multipartFiles(c.req.raw)),
+      ),
+  );
+  app.get(
+    "/migrations/:id",
+    async (c) =>
+      resultJson(c, await deps.migrations.inspect(c.req.param("id"))),
+  );
+  app.post(
+    "/migrations/:id/apply",
+    async (c) => {
+      const body = await c.req.json().catch(() => ({}));
+      return resultJson(
+        c,
+        await deps.migrations.apply(c.req.param("id"), body?.mode),
+      );
+    },
+  );
+  app.post(
+    "/migrations/:id/confirm",
+    async (c) => {
+      const body = await c.req.json().catch(() => ({}));
+      return resultJson(
+        c,
+        await deps.migrations.confirm(
+          c.req.param("id"),
+          String(body?.token ?? ""),
+        ),
+      );
+    },
   );
 
   app.post(
