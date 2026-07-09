@@ -1,0 +1,16 @@
+{
+  "kind": "Action",
+  "apiVersion": "operant.dev/v1",
+  "metadata": { "name": "block_task" },
+  "spec": {
+    "description": "Move a task to Blocked and record why work is blocked.",
+    "hook": "block_task",
+    "input": ["task_id", "stage_id", "blocked_reason"],
+    "axi": {
+      "purpose": "Block a task with an explicit blocked_reason.",
+      "help": [
+        "optctl action commit default.block_task --input '{\"task_id\":\"TASK_ID\",\"stage_id\":\"blocked\",\"blocked_reason\":\"Waiting on customer\"}'",
+      ],
+    },
+  },
+}

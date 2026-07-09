@@ -100,24 +100,23 @@ async function runAction(
     }
 
     const actor = actorOf(request);
-    const leadId = typeof request.input?.lead_id === "string"
-      ? request.input.lead_id
-      : undefined;
-    const lead = leadId
-      ? await readActionLead(deps.sql, namespace, leadId)
-      : null;
+    const current = await findActionCurrentObject(
+      deps.sql,
+      namespace,
+      request.input ?? {},
+    );
     const decision = await authorizeObjectRuntime(deps.sql, {
       actor,
-      resource: lead ? `${namespace}.lead` : `${namespace}.${name}`,
+      resource: current ? current.resource : `${namespace}.${name}`,
       action: "action",
       fields: {},
-      object: lead ?? request.input ?? {},
+      object: current?.object ?? request.input ?? {},
     });
     await assertPolicyAllowed(deps.sql, decision, {
       actor,
-      resource: lead ? `${namespace}.lead` : `${namespace}.${name}`,
+      resource: current ? current.resource : `${namespace}.${name}`,
       action: "action",
-      object_id: leadId,
+      object_id: current?.id,
     });
 
     const hookResult = await deps.hookRunner.run(hook, {
@@ -125,7 +124,9 @@ async function runAction(
       phase: mode === "preview" ? "action.preview" : "action.commit",
       input: {
         ...(request.input ?? {}),
-        lead,
+        ...(current
+          ? { current: current.object, [current.name]: current.object }
+          : {}),
         action_input: request.input ?? {},
       },
       metadata: {
@@ -300,24 +301,43 @@ export async function recordHookExecution(
   return id;
 }
 
-async function readActionLead(
+async function findActionCurrentObject(
   sql: Queryable,
   namespace: string,
-  id: string,
-): Promise<JsonRecord | null> {
-  const rows = await query<{ table_name: string }>(
-    sql,
-    `select table_name from generated_sql_objects where kind='resource_table' and namespace=$1 and name='lead' and revision=(select revision from pack_revisions where namespace=$1 and active=true order by created_at desc limit 1)`,
-    [namespace],
-  );
-  const table = rows.rows[0]?.table_name;
-  if (!table) return null;
-  const lead = await query<JsonRecord>(
-    sql,
-    `select * from ${quoteIdent(table)} where id=$1 and archived_at is null`,
-    [id],
-  );
-  return lead.rows[0] ?? null;
+  input: JsonRecord,
+): Promise<
+  { resource: string; name: string; id: string; object: JsonRecord } | null
+> {
+  const candidates = Object.entries(input)
+    .filter(([key, value]) => key.endsWith("_id") && typeof value === "string")
+    .map(([key, value]) => ({
+      name: key.slice(0, -"_id".length),
+      id: String(value),
+    }));
+  for (const candidate of candidates) {
+    const rows = await query<{ table_name: string }>(
+      sql,
+      `select table_name from generated_sql_objects where kind='resource_table' and namespace=$1 and name=$2 and revision=(select revision from pack_revisions where namespace=$1 and active=true order by created_at desc limit 1)`,
+      [namespace, candidate.name],
+    );
+    const table = rows.rows[0]?.table_name;
+    if (!table) continue;
+    const object = await query<JsonRecord>(
+      sql,
+      `select * from ${quoteIdent(table)} where id=$1 and archived_at is null`,
+      [candidate.id],
+    );
+    const row = object.rows[0];
+    if (row) {
+      return {
+        resource: `${namespace}.${candidate.name}`,
+        name: candidate.name,
+        id: candidate.id,
+        object: row,
+      };
+    }
+  }
+  return null;
 }
 
 function normalizeGeneratedOperation(

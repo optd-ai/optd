@@ -1,0 +1,26 @@
+{
+  "kind": "Lifecycle",
+  "apiVersion": "operant.dev/v1",
+  "metadata": { "name": "task_flow" },
+  "spec": {
+    "resource": "task",
+    "field": "state",
+    "states": [
+      { "name": "todo", "initial": true },
+      { "name": "in_progress" },
+      { "name": "blocked" },
+      { "name": "done", "terminal": true },
+    ],
+    "transitions": [
+      { "from": "todo", "to": "in_progress", "action": "start_task" },
+      { "from": "blocked", "to": "in_progress", "action": "start_task" },
+      { "from": "todo", "to": "blocked", "action": "block_task" },
+      { "from": "in_progress", "to": "blocked", "action": "block_task" },
+      { "from": "in_progress", "to": "done", "action": "complete_task" },
+      { "from": "blocked", "to": "done", "guard": "manager_override" },
+    ],
+    "axi": {
+      "purpose": "Task lifecycle documentation consumed by metadata; validation is enforced by validate_task hook.",
+    },
+  },
+}

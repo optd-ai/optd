@@ -1,0 +1,55 @@
+{
+  "kind": "Resource",
+  "apiVersion": "operant.dev/v1",
+  "metadata": { "name": "task" },
+  "spec": {
+    "label": "Task",
+    "fields": {
+      "title": { "type": "string", "required": true },
+      "description": { "type": "string" },
+      "project_id": { "type": "string", "required": true, "ref": "project" },
+      "stage_id": { "type": "string", "required": true, "ref": "task_stage" },
+      "state": {
+        "type": "string",
+        "required": true,
+        "enum": ["todo", "in_progress", "blocked", "done"],
+      },
+      "assignee_id": { "type": "string" },
+      "priority": {
+        "type": "string",
+        "enum": ["low", "normal", "high", "urgent"],
+      },
+      "deadline": { "type": "date" },
+      "blocked_reason": { "type": "string" },
+      "estimated_hours": { "type": "decimal" },
+      "spent_hours": { "type": "decimal" },
+    },
+    "lifecycle": {
+      "field": "state",
+      "states": ["todo", "in_progress", "blocked", "done"],
+    },
+    "hooks": {
+      "validate": ["validate_task"],
+      "after_commit": ["notify_project_change"],
+    },
+    "axi": {
+      "purpose": "Manage assigned work within projects; use actions for task state changes.",
+      "lifecycle": "todo -> in_progress -> blocked -> in_progress -> done; todo may also move to blocked.",
+      "list": {
+        "fields": [
+          "id",
+          "title",
+          "project_id",
+          "state",
+          "assignee_id",
+          "priority",
+        ],
+      },
+      "help": [
+        "optctl action preview default.start_task --input '{\"task_id\":\"TASK_ID\",\"stage_id\":\"in_progress\"}'",
+        "optctl action commit default.block_task --input '{\"task_id\":\"TASK_ID\",\"stage_id\":\"blocked\",\"blocked_reason\":\"Waiting on review\"}'",
+        "optctl history default.task TASK_ID",
+      ],
+    },
+  },
+}

@@ -72,8 +72,8 @@ export function makeInspectMetadataService(
           "packs.apply",
         ],
         help: preferred(home.help, [
-          "optctl pack preview prototypes/crm-default-pack --json",
-          "optctl metadata resource default.lead",
+          "optctl pack preview <pack-dir> --json",
+          "optctl metadata resource <namespace.resource>",
         ]),
       });
     },

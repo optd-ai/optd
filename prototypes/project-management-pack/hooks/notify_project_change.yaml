@@ -1,0 +1,27 @@
+{
+  "kind": "Hook",
+  "apiVersion": "operant.dev/v1",
+  "metadata": { "name": "notify_project_change" },
+  "spec": {
+    "script": "notify_project_change.ts",
+    "timeout": "2s",
+    "permissions": {
+      "net": false,
+      "read": false,
+      "write": false,
+      "env": false,
+      "run": false,
+    },
+    "output": { "schema": "validation.v1" },
+    "attachments": [
+      {
+        "phase": "event.after_commit",
+        "order": 100,
+        "input": { "event": "$event" },
+      },
+    ],
+    "axi": {
+      "purpose": "Durable no-network project notification hook executed from outbox.",
+    },
+  },
+}

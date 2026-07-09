@@ -1,0 +1,13 @@
+{
+  "kind": "Resource",
+  "apiVersion": "operant.dev/v1",
+  "metadata": { "name": "task_tag" },
+  "spec": {
+    "label": "Task Tag",
+    "fields": {
+      "name": { "type": "string", "required": true },
+      "color": { "type": "string" },
+    },
+    "axi": { "purpose": "Seeded labels for task categorization." },
+  },
+}

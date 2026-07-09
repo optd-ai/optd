@@ -1,0 +1,16 @@
+{
+  "kind": "Action",
+  "apiVersion": "operant.dev/v1",
+  "metadata": { "name": "start_task" },
+  "spec": {
+    "description": "Move a task from Todo or Blocked into In Progress.",
+    "hook": "start_task",
+    "input": ["task_id", "stage_id"],
+    "axi": {
+      "purpose": "Start or unblock assigned project work.",
+      "help": [
+        "optctl action preview default.start_task --input '{\"task_id\":\"TASK_ID\",\"stage_id\":\"in_progress\"}'",
+      ],
+    },
+  },
+}

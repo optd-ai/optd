@@ -1,0 +1,22 @@
+{
+  "kind": "Resource",
+  "apiVersion": "operant.dev/v1",
+  "metadata": { "name": "task_stage" },
+  "spec": {
+    "label": "Task Stage",
+    "fields": {
+      "name": { "type": "string", "required": true },
+      "state": {
+        "type": "string",
+        "required": true,
+        "enum": ["todo", "in_progress", "blocked", "done"],
+      },
+      "sequence": { "type": "integer", "required": true },
+      "folded": { "type": "boolean" },
+    },
+    "axi": {
+      "purpose": "Seeded reference stages used by task stage_id and task lifecycle state.",
+      "list": { "fields": ["id", "name", "state", "sequence"] },
+    },
+  },
+}

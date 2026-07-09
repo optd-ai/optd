@@ -1,0 +1,32 @@
+{
+  "kind": "Hook",
+  "apiVersion": "operant.dev/v1",
+  "metadata": { "name": "start_task" },
+  "spec": {
+    "script": "start_task.ts",
+    "timeout": "2s",
+    "permissions": {
+      "net": false,
+      "read": false,
+      "write": false,
+      "env": false,
+      "run": false,
+    },
+    "output": { "schema": "changeset.operations.v1" },
+    "attachments": [
+      {
+        "phase": "action.preview",
+        "action": "default.start_task",
+        "order": 100,
+      },
+      {
+        "phase": "action.commit",
+        "action": "default.start_task",
+        "order": 100,
+      },
+    ],
+    "axi": {
+      "purpose": "Generate a task update to state=in_progress using the generic changeset path.",
+    },
+  },
+}

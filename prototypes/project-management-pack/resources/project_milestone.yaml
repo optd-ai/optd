@@ -1,0 +1,19 @@
+{
+  "kind": "Resource",
+  "apiVersion": "operant.dev/v1",
+  "metadata": { "name": "project_milestone" },
+  "spec": {
+    "label": "Project Milestone",
+    "fields": {
+      "name": { "type": "string", "required": true },
+      "project_id": { "type": "string", "required": true, "ref": "project" },
+      "deadline": { "type": "date" },
+      "status": {
+        "type": "string",
+        "required": true,
+        "enum": ["planned", "at_risk", "done"],
+      },
+    },
+    "axi": { "purpose": "Track milestone deadlines and status for a project." },
+  },
+}
