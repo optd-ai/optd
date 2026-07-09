@@ -10,6 +10,10 @@ import type {
   PackApplyDto,
   PackPreviewDto,
 } from "../../../application/services/pack_services.ts";
+import type {
+  QueryObjectsDto,
+  QueryObjectsRequest,
+} from "../../../application/services/query_objects.ts";
 import type { UploadedPackFile } from "../../outbound/yaml/pack_loader.ts";
 
 export type HttpDependencies = {
@@ -25,6 +29,9 @@ export type HttpDependencies = {
   packs: {
     preview(files: UploadedPackFile[]): Promise<Result<PackPreviewDto>>;
     apply(files: UploadedPackFile[]): Promise<Result<PackApplyDto>>;
+  };
+  queries: {
+    query(input: QueryObjectsRequest): Promise<Result<QueryObjectsDto>>;
   };
   changesets: {
     preview(input: ChangesetRequest): Promise<Result<ChangesetPreviewDto>>;
@@ -125,6 +132,11 @@ export function makeHttpApp(deps: HttpDependencies): Hono {
     "/packs/apply",
     async (c) =>
       resultJson(c, await deps.packs.apply(await multipartFiles(c.req.raw))),
+  );
+
+  app.post(
+    "/queries",
+    async (c) => resultJson(c, await deps.queries.query(await c.req.json())),
   );
 
   app.post(

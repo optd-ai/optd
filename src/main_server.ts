@@ -41,6 +41,7 @@ export async function createFetchHandler() {
   const app = makeHttpApp({
     metadata: application.metadata,
     packs: application.packs,
+    queries: application.queries,
     changesets: application.changesets,
     health: makeHealthService(sql, postgresRuntime, migrationResult),
     version: OPERANT_VERSION,

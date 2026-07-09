@@ -74,6 +74,51 @@ function parse(args: string[]): Parsed {
   return parsed;
 }
 
+function parseQueryPayload(
+  resource: string,
+  args: string[],
+): Record<string, unknown> {
+  const payload: Record<string, unknown> = { resource };
+  const fields: string[] = [];
+  const sort: Array<{ field: string; direction: string }> = [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    const next = () => args[++i] ?? "";
+    if (arg === "--where" || arg === "--filter") payload.where = next();
+    else if (arg.startsWith("--where=")) {
+      payload.where = arg.slice("--where=".length);
+    } else if (arg === "--field") {
+      fields.push(...next().split(",").filter(Boolean));
+    } else if (arg.startsWith("--field=")) {
+      fields.push(...arg.slice("--field=".length).split(",").filter(Boolean));
+    } else if (arg === "--fields") {
+      fields.push(...next().split(",").filter(Boolean));
+    } else if (arg.startsWith("--fields=")) {
+      fields.push(...arg.slice("--fields=".length).split(",").filter(Boolean));
+    } else if (arg === "--sort") sort.push(parseSortArg(next()));
+    else if (arg.startsWith("--sort=")) {
+      sort.push(parseSortArg(arg.slice("--sort=".length)));
+    } else if (arg === "--limit") payload.limit = Number(next());
+    else if (arg.startsWith("--limit=")) {
+      payload.limit = Number(arg.slice("--limit=".length));
+    } else if (arg === "--cursor") payload.cursor = next();
+    else if (arg.startsWith("--cursor=")) {
+      payload.cursor = arg.slice("--cursor=".length);
+    } else if (arg === "--include-archived") payload.include_archived = true;
+    else if (arg === "--actor") payload.actor = next();
+    else if (arg.startsWith("--actor=")) {
+      payload.actor = arg.slice("--actor=".length);
+    } else throw new Error(`unknown query option ${arg}`);
+  }
+  if (fields.length) payload.fields = fields;
+  if (sort.length) payload.sort = sort;
+  return payload;
+}
+function parseSortArg(value: string): { field: string; direction: string } {
+  const [field, direction = "asc"] = value.split(":");
+  return { field, direction };
+}
+
 function helpText(): string {
   return new Command()
     .name("optctl")
@@ -95,6 +140,11 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       result = await postMultipart(`${parsed.server}/packs/preview`, value);
     } else if (cmd === "pack" && sub === "apply" && value) {
       result = await postMultipart(`${parsed.server}/packs/apply`, value);
+    } else if (cmd === "query" && sub) {
+      result = await postJson(
+        `${parsed.server}/queries`,
+        parseQueryPayload(sub, parsed.positional.slice(2)),
+      );
     } else if (cmd === "changeset" && sub === "preview" && value) {
       result = await postJson(
         `${parsed.server}/changesets/preview`,
@@ -129,7 +179,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       );
     } else {
       throw new Error(
-        "usage: optctl home | pack preview/apply <dir> | metadata resource/action/hook/policy <namespace.name> | changeset preview/commit <json-file> | view <namespace.resource> <id> | history <namespace.resource> <id>",
+        "usage: optctl home | pack preview/apply <dir> | metadata resource/action/hook/policy <namespace.name> | query <namespace.resource> [--where expr] [--fields a,b] [--sort field:desc] [--limit n] [--cursor c] | changeset preview/commit <json-file> | view <namespace.resource> <id> | history <namespace.resource> <id>",
       );
     }
     return { stdout: render(result, parsed.json), stderr: "", code: 0 };
