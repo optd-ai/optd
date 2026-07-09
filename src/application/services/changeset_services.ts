@@ -10,6 +10,11 @@ import {
   quoteIdentifier,
 } from "../../adapters/outbound/postgres/client.ts";
 import type { TransactionManager } from "../ports/transaction_manager.ts";
+import type {
+  DenoHookRunner,
+  HookDefinition,
+} from "../../adapters/outbound/deno-hooks/hook_runner.ts";
+import { loadHook, recordHookExecution } from "./run_action.ts";
 import {
   type ActorContext,
   assertPolicyAllowed,
@@ -95,7 +100,11 @@ export type ChangesetCommitDto = ChangesetPreviewDto & {
 };
 
 export function makeChangesetServices(
-  deps: { sql: Queryable; tx: TransactionManager<Queryable> },
+  deps: {
+    sql: Queryable;
+    tx: TransactionManager<Queryable>;
+    hookRunner?: DenoHookRunner;
+  },
 ) {
   return {
     async preview(
@@ -103,7 +112,12 @@ export function makeChangesetServices(
     ): Promise<Result<ChangesetPreviewDto>> {
       try {
         const actor = actorOf(input);
-        const plan = await planChangeset(deps.sql, input, actor);
+        const plan = await planChangeset(
+          deps.sql,
+          input,
+          actor,
+          deps.hookRunner,
+        );
         const preview = previewDto(crypto.randomUUID(), actor.id, plan);
         await query(
           deps.sql,
@@ -140,7 +154,7 @@ export function makeChangesetServices(
     async commit(input: ChangesetRequest): Promise<Result<ChangesetCommitDto>> {
       try {
         const result = await deps.tx.transaction((tx) =>
-          commitPlanned(tx, input)
+          commitPlanned(tx, input, deps.hookRunner)
         );
         return ok(result);
       } catch (error) {
@@ -335,9 +349,10 @@ export async function applySeedDefinitionsThroughChangesets(
 async function commitPlanned(
   sql: Queryable,
   input: ChangesetRequest,
+  hookRunner?: DenoHookRunner,
 ): Promise<ChangesetCommitDto> {
   const actor = actorOf(input);
-  const plan = await planChangeset(sql, input, actor);
+  const plan = await planChangeset(sql, input, actor, hookRunner);
   const preview = previewDto(crypto.randomUUID(), actor.id, plan);
   if (!preview.committable) {
     const policyError = preview.validation.errors.find((e) =>
@@ -420,6 +435,7 @@ async function commitPlanned(
       JSON.stringify({ operation_count: plan.planned.length }),
     ],
   );
+  await enqueueAfterCommitHooks(sql, changesetId, actor.id, plan.planned);
   return committed;
 }
 
@@ -427,6 +443,7 @@ async function planChangeset(
   sql: Queryable,
   input: ChangesetRequest,
   actor: ActorContext,
+  hookRunner?: DenoHookRunner,
 ): Promise<{ errors: ValidationIssue[]; planned: PlannedOperation[] }> {
   if (!Array.isArray(input.operations) || input.operations.length === 0) {
     throw new Error("operations must be a non-empty array");
@@ -435,7 +452,7 @@ async function planChangeset(
   const planned: PlannedOperation[] = [];
   const aliases = new Map<string, string>();
   for (let index = 0; index < input.operations.length; index++) {
-    const op = input.operations[index];
+    let op = normalizeOperation(input.operations[index]);
     const path = `/operations/${index}`;
     if (
       ["create", "update", "archive", "transition", "comment"].includes(op.op)
@@ -475,10 +492,11 @@ async function planChangeset(
           ),
         );
       }
+      op = await runResourcePatchHooks(sql, hookRunner, op, actor, path);
       const fields = op.op === "transition"
         ? {
           [String((meta as ResourceMeta).fields.status ? "status" : "state")]:
-            op.fields?.to ?? op.fields?.state ?? op.fields?.status,
+            op.to ?? op.fields?.to ?? op.fields?.state ?? op.fields?.status,
         }
         : (op.fields ?? {});
       validateFields(path, meta, fields, errors, op.op === "create");
@@ -496,6 +514,16 @@ async function planChangeset(
         }
       }
       const after = buildAfter(op.op, before, { ...fields, id: objectId });
+      await runResourceValidationHooks(
+        sql,
+        hookRunner,
+        op,
+        actor,
+        before,
+        after,
+        path,
+        errors,
+      );
       const action = policyAction(op.op);
       const decision = await authorizeObjectRuntime(sql, {
         actor,
@@ -763,6 +791,252 @@ async function commitRelationshipOperation(
   );
 }
 
+async function runResourcePatchHooks(
+  sql: Queryable,
+  hookRunner: DenoHookRunner | undefined,
+  op: ChangesetOperation,
+  actor: ActorContext,
+  path: string,
+): Promise<ChangesetOperation> {
+  if (
+    !hookRunner || !op.resource || !(op.op === "create" || op.op === "update")
+  ) return op;
+  let next: ChangesetOperation = { ...op, fields: { ...(op.fields ?? {}) } };
+  const hooks = await loadAttachedHooks(
+    sql,
+    "changeset.before_preview",
+    op.resource,
+    undefined,
+  );
+  for (const hook of hooks) {
+    const result = await hookRunner.run(hook, {
+      hook: hook.name,
+      phase: "changeset.before_preview",
+      input: { operation: next, actor, proposed: next.fields ?? {} },
+      metadata: {
+        pack_revision: hook.revision,
+        script_digest: hook.scriptDigest,
+        attachment_id: `${op.resource}:${path}`,
+      },
+    });
+    await recordHookExecution(
+      sql,
+      hook,
+      result,
+      actor.id,
+      "changeset.before_preview",
+    );
+    if (!result.ok) {
+      throw new Error(
+        `hook ${hook.namespace}.${hook.name} failed: ${
+          result.error?.message ?? "unknown"
+        }`,
+      );
+    }
+    const patches = Array.isArray(result.output?.patches)
+      ? result.output.patches.filter(isRecord)
+      : [];
+    for (const patch of patches) next = applyPatch(next, patch);
+  }
+  return next;
+}
+
+async function runResourceValidationHooks(
+  sql: Queryable,
+  hookRunner: DenoHookRunner | undefined,
+  op: ChangesetOperation,
+  actor: ActorContext,
+  current: JsonRecord | null,
+  proposed: JsonRecord | null,
+  path: string,
+  errors: ValidationIssue[],
+): Promise<void> {
+  if (
+    !hookRunner || !op.resource ||
+    !(op.op === "create" || op.op === "update" || op.op === "transition")
+  ) return;
+  const hooks = await loadAttachedHooks(
+    sql,
+    "changeset.validate",
+    op.resource,
+    undefined,
+  );
+  for (const hook of hooks) {
+    const result = await hookRunner.run(hook, {
+      hook: hook.name,
+      phase: "changeset.validate",
+      input: {
+        operation: { ...op, fields: proposed ?? op.fields ?? {} },
+        actor,
+        current,
+        proposed,
+      },
+      metadata: {
+        pack_revision: hook.revision,
+        script_digest: hook.scriptDigest,
+        attachment_id: `${op.resource}:${path}`,
+      },
+    });
+    await recordHookExecution(
+      sql,
+      hook,
+      result,
+      actor.id,
+      "changeset.validate",
+    );
+    if (!result.ok) {
+      errors.push(
+        issue(
+          path,
+          result.error?.code ?? "hook_failed",
+          `hook ${hook.namespace}.${hook.name} failed: ${
+            result.error?.message ?? "unknown"
+          }`,
+        ),
+      );
+      continue;
+    }
+    if (result.output?.allow === false) {
+      errors.push(
+        issue(
+          path,
+          "hook_denied",
+          `hook ${hook.namespace}.${hook.name} denied operation`,
+        ),
+      );
+    }
+    const hookErrors = Array.isArray(result.output?.errors)
+      ? result.output.errors.filter(isRecord)
+      : [];
+    for (const hookError of hookErrors) {
+      errors.push(
+        issue(
+          String(hookError.path ?? path),
+          String(hookError.code ?? "hook_validation"),
+          String(hookError.message ?? "hook validation failed"),
+        ),
+      );
+    }
+  }
+}
+
+async function loadAttachedHooks(
+  sql: Queryable,
+  phase: string,
+  resource?: string,
+  action?: string,
+): Promise<HookDefinition[]> {
+  const rows = await query<{ namespace: string; name: string; spec: unknown }>(
+    sql,
+    `select namespace,name,spec from hook_definitions where revision in (select revision from pack_revisions where active=true) order by namespace,name`,
+  );
+  const hooks: Array<{ id: string; order: number }> = [];
+  for (const row of rows.rows) {
+    const spec = asRecord(row.spec);
+    const attachments = Array.isArray(spec.attachments)
+      ? spec.attachments.filter(isRecord)
+      : [];
+    for (const raw of attachments) {
+      const attachmentPhase = normalizePhase(String(raw.phase ?? ""));
+      if (attachmentPhase !== phase) continue;
+      const attachmentResource = raw.resource === undefined
+        ? undefined
+        : qualify(String(raw.resource), row.namespace);
+      const attachmentAction = raw.action === undefined
+        ? undefined
+        : qualify(String(raw.action), row.namespace);
+      if (resource && attachmentResource && attachmentResource !== resource) {
+        continue;
+      }
+      if (action && attachmentAction && attachmentAction !== action) continue;
+      hooks.push({
+        id: `${row.namespace}.${row.name}`,
+        order: typeof raw.order === "number" ? raw.order : 1000,
+      });
+    }
+  }
+  const loaded: HookDefinition[] = [];
+  for (
+    const item of hooks.sort((a, b) =>
+      a.order - b.order || a.id.localeCompare(b.id)
+    )
+  ) {
+    const hook = await loadHook(sql, item.id);
+    if (hook) loaded.push(hook);
+  }
+  return loaded;
+}
+
+async function enqueueAfterCommitHooks(
+  sql: Queryable,
+  changesetId: string,
+  actorId: string,
+  planned: PlannedOperation[],
+): Promise<void> {
+  const hooks = await loadAttachedHooks(
+    sql,
+    "event.after_commit",
+    undefined,
+    undefined,
+  );
+  for (const hook of hooks) {
+    await query(
+      sql,
+      `insert into outbox(id,hook,phase,payload_json) values ($1,$2,'event.after_commit',$3::jsonb)`,
+      [
+        crypto.randomUUID(),
+        `${hook.namespace}.${hook.name}`,
+        JSON.stringify({
+          changeset_id: changesetId,
+          actor_id: actorId,
+          operations: planned.map((op) => ({
+            op: op.op,
+            resource: op.resource,
+            relationship: op.relationship,
+            id: op.objectId ?? op.id,
+          })),
+        }),
+      ],
+    );
+  }
+}
+
+function applyPatch(
+  op: ChangesetOperation,
+  patch: JsonRecord,
+): ChangesetOperation {
+  const path = String(patch.path ?? "");
+  if (!path.startsWith("/fields/")) return op;
+  const field = path.slice("/fields/".length);
+  const fields = { ...(op.fields ?? {}) };
+  if (patch.op === "unset") delete fields[field];
+  else fields[field] = patch.value;
+  return { ...op, fields };
+}
+
+function normalizeOperation(op: ChangesetOperation): ChangesetOperation {
+  const normalized = { ...op };
+  const rec = normalized as ChangesetOperation & { expectedVersion?: number };
+  if (
+    rec.expectedVersion !== undefined &&
+    normalized.expected_version === undefined
+  ) {
+    normalized.expected_version = rec.expectedVersion;
+    delete rec.expectedVersion;
+  }
+  return normalized;
+}
+function normalizePhase(phase: string): string {
+  if (phase === "before_preview") return "changeset.before_preview";
+  if (phase === "validate") return "changeset.validate";
+  if (phase === "action") return "action.preview";
+  if (phase === "after_commit") return "event.after_commit";
+  return phase;
+}
+function qualify(id: string, namespace: string): string {
+  return id.includes(".") ? id : `${namespace}.${id}`;
+}
+
 function previewDto(
   id: string,
   actor: string,
@@ -937,7 +1211,8 @@ function resolveRef(
   aliases: Map<string, string>,
 ): string {
   if (!value) return "";
-  return aliases.get(value) ?? value;
+  const key = value.startsWith("@") ? value.slice(1) : value;
+  return aliases.get(key) ?? aliases.get(value) ?? value;
 }
 function actorOf(input: ChangesetRequest): ActorContext {
   if (input.actor_context) return normalizeActor(input.actor_context);

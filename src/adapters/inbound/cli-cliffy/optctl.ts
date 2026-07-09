@@ -127,6 +127,38 @@ function parseActorArg(value: string): unknown {
   }
   return value;
 }
+function parseActionPayload(args: string[]): Record<string, unknown> {
+  const payload: Record<string, unknown> = { input: {} };
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    const next = () => args[++i] ?? "";
+    if (arg === "--input") payload.input = JSON.parse(next());
+    else if (arg.startsWith("--input=")) {
+      payload.input = JSON.parse(arg.slice("--input=".length));
+    } else if (arg === "--input-file") payload.input_file = next();
+    else if (arg.startsWith("--input-file=")) {
+      payload.input_file = arg.slice("--input-file=".length);
+    } else if (arg === "--actor") payload.actor = parseActorArg(next());
+    else if (arg.startsWith("--actor=")) {
+      payload.actor = parseActorArg(arg.slice("--actor=".length));
+    } else if (arg === "--idempotency-key") payload.idempotency_key = next();
+    else if (arg.startsWith("--idempotency-key=")) {
+      payload.idempotency_key = arg.slice("--idempotency-key=".length);
+    } else throw new Error(`unknown action option ${arg}`);
+  }
+  return payload;
+}
+async function resolveActionPayload(
+  args: string[],
+): Promise<Record<string, unknown>> {
+  const payload = parseActionPayload(args);
+  if (typeof payload.input_file === "string") {
+    payload.input = await readJsonFile(payload.input_file);
+    delete payload.input_file;
+  }
+  return payload;
+}
+
 function appendActorQuery(base: string, args: string[]): string {
   const index = args.findIndex((arg) =>
     arg === "--actor" || arg.startsWith("--actor=")
@@ -161,6 +193,14 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       result = await postMultipart(`${parsed.server}/packs/preview`, value);
     } else if (cmd === "pack" && sub === "apply" && value) {
       result = await postMultipart(`${parsed.server}/packs/apply`, value);
+    } else if (
+      cmd === "action" && (sub === "preview" || sub === "commit") && value
+    ) {
+      const [namespace, name] = splitDotted(value);
+      result = await postJson(
+        `${parsed.server}/actions/${namespace}/${name}/${sub}`,
+        await resolveActionPayload(parsed.positional.slice(3)),
+      );
     } else if (cmd === "query" && sub) {
       result = await postJson(
         `${parsed.server}/queries`,
@@ -203,7 +243,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       );
     } else {
       throw new Error(
-        "usage: optctl home | pack preview/apply <dir> | metadata resource/action/hook/policy <namespace.name> | query <namespace.resource> [--where expr] [--fields a,b] [--sort field:desc] [--limit n] [--cursor c] | changeset preview/commit <json-file> | view <namespace.resource> <id> | history <namespace.resource> <id>",
+        "usage: optctl home | pack preview/apply <dir> | metadata resource/action/hook/policy <namespace.name> | action preview/commit <namespace.action> --input '{...}' | query <namespace.resource> [--where expr] [--fields a,b] [--sort field:desc] [--limit n] [--cursor c] | changeset preview/commit <json-file> | view <namespace.resource> <id> | history <namespace.resource> <id>",
       );
     }
     return { stdout: render(result, parsed.json), stderr: "", code: 0 };

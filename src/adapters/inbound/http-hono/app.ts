@@ -7,6 +7,10 @@ import type {
   ChangesetRequest,
 } from "../../../application/services/changeset_services.ts";
 import type {
+  ActionDto,
+  ActionRequest,
+} from "../../../application/services/run_action.ts";
+import type {
   PackApplyDto,
   PackPreviewDto,
 } from "../../../application/services/pack_services.ts";
@@ -32,6 +36,18 @@ export type HttpDependencies = {
   };
   queries: {
     query(input: QueryObjectsRequest): Promise<Result<QueryObjectsDto>>;
+  };
+  actions: {
+    preview(
+      namespace: string,
+      action: string,
+      input: ActionRequest,
+    ): Promise<Result<ActionDto>>;
+    commit(
+      namespace: string,
+      action: string,
+      input: ActionRequest,
+    ): Promise<Result<ActionDto>>;
   };
   changesets: {
     preview(input: ChangesetRequest): Promise<Result<ChangesetPreviewDto>>;
@@ -138,6 +154,31 @@ export function makeHttpApp(deps: HttpDependencies): Hono {
   app.post(
     "/queries",
     async (c) => resultJson(c, await deps.queries.query(await c.req.json())),
+  );
+
+  app.post(
+    "/actions/:namespace/:action/preview",
+    async (c) =>
+      resultJson(
+        c,
+        await deps.actions.preview(
+          c.req.param("namespace"),
+          c.req.param("action"),
+          await c.req.json(),
+        ),
+      ),
+  );
+  app.post(
+    "/actions/:namespace/:action/commit",
+    async (c) =>
+      resultJson(
+        c,
+        await deps.actions.commit(
+          c.req.param("namespace"),
+          c.req.param("action"),
+          await c.req.json(),
+        ),
+      ),
   );
 
   app.post(

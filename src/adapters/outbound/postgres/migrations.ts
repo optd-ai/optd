@@ -198,6 +198,41 @@ export const platformMigrations: PlatformMigration[] = [
       create index if not exists comments_object_idx on comments(resource, object_id, created_at desc)
     `,
   },
+  {
+    id: "0005_hooks_outbox",
+    sql: `
+      create table if not exists hook_executions (
+        id text primary key,
+        hook text not null,
+        phase text not null,
+        revision text not null,
+        script_digest text not null,
+        actor_id text not null,
+        status text not null check (status in ('succeeded','failed')),
+        duration_ms integer not null,
+        exit_code integer null,
+        logs text not null default '',
+        result_json jsonb null,
+        error_json jsonb null,
+        created_at timestamptz not null default now()
+      );
+      create table if not exists outbox (
+        id text primary key,
+        hook text not null,
+        phase text not null,
+        status text not null default 'pending' check (status in ('pending','running','succeeded','failed','dead_letter')),
+        attempts integer not null default 0,
+        available_at timestamptz not null default now(),
+        locked_by text null,
+        locked_at timestamptz null,
+        last_error text null,
+        payload_json jsonb not null,
+        created_at timestamptz not null default now()
+      );
+      create index if not exists outbox_status_available_idx on outbox(status, available_at);
+      create index if not exists hook_executions_hook_idx on hook_executions(hook, created_at desc)
+    `,
+  },
 ];
 
 export async function applyPlatformMigrations(

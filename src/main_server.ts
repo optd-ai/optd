@@ -42,6 +42,7 @@ export async function createFetchHandler() {
     metadata: application.metadata,
     packs: application.packs,
     queries: application.queries,
+    actions: application.actions,
     changesets: application.changesets,
     health: makeHealthService(sql, postgresRuntime, migrationResult),
     version: OPERANT_VERSION,

@@ -19,7 +19,22 @@
     },
     "attachments": [
       {
-        "phase": "action",
+        "phase": "action.preview",
+        "action": "default.convert_lead",
+        "order": 100,
+        "input": {
+          "lead": "$current",
+          "input": "$action.input",
+        },
+      },
+      {
+        "phase": "action.commit",
+        "action": "default.convert_lead",
+        "order": 100,
+        "input": {
+          "lead": "$current",
+          "input": "$action.input",
+        },
       },
     ],
     "axi": {

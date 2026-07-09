@@ -19,7 +19,14 @@
     },
     "attachments": [
       {
-        "phase": "validate",
+        "phase": "changeset.validate",
+        "resource": "default.lead",
+        "order": 100,
+        "input": {
+          "operation": "$operation",
+          "proposed": "$proposed",
+          "actor": "$actor",
+        },
       },
     ],
     "axi": {

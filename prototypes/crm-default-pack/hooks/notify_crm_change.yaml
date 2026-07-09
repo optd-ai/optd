@@ -19,7 +19,11 @@
     },
     "attachments": [
       {
-        "phase": "after_commit",
+        "phase": "event.after_commit",
+        "order": 100,
+        "input": {
+          "event": "$event",
+        },
       },
     ],
     "axi": {

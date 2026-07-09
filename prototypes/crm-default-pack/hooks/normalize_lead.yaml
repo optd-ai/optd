@@ -19,7 +19,13 @@
     },
     "attachments": [
       {
-        "phase": "before_preview",
+        "phase": "changeset.before_preview",
+        "resource": "default.lead",
+        "order": 100,
+        "input": {
+          "operation": "$operation",
+          "actor": "$actor",
+        },
       },
     ],
     "axi": {
