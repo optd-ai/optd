@@ -104,6 +104,21 @@ When `OPERANT_DATABASE_URL` is absent, app-managed Postgres is the default. It
 lets the app initialize/start a managed Postgres process under
 `OPERANT_DATA_DIR` while preserving real Postgres behavior.
 
+## MVP runtime artifacts
+
+The repository includes production-style examples:
+
+- `Dockerfile` builds a Deno server image, compiled `optctl` binary, and
+  container-provided Postgres binaries.
+- `docker-compose.yml` runs the default one-container app-managed Postgres mode.
+- `compose.external-postgres.yml` runs Operant against an external Compose
+  Postgres service via `OPERANT_DATABASE_URL`.
+- `k8s/operant-app-managed.example.yaml` and
+  `k8s/operant-external-postgres.example.yaml` show Kubernetes deployment
+  shapes.
+- `docs/runtime.md` documents runtime env, data directory behavior,
+  health/readiness, backup/restore guidance, and no-PGlite guardrails.
+
 ## Remaining Operational Questions
 
 - Exact bundled Postgres binary layout inside the production image.

@@ -33,6 +33,7 @@ export function planPostgresRuntime(
 ): PostgresRuntimePlan {
   const databaseUrl = env.get("OPERANT_DATABASE_URL") ?? undefined;
   if (databaseUrl) {
+    assertSupportedPostgresUrl(databaseUrl);
     return {
       mode: "external",
       databaseUrl,
@@ -70,6 +71,7 @@ export async function startPostgresRuntime(
 ): Promise<PostgresRuntime> {
   const databaseUrl = env.get("OPERANT_DATABASE_URL") ?? undefined;
   if (databaseUrl) {
+    assertSupportedPostgresUrl(databaseUrl);
     return {
       mode: "external",
       databaseUrl,
@@ -124,6 +126,7 @@ export async function startManagedPostgres(
       "--no-locale",
       "--encoding=UTF8",
       "--auth=trust",
+      "--username=operant",
     ]);
   }
 
@@ -152,7 +155,7 @@ export async function startManagedPostgres(
     runDir,
     port,
     process: child,
-    databaseUrl: `postgres://127.0.0.1:${port}/postgres`,
+    databaseUrl: `postgres://operant@127.0.0.1:${port}/postgres`,
   };
 
   try {
@@ -173,6 +176,22 @@ export async function stopManagedPostgres(pg: ManagedPostgres): Promise<void> {
   await pg.process.status.catch(() => undefined);
 }
 
+export function assertSupportedPostgresUrl(databaseUrl: string): void {
+  let protocol: string;
+  try {
+    protocol = new URL(databaseUrl).protocol;
+  } catch {
+    throw new Error(
+      "OPERANT_DATABASE_URL must be a valid postgres:// or postgresql:// URL",
+    );
+  }
+  if (protocol !== "postgres:" && protocol !== "postgresql:") {
+    throw new Error(
+      "unsupported runtime database URL: MVP runtime is Postgres-only; PGlite, SQLite, file, and in-memory URLs are not allowed",
+    );
+  }
+}
+
 async function waitReady(psqlBin: string, pg: ManagedPostgres): Promise<void> {
   const started = Date.now();
   let last = "";
@@ -185,6 +204,8 @@ async function waitReady(psqlBin: string, pg: ManagedPostgres): Promise<void> {
         String(pg.port),
         "-d",
         "postgres",
+        "-U",
+        "operant",
         "-Atc",
         "select 1",
       ],

@@ -1,0 +1,24 @@
+services:
+  operant:
+    build:
+      context: .
+    image: operant:dev
+    ports:
+      - "8789:8789"
+    environment:
+      OPERANT_HOST: 0.0.0.0
+      OPERANT_PORT: 8789
+      OPERANT_DATA_DIR: /data
+      # Required before creating/reading encrypted hook secrets.
+      OPERANT_SECRET_MASTER_KEY: ${OPERANT_SECRET_MASTER_KEY:-}
+    volumes:
+      - operant-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8789/ready"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 20s
+
+volumes:
+  operant-data:

@@ -100,6 +100,15 @@ export function makeHttpApp(deps: HttpDependencies): Hono {
     return c.json({ ok: true, data: { version: deps.version, ...health } });
   });
 
+  app.get("/ready", async (c) => {
+    const health = await deps.health.inspect();
+    const ready = health.status === "ready";
+    return c.json(
+      { ok: ready, data: { version: deps.version, ...health } },
+      ready ? 200 : 503,
+    );
+  });
+
   app.get(
     "/metadata/home",
     async (c) => resultJson(c, await deps.metadata.home()),

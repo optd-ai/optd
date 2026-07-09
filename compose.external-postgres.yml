@@ -1,0 +1,42 @@
+services:
+  operant:
+    build:
+      context: .
+    image: operant:dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8789:8789"
+    environment:
+      OPERANT_HOST: 0.0.0.0
+      OPERANT_PORT: 8789
+      OPERANT_DATA_DIR: /data
+      OPERANT_DATABASE_URL: postgres://operant:operant@postgres:5432/operant
+      OPERANT_SECRET_MASTER_KEY: ${OPERANT_SECRET_MASTER_KEY:-}
+    volumes:
+      - operant-cache:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8789/ready"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 20s
+
+  postgres:
+    image: postgres:16-bookworm
+    environment:
+      POSTGRES_DB: operant
+      POSTGRES_USER: operant
+      POSTGRES_PASSWORD: operant
+    volumes:
+      - operant-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U operant -d operant"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+volumes:
+  operant-cache:
+  operant-postgres:
