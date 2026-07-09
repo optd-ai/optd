@@ -62,8 +62,8 @@ Deno.test("app-managed Postgres starts, migrates, persists sentinel across resta
     await sql.begin(async (tx) => await applyPlatformMigrations(tx));
     await query(
       sql,
-      "insert into platform_kv(key, value) values ($1, $2::jsonb) on conflict (key) do update set value = excluded.value, updated_at = now()",
-      ["postgres_lifecycle_sentinel", '{"ok":true}'],
+      "insert into platform_kv(key, value) values ($1, jsonb_build_object('ok', true)) on conflict (key) do update set value = excluded.value, updated_at = now()",
+      ["postgres_lifecycle_sentinel"],
     );
     await closePostgresClient(sql);
     sql = undefined;
@@ -72,12 +72,12 @@ Deno.test("app-managed Postgres starts, migrates, persists sentinel across resta
 
     secondRuntime = await startPostgresRuntime();
     sql = createPostgresClient(secondRuntime.databaseUrl);
-    const sentinel = await query<{ value: { ok: boolean } }>(
+    const sentinel = await query<{ ok: boolean }>(
       sql,
-      "select value from platform_kv where key = $1",
+      "select (value->>'ok')::boolean as ok from platform_kv where key = $1",
       ["postgres_lifecycle_sentinel"],
     );
-    assertEquals(sentinel.rows[0]?.value.ok, true);
+    assertEquals(sentinel.rows[0]?.ok, true);
     const migrations = await inspectMigrationStatus(sql);
     assertEquals(migrations.ok, true);
     assert(migrations.appliedCount >= 2);

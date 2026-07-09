@@ -29,8 +29,8 @@ Deno.test("postgres bootstrap scenario validates HTTP health and restart persist
 
     await query(
       server.sql,
-      "insert into platform_kv(key, value) values ($1, $2::jsonb) on conflict (key) do update set value = excluded.value, updated_at = now()",
-      ["http_restart_sentinel", '{"survived":true}'],
+      "insert into platform_kv(key, value) values ($1, jsonb_build_object('survived', true)) on conflict (key) do update set value = excluded.value, updated_at = now()",
+      ["http_restart_sentinel"],
     );
     await server.shutdown();
     server = undefined;
@@ -40,12 +40,12 @@ Deno.test("postgres bootstrap scenario validates HTTP health and restart persist
     assertEquals(health.data.database.ok, true);
     assertEquals(health.data.migrations.ok, true);
 
-    const sentinel = await query<{ value: { survived: boolean } }>(
+    const sentinel = await query<{ survived: boolean }>(
       server.sql,
-      "select value from platform_kv where key = $1",
+      "select (value->>'survived')::boolean as survived from platform_kv where key = $1",
       ["http_restart_sentinel"],
     );
-    assertEquals(sentinel.rows[0]?.value.survived, true);
+    assertEquals(sentinel.rows[0]?.survived, true);
   } finally {
     if (server) await server.shutdown().catch(() => undefined);
     if (previousDataDir === undefined) Deno.env.delete("OPERANT_DATA_DIR");
