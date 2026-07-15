@@ -27,19 +27,26 @@ export class PostgresAuthRepository implements AuthRepository {
   ) {}
 
   async bootstrapStatus() {
-    const result = await query<{ completed: boolean }>(
-      this.sql,
-      "select completed from bootstrap_state where singleton = true",
-    );
-    if (result.rows[0]?.completed === true) return ok("ready" as const);
-    if (!this.configuredBootstrapToken) {
-      return err(authError(
-        "bootstrap_token_not_configured",
-        "bootstrap token is not configured",
-        "unavailable",
-      ));
-    }
-    return ok("bootstrap_required" as const);
+    return await this.sql.begin(async (tx) => {
+      const result = await query<{ completed: boolean }>(
+        tx,
+        "select completed from bootstrap_state where singleton = true",
+      );
+      if (result.rows[0]?.completed === true) return ok("active" as const);
+      const lock = await query<{ acquired: boolean }>(
+        tx,
+        "select pg_try_advisory_xact_lock(hashtext('operant.auth.bootstrap')) acquired",
+      );
+      if (!lock.rows[0]?.acquired) return ok("bootstrap_in_progress" as const);
+      if (!this.configuredBootstrapToken) {
+        return err(authError(
+          "bootstrap_token_not_configured",
+          "bootstrap token is not configured",
+          "unavailable",
+        ));
+      }
+      return ok("bootstrap_required" as const);
+    });
   }
 
   async bootstrap(input: BootstrapInput): Promise<Result<BootstrapResult>> {

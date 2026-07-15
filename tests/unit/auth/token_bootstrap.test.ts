@@ -21,6 +21,7 @@ import {
   validatePassword,
 } from "../../../src/domain/auth/validation.ts";
 import type { AuthRepository } from "../../../src/application/ports/authentication.ts";
+import { bootstrapStatusDataValidator } from "../../../src/schemas/auth/bootstrap.ts";
 
 Deno.test("opaque credentials hash deterministically without retaining plaintext", async () => {
   const token = opaqueToken();
@@ -40,6 +41,23 @@ Deno.test("auth character bounds count Unicode code points", () => {
   assert(!validateDisplayName("😀".repeat(121)).ok);
   assert(normalizeUsername(`a${"b".repeat(62)}`).ok);
   assert(!normalizeUsername(`a${"b".repeat(63)}`).ok);
+});
+
+Deno.test("bootstrap status schema uses only frozen state vocabulary", () => {
+  for (
+    const state of [
+      "bootstrap_required",
+      "bootstrap_in_progress",
+      "active",
+    ]
+  ) {
+    assert(bootstrapStatusDataValidator.check({ state }));
+  }
+  assert(!bootstrapStatusDataValidator.check({ status: "bootstrap_required" }));
+  assert(!bootstrapStatusDataValidator.check({ state: "ready" }));
+  assert(
+    !bootstrapStatusDataValidator.check({ state: "active", status: "ready" }),
+  );
 });
 
 Deno.test("bootstrap transition is one-way with stable errors", () => {

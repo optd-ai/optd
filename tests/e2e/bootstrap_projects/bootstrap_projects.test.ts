@@ -49,7 +49,7 @@ Deno.test({
       ]);
       assertEquals(configuredStatus.code, 0, configuredStatus.stderr);
       assertEquals(
-        JSON.parse(configuredStatus.stdout).data.status,
+        JSON.parse(configuredStatus.stdout).data.state,
         "bootstrap_required",
       );
       const unauthenticated = await fetch(`${harness.baseUrl}/metadata/home`);
@@ -69,7 +69,8 @@ Deno.test({
         "--display-name",
         username,
       ];
-      const attempts = await harness.runConcurrent([
+      let bootstrapSettled = false;
+      const attemptsPromise = harness.runConcurrent([
         {
           args: bootstrapArgs("jordan"),
           stdin: "correct horse battery staple\n",
@@ -78,7 +79,24 @@ Deno.test({
           args: bootstrapArgs("casey"),
           stdin: "another correct horse password\n",
         },
-      ]);
+      ]).finally(() => bootstrapSettled = true);
+      let observedInProgress = false;
+      while (!bootstrapSettled && !observedInProgress) {
+        const status = await harness.runOptctl([
+          "--json",
+          "status",
+          "bootstrap",
+        ]);
+        if (status.code === 0) {
+          observedInProgress =
+            JSON.parse(status.stdout).data.state === "bootstrap_in_progress";
+        }
+        if (!observedInProgress) {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+      }
+      const attempts = await attemptsPromise;
+      assertEquals(observedInProgress, true);
       for (const attempt of attempts) {
         assert(!attempt.argv.includes("correct horse battery staple"));
         assert(!attempt.argv.includes("another correct horse password"));
@@ -436,7 +454,7 @@ Deno.test({
         "bootstrap",
       ]);
       assertEquals(completedStatus.code, 0, completedStatus.stderr);
-      assertEquals(JSON.parse(completedStatus.stdout).data.status, "ready");
+      assertEquals(JSON.parse(completedStatus.stdout).data.state, "active");
       const persisted = await harness.runOptctl([
         "--json",
         "project",

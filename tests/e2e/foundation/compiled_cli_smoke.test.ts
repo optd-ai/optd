@@ -71,7 +71,7 @@ Deno.test("fresh real server supports compiled CLI TOON/JSON, restart, and stabl
       "bootstrap",
     ]);
     assertEquals(
-      JSON.parse(bootstrap.stdout).data.status,
+      JSON.parse(bootstrap.stdout).data.state,
       "bootstrap_required",
     );
 

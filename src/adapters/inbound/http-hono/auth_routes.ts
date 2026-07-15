@@ -8,6 +8,7 @@ import {
 } from "../../../schemas/api/contracts.ts";
 import { toHttpStatus } from "../../../domain/errors/result.ts";
 import { type AuthVariables, isJsonContentType } from "./auth_middleware.ts";
+import { bootstrapStatusDataValidator } from "../../../schemas/auth/bootstrap.ts";
 
 export type BootstrapHttpService = {
   status(): Promise<Result<BootstrapStatus>>;
@@ -33,7 +34,9 @@ export function registerAuthRoutes(
         toHttpStatus(result.error) as 503,
       );
     }
-    return c.json(successEnvelope({ status: result.value }));
+    const data = { state: result.value };
+    bootstrapStatusDataValidator.assert(data);
+    return c.json(successEnvelope(data));
   });
   app.post("/api/v1/auth/bootstrap", async (c) => {
     if (!isJsonContentType(c.req.header("content-type") ?? "")) {
