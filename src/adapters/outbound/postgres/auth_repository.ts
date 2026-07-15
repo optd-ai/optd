@@ -10,6 +10,7 @@ import type {
   PasswordReset,
 } from "../../../domain/auth/model.ts";
 import { immutableAuthContext } from "../../../domain/auth/model.ts";
+import { transitionPasswordReset } from "../../../domain/auth/password_reset_state.ts";
 import { err, ok, type Result } from "../../../domain/errors/result.ts";
 import { uuidV7 } from "../../../domain/ids/uuid_v7.ts";
 import {
@@ -172,7 +173,7 @@ export class PostgresAuthRepository implements AuthRepository {
           username: input.username,
           displayName: input.displayName,
         },
-        credentials: { token: full.token, requestToken: request.token },
+        credentials: issuedCredentials(full, request),
       });
     }) as Result<BootstrapResult>;
   }
@@ -243,6 +244,7 @@ export class PostgresAuthRepository implements AuthRepository {
   async login(
     username: string,
     password: string,
+    existingRequestSessionId?: string,
   ): Promise<Result<LoginResult>> {
     const release = this.hashes.tryAcquire();
     if (!release) {
@@ -333,12 +335,29 @@ export class PostgresAuthRepository implements AuthRepository {
           row.id,
           "human_full",
         );
-        const request = await issueSession(
-          tx,
-          row.principal_id,
-          row.id,
-          "authorization_request",
-        );
+        const retained = existingRequestSessionId
+          ? (await query<{ id: string }>(
+            tx,
+            `select id from auth_sessions where id=$1 and human_user_id=$2 and principal_id=$3 and credential_kind='authorization_request' and revoked_at is null for update`,
+            [existingRequestSessionId, row.id, row.principal_id],
+          )).rows[0]
+          : undefined;
+        let request: { id: string; token: string };
+        if (retained) {
+          request = { id: retained.id, token: "" };
+        } else {
+          await query(
+            tx,
+            `update auth_sessions set revoked_at=now() where human_user_id=$1 and credential_kind='authorization_request' and revoked_at is null`,
+            [row.id],
+          );
+          request = await issueSession(
+            tx,
+            row.principal_id,
+            row.id,
+            "authorization_request",
+          );
+        }
         await audit(
           tx,
           "auth.login.succeeded",
@@ -348,7 +367,14 @@ export class PostgresAuthRepository implements AuthRepository {
         );
         return ok({
           user: humanUser(row),
-          credentials: { token: full.token, requestToken: request.token },
+          credentials: retained
+            ? {
+              token: full.token,
+              fullSessionId: full.id,
+              requestSessionId: retained.id,
+              requestRetained: true,
+            }
+            : issuedCredentials(full, request),
         });
       }) as Result<LoginResult>;
     } finally {
@@ -422,34 +448,28 @@ export class PostgresAuthRepository implements AuthRepository {
       );
     }
     try {
-      const row = (await query<{ phc_hash: string }>(
-        this.sql,
-        `select phc_hash from password_credentials where human_user_id=$1`,
-        [auth.humanUserId],
-      )).rows[0];
-      if (!row || !await verifyPassword(password, row.phc_hash)) {
-        return err(
-          authError(
-            "login_invalid",
-            "username or password is invalid",
-            "authentication",
-          ),
+      return await this.sql.begin(async (tx) => {
+        const confirmed = await confirmHumanPassword(
+          tx,
+          auth.humanUserId,
+          password,
         );
-      }
-      const result = await query(
-        this.sql,
-        `update auth_sessions set revoked_at=now() where human_user_id=$1 and revoked_at is null returning id`,
-        [auth.humanUserId],
-      );
-      await audit(
-        this.sql,
-        "auth.sessions.revoked_all",
-        auth.principalId,
-        auth.humanUserId,
-        auth.sessionId,
-        auth.id,
-      );
-      return ok({ revoked: result.rows.length });
+        if (!confirmed.ok) return confirmed;
+        const result = await query(
+          tx,
+          `update auth_sessions set revoked_at=now() where human_user_id=$1 and revoked_at is null returning id`,
+          [auth.humanUserId],
+        );
+        await audit(
+          tx,
+          "auth.sessions.revoked_all",
+          auth.principalId,
+          auth.humanUserId,
+          auth.sessionId,
+          auth.id,
+        );
+        return ok({ revoked: result.rows.length });
+      }) as Result<{ revoked: number }>;
     } finally {
       release();
     }
@@ -472,30 +492,15 @@ export class PostgresAuthRepository implements AuthRepository {
       );
     }
     try {
-      const credential = (await query<{ phc_hash: string }>(
-        this.sql,
-        `select phc_hash from password_credentials where human_user_id=$1`,
-        [auth.humanUserId],
-      )).rows[0];
-      if (
-        !credential ||
-        !await verifyPassword(currentPassword, credential.phc_hash)
-      ) {
-        return err(
-          authError(
-            "login_invalid",
-            "username or password is invalid",
-            "authentication",
-          ),
-        );
-      }
-      const phc = await hashPassword(newPassword);
       return await this.sql.begin(async (tx) => {
-        const user = (await query<UserRow>(
+        const confirmed = await confirmHumanPassword(
           tx,
-          `select id,principal_id,username,display_name,status from human_users where id=$1 for update`,
-          [auth.humanUserId],
-        )).rows[0]!;
+          auth.humanUserId,
+          currentPassword,
+        );
+        if (!confirmed.ok) return confirmed;
+        const user = confirmed.value;
+        const phc = await hashPassword(newPassword);
         await query(
           tx,
           `update password_credentials set phc_hash=$2,profile='argon2id.v1',password_changed_at=now() where human_user_id=$1`,
@@ -529,7 +534,7 @@ export class PostgresAuthRepository implements AuthRepository {
         );
         return ok({
           user: humanUser(user),
-          credentials: { token: full.token, requestToken: request.token },
+          credentials: issuedCredentials(full, request),
         });
       }) as Result<LoginResult>;
     } finally {
@@ -900,18 +905,14 @@ export class PostgresAuthRepository implements AuthRepository {
           ),
         );
       }
-      const status = decision === "approved" ? "approved" : "denied";
-      if (row.status === status) return ok(passwordReset(row));
-      if (row.status !== "pending") {
-        return err(
-          authError(
-            "request_already_decided",
-            "password reset is already decided",
-            "conflict",
-          ),
-        );
-      }
-      if (new Date(row.expires_at).getTime() <= Date.now()) {
+      const transition = transitionPasswordReset(
+        row.status,
+        decision === "approved" ? "approve" : "deny",
+        new Date(row.expires_at).getTime() <= Date.now(),
+      );
+      if (!transition.ok) return transition;
+      const status = transition.value;
+      if (status === "expired") {
         return err(
           authError(
             "password_reset_expired",
@@ -920,6 +921,7 @@ export class PostgresAuthRepository implements AuthRepository {
           ),
         );
       }
+      if (row.status === status) return ok(passwordReset(row));
       await query(
         tx,
         `update password_reset_requests set status=$2,version=version+1,decided_by_auth_context_id=$3,decided_at=now() where id=$1`,
@@ -1041,6 +1043,15 @@ export class PostgresAuthRepository implements AuthRepository {
       const phc = await hashPassword(password);
       return await this.sql.begin(async (tx) => {
         const row = await resetRow(tx, id, true);
+        if (row?.status === "completed") {
+          return err(
+            authError(
+              "redemption_already_used",
+              "reset capability was already used",
+              "conflict",
+            ),
+          );
+        }
         if (
           !row || !row.human_user_id || !row.capability_digest ||
           !constantTimeDigestEqual(
@@ -1056,21 +1067,27 @@ export class PostgresAuthRepository implements AuthRepository {
             ),
           );
         }
-        if (row.status === "completed") {
-          return err(
-            authError(
-              "redemption_already_used",
-              "reset capability was already used",
-              "conflict",
-            ),
-          );
-        }
         if (row.status !== "approved") {
           return err(
             authError(
               "password_reset_capability_invalid",
               "reset capability is invalid",
               "authentication",
+            ),
+          );
+        }
+        if (new Date(row.expires_at).getTime() <= Date.now()) {
+          await query(
+            tx,
+            `update password_reset_requests set status='expired',version=version+1,capability_digest=null where id=$1`,
+            [id],
+          );
+          await signalPasswordReset(tx, id);
+          return err(
+            authError(
+              "password_reset_expired",
+              "password reset has expired",
+              "expired",
             ),
           );
         }
@@ -1117,7 +1134,7 @@ export class PostgresAuthRepository implements AuthRepository {
         );
         return ok({
           user: humanUser(user),
-          credentials: { token: full.token, requestToken: request.token },
+          credentials: issuedCredentials(full, request),
         });
       }) as Result<LoginResult>;
     } finally {
@@ -1345,7 +1362,7 @@ export class PostgresAuthRepository implements AuthRepository {
             ...row,
             status: row.enable_user ? "active" : row.status,
           }),
-          credentials: { token: full.token, requestToken: request.token },
+          credentials: issuedCredentials(full, request),
         });
       }) as Result<LoginResult>;
     } finally {
@@ -1366,7 +1383,7 @@ async function signalPasswordReset(sql: Queryable, id: string): Promise<void> {
 const DUMMY_PASSWORD_HASH =
   "$argon2id$v=19$m=19456,t=2,p=1$hVNuIMcQVCGTBSGnJ6Bg8A$IA2Q5Wevful1bg2s1x2mfuyqmNlXMfR/M+jIUD4U85w";
 
-class ImmediateSemaphore {
+export class ImmediateSemaphore {
   private active = 0;
   constructor(private readonly maximum: number) {
     if (!Number.isInteger(maximum) || maximum < 1) {
@@ -1448,6 +1465,19 @@ async function verifyPassword(password: string, phc: string): Promise<boolean> {
   return (JSON.parse(new TextDecoder().decode(output.stdout)) as {
     valid: boolean;
   }).valid;
+}
+
+function issuedCredentials(
+  full: { id: string; token: string },
+  request: { id: string; token: string },
+) {
+  return {
+    token: full.token,
+    fullSessionId: full.id,
+    requestToken: request.token,
+    requestSessionId: request.id,
+    requestRetained: false,
+  };
 }
 
 async function issueSession(
@@ -1603,7 +1633,93 @@ function authorizationDenied() {
     ),
   );
 }
+async function confirmHumanPassword(
+  sql: Queryable,
+  userId: string,
+  password: string,
+): Promise<Result<UserRow>> {
+  const user = (await query<UserRow & { phc_hash: string }>(
+    sql,
+    `select u.id,u.principal_id,u.username,u.display_name,u.status,p.phc_hash from human_users u join password_credentials p on p.human_user_id=u.id where u.id=$1 for update`,
+    [userId],
+  )).rows[0];
+  if (!user) {
+    return err(
+      authError(
+        "login_invalid",
+        "username or password is invalid",
+        "authentication",
+      ),
+    );
+  }
+  await query(
+    sql,
+    `insert into login_throttles(username) values($1) on conflict do nothing`,
+    [user.username],
+  );
+  const throttle =
+    (await query<{ failure_count: number; next_allowed_at: Date | null }>(
+      sql,
+      `select failure_count,next_allowed_at from login_throttles where username=$1 for update`,
+      [user.username],
+    )).rows[0]!;
+  if (
+    throttle.next_allowed_at &&
+    new Date(throttle.next_allowed_at).getTime() > Date.now()
+  ) {
+    const retry = Math.max(
+      1,
+      Math.ceil(
+        (new Date(throttle.next_allowed_at).getTime() - Date.now()) / 1000,
+      ),
+    );
+    return err(
+      authError(
+        "login_throttled",
+        "login is temporarily throttled",
+        "rate_limited",
+        { retry_after_seconds: retry },
+      ),
+    );
+  }
+  const valid = user.status === "active" &&
+    await verifyPassword(password, user.phc_hash);
+  if (!valid) {
+    const failures = throttle.failure_count + 1;
+    const delay = failures < 5 ? 0 : Math.min(30, 2 ** (failures - 5));
+    await query(
+      sql,
+      `update login_throttles set failure_count=$2,next_allowed_at=case when $3::int=0 then null else now()+make_interval(secs=>$3) end,updated_at=now() where username=$1`,
+      [user.username, failures, delay],
+    );
+    return err(
+      authError(
+        "login_invalid",
+        "username or password is invalid",
+        "authentication",
+      ),
+    );
+  }
+  await query(
+    sql,
+    `update login_throttles set failure_count=0,next_allowed_at=null,updated_at=now() where username=$1`,
+    [user.username],
+  );
+  return ok(humanUserRow(user));
+}
+
+function humanUserRow(row: UserRow): UserRow {
+  return {
+    id: row.id,
+    principal_id: row.principal_id,
+    username: row.username,
+    display_name: row.display_name,
+    status: row.status,
+  };
+}
+
 async function revokeAnchored(sql: Queryable, userId: string): Promise<void> {
+  // Keep every anchor-owned authority revocation in this transaction; later agent tables extend this helper.
   await query(
     sql,
     `update auth_sessions set revoked_at=coalesce(revoked_at,now()) where human_user_id=$1 and revoked_at is null`,

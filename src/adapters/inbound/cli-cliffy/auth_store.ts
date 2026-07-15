@@ -3,6 +3,7 @@ import { dirname, join } from "jsr:@std/path";
 type OriginState = {
   token?: string;
   requestToken?: string;
+  requestSessionId?: string;
   projectId?: string;
   projectSlug?: string;
   username?: string;

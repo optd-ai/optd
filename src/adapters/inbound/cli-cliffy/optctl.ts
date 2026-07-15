@@ -68,6 +68,13 @@ async function postMultipart(url: string, packDir: string): Promise<unknown> {
     }),
   );
 }
+export function authenticatedOutput(
+  user: unknown,
+  extra: Record<string, unknown> = {},
+) {
+  return { ok: true, data: { user, authenticated: true, ...extra } };
+}
+
 function render(value: unknown, asJson?: boolean): string {
   return asJson ? JSON.stringify(value, null, 2) : formatToon(value);
 }
@@ -333,6 +340,22 @@ function option(args: string[], name: string): string | undefined {
     ? args[index + 1]
     : args[index].slice(name.length + 1);
 }
+function issuedCredentialUpdate(
+  credentials: Record<string, unknown>,
+  prior: { requestToken?: string; requestSessionId?: string } = {},
+) {
+  return {
+    token: String(credentials.token),
+    requestToken: typeof credentials.authorization_request_token === "string"
+      ? credentials.authorization_request_token
+      : prior.requestToken,
+    requestSessionId:
+      typeof credentials.authorization_request_session_id === "string"
+        ? credentials.authorization_request_session_id
+        : prior.requestSessionId,
+  };
+}
+
 function envelopeData(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || !("data" in value)) {
     throw new Error("server returned an invalid success envelope");
@@ -409,7 +432,11 @@ async function waitForPasswordReset(
           socket.close(1000);
         };
         socket.onerror = () => {
-          if (!terminal) reject(new Error("password reset watch disconnected"));
+          if (!terminal) {
+            try {
+              socket.close();
+            } catch { /* rejected handshakes still emit close */ }
+          }
         };
         socket.onclose = () => {
           if (!terminal) reject(new Error("password reset watch disconnected"));
@@ -480,14 +507,10 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
         unknown
       >;
       await writeOrigin(parsed.server, {
-        token: String(credentials.token),
-        requestToken: String(credentials.authorization_request_token),
+        ...issuedCredentialUpdate(credentials),
         username,
       });
-      result = {
-        ok: true,
-        data: { user: envelopeData(result).user, authenticated: true },
-      };
+      result = authenticatedOutput(envelopeData(result).user);
     } else if (cmd === "auth" && sub === "login") {
       const authArgs = parsed.positional.slice(2);
       const prior = await readOrigin(parsed.server);
@@ -500,7 +523,13 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
         await fetch(`${parsed.server}/api/v1/auth/login`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ username, password }),
+          body: JSON.stringify({
+            username,
+            password,
+            ...(prior.requestSessionId
+              ? { existing_request_session_id: prior.requestSessionId }
+              : {}),
+          }),
         }),
       );
       const credentials = envelopeData(result).credentials as Record<
@@ -508,14 +537,10 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
         unknown
       >;
       await writeOrigin(parsed.server, {
-        token: String(credentials.token),
-        requestToken: String(credentials.authorization_request_token),
+        ...issuedCredentialUpdate(credentials, prior),
         username,
       });
-      result = {
-        ok: true,
-        data: { user: envelopeData(result).user, authenticated: true },
-      };
+      result = authenticatedOutput(envelopeData(result).user);
     } else if (cmd === "auth" && (sub === "whoami" || sub === "status")) {
       result = await getJson(`${parsed.server}/api/v1/auth/me`);
     } else if (cmd === "auth" && sub === "sessions") {
@@ -532,6 +557,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
         await writeOrigin(parsed.server, {
           token: undefined,
           requestToken: undefined,
+          requestSessionId: undefined,
         });
       } else {
         result = await postJson(`${parsed.server}/api/v1/auth/logout`, {});
@@ -595,9 +621,10 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       await writeOrigin(parsed.server, {
         token: String(credentials.token),
         requestToken: String(credentials.authorization_request_token),
+        requestSessionId: String(credentials.authorization_request_session_id),
         username: String(user.username),
       });
-      result = { ok: true, data: { user, authenticated: true } };
+      result = authenticatedOutput(user);
     } else if (cmd === "auth" && sub === "password-policy") {
       result = await getJson(`${parsed.server}/api/v1/auth/password-policy`);
     } else if (cmd === "auth" && sub === "wait" && value) {
@@ -661,12 +688,10 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       await writeOrigin(parsed.server, {
         token: String(credentials.token),
         requestToken: String(credentials.authorization_request_token),
+        requestSessionId: String(credentials.authorization_request_session_id),
         username: String(user.username),
       });
-      result = {
-        ok: true,
-        data: { user, authenticated: true, request_id: value },
-      };
+      result = authenticatedOutput(user, { request_id: value });
     } else if (cmd === "auth" && sub === "password-reset") {
       const action = value;
       const resetArgs = parsed.positional.slice(3);
@@ -763,9 +788,12 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
           await writeOrigin(parsed.server, {
             token: String(credentials.token),
             requestToken: String(credentials.authorization_request_token),
+            requestSessionId: String(
+              credentials.authorization_request_session_id,
+            ),
             username: String(user.username),
           });
-          result = { ok: true, data: { user, authenticated: true } };
+          result = authenticatedOutput(user);
         }
       } else throw usageError("invalid auth password-reset command");
     } else if (cmd === "auth" && sub === "recover") {
@@ -793,9 +821,10 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       await writeOrigin(parsed.server, {
         token: String(credentials.token),
         requestToken: String(credentials.authorization_request_token),
+        requestSessionId: String(credentials.authorization_request_session_id),
         username,
       });
-      result = { ok: true, data: { user: data.user, authenticated: true } };
+      result = authenticatedOutput(data.user);
     } else if (cmd === "project" && sub === "list") {
       const listArgs = parsed.positional.slice(2);
       const parameters = new URLSearchParams();

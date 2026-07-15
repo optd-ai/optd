@@ -33,7 +33,11 @@ export type BootstrapHttpService = {
 export type HumanAuthHttpService = {
   policy(): Result<PasswordPolicy>;
   login(
-    input: { username: unknown; password: unknown },
+    input: {
+      username: unknown;
+      password: unknown;
+      existingRequestSessionId?: unknown;
+    },
   ): Promise<Result<LoginResult>>;
   current(auth: AuthContext): Promise<Result<HumanUser>>;
   sessions(auth: AuthContext): Promise<Result<HumanSession[]>>;
@@ -236,6 +240,7 @@ export function registerAuthRoutes(
         await human.login({
           username: parsed.body!.username,
           password: parsed.body!.password,
+          existingRequestSessionId: parsed.body!.existing_request_session_id,
         }),
       ),
     );
@@ -514,7 +519,12 @@ function loginData(result: LoginResult) {
     },
     credentials: {
       token: result.credentials.token,
-      authorization_request_token: result.credentials.requestToken,
+      session_id: result.credentials.fullSessionId,
+      authorization_request_session_id: result.credentials.requestSessionId,
+      authorization_request_retained: result.credentials.requestRetained,
+      ...(result.credentials.requestToken === undefined
+        ? {}
+        : { authorization_request_token: result.credentials.requestToken }),
     },
   };
 }

@@ -69,7 +69,19 @@ Deno.test({
         "--display-name",
         username,
       ];
-      let bootstrapSettled = false;
+      let releaseLock!: () => void;
+      let lockAcquired!: () => void;
+      const acquired = new Promise<void>((resolve) => lockAcquired = resolve);
+      const release = new Promise<void>((resolve) => releaseLock = resolve);
+      const lockTransaction = harness.server.sql.begin(async (tx) => {
+        await query(
+          tx,
+          `select pg_advisory_xact_lock(hashtext('operant.auth.bootstrap'))`,
+        );
+        lockAcquired();
+        await release;
+      });
+      await acquired;
       const attemptsPromise = harness.runConcurrent([
         {
           args: bootstrapArgs("jordan"),
@@ -79,24 +91,23 @@ Deno.test({
           args: bootstrapArgs("casey"),
           stdin: "another correct horse password\n",
         },
-      ]).finally(() => bootstrapSettled = true);
-      let observedInProgress = false;
-      while (!bootstrapSettled && !observedInProgress) {
+      ]);
+      try {
         const status = await harness.runOptctl([
           "--json",
           "status",
           "bootstrap",
         ]);
-        if (status.code === 0) {
-          observedInProgress =
-            JSON.parse(status.stdout).data.state === "bootstrap_in_progress";
-        }
-        if (!observedInProgress) {
-          await new Promise((resolve) => setTimeout(resolve, 10));
-        }
+        assertEquals(status.code, 0, status.stderr);
+        assertEquals(
+          JSON.parse(status.stdout).data.state,
+          "bootstrap_in_progress",
+        );
+      } finally {
+        releaseLock();
+        await lockTransaction;
       }
       const attempts = await attemptsPromise;
-      assertEquals(observedInProgress, true);
       for (const attempt of attempts) {
         assert(!attempt.argv.includes("correct horse battery staple"));
         assert(!attempt.argv.includes("another correct horse password"));

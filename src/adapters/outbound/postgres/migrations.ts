@@ -436,7 +436,7 @@ export const platformMigrations: PlatformMigration[] = [
         idempotency_key text not null,
         nonce_digest text not null,
         capability_digest text,
-        status text not null check(status in ('pending','approved','denied','cancelled','completed')),
+        status text not null check(status in ('pending','approved','denied','cancelled','completed','expired')),
         created_at timestamptz not null default now(),
         expires_at timestamptz not null,
         decided_by_auth_context_id uuid references auth_contexts(id),

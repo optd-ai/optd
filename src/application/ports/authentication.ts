@@ -21,7 +21,11 @@ export interface BootstrapRepository {
 
 export interface AuthRepository extends BootstrapRepository {
   authenticate(token: string): Promise<Result<AuthContext>>;
-  login(username: string, password: string): Promise<Result<LoginResult>>;
+  login(
+    username: string,
+    password: string,
+    existingRequestSessionId?: string,
+  ): Promise<Result<LoginResult>>;
   current(auth: AuthContext): Promise<Result<HumanUser>>;
   sessions(auth: AuthContext): Promise<Result<HumanSession[]>>;
   logout(auth: AuthContext): Promise<Result<{ revoked: true }>>;

@@ -20,7 +20,10 @@ export type BootstrapInput = {
 
 export type IssuedCredentials = {
   token: string;
-  requestToken: string;
+  fullSessionId: string;
+  requestToken?: string;
+  requestSessionId: string;
+  requestRetained: boolean;
 };
 
 export type HumanUser = {

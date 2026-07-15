@@ -39,7 +39,13 @@ export function makeHumanAuthService(
   const password = (value: unknown) => validatePassword(value, policy);
   return {
     policy: () => ({ ok: true as const, value: policy }),
-    login: async (input: { username: unknown; password: unknown }) => {
+    login: async (
+      input: {
+        username: unknown;
+        password: unknown;
+        existingRequestSessionId?: unknown;
+      },
+    ) => {
       const username = normalizeUsername(input.username);
       if (!username.ok) return { ok: false as const, error: username.error };
       if (typeof input.password !== "string") {
@@ -55,9 +61,15 @@ export function makeHumanAuthService(
             : invalid.error,
         };
       }
+      const existingRequestSessionId =
+        typeof input.existingRequestSessionId === "string" &&
+          /^[0-9a-f-]{36}$/.test(input.existingRequestSessionId)
+          ? input.existingRequestSessionId
+          : undefined;
       return await repository.login(
         username.value,
         input.password.normalize("NFC"),
+        existingRequestSessionId,
       );
     },
     current: (auth: AuthContext) => repository.current(auth),

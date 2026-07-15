@@ -14,7 +14,12 @@ Deno.test("compiled optctl logs in, lists sessions, logs out, and survives resta
     assertFalse(boot.stdout.includes('"token"'));
     const sessions = await harness.runOptctl(["--json", "auth", "sessions"]);
     assertEquals(sessions.code, 0, sessions.stderr);
-    assertEquals(JSON.parse(sessions.stdout).data.length, 2);
+    const initialSessions = JSON.parse(sessions.stdout).data;
+    assertEquals(initialSessions.length, 2);
+    const initialRequestSessionId =
+      initialSessions.find((session: { credential_kind: string }) =>
+        session.credential_kind === "authorization_request"
+      ).id;
     assertEquals(
       (await harness.runOptctl(["--json", "auth", "logout"])).code,
       0,
@@ -29,6 +34,19 @@ Deno.test("compiled optctl logs in, lists sessions, logs out, and survives resta
     });
     assertEquals(login.code, 0, login.stderr);
     assertFalse(login.stdout.includes('"token"'));
+    for (let repeat = 0; repeat < 3; repeat++) {
+      const repeated = await harness.login({
+        username: "human-admin",
+        password: "correct horse battery staple",
+      });
+      assertEquals(repeated.code, 0, repeated.stderr);
+    }
+    const requestSessions = await query<{ id: string }>(
+      harness.server.sql,
+      `select id from auth_sessions where human_user_id=(select id from human_users where username='human-admin') and credential_kind='authorization_request' and revoked_at is null`,
+    );
+    assertEquals(requestSessions.rows.length, 1);
+    assertEquals(requestSessions.rows[0].id, initialRequestSessionId);
     await harness.restart();
     const current = await harness.runOptctl(["--json", "auth", "whoami"]);
     assertEquals(current.code, 0, current.stderr);
@@ -368,6 +386,7 @@ Deno.test("compiled optctl reset wait reconnects by WebSocket without polling", 
       },
     );
     assertEquals(wrong.status, 404);
+    await wrong.body?.cancel();
     const ticketResponse = await fetch(
       `${harness.baseUrl}/api/v1/auth/password-reset/requests/${requestId}/watch-ticket`,
       {
@@ -384,7 +403,7 @@ Deno.test("compiled optctl reset wait reconnects by WebSocket without polling", 
     watchUrl.searchParams.set("ticket", ticket);
     const initial = await watchOnce(watchUrl);
     assertEquals(initial.message.status, "pending");
-    initial.socket.close();
+    await closeWebSocket(initial.socket);
     const reused = await watchOnce(watchUrl, true);
     assertEquals(
       ["watch_ticket_invalid", "connection_rejected"].includes(
@@ -544,6 +563,14 @@ Deno.test("compiled optctl completes non-enumerating approved password reset", a
   }
 });
 
+async function closeWebSocket(socket: WebSocket): Promise<void> {
+  if (socket.readyState === WebSocket.CLOSED) return;
+  await new Promise<void>((resolve) => {
+    socket.addEventListener("close", () => resolve(), { once: true });
+    socket.close(1000);
+  });
+}
+
 async function watchOnce(
   url: URL,
   expectClose = false,
@@ -568,8 +595,15 @@ async function watchOnce(
     };
     socket.onerror = () => {
       if (expectClose) {
-        resolve({ socket, message: {}, closeReason: "connection_rejected" });
-      } else reject(new Error("watch socket failed"));
+        try {
+          socket.close();
+        } catch { /* rejected handshake will emit close */ }
+      } else {
+        try {
+          socket.close();
+        } catch { /* handshake was already rejected */ }
+        reject(new Error("watch socket failed"));
+      }
     };
   });
 }
