@@ -26,6 +26,7 @@ import { query } from "./client.ts";
 
 export class PostgresAuthRepository implements AuthRepository {
   private readonly hashes: ImmediateSemaphore;
+  private resetListener: Promise<{ unlisten(): Promise<void> }> | undefined;
 
   constructor(
     private readonly sql: Sql,
@@ -682,6 +683,42 @@ export class PostgresAuthRepository implements AuthRepository {
         [input.username, input.idempotencyKey],
       )).rows[0];
       if (existing) return ok({ requestId: existing.id });
+      await query(
+        tx,
+        `insert into password_reset_throttles(username) values($1) on conflict do nothing`,
+        [input.username],
+      );
+      const throttle =
+        (await query<{ request_count: number; window_started_at: Date }>(
+          tx,
+          `select request_count,window_started_at from password_reset_throttles where username=$1 for update`,
+          [input.username],
+        )).rows[0]!;
+      const freshWindow =
+        Date.now() - new Date(throttle.window_started_at).getTime() >=
+          15 * 60_000;
+      if (!freshWindow && throttle.request_count >= 5) {
+        const retry = Math.max(
+          1,
+          Math.ceil(
+            (new Date(throttle.window_started_at).getTime() + 15 * 60_000 -
+              Date.now()) / 1000,
+          ),
+        );
+        return err(
+          authError(
+            "password_reset_throttled",
+            "password reset requests are temporarily throttled",
+            "rate_limited",
+            { retry_after_seconds: retry },
+          ),
+        );
+      }
+      await query(
+        tx,
+        `update password_reset_throttles set request_count=case when $2 then 1 else request_count+1 end,window_started_at=case when $2 then now() else window_started_at end,updated_at=now() where username=$1`,
+        [input.username, freshWindow],
+      );
       const user = (await query<{ id: string }>(
         tx,
         `select id from human_users where username=$1`,
@@ -701,6 +738,131 @@ export class PostgresAuthRepository implements AuthRepository {
       );
       return ok({ requestId: id });
     }) as Result<{ requestId: string }>;
+  }
+
+  async createPasswordResetWatchTicket(
+    id: string,
+    nonce: string,
+  ): Promise<Result<{ ticket: string }>> {
+    return await this.sql.begin(async (tx) => {
+      const row = await resetRow(tx, id, true);
+      if (
+        !row ||
+        !constantTimeDigestEqual(row.nonce_digest, await tokenDigest(nonce))
+      ) {
+        return err(
+          authError(
+            "password_reset_not_found",
+            "password reset was not found",
+            "not_found",
+          ),
+        );
+      }
+      if (new Date(row.expires_at).getTime() <= Date.now()) {
+        return err(
+          authError(
+            "password_reset_expired",
+            "password reset has expired",
+            "expired",
+          ),
+        );
+      }
+      const ticket = opaqueToken();
+      await query(
+        tx,
+        `insert into password_reset_watch_tickets(token_digest,request_id,expires_at) values($1,$2,now()+interval '60 seconds')`,
+        [await tokenDigest(ticket), id],
+      );
+      return ok({ ticket });
+    }) as Result<{ ticket: string }>;
+  }
+
+  async consumePasswordResetWatchTicket(
+    id: string,
+    ticket: string,
+  ): Promise<
+    Result<
+      { requestId: string; version: number; status: PasswordReset["status"] }
+    >
+  > {
+    return await this.sql.begin(async (tx) => {
+      const digest = await tokenDigest(ticket);
+      const found = (await query<
+        { request_id: string; expires_at: Date; used_at: Date | null }
+      >(
+        tx,
+        `select request_id,expires_at,used_at from password_reset_watch_tickets where token_digest=$1 for update`,
+        [digest],
+      )).rows[0];
+      if (!found || found.request_id !== id || found.used_at) {
+        return err(
+          authError(
+            "watch_ticket_invalid",
+            "watch ticket is invalid",
+            "authentication",
+          ),
+        );
+      }
+      if (new Date(found.expires_at).getTime() <= Date.now()) {
+        return err(
+          authError(
+            "watch_ticket_expired",
+            "watch ticket has expired",
+            "expired",
+          ),
+        );
+      }
+      await query(
+        tx,
+        `update password_reset_watch_tickets set used_at=now() where token_digest=$1`,
+        [digest],
+      );
+      return await readPasswordResetStatus(tx, id);
+    }) as Result<
+      { requestId: string; version: number; status: PasswordReset["status"] }
+    >;
+  }
+
+  async passwordResetStatus(
+    id: string,
+  ): Promise<
+    Result<
+      { requestId: string; version: number; status: PasswordReset["status"] }
+    >
+  > {
+    return await readPasswordResetStatus(this.sql, id);
+  }
+
+  subscribePasswordReset(id: string, listener: () => void): () => void {
+    if (!this.resetListener) {
+      this.resetListener = this.sql.listen(
+        "operant_password_reset",
+        (requestId: string) => {
+          for (
+            const notify of passwordResetListeners.get(requestId) ?? []
+          ) notify();
+        },
+      );
+      void this.resetListener.catch(() => {
+        this.resetListener = undefined;
+      });
+    }
+    let listeners = passwordResetListeners.get(id);
+    if (!listeners) {
+      listeners = new Set();
+      passwordResetListeners.set(id, listeners);
+    }
+    listeners.add(listener);
+    return () => {
+      listeners!.delete(listener);
+      if (!listeners!.size) passwordResetListeners.delete(id);
+    };
+  }
+
+  async close(): Promise<void> {
+    const listener = this.resetListener;
+    this.resetListener = undefined;
+    if (listener) await (await listener).unlisten();
   }
 
   async inspectPasswordReset(
@@ -738,6 +900,8 @@ export class PostgresAuthRepository implements AuthRepository {
           ),
         );
       }
+      const status = decision === "approved" ? "approved" : "denied";
+      if (row.status === status) return ok(passwordReset(row));
       if (row.status !== "pending") {
         return err(
           authError(
@@ -756,12 +920,12 @@ export class PostgresAuthRepository implements AuthRepository {
           ),
         );
       }
-      const status = decision === "approved" ? "approved" : "denied";
       await query(
         tx,
-        `update password_reset_requests set status=$2,decided_by_auth_context_id=$3,decided_at=now() where id=$1`,
+        `update password_reset_requests set status=$2,version=version+1,decided_by_auth_context_id=$3,decided_at=now() where id=$1`,
         [id, status, auth.id],
       );
+      await signalPasswordReset(tx, id);
       await audit(
         tx,
         `auth.password_reset.${status}`,
@@ -803,9 +967,10 @@ export class PostgresAuthRepository implements AuthRepository {
       }
       await query(
         tx,
-        `update password_reset_requests set status='cancelled' where id=$1`,
+        `update password_reset_requests set status='cancelled',version=version+1 where id=$1`,
         [id],
       );
+      await signalPasswordReset(tx, id);
       return ok(passwordReset({ ...row, status: "cancelled" }));
     }) as Result<PasswordReset>;
   }
@@ -939,9 +1104,10 @@ export class PostgresAuthRepository implements AuthRepository {
         );
         await query(
           tx,
-          `update password_reset_requests set status='completed',completed_at=now(),capability_digest=null where id=$1`,
+          `update password_reset_requests set status='completed',version=version+1,completed_at=now(),capability_digest=null where id=$1`,
           [id],
         );
+        await signalPasswordReset(tx, id);
         await audit(
           tx,
           "auth.password_reset.completed",
@@ -1036,12 +1202,36 @@ export class PostgresAuthRepository implements AuthRepository {
   }
 
   async cancelRecovery(username: string): Promise<Result<{ cancelled: true }>> {
-    await query(
-      this.sql,
-      `update recovery_challenges r set status='cancelled' from human_users u where r.human_user_id=u.id and u.username=$1 and r.status='active'`,
-      [username],
-    );
-    return ok({ cancelled: true });
+    return await this.sql.begin(async (tx) => {
+      const row = (await query<
+        { id: string; human_user_id: string; principal_id: string }
+      >(
+        tx,
+        `select r.id,r.human_user_id,u.principal_id from recovery_challenges r join human_users u on u.id=r.human_user_id where u.username=$1 and r.status='active' for update`,
+        [username],
+      )).rows[0];
+      if (!row) {
+        return err(
+          authError(
+            "recovery_invalid",
+            "active recovery challenge was not found",
+            "not_found",
+          ),
+        );
+      }
+      await query(
+        tx,
+        `update recovery_challenges set status='cancelled',token_digest=null where id=$1`,
+        [row.id],
+      );
+      await audit(
+        tx,
+        "auth.recovery.cancelled",
+        row.principal_id,
+        row.human_user_id,
+      );
+      return ok({ cancelled: true as const });
+    }) as Result<{ cancelled: true }>;
   }
 
   async completeRecovery(
@@ -1090,6 +1280,12 @@ export class PostgresAuthRepository implements AuthRepository {
           );
         }
         if (new Date(row.expires_at).getTime() <= Date.now()) {
+          await query(
+            tx,
+            `update recovery_challenges set status='expired',token_digest=null where id=$1`,
+            [row.challenge_id],
+          );
+          await audit(tx, "auth.recovery.expired", row.principal_id, row.id);
           return err(
             authError(
               "recovery_expired",
@@ -1156,6 +1352,15 @@ export class PostgresAuthRepository implements AuthRepository {
       release();
     }
   }
+}
+
+const passwordResetListeners = new Map<string, Set<() => void>>();
+
+async function signalPasswordReset(sql: Queryable, id: string): Promise<void> {
+  await query(sql, `select pg_notify('operant_password_reset', $1)`, [id]);
+  setTimeout(() => {
+    for (const listener of passwordResetListeners.get(id) ?? []) listener();
+  }, 0);
 }
 
 const DUMMY_PASSWORD_HASH =
@@ -1336,6 +1541,42 @@ function passwordReset(row: ResetRow): PasswordReset {
     expiresAt: new Date(row.expires_at).toISOString(),
   };
 }
+async function readPasswordResetStatus(
+  sql: Queryable,
+  id: string,
+): Promise<
+  Result<
+    { requestId: string; version: number; status: PasswordReset["status"] }
+  >
+> {
+  const row = (await query<
+    {
+      id: string;
+      version: number;
+      status: PasswordReset["status"];
+      expires_at: Date;
+    }
+  >(
+    sql,
+    `select id,version,status,expires_at from password_reset_requests where id=$1`,
+    [id],
+  )).rows[0];
+  if (!row) {
+    return err(
+      authError(
+        "password_reset_not_found",
+        "password reset was not found",
+        "not_found",
+      ),
+    );
+  }
+  const status =
+    row.status === "pending" && new Date(row.expires_at).getTime() <= Date.now()
+      ? "expired"
+      : row.status;
+  return ok({ requestId: row.id, version: Number(row.version), status });
+}
+
 async function resetRow(
   sql: Queryable,
   id: string,

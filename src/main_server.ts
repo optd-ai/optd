@@ -62,6 +62,7 @@ export async function createFetchHandler() {
     fetch: app.fetch,
     sql,
     async shutdown() {
+      await application.authentication.close();
       await closePostgresClient(sql);
       await postgresRuntime.stop();
     },

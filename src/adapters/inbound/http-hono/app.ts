@@ -131,8 +131,12 @@ export function makeHttpApp(
       (c.req.method === "POST" &&
         c.req.path === "/api/v1/auth/password-reset/requests") ||
       (c.req.method === "POST" &&
-        /^\/api\/v1\/auth\/password-reset\/requests\/[^/]+\/(cancel|redeem|complete)$/
+        /^\/api\/v1\/auth\/password-reset\/requests\/[^/]+\/(cancel|redeem|complete|watch-ticket)$/
           .test(c.req.path)) ||
+      (c.req.method === "GET" &&
+        /^\/api\/v1\/auth\/password-reset\/requests\/[^/]+\/watch$/.test(
+          c.req.path,
+        )) ||
       c.req.path === "/api/v1/auth/recovery/complete"
     ) {
       await next();

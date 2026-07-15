@@ -364,6 +364,71 @@ async function resolveProject(
   return items[0] as Record<string, unknown>;
 }
 
+async function waitForPasswordReset(
+  server: string,
+  requestId: string,
+  nonce: string,
+): Promise<string> {
+  let backoff = 100;
+  while (true) {
+    try {
+      const ticketEnvelope = await decodeJsonResponse(
+        await fetch(
+          `${server}/api/v1/auth/password-reset/requests/${
+            encodeURIComponent(requestId)
+          }/watch-ticket`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ redemption_nonce: nonce }),
+          },
+        ),
+      );
+      const ticket = String(envelopeData(ticketEnvelope).ticket);
+      const socketUrl = new URL(
+        `${server}/api/v1/auth/password-reset/requests/${
+          encodeURIComponent(requestId)
+        }/watch`,
+      );
+      socketUrl.protocol = socketUrl.protocol === "https:" ? "wss:" : "ws:";
+      socketUrl.searchParams.set("ticket", ticket);
+      const status = await new Promise<string>((resolve, reject) => {
+        const socket = new WebSocket(socketUrl);
+        let terminal = false;
+        socket.onmessage = (event) => {
+          const message = JSON.parse(String(event.data)) as {
+            type?: string;
+            status?: string;
+          };
+          if (
+            message.type !== "password_reset_status" || !message.status ||
+            message.status === "pending"
+          ) return;
+          terminal = true;
+          resolve(message.status);
+          socket.close(1000);
+        };
+        socket.onerror = () => {
+          if (!terminal) reject(new Error("password reset watch disconnected"));
+        };
+        socket.onclose = () => {
+          if (!terminal) reject(new Error("password reset watch disconnected"));
+        };
+      });
+      return status;
+    } catch (error) {
+      if (
+        error instanceof OptctlError &&
+        ["password_reset_not_found", "password_reset_expired"].includes(
+          error.envelope.error.code,
+        )
+      ) throw error;
+      await new Promise((resolve) => setTimeout(resolve, backoff));
+      backoff = Math.min(2_000, backoff * 2);
+    }
+  }
+}
+
 function helpText(): string {
   return new Command()
     .name("optctl")
@@ -535,6 +600,73 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       result = { ok: true, data: { user, authenticated: true } };
     } else if (cmd === "auth" && sub === "password-policy") {
       result = await getJson(`${parsed.server}/api/v1/auth/password-policy`);
+    } else if (cmd === "auth" && sub === "wait" && value) {
+      const waitArgs = parsed.positional.slice(3);
+      if (
+        waitArgs.some((arg) =>
+          arg === "--timeout" || arg.startsWith("--timeout=")
+        )
+      ) throw usageError("auth wait has no timeout option");
+      const prior = await readOrigin(parsed.server);
+      const nonce = prior.resetNonces?.[value];
+      if (!nonce) {
+        throw usageError(
+          "password-reset requester nonce is unavailable in this local auth store",
+        );
+      }
+      const status = await waitForPasswordReset(parsed.server, value, nonce);
+      if (status !== "approved") {
+        const code = status === "denied"
+          ? "password_reset_denied"
+          : status === "expired"
+          ? "password_reset_expired"
+          : "request_cancelled";
+        throw new OptctlError(
+          errorEnvelope({
+            code,
+            message: `password reset is ${status}`,
+            details: { request_id: value, status },
+          }),
+        );
+      }
+      const redeemed = await decodeJsonResponse(
+        await fetch(
+          `${parsed.server}/api/v1/auth/password-reset/requests/${
+            encodeURIComponent(value)
+          }/redeem`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ redemption_nonce: nonce }),
+          },
+        ),
+      );
+      const capability = String(envelopeData(redeemed).capability);
+      const password = await readPassword(waitArgs);
+      result = await decodeJsonResponse(
+        await fetch(
+          `${parsed.server}/api/v1/auth/password-reset/requests/${
+            encodeURIComponent(value)
+          }/complete`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ capability, password }),
+          },
+        ),
+      );
+      const data = envelopeData(result);
+      const credentials = data.credentials as Record<string, unknown>;
+      const user = data.user as Record<string, unknown>;
+      await writeOrigin(parsed.server, {
+        token: String(credentials.token),
+        requestToken: String(credentials.authorization_request_token),
+        username: String(user.username),
+      });
+      result = {
+        ok: true,
+        data: { user, authenticated: true, request_id: value },
+      };
     } else if (cmd === "auth" && sub === "password-reset") {
       const action = value;
       const resetArgs = parsed.positional.slice(3);

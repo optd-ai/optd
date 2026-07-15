@@ -122,7 +122,8 @@ Deno.test("fresh real server supports compiled CLI TOON/JSON, restart, and stabl
       username: "future-admin",
       password: "not-a-real-credential",
     });
-    assertEquals(loginFuture.result.code, 2);
+    assertEquals(loginFuture.result.code, 1);
+    assertFrozenErrorEnvelope(loginFuture.result.stderr, "login_invalid");
     await loginFuture.launcher.close();
     const missingProject = await harness.runOptctl([
       "--json",

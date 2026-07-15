@@ -451,7 +451,7 @@ export const platformMigrations: PlatformMigration[] = [
         token_digest text,
         enable_user boolean not null,
         restore_super_admin boolean not null,
-        status text not null check(status in ('active','completed','cancelled')),
+        status text not null check(status in ('active','completed','cancelled','expired')),
         created_at timestamptz not null default now(),
         expires_at timestamptz not null,
         completed_at timestamptz
@@ -461,11 +461,32 @@ export const platformMigrations: PlatformMigration[] = [
         'auth.bootstrap.completed','auth.human_user.created','auth.human_user.enabled','auth.human_user.disabled',
         'auth.role_assignment.created','auth.session.created','auth.session.revoked','auth.sessions.revoked_all',
         'auth.login.succeeded','auth.password.changed','auth.password_reset.approved','auth.password_reset.denied',
-        'auth.password_reset.completed','auth.recovery.initiated','auth.recovery.completed'
+        'auth.password_reset.completed','auth.recovery.initiated','auth.recovery.completed','auth.recovery.cancelled','auth.recovery.expired'
       ));
       create index login_throttles_updated_idx on login_throttles(updated_at);
       create index password_reset_target_idx on password_reset_requests(human_user_id,created_at);
       create unique index recovery_one_active_target_idx on recovery_challenges(human_user_id) where status='active';
+    `,
+  },
+  {
+    id: "1010_password_reset_wait_throttle",
+    sql: `
+      alter table password_reset_requests add column version bigint not null default 1;
+      create table password_reset_watch_tickets (
+        token_digest text primary key,
+        request_id text not null references password_reset_requests(id),
+        created_at timestamptz not null default now(),
+        expires_at timestamptz not null,
+        used_at timestamptz
+      );
+      create table password_reset_throttles (
+        username text primary key,
+        request_count integer not null default 0,
+        window_started_at timestamptz not null default now(),
+        updated_at timestamptz not null default now()
+      );
+      create index password_reset_watch_ticket_expiry_idx on password_reset_watch_tickets(expires_at);
+      create index password_reset_throttle_updated_idx on password_reset_throttles(updated_at);
     `,
   },
 ];

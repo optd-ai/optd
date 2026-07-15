@@ -1,4 +1,5 @@
 import type { Hono } from "npm:hono";
+import { upgradeWebSocket } from "npm:hono/deno";
 import type { Result } from "../../../domain/errors/result.ts";
 import type {
   AuthContext,
@@ -59,6 +60,26 @@ export type HumanAuthHttpService = {
   requestReset(
     input: { username: unknown; nonceHash: unknown; idempotencyKey: unknown },
   ): Promise<Result<{ requestId: string }>>;
+  createResetWatchTicket(
+    id: string,
+    nonce: string,
+  ): Promise<Result<{ ticket: string }>>;
+  consumeResetWatchTicket(
+    id: string,
+    ticket: string,
+  ): Promise<
+    Result<
+      { requestId: string; version: number; status: PasswordReset["status"] }
+    >
+  >;
+  resetStatus(
+    id: string,
+  ): Promise<
+    Result<
+      { requestId: string; version: number; status: PasswordReset["status"] }
+    >
+  >;
+  subscribeReset(id: string, listener: () => void): () => void;
   inspectReset(auth: AuthContext, id: string): Promise<Result<PasswordReset>>;
   decideReset(
     auth: AuthContext,
@@ -96,7 +117,8 @@ export function registerAuthRoutes(
     if (
       !result.ok &&
       (result.error.code === "authentication_busy" ||
-        result.error.code === "login_throttled")
+        result.error.code === "login_throttled" ||
+        result.error.code === "password_reset_throttled")
     ) {
       const details = result.error.details as
         | { retry_after_seconds?: number }
@@ -322,6 +344,71 @@ export function registerAuthRoutes(
       ? c.json(successEnvelope({ request_id: result.value.requestId }), 202)
       : send(c, result);
   });
+  app.post(
+    "/api/v1/auth/password-reset/requests/:id/watch-ticket",
+    async (c) => {
+      const parsed = await json(c);
+      if (parsed.response) return parsed.response;
+      return send(
+        c,
+        await human.createResetWatchTicket(
+          c.req.param("id"),
+          String(parsed.body!.redemption_nonce ?? ""),
+        ),
+      );
+    },
+  );
+  app.get(
+    "/api/v1/auth/password-reset/requests/:id/watch",
+    upgradeWebSocket((c) => {
+      const id = c.req.param("id") ?? "";
+      const ticket = c.req.query("ticket") ?? "";
+      let unsubscribe: (() => void) | undefined;
+      let lastVersion = -1;
+      const sendState = async (
+        ws: {
+          send(data: string): void;
+          close(code?: number, reason?: string): void;
+        },
+      ) => {
+        const state = await human.resetStatus(id);
+        if (!state.ok) {
+          ws.close(1008, state.error.code);
+          return;
+        }
+        if (state.value.version <= lastVersion) return;
+        lastVersion = state.value.version;
+        ws.send(
+          JSON.stringify({
+            type: "password_reset_status",
+            request_id: state.value.requestId,
+            version: state.value.version,
+            status: state.value.status,
+          }),
+        );
+        if (state.value.status !== "pending") {
+          ws.close(1000, state.value.status);
+        }
+      };
+      return {
+        async onOpen(_event, ws) {
+          const consumed = await human.consumeResetWatchTicket(id, ticket);
+          if (!consumed.ok) {
+            ws.close(1008, consumed.error.code);
+            return;
+          }
+          unsubscribe = human.subscribeReset(id, () => void sendState(ws));
+          await sendState(ws);
+        },
+        onClose() {
+          unsubscribe?.();
+        },
+        onError() {
+          unsubscribe?.();
+        },
+      };
+    }),
+  );
   app.get(
     "/api/v1/auth/password-reset/requests/:id",
     async (c) =>

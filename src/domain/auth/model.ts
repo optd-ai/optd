@@ -57,7 +57,13 @@ export type PasswordPolicy = {
 export type PasswordReset = {
   id: string;
   username: string;
-  status: "pending" | "approved" | "denied" | "cancelled" | "completed";
+  status:
+    | "pending"
+    | "approved"
+    | "denied"
+    | "cancelled"
+    | "completed"
+    | "expired";
   createdAt: string;
   expiresAt: string;
 };

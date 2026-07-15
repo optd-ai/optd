@@ -49,6 +49,26 @@ export interface AuthRepository extends BootstrapRepository {
     nonceHash: string;
     idempotencyKey: string;
   }): Promise<Result<{ requestId: string }>>;
+  createPasswordResetWatchTicket(
+    id: string,
+    nonce: string,
+  ): Promise<Result<{ ticket: string }>>;
+  consumePasswordResetWatchTicket(
+    id: string,
+    ticket: string,
+  ): Promise<
+    Result<
+      { requestId: string; version: number; status: PasswordReset["status"] }
+    >
+  >;
+  passwordResetStatus(
+    id: string,
+  ): Promise<
+    Result<
+      { requestId: string; version: number; status: PasswordReset["status"] }
+    >
+  >;
+  subscribePasswordReset(id: string, listener: () => void): () => void;
   inspectPasswordReset(
     auth: AuthContext,
     id: string,

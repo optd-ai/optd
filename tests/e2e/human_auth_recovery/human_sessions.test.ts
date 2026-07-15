@@ -1,6 +1,6 @@
 import { assertEquals, assertFalse } from "jsr:@std/assert";
 import { startLiveHarness } from "../../support/live_harness.ts";
-import { makeApplication } from "../../../src/application/app.ts";
+import { query } from "../../../src/adapters/outbound/postgres/client.ts";
 
 Deno.test("compiled optctl logs in, lists sessions, logs out, and survives restart", async () => {
   const harness = await startLiveHarness();
@@ -85,11 +85,55 @@ Deno.test("compiled optctl observes bounded hash saturation", async () => {
   }
 });
 
-Deno.test("compiled optctl completes targeted host recovery", async () => {
+Deno.test("password reset request throttling is Postgres-backed and non-enumerating", async () => {
+  const harness = await startLiveHarness();
+  try {
+    assertEquals(
+      (await harness.bootstrap({
+        username: "throttle-admin",
+        password: "administrator password",
+      })).code,
+      0,
+    );
+    for (const username of ["throttle-admin", "unknown-throttle-user"]) {
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const result = await harness.runOptctl([
+          "--json",
+          "auth",
+          "password-reset",
+          "request",
+          "--username",
+          username,
+        ]);
+        assertEquals(result.code, 0, result.stderr);
+        assertEquals(Object.keys(JSON.parse(result.stdout).data), [
+          "request_id",
+        ]);
+      }
+      const throttled = await harness.runOptctl([
+        "--json",
+        "auth",
+        "password-reset",
+        "request",
+        "--username",
+        username,
+      ]);
+      assertEquals(throttled.code, 1);
+      const error = JSON.parse(throttled.stderr).error;
+      assertEquals(error.code, "password_reset_throttled");
+      assertEquals(typeof error.details.retry_after_seconds, "number");
+    }
+  } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("compiled host command covers recovery revocation repair cancellation and expiry", async () => {
   const recoveryToken = "host-recovery-secret-with-at-least-32-characters";
   const prior = Deno.env.get("OPERANT_RECOVERY_TOKEN");
   Deno.env.set("OPERANT_RECOVERY_TOKEN", recoveryToken);
   const harness = await startLiveHarness();
+  let serverBinary: string | undefined;
   try {
     assertEquals(
       (await harness.bootstrap({
@@ -109,18 +153,69 @@ Deno.test("compiled optctl completes targeted host recovery", async () => {
     ], "original recovery password\n");
     const userId = JSON.parse(created.stdout).data.id;
     assertEquals(
-      (await harness.runOptctl(["--json", "auth", "user", "disable", userId]))
-        .code,
+      (await harness.login({
+        username: "recovery-user",
+        password: "original recovery password",
+      })).code,
       0,
     );
-    const repository = makeApplication(harness.server.sql).authentication;
-    const initiated = await repository.beginRecovery({
-      username: "recovery-user",
-      token: recoveryToken,
-      enableUser: true,
-      restoreSuperAdmin: false,
-    });
-    assertEquals(initiated.ok, true);
+    assertEquals(
+      (await harness.login({
+        username: "host-admin",
+        password: "administrator password",
+      })).code,
+      0,
+    );
+    serverBinary = `${harness.rootDir}/operant-server`;
+    const compiled = await new Deno.Command(Deno.execPath(), {
+      args: [
+        "compile",
+        "--allow-all",
+        "--output",
+        serverBinary,
+        new URL("../../../src/main_server.ts", import.meta.url).pathname,
+      ],
+      stdout: "piped",
+      stderr: "piped",
+    }).output();
+    assertEquals(
+      compiled.success,
+      true,
+      new TextDecoder().decode(compiled.stderr),
+    );
+    const postmaster = (await Deno.readTextFile(
+      `${harness.dataDir}/postgres/data/postmaster.pid`,
+    )).split("\n");
+    const hostEnv = {
+      ...Deno.env.toObject(),
+      OPERANT_DATABASE_URL: `postgres://operant@127.0.0.1:${
+        postmaster[3]
+      }/postgres`,
+      OPERANT_RECOVERY_TOKEN: recoveryToken,
+    };
+    const host = (args: string[]) =>
+      new Deno.Command(serverBinary!, {
+        args,
+        env: hostEnv,
+        stdout: "piped",
+        stderr: "piped",
+      }).output();
+
+    const begun = await host([
+      "auth",
+      "recovery",
+      "begin",
+      "--username",
+      "recovery-user",
+      "--restore-super-admin",
+    ]);
+    assertEquals(begun.success, true, new TextDecoder().decode(begun.stderr));
+    const activeSessions = await query<{ count: string }>(
+      harness.server.sql,
+      `select count(*)::text count from auth_sessions where human_user_id=$1 and revoked_at is null`,
+      [userId],
+    );
+    assertEquals(activeSessions.rows[0]?.count, "0");
     const recovered = await harness.runOptctl([
       "--json",
       "auth",
@@ -130,16 +225,220 @@ Deno.test("compiled optctl completes targeted host recovery", async () => {
       "--password-stdin",
     ], "replacement recovery password\n");
     assertEquals(recovered.code, 0, recovered.stderr);
-    assertFalse(recovered.stdout.includes('"token"'));
-    assertEquals(
-      JSON.parse((await harness.runOptctl(["--json", "auth", "whoami"])).stdout)
-        .data.username,
-      "recovery-user",
+    const restored = await query<{ count: string }>(
+      harness.server.sql,
+      `select count(*)::text count from role_assignments r join human_users u on u.principal_id=r.principal_id where u.id=$1 and r.role_id='system:super_admin' and r.active`,
+      [userId],
     );
+    assertEquals(restored.rows[0]?.count, "1");
+
+    assertEquals(
+      (await harness.runOptctl(["--json", "auth", "user", "disable", userId]))
+        .code,
+      0,
+    );
+    assertEquals(
+      (await host([
+        "auth",
+        "recovery",
+        "begin",
+        "--username",
+        "recovery-user",
+        "--enable-user",
+      ])).success,
+      true,
+    );
+    assertEquals(
+      (await harness.runOptctl([
+        "--json",
+        "auth",
+        "recover",
+        "--username",
+        "recovery-user",
+        "--password-stdin",
+      ], "enabled recovery password\n")).code,
+      0,
+    );
+    const enabled = await query<{ status: string }>(
+      harness.server.sql,
+      `select status from human_users where id=$1`,
+      [userId],
+    );
+    assertEquals(enabled.rows[0]?.status, "active");
+
+    assertEquals(
+      (await host(["auth", "recovery", "begin", "--username", "recovery-user"]))
+        .success,
+      true,
+    );
+    assertEquals(
+      (await host([
+        "auth",
+        "recovery",
+        "cancel",
+        "--username",
+        "recovery-user",
+      ])).success,
+      true,
+    );
+    const cancelled = await harness.runOptctl([
+      "--json",
+      "auth",
+      "recover",
+      "--username",
+      "recovery-user",
+      "--password-stdin",
+    ], "cancelled recovery password\n");
+    assertEquals(JSON.parse(cancelled.stderr).error.code, "recovery_invalid");
+
+    assertEquals(
+      (await host(["auth", "recovery", "begin", "--username", "recovery-user"]))
+        .success,
+      true,
+    );
+    await query(
+      harness.server.sql,
+      `update recovery_challenges set expires_at=now()-interval '1 second' where human_user_id=$1 and status='active'`,
+      [userId],
+    );
+    const expired = await harness.runOptctl([
+      "--json",
+      "auth",
+      "recover",
+      "--username",
+      "recovery-user",
+      "--password-stdin",
+    ], "expired recovery password\n");
+    assertEquals(JSON.parse(expired.stderr).error.code, "recovery_expired");
+    const expiredState = await query<{ status: string }>(
+      harness.server.sql,
+      `select status from recovery_challenges where human_user_id=$1 order by created_at desc limit 1`,
+      [userId],
+    );
+    assertEquals(expiredState.rows[0]?.status, "expired");
   } finally {
     await harness.close();
     if (prior === undefined) Deno.env.delete("OPERANT_RECOVERY_TOKEN");
     else Deno.env.set("OPERANT_RECOVERY_TOKEN", prior);
+  }
+});
+
+Deno.test("compiled optctl reset wait reconnects by WebSocket without polling", async () => {
+  const harness = await startLiveHarness();
+  try {
+    assertEquals(
+      (await harness.bootstrap({
+        username: "wait-admin",
+        password: "administrator password",
+      })).code,
+      0,
+    );
+    const created = await harness.runOptctl([
+      "--json",
+      "auth",
+      "user",
+      "create",
+      "--username",
+      "wait-user",
+      "--password-stdin",
+    ], "original wait password\n");
+    assertEquals(created.code, 0, created.stderr);
+    const requested = await harness.runOptctl([
+      "--json",
+      "auth",
+      "password-reset",
+      "request",
+      "--username",
+      "wait-user",
+    ]);
+    const requestId = JSON.parse(requested.stdout).data.request_id;
+    const store = JSON.parse(
+      await Deno.readTextFile(
+        `${harness.rootDir}/xdg-config/operant/auth.json`,
+      ),
+    );
+    const nonce =
+      store.origins[new URL(harness.baseUrl).origin].resetNonces[requestId];
+    const wrong = await fetch(
+      `${harness.baseUrl}/api/v1/auth/password-reset/requests/${requestId}/watch-ticket`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ redemption_nonce: "wrong-requester-nonce" }),
+      },
+    );
+    assertEquals(wrong.status, 404);
+    const ticketResponse = await fetch(
+      `${harness.baseUrl}/api/v1/auth/password-reset/requests/${requestId}/watch-ticket`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ redemption_nonce: nonce }),
+      },
+    );
+    const ticket = (await ticketResponse.json()).data.ticket;
+    const watchUrl = new URL(
+      `${harness.baseUrl}/api/v1/auth/password-reset/requests/${requestId}/watch`,
+    );
+    watchUrl.protocol = "ws:";
+    watchUrl.searchParams.set("ticket", ticket);
+    const initial = await watchOnce(watchUrl);
+    assertEquals(initial.message.status, "pending");
+    initial.socket.close();
+    const reused = await watchOnce(watchUrl, true);
+    assertEquals(
+      ["watch_ticket_invalid", "connection_rejected"].includes(
+        reused.closeReason,
+      ),
+      true,
+    );
+    const child = new Deno.Command(harness.binaryPath, {
+      args: [
+        "--server",
+        harness.baseUrl,
+        "--json",
+        "auth",
+        "wait",
+        requestId,
+        "--password-stdin",
+      ],
+      env: {
+        ...Deno.env.toObject(),
+        HOME: harness.homeDir,
+        XDG_CONFIG_HOME: `${harness.rootDir}/xdg-config`,
+        XDG_STATE_HOME: `${harness.rootDir}/xdg-state`,
+      },
+      stdin: "piped",
+      stdout: "piped",
+      stderr: "piped",
+    }).spawn();
+    const writer = child.stdin.getWriter();
+    await writer.write(new TextEncoder().encode("replacement wait password\n"));
+    await writer.close();
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    await harness.restart();
+    const approved = await harness.runOptctl([
+      "--json",
+      "auth",
+      "password-reset",
+      "approve",
+      requestId,
+    ]);
+    assertEquals(approved.code, 0, approved.stderr);
+    const output = await child.output();
+    assertEquals(output.code, 0, new TextDecoder().decode(output.stderr));
+    assertFalse(new TextDecoder().decode(output.stdout).includes('"token"'));
+    const repeated = await harness.runOptctl([
+      "--json",
+      "auth",
+      "password-reset",
+      "complete",
+      requestId,
+      "--password-stdin",
+    ], "another replacement password\n");
+    assertEquals(repeated.code, 1);
+  } finally {
+    await harness.close();
   }
 });
 
@@ -244,3 +543,33 @@ Deno.test("compiled optctl completes non-enumerating approved password reset", a
     await harness.close();
   }
 });
+
+async function watchOnce(
+  url: URL,
+  expectClose = false,
+): Promise<
+  { socket: WebSocket; message: Record<string, unknown>; closeReason: string }
+> {
+  return await new Promise((resolve, reject) => {
+    const socket = new WebSocket(url);
+    socket.onmessage = (event) => {
+      if (!expectClose) {
+        resolve({
+          socket,
+          message: JSON.parse(String(event.data)),
+          closeReason: "",
+        });
+      }
+    };
+    socket.onclose = (event) => {
+      if (expectClose) {
+        resolve({ socket, message: {}, closeReason: event.reason });
+      } else reject(new Error(`watch closed before state: ${event.reason}`));
+    };
+    socket.onerror = () => {
+      if (expectClose) {
+        resolve({ socket, message: {}, closeReason: "connection_rejected" });
+      } else reject(new Error("watch socket failed"));
+    };
+  });
+}

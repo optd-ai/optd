@@ -156,6 +156,13 @@ export function makeHumanAuthService(
         idempotencyKey: input.idempotencyKey,
       });
     },
+    createResetWatchTicket: (id: string, nonce: string) =>
+      repository.createPasswordResetWatchTicket(id, nonce),
+    consumeResetWatchTicket: (id: string, ticket: string) =>
+      repository.consumePasswordResetWatchTicket(id, ticket),
+    resetStatus: (id: string) => repository.passwordResetStatus(id),
+    subscribeReset: (id: string, listener: () => void) =>
+      repository.subscribePasswordReset(id, listener),
     inspectReset: (auth: AuthContext, id: string) =>
       repository.inspectPasswordReset(auth, id),
     decideReset: (
