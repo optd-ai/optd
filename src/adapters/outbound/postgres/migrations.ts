@@ -350,7 +350,9 @@ export const platformMigrations: PlatformMigration[] = [
         singleton boolean primary key check (singleton),
         token_digest text,
         completed boolean not null,
-        completed_at timestamptz
+        completed_at timestamptz,
+        completed_by_human_user_id uuid references human_users(id),
+        updated_at timestamptz not null default now()
       );
       create table projects (
         id uuid primary key,
@@ -366,6 +368,33 @@ export const platformMigrations: PlatformMigration[] = [
         archived_at timestamptz
       );
       alter table role_assignments add constraint role_assignments_project_fk foreign key(project_id) references projects(id);
+      create table auth_audit_events (
+        id uuid primary key,
+        event_type text not null check (event_type in (
+          'auth.bootstrap.completed',
+          'auth.human_user.created',
+          'auth.role_assignment.created',
+          'auth.session.created'
+        )),
+        auth_context_id uuid references auth_contexts(id),
+        principal_id uuid references principals(id),
+        human_user_id uuid references human_users(id),
+        session_id uuid references auth_sessions(id),
+        role_assignment_id uuid references role_assignments(id),
+        role_id text references system_roles(id),
+        credential_kind text,
+        boundary_type text,
+        details jsonb not null default '{}'::jsonb,
+        created_at timestamptz not null default now()
+      );
+      create function reject_auth_audit_mutation() returns trigger language plpgsql as $$
+      begin
+        raise exception 'auth audit events are immutable';
+      end
+      $$;
+      create trigger auth_audit_events_immutable
+        before update or delete on auth_audit_events
+        for each row execute function reject_auth_audit_mutation();
       create table project_audit_events (
         id uuid primary key,
         auth_context_id uuid not null references auth_contexts(id),
@@ -377,6 +406,8 @@ export const platformMigrations: PlatformMigration[] = [
       );
       create index auth_sessions_token_digest_idx on auth_sessions(token_digest) where revoked_at is null;
       create index projects_status_slug_idx on projects(status, slug);
+      create index auth_audit_human_idx on auth_audit_events(human_user_id, created_at);
+      create index auth_audit_session_idx on auth_audit_events(session_id, created_at);
       create index project_audit_context_idx on project_audit_events(auth_context_id, created_at)
     `,
   },

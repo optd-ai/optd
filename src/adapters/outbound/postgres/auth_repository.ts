@@ -8,6 +8,15 @@ import type {
 import { immutableAuthContext } from "../../../domain/auth/model.ts";
 import { err, ok, type Result } from "../../../domain/errors/result.ts";
 import { uuidV7 } from "../../../domain/ids/uuid_v7.ts";
+import {
+  beginBootstrap,
+  completeBootstrap,
+} from "../../../domain/auth/bootstrap_state.ts";
+import {
+  constantTimeDigestEqual,
+  opaqueToken,
+  tokenDigest,
+} from "../../../domain/auth/token.ts";
 import type { Queryable, Sql } from "./client.ts";
 import { query } from "./client.ts";
 
@@ -35,9 +44,13 @@ export class PostgresAuthRepository implements AuthRepository {
         ),
       );
     }
-    const configuredDigest = await digest(this.configuredBootstrapToken);
-    const suppliedDigest = await digest(input.bootstrapToken);
+    const configuredDigest = await tokenDigest(this.configuredBootstrapToken);
+    const suppliedDigest = await tokenDigest(input.bootstrapToken);
     return await this.sql.begin(async (tx) => {
+      await query(
+        tx,
+        "select pg_advisory_xact_lock(hashtext('operant.auth.bootstrap'))",
+      );
       await query(
         tx,
         `insert into bootstrap_state(singleton, token_digest, completed) values (true, $1, false) on conflict (singleton) do nothing`,
@@ -48,16 +61,11 @@ export class PostgresAuthRepository implements AuthRepository {
         "select token_digest, completed from bootstrap_state where singleton = true for update",
       );
       const row = state.rows[0];
-      if (row?.completed) {
-        return err(
-          authError(
-            "bootstrap_already_completed",
-            "bootstrap has already been completed",
-            "conflict",
-          ),
-        );
-      }
-      if (!row || !constantTimeEqual(row.token_digest, suppliedDigest)) {
+      const transition = beginBootstrap(
+        row?.completed ? "active" : "bootstrap_required",
+      );
+      if (!transition.ok) return transition;
+      if (!row || !constantTimeDigestEqual(row.token_digest, suppliedDigest)) {
         return err(
           authError(
             "bootstrap_credential_invalid",
@@ -98,9 +106,23 @@ export class PostgresAuthRepository implements AuthRepository {
         userId,
         "authorization_request",
       );
+      const completed = completeBootstrap(transition.value);
+      if (!completed.ok) return completed;
+      await insertBootstrapAudit(tx, {
+        principalId,
+        userId,
+        assignmentId,
+        fullSessionId: full.id,
+        requestSessionId: request.id,
+      });
       await query(
         tx,
-        "update bootstrap_state set completed = true, completed_at = now(), token_digest = null where singleton = true",
+        `update bootstrap_state
+            set completed = true, completed_at = now(),
+                completed_by_human_user_id = $1, token_digest = null,
+                updated_at = now()
+          where singleton = true`,
+        [userId],
       );
       return ok({
         user: {
@@ -109,13 +131,13 @@ export class PostgresAuthRepository implements AuthRepository {
           username: input.username,
           displayName: input.displayName,
         },
-        credentials: { token: full, requestToken: request },
+        credentials: { token: full.token, requestToken: request.token },
       });
     }) as Result<BootstrapResult>;
   }
 
   async authenticate(token: string): Promise<Result<AuthContext>> {
-    const tokenDigest = await digest(token);
+    const digest = await tokenDigest(token);
     const result = await query<{
       session_id: string;
       principal_id: string;
@@ -136,7 +158,7 @@ export class PostgresAuthRepository implements AuthRepository {
        where s.token_digest = $1 and s.revoked_at is null
        group by s.id, s.principal_id, s.human_user_id, s.credential_kind
     `,
-      [tokenDigest],
+      [digest],
     );
     const row = result.rows[0];
     if (!row) {
@@ -205,40 +227,55 @@ async function issueSession(
   principalId: string,
   userId: string,
   kind: CredentialKind,
-): Promise<string> {
+): Promise<{ id: string; token: string }> {
+  const id = uuidV7();
   const token = opaqueToken();
   await query(
     sql,
     `insert into auth_sessions(id, principal_id, human_user_id, credential_kind, token_digest) values ($1,$2,$3,$4,$5)`,
-    [uuidV7(), principalId, userId, kind, await digest(token)],
+    [id, principalId, userId, kind, await tokenDigest(token)],
   );
-  return token;
+  return { id, token };
 }
 
-function opaqueToken(): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(32));
-  return btoa(String.fromCharCode(...bytes)).replaceAll("+", "-").replaceAll(
-    "/",
-    "_",
-  ).replaceAll("=", "");
-}
-async function digest(value: string): Promise<string> {
-  const hash = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(value),
+async function insertBootstrapAudit(
+  sql: Queryable,
+  provenance: {
+    principalId: string;
+    userId: string;
+    assignmentId: string;
+    fullSessionId: string;
+    requestSessionId: string;
+  },
+): Promise<void> {
+  const common = [provenance.principalId, provenance.userId];
+  await query(
+    sql,
+    `
+    insert into auth_audit_events(
+      id, event_type, auth_context_id, principal_id, human_user_id,
+      session_id, role_assignment_id, role_id, credential_kind,
+      boundary_type, details
+    ) values
+      ($1, 'auth.human_user.created', null, $2, $3, null, null, null, null, null, '{}'::jsonb),
+      ($4, 'auth.role_assignment.created', null, $2, $3, null, $5, 'system:super_admin', null, 'system', '{}'::jsonb),
+      ($6, 'auth.session.created', null, $2, $3, $7, null, null, 'human_full', null, '{}'::jsonb),
+      ($8, 'auth.session.created', null, $2, $3, $9, null, null, 'authorization_request', null, '{}'::jsonb),
+      ($10, 'auth.bootstrap.completed', null, $2, $3, null, $5, 'system:super_admin', null, 'system',
+       jsonb_build_object('full_session_id', $7::text, 'authorization_request_session_id', $9::text))
+  `,
+    [
+      uuidV7(),
+      ...common,
+      uuidV7(),
+      provenance.assignmentId,
+      uuidV7(),
+      provenance.fullSessionId,
+      uuidV7(),
+      provenance.requestSessionId,
+      uuidV7(),
+    ],
   );
-  return Array.from(
-    new Uint8Array(hash),
-    (byte) => byte.toString(16).padStart(2, "0"),
-  ).join("");
-}
-function constantTimeEqual(left: string, right: string): boolean {
-  if (left.length !== right.length) return false;
-  let difference = 0;
-  for (let i = 0; i < left.length; i++) {
-    difference |= left.charCodeAt(i) ^ right.charCodeAt(i);
-  }
-  return difference === 0;
 }
 function authError(
   code: string,

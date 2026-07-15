@@ -49,10 +49,8 @@ Deno.test({
         JSON.parse(losers[0].stderr).error.code,
         "bootstrap_already_completed",
       );
-      assertMatch(
-        JSON.parse(winners[0].stdout).data.user.id,
-        /^[0-9a-f-]{36}$/,
-      );
+      const winnerBody = JSON.parse(winners[0].stdout).data;
+      assertMatch(winnerBody.user.id, /^[0-9a-f-]{36}$/);
 
       const bootstrapFacts = await query<
         { users: string; assignments: string; phc: string }
@@ -65,6 +63,100 @@ Deno.test({
       assertEquals(bootstrapFacts.rows[0].users, "1");
       assertEquals(bootstrapFacts.rows[0].assignments, "1");
       assertMatch(bootstrapFacts.rows[0].phc, /^\$argon2id\$/);
+      const completedState = await query<{
+        completed: boolean;
+        completed_by: string;
+      }>(
+        harness.server.sql,
+        "select completed, completed_by_human_user_id::text completed_by from bootstrap_state where singleton=true",
+      );
+      assertEquals(completedState.rows[0], {
+        completed: true,
+        completed_by: winnerBody.user.id,
+      });
+      const authStorePath =
+        `${harness.homeDir}/../xdg-config/operant/auth.json`;
+      const authStore = JSON.parse(await Deno.readTextFile(authStorePath));
+      const originCredentials = authStore.origins[harness.baseUrl];
+      const sessionFacts = await query<
+        { token_digest: string; credential_kind: string }
+      >(
+        harness.server.sql,
+        "select token_digest, credential_kind from auth_sessions order by credential_kind",
+      );
+      assertEquals(sessionFacts.rows.length, 2);
+      assert(
+        sessionFacts.rows.every((row) =>
+          /^[0-9a-f]{64}$/.test(row.token_digest)
+        ),
+      );
+      assert(
+        sessionFacts.rows.every((row) =>
+          row.token_digest !== originCredentials.token
+        ),
+      );
+      assert(
+        sessionFacts.rows.every((row) =>
+          row.token_digest !== originCredentials.requestToken
+        ),
+      );
+
+      const authAudit = await query<{
+        event_type: string;
+        auth_context_id: string | null;
+        human_user_id: string;
+        session_id: string | null;
+        role_assignment_id: string | null;
+        role_id: string | null;
+        credential_kind: string | null;
+        boundary_type: string | null;
+        details: Record<string, unknown>;
+      }>(
+        harness.server.sql,
+        `
+        select event_type, auth_context_id::text, human_user_id::text,
+               session_id::text, role_assignment_id::text, role_id,
+               credential_kind, boundary_type, details
+          from auth_audit_events order by created_at, event_type
+      `,
+      );
+      assertEquals(authAudit.rows.map((row) => row.event_type).sort(), [
+        "auth.bootstrap.completed",
+        "auth.human_user.created",
+        "auth.role_assignment.created",
+        "auth.session.created",
+        "auth.session.created",
+      ]);
+      assert(authAudit.rows.every((row) => row.auth_context_id === null));
+      assert(
+        authAudit.rows.every((row) => row.human_user_id === winnerBody.user.id),
+      );
+      const sessionAudits = authAudit.rows.filter((row) =>
+        row.event_type === "auth.session.created"
+      );
+      assertEquals(sessionAudits.map((row) => row.credential_kind).sort(), [
+        "authorization_request",
+        "human_full",
+      ]);
+      assert(sessionAudits.every((row) => row.session_id !== null));
+      const roleAudit = authAudit.rows.find((row) =>
+        row.event_type === "auth.role_assignment.created"
+      )!;
+      assertEquals(roleAudit.role_id, "system:super_admin");
+      assertEquals(roleAudit.boundary_type, "system");
+      assert(roleAudit.role_assignment_id !== null);
+      assert(!JSON.stringify(authAudit.rows).includes("correct horse"));
+      assert(!JSON.stringify(authAudit.rows).includes(originCredentials.token));
+      const immutableTrigger = await query<{ present: boolean }>(
+        harness.server.sql,
+        `select exists(
+           select 1 from pg_trigger
+            where tgrelid='auth_audit_events'::regclass
+              and tgname='auth_audit_events_immutable'
+              and not tgisinternal
+         ) present`,
+      );
+      assertEquals(immutableTrigger.rows[0].present, true);
 
       const missingInput = await harness.runOptctl([
         "--json",
@@ -82,10 +174,6 @@ Deno.test({
       const home = await harness.runOptctl(["--json", "home"]);
       assertEquals(home.code, 0, home.stderr);
 
-      const authStorePath =
-        `${harness.homeDir}/../xdg-config/operant/auth.json`;
-      const authStore = JSON.parse(await Deno.readTextFile(authStorePath));
-      const originCredentials = authStore.origins[harness.baseUrl];
       const requestOnly = await fetch(`${harness.baseUrl}/metadata/home`, {
         headers: { authorization: `Bearer ${originCredentials.requestToken}` },
       });

@@ -12,9 +12,11 @@ function error(
   message: string,
   severity: string,
 ) {
-  return Response.json({ ok: false, error: { code, message, severity } }, {
-    status,
-  });
+  return Response.json({
+    ok: false,
+    error: { code, message, severity, details: {} },
+    meta: { request_id: "019b7a2e-7c10-7000-8000-000000000001" },
+  }, { status });
 }
 
 async function withMockServer(
@@ -178,7 +180,11 @@ Deno.test("optctl emits TOON by default and stable JSON error envelopes", async 
     assertEquals(envelope.ok, false);
     assertEquals(envelope.error.code, "resource_not_found");
     assertEquals(envelope.error.severity, "not_found");
-    assert(envelope.help.includes("optctl home"));
+    assertEquals(envelope.error.details, {});
+    assertEquals(
+      envelope.meta.request_id,
+      "019b7a2e-7c10-7000-8000-000000000001",
+    );
   });
 });
 
