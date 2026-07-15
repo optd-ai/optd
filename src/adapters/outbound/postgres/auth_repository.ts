@@ -622,6 +622,9 @@ export class PostgresAuthRepository implements AuthRepository {
   ): Promise<Result<HumanUser>> {
     if (!isSuperAdmin(auth)) return authorizationDenied();
     return await this.sql.begin(async (tx) => {
+      const activeSuperAdmins = status === "disabled"
+        ? await lockActiveHumanSuperAdmins(tx)
+        : [];
       const target = (await query<UserRow>(
         tx,
         `select id,principal_id,username,display_name,status from human_users where id=$1 for update`,
@@ -631,19 +634,12 @@ export class PostgresAuthRepository implements AuthRepository {
         return err(authError("not_found", "user was not found", "not_found"));
       }
       if (status === "disabled") {
-        const hasSuper = (await query(
-          tx,
-          `select 1 from role_assignments where principal_id=$1 and role_id='system:super_admin' and active`,
-          [target.principal_id],
-        )).rows.length > 0;
+        const activeSuperAdminPrincipals = new Set(
+          activeSuperAdmins.map((row) => row.principal_id),
+        );
+        const hasSuper = activeSuperAdminPrincipals.has(target.principal_id);
         if (hasSuper) {
-          const count = Number(
-            (await query<{ count: string }>(
-              tx,
-              `select count(*)::text count from human_users u join role_assignments r on r.principal_id=u.principal_id and r.role_id='system:super_admin' and r.active where u.status='active'`,
-            )).rows[0]?.count ?? "0",
-          );
-          if (count <= 1) {
+          if (activeSuperAdminPrincipals.size <= 1) {
             return err(
               authError(
                 "last_super_admin",
@@ -1633,6 +1629,31 @@ function authorizationDenied() {
     ),
   );
 }
+type ActiveHumanSuperAdmin = {
+  user_id: string;
+  principal_id: string;
+  assignment_id: string;
+};
+
+async function lockActiveHumanSuperAdmins(
+  sql: Queryable,
+): Promise<ActiveHumanSuperAdmin[]> {
+  // Every current or future path that can remove human super-admin authority must acquire this first.
+  await query(
+    sql,
+    `select pg_advisory_xact_lock(hashtext('operant.auth.super_admin_invariant'))`,
+  );
+  return (await query<ActiveHumanSuperAdmin>(
+    sql,
+    `select u.id user_id,u.principal_id,r.id assignment_id
+       from human_users u
+       join role_assignments r on r.principal_id=u.principal_id
+      where u.status='active' and r.role_id='system:super_admin' and r.active
+      order by u.id,r.id
+      for update of u,r`,
+  )).rows;
+}
+
 async function confirmHumanPassword(
   sql: Queryable,
   userId: string,

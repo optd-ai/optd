@@ -295,6 +295,107 @@ Deno.test("reset decisions redemption completion and anchored revocation seriali
   }
 });
 
+Deno.test("concurrent super-admin disablement preserves exactly one active human", async () => {
+  const harness = await startLiveHarness();
+  try {
+    const boot = await harness.bootstrap({
+      username: "invariant-admin-one",
+      password: "administrator one password",
+    });
+    assertEquals(boot.code, 0, boot.stderr);
+    const first = (await query<{ id: string; principal_id: string }>(
+      harness.server.sql,
+      `select id,principal_id from human_users where username='invariant-admin-one'`,
+    )).rows[0];
+    const created = await harness.runOptctl([
+      "--json",
+      "auth",
+      "user",
+      "create",
+      "--username",
+      "invariant-admin-two",
+      "--password-stdin",
+    ], "administrator two password\n");
+    assertEquals(created.code, 0, created.stderr);
+    const secondBody = JSON.parse(created.stdout).data;
+    await query(
+      harness.server.sql,
+      `insert into role_assignments(id,principal_id,role_id,boundary_type,active) values($1,$2,'system:super_admin','system',true)`,
+      [crypto.randomUUID(), secondBody.principal_id],
+    );
+    const baselineAudit = Number(
+      (await query<{ count: string }>(
+        harness.server.sql,
+        `select count(*)::text count from auth_audit_events where event_type='auth.human_user.disabled'`,
+      )).rows[0]?.count ?? "0",
+    );
+
+    for (let iteration = 0; iteration < 8; iteration++) {
+      await query(
+        harness.server.sql,
+        `update human_users set status='active',disabled_at=null where id=any($1::uuid[])`,
+        [[first.id, secondBody.id]],
+      );
+      await query(
+        harness.server.sql,
+        `update principals set active=true where id=any($1::uuid[])`,
+        [[first.principal_id, secondBody.principal_id]],
+      );
+      const login = await harness.login({
+        username: "invariant-admin-one",
+        password: "administrator one password",
+      });
+      assertEquals(login.code, 0, login.stderr);
+
+      let releaseInvariant!: () => void;
+      let invariantAcquired!: () => void;
+      const acquired = new Promise<void>((resolve) =>
+        invariantAcquired = resolve
+      );
+      const release = new Promise<void>((resolve) =>
+        releaseInvariant = resolve
+      );
+      const blocker = harness.server.sql.begin(async (tx) => {
+        await query(
+          tx,
+          `select pg_advisory_xact_lock(hashtext('operant.auth.super_admin_invariant'))`,
+        );
+        invariantAcquired();
+        await release;
+      });
+      await acquired;
+      const attemptsPromise = harness.runConcurrent([
+        { args: ["--json", "auth", "user", "disable", first.id] },
+        { args: ["--json", "auth", "user", "disable", secondBody.id] },
+      ]);
+      try {
+        await waitForSuperAdminWaiters(harness.server.sql, 2);
+      } finally {
+        releaseInvariant();
+        await blocker;
+      }
+      const attempts = await attemptsPromise;
+      assertEquals(attempts.filter((attempt) => attempt.code === 0).length, 1);
+      const rejected = attempts.find((attempt) => attempt.code !== 0)!;
+      assertEquals(JSON.parse(rejected.stderr).error.code, "last_super_admin");
+      const active = await query<{ users: string; assignments: string }>(
+        harness.server.sql,
+        `select count(distinct u.id)::text users,count(distinct r.id)::text assignments from human_users u join role_assignments r on r.principal_id=u.principal_id and r.role_id='system:super_admin' and r.active where u.status='active'`,
+      );
+      assertEquals(active.rows[0], { users: "1", assignments: "1" });
+      const audit = Number(
+        (await query<{ count: string }>(
+          harness.server.sql,
+          `select count(*)::text count from auth_audit_events where event_type='auth.human_user.disabled'`,
+        )).rows[0]?.count ?? "0",
+      );
+      assertEquals(audit - baselineAudit, iteration + 1);
+    }
+  } finally {
+    await harness.close();
+  }
+});
+
 Deno.test("reset completion rejects capabilities after request expiry", async () => {
   const harness = await startLiveHarness();
   try {
@@ -363,6 +464,24 @@ Deno.test("reset completion rejects capabilities after request expiry", async ()
     await harness.close();
   }
 });
+
+async function waitForSuperAdminWaiters(
+  sql: Parameters<typeof query>[0],
+  expected: number,
+): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    const waiting = await query<{ count: string }>(
+      sql,
+      `select count(*)::text count from pg_stat_activity where wait_event='advisory' and query like '%operant.auth.super_admin_invariant%'`,
+    );
+    if (Number(waiting.rows[0]?.count ?? "0") >= expected) return;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error(
+    `timed out waiting for ${expected} super-admin invariant contenders`,
+  );
+}
 
 async function resetNonce(
   rootDir: string,
