@@ -166,12 +166,43 @@ export interface AuthRepository extends BootstrapRepository {
   ): Promise<Result<{ revoked: true }>>;
 }
 
-export interface AgentAuthorizationGrantability {
-  canDecide(input: {
+export type AgentAuthorizationGrantabilitySnapshot = {
+  roleDefinitionVersions: ReadonlyArray<{
+    role: string;
+    versionId: string;
+    version: number;
+  }>;
+  policyDefinitionVersions: ReadonlyArray<{
+    policy: string;
+    versionId: string;
+    version: number;
+  }>;
+  capabilitySummaryDigest: string;
+};
+
+export interface AgentAuthorizationGrantabilityState {
+  current(input: {
     auth: AuthContext;
     roles: readonly string[];
     boundary: AuthorizationBoundary;
-  }): Promise<Result<{ allowed: true }>>;
+  }): Promise<
+    Result<{
+      superAdmin: boolean;
+      canDecide: boolean;
+      effectiveRoles: readonly string[];
+      snapshot: AgentAuthorizationGrantabilitySnapshot;
+    }>
+  >;
+}
+
+export interface AgentAuthorizationGrantability {
+  canDecide(input: {
+    auth: AuthContext;
+    decision: "approved" | "denied";
+    roles: readonly string[];
+    boundary: AuthorizationBoundary;
+    state: AgentAuthorizationGrantabilityState;
+  }): Promise<Result<AgentAuthorizationGrantabilitySnapshot>>;
 }
 
 export interface RequestAuthenticator {

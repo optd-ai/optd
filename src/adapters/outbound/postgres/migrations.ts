@@ -574,6 +574,55 @@ export const platformMigrations: PlatformMigration[] = [
       ));
     `,
   },
+  {
+    id: "1012_authorization_grantability",
+    sql: `
+      create table role_definition_versions (
+        id uuid primary key,
+        role_id text not null references system_roles(id),
+        version integer not null check(version > 0),
+        active boolean not null,
+        created_at timestamptz not null default now(),
+        unique(role_id,version)
+      );
+      create unique index role_definition_one_active_idx
+        on role_definition_versions(role_id) where active;
+      insert into role_definition_versions(id,role_id,version,active) values
+        ('01900000-0000-7000-8000-000000000101','system:super_admin',1,true),
+        ('01900000-0000-7000-8000-000000000102','system:admin',1,true);
+
+      create table policy_definition_versions (
+        id uuid primary key,
+        policy_id text not null,
+        version integer not null check(version > 0),
+        active boolean not null,
+        created_at timestamptz not null default now(),
+        unique(policy_id,version)
+      );
+      create unique index policy_definition_one_active_idx
+        on policy_definition_versions(policy_id) where active;
+      create table policy_rules (
+        id uuid primary key,
+        policy_definition_version_id uuid not null references policy_definition_versions(id),
+        role_id text not null references system_roles(id),
+        capability text not null,
+        created_at timestamptz not null default now(),
+        unique(policy_definition_version_id,role_id,capability)
+      );
+      create table policy_assignments (
+        id uuid primary key,
+        policy_definition_version_id uuid not null references policy_definition_versions(id),
+        boundary_type text not null check(boundary_type in ('system','all_projects','project')),
+        project_id uuid references projects(id),
+        active boolean not null,
+        created_at timestamptz not null default now(),
+        disabled_at timestamptz,
+        check((boundary_type='project')=(project_id is not null))
+      );
+      create index policy_assignment_boundary_idx
+        on policy_assignments(boundary_type,project_id) where active;
+    `,
+  },
 ];
 
 export async function applyPlatformMigrations(

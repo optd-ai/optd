@@ -1,6 +1,7 @@
 import { assertEquals, assertExists } from "jsr:@std/assert";
 import { join } from "jsr:@std/path";
 import { query } from "../../../src/adapters/outbound/postgres/client.ts";
+import { uuidV7 } from "../../../src/domain/ids/uuid_v7.ts";
 import {
   type CliLauncher,
   type LiveHarness,
@@ -36,11 +37,52 @@ Deno.test("distinct compiled process trees reconnect wait, delegate, replace, an
     ], "interrupted websocket password\n");
     assertEquals(boot.code, 0, boot.stderr);
     const initial = await storedState(harness);
+    const project = await human.runOptctl([
+      "--json",
+      "project",
+      "create",
+      "agent-work",
+      "--display-name",
+      "Agent Work",
+    ]);
+    assertEquals(project.code, 0, project.stderr);
+    await selectCredential(harness, {
+      token: initial.requestToken,
+      requestToken: initial.requestToken,
+    });
+    const discovered = await requestOnly.runOptctl([
+      "--json",
+      "auth",
+      "roles",
+      "--boundary",
+      "system",
+    ]);
+    assertEquals(discovered.code, 0, discovered.stderr);
+    assertEquals(JSON.parse(discovered.stdout).data.roles, [
+      "system:admin",
+      "system:super_admin",
+    ]);
+    const requestOnlyWork = await requestOnly.runOptctl([
+      "--json",
+      "project",
+      "list",
+    ]);
+    assertEquals(requestOnlyWork.code, 1);
+    assertEquals(
+      JSON.parse(requestOnlyWork.stderr).error.code,
+      "authorization_insufficient",
+    );
+    await selectCredential(harness, {
+      token: initial.token,
+      requestToken: initial.requestToken,
+    });
 
     const request = await requestOnly.runOptctl([
       "--json",
       "auth",
       "request",
+      "--role",
+      "system:admin",
       "--role",
       "system:super_admin",
       "--boundary",
@@ -83,6 +125,16 @@ Deno.test("distinct compiled process trees reconnect wait, delegate, replace, an
     const topToken = topState.token;
     assertExists(topToken);
     const topAuthorizationId = await requestAuthorizationId(harness, requestId);
+    await selectCredential(harness, {
+      token: topToken,
+      requestToken: undefined,
+    });
+    const allowedWork = await waitingAgent.runOptctl([
+      "--json",
+      "project",
+      "list",
+    ]);
+    assertEquals(allowedWork.code, 0, allowedWork.stderr);
     const contextsAfter = await requestContextCount(
       harness,
       initial.requestSessionId,
@@ -115,6 +167,113 @@ Deno.test("distinct compiled process trees reconnect wait, delegate, replace, an
     );
     assertEquals(wrongRequester.status, 401);
     assertEquals(wrongRequester.body.error.code, "redemption_invalid");
+
+    await selectCredential(harness, {
+      token: undefined,
+      requestToken: initial.requestToken,
+    });
+    const deniedRequest = await requestOnly.runOptctl([
+      "--json",
+      "auth",
+      "request",
+      "--role",
+      "system:admin",
+      "--boundary",
+      "system",
+      "--reason",
+      "public denial",
+    ]);
+    assertEquals(deniedRequest.code, 0, deniedRequest.stderr);
+    const deniedRequestId = JSON.parse(deniedRequest.stdout).data.id as string;
+    await selectCredential(harness, {
+      token: topToken,
+      requestToken: undefined,
+    });
+    const deniedDecision = await waitingAgent.runOptctl([
+      "--json",
+      "auth",
+      "deny",
+      deniedRequestId,
+      "--reason",
+      "not appropriate",
+    ]);
+    assertEquals(deniedDecision.code, 0, deniedDecision.stderr);
+
+    await selectCredential(harness, {
+      token: undefined,
+      requestToken: initial.requestToken,
+    });
+    const narrowRequest = await requestOnly.runOptctl([
+      "--json",
+      "auth",
+      "request",
+      "--role",
+      "system:admin",
+      "--boundary",
+      "system",
+      "--reason",
+      "narrow decider",
+    ]);
+    assertEquals(narrowRequest.code, 0, narrowRequest.stderr);
+    const narrowRequestId = JSON.parse(narrowRequest.stdout).data.id as string;
+    await selectCredential(harness, {
+      token: topToken,
+      requestToken: undefined,
+    });
+    const narrowApproval = await waitingAgent.runOptctl([
+      "--json",
+      "auth",
+      "approve",
+      narrowRequestId,
+      "--yes",
+    ]);
+    assertEquals(narrowApproval.code, 0, narrowApproval.stderr);
+    await selectCredential(harness, {
+      token: undefined,
+      requestToken: initial.requestToken,
+    });
+    const narrowWait = await delegatedAgent.runOptctl([
+      "--json",
+      "auth",
+      "wait",
+      narrowRequestId,
+    ]);
+    assertEquals(narrowWait.code, 0, narrowWait.stderr);
+    const narrowToken = (await storedState(harness)).token;
+    await seedAgentDecidePolicy(harness);
+    await selectCredential(harness, {
+      token: undefined,
+      requestToken: initial.requestToken,
+    });
+    const broadRequest = await requestOnly.runOptctl([
+      "--json",
+      "auth",
+      "request",
+      "--role",
+      "system:super_admin",
+      "--boundary",
+      "system",
+      "--reason",
+      "under-authorized decision",
+    ]);
+    assertEquals(broadRequest.code, 0, broadRequest.stderr);
+    const broadRequestId = JSON.parse(broadRequest.stdout).data.id as string;
+    await selectCredential(harness, {
+      token: narrowToken,
+      requestToken: undefined,
+    });
+    const underAuthorized = await delegatedAgent.runOptctl([
+      "--json",
+      "auth",
+      "approve",
+      broadRequestId,
+      "--yes",
+    ]);
+    assertEquals(underAuthorized.code, 1);
+    assertEquals(
+      JSON.parse(underAuthorized.stderr).error.code,
+      "authorization_insufficient",
+    );
 
     await selectCredential(harness, {
       token: undefined,
@@ -336,6 +495,24 @@ async function lineage(harness: LiveHarness, authorizationId: string) {
     `select parent_authorization_id,root_authorization_id from agent_authorizations where id=$1`,
     [authorizationId],
   )).rows[0]!;
+}
+async function seedAgentDecidePolicy(harness: LiveHarness) {
+  const versionId = uuidV7();
+  await query(
+    harness.server.sql,
+    `insert into policy_definition_versions(id,policy_id,version,active) values($1,'system:e2e_agent_decider',1,true)`,
+    [versionId],
+  );
+  await query(
+    harness.server.sql,
+    `insert into policy_rules(id,policy_definition_version_id,role_id,capability) values($1,$2,'system:admin','auth.request.decide')`,
+    [uuidV7(), versionId],
+  );
+  await query(
+    harness.server.sql,
+    `insert into policy_assignments(id,policy_definition_version_id,boundary_type,active) values($1,$2,'system',true)`,
+    [uuidV7(), versionId],
+  );
 }
 async function postJson(
   origin: string,

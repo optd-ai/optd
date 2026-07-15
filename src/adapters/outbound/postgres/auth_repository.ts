@@ -1,7 +1,10 @@
 import type {
   AgentAuthorizationGrantability,
+  AgentAuthorizationGrantabilitySnapshot,
+  AgentAuthorizationGrantabilityState,
   AuthRepository,
 } from "../../../application/ports/authentication.ts";
+import { CurrentPolicyAgentAuthorizationGrantability } from "../../../application/services/auth/grantability.ts";
 import type {
   AgentAuthorization,
   AgentAuthorizationRequest,
@@ -50,7 +53,7 @@ export class PostgresAuthRepository implements AuthRepository {
     private readonly configuredBootstrapToken?: string,
     maxConcurrentHashes = 4,
     private readonly grantability: AgentAuthorizationGrantability =
-      new SuperAdminGrantability(),
+      new CurrentPolicyAgentAuthorizationGrantability(),
   ) {
     this.hashes = new ImmediateSemaphore(maxConcurrentHashes);
   }
@@ -1519,10 +1522,22 @@ export class PostgresAuthRepository implements AuthRepository {
       return authorizationDenied();
     }
     const params = boundaryParams(boundary);
-    const rows = isSuperAdmin(auth)
+    const anchorSuperAdmin = Boolean(
+      (await query<{ found: boolean }>(
+        this.sql,
+        `select exists(
+         select 1 from human_users u
+         join role_assignments ra on ra.principal_id=u.principal_id
+         where u.id=$1 and u.status='active' and ra.active
+           and ra.role_id='system:super_admin'
+       ) found`,
+        [auth.humanUserId],
+      )).rows[0]?.found,
+    );
+    const rows = anchorSuperAdmin
       ? (await query<{ role_id: string }>(
         this.sql,
-        `select id role_id from system_roles order by id`,
+        `select id role_id from system_roles where active order by id`,
       )).rows
       : auth.authorizationId
       ? (await query<{ role_id: string }>(
@@ -1676,8 +1691,10 @@ export class PostgresAuthRepository implements AuthRepository {
       }
       const grantable = await this.grantability.canDecide({
         auth,
+        decision: input.decision,
         roles: row.roles,
         boundary: boundaryFromRow(row),
+        state: new PostgresAgentAuthorizationGrantabilityState(tx),
       });
       if (!grantable.ok) return grantable;
       let authorizationId: string | null = null;
@@ -1790,7 +1807,9 @@ export class PostgresAuthRepository implements AuthRepository {
           ? { type: "project", project_id: row.project_id }
           : { type: row.boundary_type },
         approver_auth_context_id: auth.id,
-        capability_summary_digest: input.capabilitySummaryDigest ?? null,
+        role_definition_versions: grantable.value.roleDefinitionVersions,
+        policy_definition_versions: grantable.value.policyDefinitionVersions,
+        capability_summary_digest: grantable.value.capabilitySummaryDigest,
       };
       const updated = (await query<AgentRequestRow>(
         tx,
@@ -2265,18 +2284,149 @@ async function signalPasswordReset(sql: Queryable, id: string): Promise<void> {
 const DUMMY_PASSWORD_HASH =
   "$argon2id$v=19$m=19456,t=2,p=1$hVNuIMcQVCGTBSGnJ6Bg8A$IA2Q5Wevful1bg2s1x2mfuyqmNlXMfR/M+jIUD4U85w";
 
-export class SuperAdminGrantability implements AgentAuthorizationGrantability {
-  canDecide(input: {
+export class PostgresAgentAuthorizationGrantabilityState
+  implements AgentAuthorizationGrantabilityState {
+  constructor(private readonly sql: Queryable) {}
+
+  async current(input: {
     auth: AuthContext;
     roles: readonly string[];
     boundary: AuthorizationBoundary;
-  }): Promise<Result<{ allowed: true }>> {
-    return Promise.resolve(
-      isSuperAdmin(input.auth)
-        ? ok({ allowed: true as const })
-        : authorizationDenied(),
+  }): Promise<
+    Result<{
+      superAdmin: boolean;
+      canDecide: boolean;
+      effectiveRoles: readonly string[];
+      snapshot: AgentAuthorizationGrantabilitySnapshot;
+    }>
+  > {
+    const [boundaryType, projectId] = boundaryParams(input.boundary);
+    const assignments = input.auth.authorizationId
+      ? (await query<{ role_id: string }>(
+        this.sql,
+        `select ar.role_id
+           from agent_authorizations a
+           join agent_authorization_roles ar on ar.authorization_id=a.id
+          where a.id=$1 and a.human_user_id=$2 and a.revoked_at is null
+            and ar.boundary_type=$3 and ar.project_id is not distinct from $4::uuid
+          order by ar.role_id
+          for share of a,ar`,
+        [
+          input.auth.authorizationId,
+          input.auth.humanUserId,
+          boundaryType,
+          projectId,
+        ],
+      )).rows
+      : (await query<{ role_id: string }>(
+        this.sql,
+        `select ra.role_id
+           from role_assignments ra
+           join human_users u on u.principal_id=ra.principal_id
+          where u.id=$1 and u.status='active' and ra.active
+            and ra.boundary_type=$2 and ra.project_id is not distinct from $3::uuid
+          order by ra.role_id
+          for share of u,ra`,
+        [input.auth.humanUserId, boundaryType, projectId],
+      )).rows;
+    const effectiveRoles = assignments.map((row) => row.role_id);
+    const superAdmin = isSuperAdmin(input.auth) && await currentSuperAdmin(
+      this.sql,
+      input.auth,
+    );
+
+    const policies = effectiveRoles.length
+      ? (await query<{
+        policy_id: string;
+        policy_version_id: string;
+        version: number;
+        capability: string;
+      }>(
+        this.sql,
+        `select pd.policy_id,pd.id policy_version_id,pd.version,pr.capability
+           from policy_assignments pa
+           join policy_definition_versions pd on pd.id=pa.policy_definition_version_id and pd.active
+           join policy_rules pr on pr.policy_definition_version_id=pd.id
+          where pa.active and pa.boundary_type=$1
+            and pa.project_id is not distinct from $2::uuid
+            and pr.role_id=any($3::text[])
+          order by pd.policy_id,pd.version,pr.capability
+          for share of pa,pd,pr`,
+        [boundaryType, projectId, effectiveRoles],
+      )).rows
+      : [];
+    const roleVersions = input.roles.length
+      ? (await query<{ role_id: string; id: string; version: number }>(
+        this.sql,
+        `select role_id,id,version from role_definition_versions
+          where active and role_id=any($1::text[]) order by role_id,version for share`,
+        [input.roles],
+      )).rows
+      : [];
+    const snapshot = {
+      roleDefinitionVersions: roleVersions.map((row) => ({
+        role: row.role_id,
+        versionId: row.id,
+        version: Number(row.version),
+      })),
+      policyDefinitionVersions: policies.map((row) => ({
+        policy: row.policy_id,
+        versionId: row.policy_version_id,
+        version: Number(row.version),
+      })).filter((value, index, values) =>
+        index ===
+          values.findIndex((other) => other.versionId === value.versionId)
+      ),
+      capabilitySummaryDigest: "",
+    };
+    snapshot.capabilitySummaryDigest = await tokenDigest(JSON.stringify({
+      boundary: input.boundary,
+      roles: input.roles,
+      effective_roles: effectiveRoles,
+      policies: snapshot.policyDefinitionVersions,
+      capabilities: policies.map((row) => row.capability).sort(),
+    }));
+    return ok({
+      superAdmin,
+      canDecide: policies.some((row) =>
+        row.capability === "auth.request.decide"
+      ),
+      effectiveRoles,
+      snapshot,
+    });
+  }
+}
+
+async function currentSuperAdmin(
+  sql: Queryable,
+  auth: AuthContext,
+): Promise<boolean> {
+  if (auth.authorizationId) {
+    return Boolean(
+      (await query<{ found: boolean }>(
+        sql,
+        `select exists(
+         select 1 from agent_authorizations a
+         join agent_authorization_roles ar on ar.authorization_id=a.id
+         where a.id=$1 and a.human_user_id=$2 and a.revoked_at is null
+           and ar.role_id='system:super_admin' and ar.boundary_type='system'
+       ) found`,
+        [auth.authorizationId, auth.humanUserId],
+      )).rows[0]?.found,
     );
   }
+  return Boolean(
+    (await query<{ found: boolean }>(
+      sql,
+      `select exists(
+       select 1 from role_assignments ra
+       join human_users u on u.principal_id=ra.principal_id
+       where u.id=$1 and u.status='active' and ra.active
+         and ra.role_id='system:super_admin' and ra.boundary_type='system'
+     ) found`,
+      [auth.humanUserId],
+    )).rows[0]?.found,
+  );
 }
 
 export class ImmediateSemaphore {
