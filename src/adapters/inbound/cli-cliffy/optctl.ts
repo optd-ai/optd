@@ -170,6 +170,68 @@ function usageError(message: string): OptctlError {
   );
 }
 
+function interactiveInputError(message: string): OptctlError {
+  return new OptctlError(
+    errorEnvelope({
+      code: "interactive_input_required",
+      message,
+      details: {},
+    }),
+    2,
+  );
+}
+
+async function readPassword(args: string[]): Promise<string> {
+  if (
+    args.some((arg) => arg === "--password" || arg.startsWith("--password="))
+  ) {
+    throw usageError(
+      "plaintext password arguments are not supported; use --password-stdin or an interactive prompt",
+    );
+  }
+  if (args.includes("--password-stdin")) {
+    const input = await new Response(Deno.stdin.readable).text();
+    return input.replace(/\r?\n$/, "");
+  }
+  if (!Deno.stdin.isTerminal() || !Deno.stderr.isTerminal()) {
+    throw interactiveInputError(
+      "password input requires a terminal or --password-stdin",
+    );
+  }
+  const first = await promptSecret("Password: ");
+  const confirmation = await promptSecret("Confirm password: ");
+  if (first !== confirmation) {
+    throw new OptctlError(
+      errorEnvelope({
+        code: "password_confirmation_required",
+        message: "password confirmation does not match",
+        details: {},
+      }),
+      2,
+    );
+  }
+  return first;
+}
+
+async function promptSecret(label: string): Promise<string> {
+  await Deno.stderr.write(new TextEncoder().encode(label));
+  Deno.stdin.setRaw(true);
+  const bytes: number[] = [];
+  const buffer = new Uint8Array(1);
+  try {
+    while (true) {
+      const count = await Deno.stdin.read(buffer);
+      if (count === null || buffer[0] === 10 || buffer[0] === 13) break;
+      if ((buffer[0] === 8 || buffer[0] === 127) && bytes.length) bytes.pop();
+      else if (buffer[0] !== 8 && buffer[0] !== 127) bytes.push(buffer[0]);
+    }
+  } finally {
+    Deno.stdin.setRaw(false);
+    await Deno.stderr.write(new TextEncoder().encode("\n"));
+  }
+  return new TextDecoder().decode(new Uint8Array(bytes));
+}
+
 function isErrorEnvelope(value: unknown): value is ErrorEnvelope {
   if (!value || typeof value !== "object") return false;
   const envelope = value as Record<string, unknown>;
@@ -322,14 +384,14 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
     } else if (cmd === "status" && sub === "bootstrap") {
       result = await getJson(`${parsed.server}/api/v1/auth/bootstrap/status`);
     } else if (cmd === "bootstrap" && sub === "init") {
-      const username = option(parsed.positional.slice(2), "--username");
-      const password = option(parsed.positional.slice(2), "--password");
-      const displayName =
-        option(parsed.positional.slice(2), "--display-name") ?? username;
+      const bootstrapArgs = parsed.positional.slice(2);
+      const username = option(bootstrapArgs, "--username");
+      const password = await readPassword(bootstrapArgs);
+      const displayName = option(bootstrapArgs, "--display-name") ?? username;
       const bootstrapToken = Deno.env.get("OPERANT_BOOTSTRAP_TOKEN");
-      if (!username || password === undefined || !bootstrapToken) {
+      if (!username || !bootstrapToken) {
         throw usageError(
-          "bootstrap init requires --username and --password with OPERANT_BOOTSTRAP_TOKEN configured",
+          "bootstrap init requires --username and OPERANT_BOOTSTRAP_TOKEN configured",
         );
       }
       result = await decodeJsonResponse(

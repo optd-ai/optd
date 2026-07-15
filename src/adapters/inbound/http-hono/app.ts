@@ -25,7 +25,7 @@ import type {
 import type { UploadedPackFile } from "../../outbound/yaml/pack_loader.ts";
 import type { RequestAuthenticator } from "../../../application/ports/authentication.ts";
 import type { AuthVariables } from "./auth_middleware.ts";
-import { requireBearer } from "./auth_middleware.ts";
+import { requireBearer, serverActor } from "./auth_middleware.ts";
 import {
   type BootstrapHttpService,
   registerAuthRoutes,
@@ -263,7 +263,8 @@ export function makeHttpApp(
 
   app.post(
     "/queries",
-    async (c) => resultJson(c, await deps.queries.query(await c.req.json())),
+    async (c) =>
+      resultJson(c, await deps.queries.query(await authenticatedJson(c))),
   );
 
   app.post(
@@ -274,7 +275,7 @@ export function makeHttpApp(
         await deps.actions.preview(
           c.req.param("namespace"),
           c.req.param("action"),
-          await c.req.json(),
+          await authenticatedJson(c),
         ),
       ),
   );
@@ -286,7 +287,7 @@ export function makeHttpApp(
         await deps.actions.commit(
           c.req.param("namespace"),
           c.req.param("action"),
-          await c.req.json(),
+          await authenticatedJson(c),
         ),
       ),
   );
@@ -294,12 +295,12 @@ export function makeHttpApp(
   app.post(
     "/changesets/preview",
     async (c) =>
-      resultJson(c, await deps.changesets.preview(await c.req.json())),
+      resultJson(c, await deps.changesets.preview(await authenticatedJson(c))),
   );
   app.post(
     "/changesets/commit",
     async (c) =>
-      resultJson(c, await deps.changesets.commit(await c.req.json())),
+      resultJson(c, await deps.changesets.commit(await authenticatedJson(c))),
   );
   app.get(
     "/objects/:namespace/:resource/:id",
@@ -310,6 +311,7 @@ export function makeHttpApp(
           `${c.req.param("namespace")}.${c.req.param("resource")}`,
           c.req.param("id"),
           c.req.query("include_archived") === "true",
+          serverActor(c.get("auth")),
         ),
       ),
   );
@@ -345,14 +347,23 @@ export function makeHttpApp(
 
   app.get(
     "/secrets",
-    async (c) => resultJson(c, await deps.secrets.list()),
+    async (c) =>
+      resultJson(
+        c,
+        await deps.secrets.list({
+          actor: serverActor(c.get("auth")),
+        }),
+      ),
   );
   app.post(
     "/secrets",
-    async (c) => resultJson(c, await deps.secrets.set(await c.req.json())),
+    async (c) =>
+      resultJson(c, await deps.secrets.set(await authenticatedJson(c))),
   );
   app.delete("/secrets/:name", async (c) => {
-    const body = await c.req.json().catch(() => ({}));
+    const body = await authenticatedJson(c).catch(() => ({
+      actor_context: serverActor(c.get("auth")),
+    }));
     return resultJson(c, await deps.secrets.delete(c.req.param("name"), body));
   });
 
@@ -382,6 +393,20 @@ export function makeHttpApp(
   });
 
   return app;
+}
+
+async function authenticatedJson<T extends Record<string, unknown>>(c: {
+  req: { json(): Promise<unknown> };
+  get(key: "auth"): AuthVariables["auth"];
+}): Promise<T> {
+  const body = await c.req.json();
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw new SyntaxError("request body must be a JSON object");
+  }
+  return {
+    ...(body as Record<string, unknown>),
+    actor_context: serverActor(c.get("auth")),
+  } as unknown as T;
 }
 
 async function multipartFiles(request: Request): Promise<UploadedPackFile[]> {

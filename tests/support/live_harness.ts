@@ -28,11 +28,12 @@ export type LoginInput = { username: string; password: string };
 export type ProcessTreeKind = "human" | "request_only" | "agent";
 export type CliLauncher = {
   kind: ProcessTreeKind;
-  runOptctl(args: string[]): Promise<CliResult>;
+  runOptctl(args: string[], stdin?: string): Promise<CliResult>;
   close(): Promise<void>;
 };
 export type ConcurrentCliRequest = {
   args: string[];
+  stdin?: string;
   launcher?: CliLauncher;
 };
 export type ProcessLaunchResult = {
@@ -53,7 +54,7 @@ export type LiveHarness = {
   binaryPath: string;
   /** Test-support SQL is only for focused setup/assertions, never acceptance actions. */
   server: { sql: Sql };
-  runOptctl(args: string[]): Promise<CliResult>;
+  runOptctl(args: string[], stdin?: string): Promise<CliResult>;
   bootstrap(input: BootstrapInput): Promise<CliResult>;
   login(input: LoginInput): Promise<CliResult>;
   bootstrapProcess(input: BootstrapInput): Promise<ProcessLaunchResult>;
@@ -114,7 +115,7 @@ export async function startLiveHarness(
   const binaryPath = await compileOptctl();
   const env = Deno.env.toObject();
   env.OPERANT_DATA_DIR = dataDir;
-  env.OPERANT_PORT = "0";
+  env.OPERANT_PORT = String(freePort());
   env.OPERANT_PG_PORT = String(freePort());
   env.OPERANT_HOST = "127.0.0.1";
   env.HOME = homeDir;
@@ -131,16 +132,25 @@ export async function startLiveHarness(
     `postgres://operant@127.0.0.1:${env.OPERANT_PG_PORT}/postgres`;
   const sql = createPostgresClient(databaseUrl);
   const launchers = new Set<CliLauncher>();
-  const runBinary = async (args: string[]): Promise<CliResult> => {
+  const runBinary = async (
+    args: string[],
+    stdin?: string,
+  ): Promise<CliResult> => {
     const argv = ["--server", running.url, ...args];
     const startedAt = Date.now();
-    const output = await new Deno.Command(binaryPath, {
+    const child = new Deno.Command(binaryPath, {
       args: argv,
       env,
+      stdin: stdin === undefined ? "null" : "piped",
       stdout: "piped",
       stderr: "piped",
-    }).output();
-    return cliResult(argv, startedAt, output);
+    }).spawn();
+    if (stdin !== undefined) {
+      const writer = child.stdin.getWriter();
+      await writer.write(new TextEncoder().encode(stdin));
+      await writer.close();
+    }
+    return cliResult(argv, startedAt, await child.output());
   };
   const harness: LiveHarness = {
     rootDir,
@@ -156,10 +166,9 @@ export async function startLiveHarness(
         "init",
         "--username",
         input.username,
-        "--password",
-        input.password,
+        "--password-stdin",
         ...input.displayName ? ["--display-name", input.displayName] : [],
-      ]);
+      ], `${input.password}\n`);
     },
     async login(input) {
       return await runBinary([
@@ -167,9 +176,8 @@ export async function startLiveHarness(
         "login",
         "--username",
         input.username,
-        "--password",
-        input.password,
-      ]);
+        "--password-stdin",
+      ], `${input.password}\n`);
     },
     async bootstrapProcess(input) {
       const launcher = await harness.createProcessTreeLauncher("human");
@@ -179,10 +187,9 @@ export async function startLiveHarness(
           "init",
           "--username",
           input.username,
-          "--password",
-          input.password,
+          "--password-stdin",
           ...input.displayName ? ["--display-name", input.displayName] : [],
-        ]);
+        ], `${input.password}\n`);
         return { result, launcher };
       } catch (error) {
         await launcher.close();
@@ -197,9 +204,8 @@ export async function startLiveHarness(
           "login",
           "--username",
           input.username,
-          "--password",
-          input.password,
-        ]);
+          "--password-stdin",
+        ], `${input.password}\n`);
         return { result, launcher };
       } catch (error) {
         await launcher.close();
@@ -250,8 +256,8 @@ export async function startLiveHarness(
     },
     async runConcurrent(requests) {
       return await Promise.all(
-        requests.map(({ args, launcher }) =>
-          launcher ? launcher.runOptctl(args) : runBinary(args)
+        requests.map(({ args, stdin, launcher }) =>
+          launcher ? launcher.runOptctl(args, stdin) : runBinary(args, stdin)
         ),
       );
     },
@@ -315,6 +321,7 @@ async function compileOptctl(): Promise<string> {
     args: [
       "compile",
       "--allow-read",
+      "--allow-write",
       "--allow-env",
       "--allow-net",
       "--output",
@@ -599,11 +606,18 @@ async function makeProcessTreeLauncher(
         if (!line) continue;
         const message = JSON.parse(line);
         if (message.close) Deno.exit(0);
-        const output = await new Deno.Command(binary, {
+        const process = new Deno.Command(binary, {
           args: message.argv,
+          stdin: message.stdin === undefined ? "null" : "piped",
           stdout: "piped",
           stderr: "piped",
-        }).output();
+        }).spawn();
+        if (message.stdin !== undefined) {
+          const writer = process.stdin.getWriter();
+          await writer.write(new TextEncoder().encode(message.stdin));
+          await writer.close();
+        }
+        const output = await process.output();
         console.log(JSON.stringify({
           code: output.code,
           stdout: new TextDecoder().decode(output.stdout),
@@ -645,13 +659,13 @@ async function makeProcessTreeLauncher(
 
   return {
     kind,
-    async runOptctl(args) {
+    async runOptctl(args, stdin) {
       if (closed) throw new Error("process-tree launcher is closed");
       const argv = ["--server", serverUrl(), ...args];
       const startedAt = Date.now();
       const operation = queue.then(async () => {
         await input.write(
-          new TextEncoder().encode(`${JSON.stringify({ argv })}\n`),
+          new TextEncoder().encode(`${JSON.stringify({ argv, stdin })}\n`),
         );
         return JSON.parse(await readLine()) as {
           code: number;

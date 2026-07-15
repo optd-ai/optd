@@ -31,12 +31,15 @@ export class PostgresProjectRepository implements ProjectRepository {
     input: CreateProject,
   ): Promise<Result<Project>> {
     try {
-      const rows = await query<ProjectRow>(
-        this.sql,
-        `insert into projects(id,slug,display_name,description,created_by_auth_context_id,updated_by_auth_context_id) values ($1,$2,$3,$4,$5,$5) returning ${COLUMNS}`,
-        [uuidV7(), input.slug, input.displayName, input.description, auth.id],
-      );
-      return ok(mapProject(rows.rows[0]));
+      return await this.sql.begin(async (tx) => {
+        const rows = await query<ProjectRow>(
+          tx,
+          `insert into projects(id,slug,display_name,description,created_by_auth_context_id,updated_by_auth_context_id) values ($1,$2,$3,$4,$5,$5) returning ${COLUMNS}`,
+          [uuidV7(), input.slug, input.displayName, input.description, auth.id],
+        );
+        await audit(tx, auth, "project.create", rows.rows[0].id);
+        return ok(mapProject(rows.rows[0]));
+      }) as Result<Project>;
     } catch (error) {
       if (postgresCode(error) === "23505") {
         return err(
@@ -56,28 +59,37 @@ export class PostgresProjectRepository implements ProjectRepository {
     _auth: AuthContext,
     filter: { status: ProjectStatus | "all"; slug?: string },
   ): Promise<Result<Project[]>> {
-    const rows = await query<ProjectRow>(
-      this.sql,
-      `select ${COLUMNS} from projects where ($1 = 'all' or status = $1) and ($2::text is null or slug = $2) order by slug`,
-      [filter.status, filter.slug ?? null],
-    );
-    return ok(rows.rows.map(mapProject));
+    return await this.sql.begin(async (tx) => {
+      const rows = await query<ProjectRow>(
+        tx,
+        `select ${COLUMNS} from projects where ($1 = 'all' or status = $1) and ($2::text is null or slug = $2) order by slug`,
+        [filter.status, filter.slug ?? null],
+      );
+      await audit(tx, _auth, "project.read", null, { filter });
+      return ok(rows.rows.map(mapProject));
+    }) as Result<Project[]>;
   }
 
   async get(_auth: AuthContext, id: string): Promise<Result<Project>> {
-    const rows = await query<ProjectRow>(
-      this.sql,
-      `select ${COLUMNS} from projects where id = $1`,
-      [id],
-    );
-    return rows.rows[0] ? ok(mapProject(rows.rows[0])) : err(
-      projectError(
-        "project_not_found",
-        "project was not found",
-        "not_found",
-        { project_id: id },
-      ),
-    );
+    return await this.sql.begin(async (tx) => {
+      const rows = await query<ProjectRow>(
+        tx,
+        `select ${COLUMNS} from projects where id = $1`,
+        [id],
+      );
+      if (!rows.rows[0]) {
+        return err(
+          projectError(
+            "project_not_found",
+            "project was not found",
+            "not_found",
+            { project_id: id },
+          ),
+        );
+      }
+      await audit(tx, _auth, "project.read", id);
+      return ok(mapProject(rows.rows[0]));
+    }) as Result<Project>;
   }
 
   async update(
@@ -107,6 +119,9 @@ export class PostgresProjectRepository implements ProjectRepository {
           auth.id,
         ],
       );
+      await audit(tx, auth, "project.update", id, {
+        expected_version: input.expectedVersion,
+      });
       return ok(mapProject(rows.rows[0]));
     });
   }
@@ -117,7 +132,10 @@ export class PostgresProjectRepository implements ProjectRepository {
     expectedVersion: number,
   ): Promise<Result<Project>> {
     return await this.mutate(id, async (tx, current) => {
-      if (current.status === "archived") return ok(mapProject(current));
+      if (current.status === "archived") {
+        await audit(tx, auth, "project.archive", id, { idempotent: true });
+        return ok(mapProject(current));
+      }
       if (Number(current.version) !== expectedVersion) {
         return versionConflict(id, current.version);
       }
@@ -126,6 +144,9 @@ export class PostgresProjectRepository implements ProjectRepository {
         `update projects set status='archived', version=version+1, archived_at=now(), updated_at=now(), updated_by_auth_context_id=$2 where id=$1 returning ${COLUMNS}`,
         [id, auth.id],
       );
+      await audit(tx, auth, "project.archive", id, {
+        expected_version: expectedVersion,
+      });
       return ok(mapProject(rows.rows[0]));
     });
   }
@@ -153,6 +174,25 @@ export class PostgresProjectRepository implements ProjectRepository {
       return await operation(tx, rows.rows[0]);
     }) as Result<Project>;
   }
+}
+
+async function audit(
+  sql: Queryable,
+  auth: AuthContext,
+  action:
+    | "project.read"
+    | "project.create"
+    | "project.update"
+    | "project.archive",
+  projectId: string | null,
+  details: unknown = {},
+): Promise<void> {
+  await query(
+    sql,
+    `insert into project_audit_events(id, auth_context_id, project_id, action, decision, details)
+     values ($1, $2, $3, $4, 'allowed', $5::jsonb)`,
+    [uuidV7(), auth.id, projectId, action, JSON.stringify(details)],
+  );
 }
 
 function mapProject(row: ProjectRow): Project {

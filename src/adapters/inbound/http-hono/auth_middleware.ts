@@ -55,8 +55,34 @@ export async function requireBearer(
       toHttpStatus(result.error) as 400,
     );
   }
+  if (
+    result.value.credentialKind === "authorization_request" &&
+    !c.req.path.startsWith("/api/v1/auth/")
+  ) {
+    return c.json(
+      errorEnvelope({
+        code: "authorization_insufficient",
+        message:
+          "authorization-request credentials cannot perform platform work",
+        details: { credential_kind: result.value.credentialKind },
+      }),
+      403,
+    );
+  }
   c.set("auth", result.value);
   await next();
+}
+
+export function serverActor(auth: AuthContext) {
+  return {
+    id: auth.principalId,
+    roles: auth.roles.map((role) =>
+      role === "system:super_admin" ? "super_admin" : role
+    ),
+    auth_context_id: auth.id,
+    principal_type: auth.principalType,
+    human_user_id: auth.humanUserId,
+  };
 }
 
 function containsAuthority(value: unknown): boolean {

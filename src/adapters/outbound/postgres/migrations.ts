@@ -366,8 +366,18 @@ export const platformMigrations: PlatformMigration[] = [
         archived_at timestamptz
       );
       alter table role_assignments add constraint role_assignments_project_fk foreign key(project_id) references projects(id);
+      create table project_audit_events (
+        id uuid primary key,
+        auth_context_id uuid not null references auth_contexts(id),
+        project_id uuid references projects(id),
+        action text not null check (action in ('project.read', 'project.create', 'project.update', 'project.archive')),
+        decision text not null check (decision in ('allowed', 'denied')),
+        details jsonb not null default '{}'::jsonb,
+        created_at timestamptz not null default now()
+      );
       create index auth_sessions_token_digest_idx on auth_sessions(token_digest) where revoked_at is null;
-      create index projects_status_slug_idx on projects(status, slug)
+      create index projects_status_slug_idx on projects(status, slug);
+      create index project_audit_context_idx on project_audit_events(auth_context_id, created_at)
     `,
   },
 ];

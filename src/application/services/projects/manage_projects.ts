@@ -13,16 +13,21 @@ import {
 } from "../../../domain/projects/model.ts";
 import { isUuidV7 } from "../../../domain/ids/uuid_v7.ts";
 
+type ProjectAction =
+  | "project.read"
+  | "project.create"
+  | "project.update"
+  | "project.archive";
+
 export function makeProjectService(repository: ProjectRepository) {
-  const authorized = (auth: AuthContext): Result<true> =>
-    auth.credentialKind === "human_full" &&
-      auth.roles.includes("system:super_admin")
+  const authorized = (auth: AuthContext, action: ProjectAction): Result<true> =>
+    auth.roles.includes("system:super_admin")
       ? { ok: true, value: true }
       : err({
         code: "authorization_insufficient",
-        message: "credential is not authorized for project administration",
+        message: `credential is not authorized for ${action}`,
         severity: "authorization",
-        details: {},
+        details: { action },
       });
   const validId = (id: string): Result<true> =>
     isUuidV7(id) ? { ok: true, value: true } : err(
@@ -35,7 +40,7 @@ export function makeProjectService(repository: ProjectRepository) {
       auth: AuthContext,
       input: { slug: unknown; displayName: unknown; description?: unknown },
     ): Promise<Result<Project>> {
-      const permit = authorized(auth);
+      const permit = authorized(auth, "project.create");
       if (!permit.ok) return permit;
       const slug = validateProjectSlug(input.slug);
       if (!slug.ok) return slug;
@@ -54,7 +59,7 @@ export function makeProjectService(repository: ProjectRepository) {
       status: string,
       slug?: string,
     ): Promise<Result<Project[]>> {
-      const permit = authorized(auth);
+      const permit = authorized(auth, "project.read");
       if (!permit.ok) return permit;
       if (!(["active", "archived", "all"] as string[]).includes(status)) {
         return err(
@@ -75,7 +80,7 @@ export function makeProjectService(repository: ProjectRepository) {
       });
     },
     async get(auth: AuthContext, id: string) {
-      const permit = authorized(auth);
+      const permit = authorized(auth, "project.read");
       if (!permit.ok) return permit;
       const valid = validId(id);
       if (!valid.ok) return valid;
@@ -90,7 +95,7 @@ export function makeProjectService(repository: ProjectRepository) {
         description?: unknown;
       },
     ): Promise<Result<Project>> {
-      const permit = authorized(auth);
+      const permit = authorized(auth, "project.update");
       if (!permit.ok) return permit;
       const valid = validId(id);
       if (!valid.ok) return valid;
@@ -140,7 +145,7 @@ export function makeProjectService(repository: ProjectRepository) {
       id: string,
       expectedVersion: unknown,
     ): Promise<Result<Project>> {
-      const permit = authorized(auth);
+      const permit = authorized(auth, "project.archive");
       if (!permit.ok) return permit;
       const valid = validId(id);
       if (!valid.ok) return valid;
