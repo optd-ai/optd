@@ -1,5 +1,28 @@
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert";
+import { isUuidV7 } from "../../../src/domain/ids/uuid_v7.ts";
 import { startLiveHarness } from "../../support/live_harness.ts";
+
+function assertFrozenErrorEnvelope(text: string, expectedCode: string) {
+  const envelope = JSON.parse(text);
+  assertEquals(Object.keys(envelope).sort(), ["error", "meta", "ok"]);
+  assertEquals(Object.keys(envelope.error).sort(), [
+    "code",
+    "details",
+    "message",
+  ]);
+  assertEquals(envelope.ok, false);
+  assertEquals(envelope.error.code, expectedCode);
+  assert(typeof envelope.error.message === "string");
+  assert(
+    envelope.error.details !== null &&
+      typeof envelope.error.details === "object" &&
+      !Array.isArray(envelope.error.details),
+  );
+  assert(isUuidV7(envelope.meta.request_id));
+  assertEquals("help" in envelope, false);
+  assertEquals("severity" in envelope.error, false);
+  return envelope;
+}
 
 Deno.test("fresh real server supports compiled CLI TOON/JSON, restart, and stable failures", async () => {
   let harness: Awaited<ReturnType<typeof startLiveHarness>>;
@@ -48,6 +71,15 @@ Deno.test("fresh real server supports compiled CLI TOON/JSON, restart, and stabl
       "bootstrap_required",
     );
 
+    const serverError = await harness.runOptctl([
+      "--json",
+      "metadata",
+      "pack",
+      "missing.missing",
+    ]);
+    assertEquals(serverError.code, 1);
+    assertFrozenErrorEnvelope(serverError.stderr, "not_found");
+
     const malformed = await harness.runOptctl([
       "--json",
       "changeset",
@@ -56,7 +88,11 @@ Deno.test("fresh real server supports compiled CLI TOON/JSON, restart, and stabl
       "{",
     ]);
     assertEquals(malformed.code, 2);
-    assertEquals(JSON.parse(malformed.stderr).error.code, "usage_error");
+    const malformedEnvelope = assertFrozenErrorEnvelope(
+      malformed.stderr,
+      "usage_error",
+    );
+    assert(Array.isArray(malformedEnvelope.error.details.help));
 
     await harness.restart();
     const restarted = await harness.runOptctl(["--json", "status", "ready"]);
@@ -73,8 +109,8 @@ Deno.test("fresh real server supports compiled CLI TOON/JSON, restart, and stabl
       stderr: "piped",
     }).output();
     assertEquals(unavailable.code, 1);
-    assertEquals(
-      JSON.parse(new TextDecoder().decode(unavailable.stderr)).error.code,
+    assertFrozenErrorEnvelope(
+      new TextDecoder().decode(unavailable.stderr),
       "unavailable",
     );
     failed = false;

@@ -42,15 +42,17 @@ Deno.test("strict contracts reject unknown fields with sorted stable issues", ()
   ]);
 });
 
-Deno.test("API envelopes always contain a UUIDv7 request id and safe details", () => {
-  const success = successEnvelope({ value: 1 });
+Deno.test("API envelopes generate non-overridable UUIDv7 request ids and safe details", () => {
+  const success = successEnvelope({ value: 1 }, { request_id: "caller" });
   const failure = errorEnvelope({
     code: "bad_request",
     message: "bad",
     details: "unsafe",
-  });
+  }, { request_id: "caller" });
   assert(isUuidV7(success.meta.request_id));
   assert(isUuidV7(failure.meta.request_id));
+  assertEquals(success.meta.request_id === "caller", false);
+  assertEquals(failure.meta.request_id === "caller", false);
   assertEquals(failure.error.details, {});
 });
 

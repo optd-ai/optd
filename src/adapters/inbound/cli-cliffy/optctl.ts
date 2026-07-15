@@ -2,6 +2,10 @@ import { Command } from "jsr:@cliffy/command";
 import { walk } from "jsr:@std/fs/walk";
 import { relative } from "jsr:@std/path";
 import { formatToon } from "../../outbound/toon/format.ts";
+import {
+  type ErrorEnvelope,
+  errorEnvelope,
+} from "../../../schemas/api/contracts.ts";
 
 export type OptctlRunResult = { stdout: string; stderr: string; code: number };
 type Parsed = {
@@ -10,19 +14,8 @@ type Parsed = {
   verbose: boolean;
   positional: string[];
 };
-type StableErrorEnvelope = {
-  ok: false;
-  error: {
-    code: string;
-    message: string;
-    severity?: string;
-    details?: unknown;
-  };
-  help: string[];
-};
-
 class OptctlError extends Error {
-  constructor(readonly envelope: StableErrorEnvelope, readonly exitCode = 1) {
+  constructor(readonly envelope: ErrorEnvelope, readonly exitCode = 1) {
     super(envelope.error.message);
   }
 }
@@ -138,72 +131,44 @@ function parseSortArg(value: string): { field: string; direction: string } {
   return { field, direction };
 }
 function httpError(status: number, body: unknown): OptctlError {
-  const bodyRecord = body && typeof body === "object"
-    ? body as Record<string, unknown>
-    : {};
-  const bodyError = bodyRecord.error && typeof bodyRecord.error === "object"
-    ? bodyRecord.error as Record<string, unknown>
-    : undefined;
-  const code = typeof bodyError?.code === "string"
-    ? bodyError.code
-    : `http_${status}`;
-  const message = typeof bodyError?.message === "string"
-    ? bodyError.message
-    : `HTTP ${status}`;
-  const severity = typeof bodyError?.severity === "string"
-    ? bodyError.severity
-    : status === 404
-    ? "not_found"
-    : status === 409
-    ? "conflict"
-    : status >= 500
-    ? "internal"
-    : "validation";
-  return new OptctlError({
-    ok: false,
-    error: {
-      code,
-      message,
-      severity,
-      details: bodyError?.details ?? body,
-    },
-    help: helpForError(code, status),
-  }, 1);
+  if (isErrorEnvelope(body)) return new OptctlError(body, 1);
+  return new OptctlError(
+    errorEnvelope({
+      code: `http_${status}`,
+      message: `HTTP ${status}`,
+      details: { status },
+    }),
+    1,
+  );
 }
 
 function usageError(message: string): OptctlError {
-  return new OptctlError({
-    ok: false,
-    error: { code: "usage_error", message, severity: "validation" },
-    help: [
-      "optctl --help",
-      "optctl home",
-      "optctl metadata resource <namespace.resource>",
-    ],
-  }, 2);
+  return new OptctlError(
+    errorEnvelope({
+      code: "usage_error",
+      message,
+      details: {
+        help: [
+          "optctl --help",
+          "optctl home",
+          "optctl metadata resource <namespace.resource>",
+        ],
+      },
+    }),
+    2,
+  );
 }
 
-function helpForError(code: string, status: number): string[] {
-  if (code.includes("cursor")) {
-    return ["optctl query <namespace.resource> --where '<expr>' --limit 20"];
-  }
-  if (status === 404) {
-    return [
-      "optctl home",
-      "optctl metadata resource <namespace.resource>",
-      "optctl metadata action <namespace.action>",
-    ];
-  }
-  if (code.includes("policy")) {
-    return ["optctl metadata policy <namespace.policy>", "optctl home"];
-  }
-  if (code.includes("migration")) {
-    return [
-      "optctl migration inspect <migration_id>",
-      "optctl migration apply <migration_id> --stage",
-    ];
-  }
-  return ["optctl --help", "optctl home"];
+function isErrorEnvelope(value: unknown): value is ErrorEnvelope {
+  if (!value || typeof value !== "object") return false;
+  const envelope = value as Record<string, unknown>;
+  if (envelope.ok !== false || !envelope.error || !envelope.meta) return false;
+  const error = envelope.error as Record<string, unknown>;
+  const meta = envelope.meta as Record<string, unknown>;
+  return typeof error.code === "string" &&
+    typeof error.message === "string" &&
+    error.details !== null && typeof error.details === "object" &&
+    !Array.isArray(error.details) && typeof meta.request_id === "string";
 }
 
 function parseActorArg(value: string): unknown {
@@ -499,19 +464,15 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       };
     }
     const unavailable = error instanceof TypeError;
-    const envelope: StableErrorEnvelope = {
-      ok: false,
-      error: {
-        code: unavailable ? "unavailable" : "internal_error",
-        message: unavailable
-          ? "server is unavailable"
-          : error instanceof Error
-          ? error.message
-          : String(error),
-        severity: unavailable ? "unavailable" : "internal",
-      },
-      help: ["optctl --help", "optctl status ready"],
-    };
+    const envelope = errorEnvelope({
+      code: unavailable ? "unavailable" : "internal_error",
+      message: unavailable
+        ? "server is unavailable"
+        : error instanceof Error
+        ? error.message
+        : String(error),
+      details: {},
+    });
     return { stdout: "", stderr: render(envelope, parse(args).json), code: 1 };
   }
 }

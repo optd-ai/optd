@@ -74,7 +74,7 @@ export function successEnvelope<T>(
   data: T,
   meta: Record<string, unknown> = {},
 ): SuccessEnvelope<T> {
-  return { ok: true, data, meta: { request_id: uuidV7(), ...meta } };
+  return { ok: true, data, meta: { ...meta, request_id: uuidV7() } };
 }
 
 export function errorEnvelope(
@@ -88,7 +88,7 @@ export function errorEnvelope(
       message: error.message,
       details: isRecord(error.details) ? error.details : {},
     },
-    meta: { request_id: uuidV7(), ...meta },
+    meta: { ...meta, request_id: uuidV7() },
   };
 }
 
