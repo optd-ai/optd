@@ -1,0 +1,75 @@
+{
+  "kind": "Resource",
+  "apiVersion": "operant.dev/v1",
+  "metadata": {
+    "name": "opportunity",
+  },
+  "spec": {
+    "fields": {
+      "name": {
+        "type": "string",
+        "required": true,
+      },
+      "stage": {
+        "type": "string",
+        "required": true,
+      },
+      "expected_revenue": {
+        "type": "decimal",
+      },
+      "probability": {
+        "type": "integer",
+      },
+      "company_id": {
+        "type": "string",
+        "ref": "company",
+      },
+      "contact_id": {
+        "type": "string",
+        "ref": "contact",
+      },
+      "lead_id": {
+        "type": "string",
+        "ref": "lead",
+      },
+      "sales_team_id": {
+        "type": "string",
+        "ref": "sales_team",
+      },
+      "owner_id": {
+        "type": "string",
+      },
+      "lost_reason_id": {
+        "type": "string",
+        "ref": "lost_reason",
+      },
+      "close_date": {
+        "type": "timestamp",
+      },
+    },
+    "lifecycle": {
+      "field": "stage",
+      "states": [
+        "new",
+        "qualified",
+        "proposal",
+        "won",
+        "lost",
+      ],
+    },
+    "axi": {
+      "list": {
+        "fields": [
+          "id",
+          "name",
+          "stage",
+          "expected_revenue",
+        ],
+      },
+      "help": [
+        "optctl query default.opportunity",
+        "optctl metadata resource default.opportunity",
+      ],
+    },
+  },
+}

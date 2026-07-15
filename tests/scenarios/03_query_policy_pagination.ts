@@ -25,7 +25,7 @@ Deno.test("CRM query filters projections pagination and cursor mismatch through 
       server.url,
       "pack",
       "apply",
-      "prototypes/crm-default-pack",
+      "tests/fixtures/packs/crm-default-pack",
       "--actor",
       "manager:sales_manager",
       "--json",

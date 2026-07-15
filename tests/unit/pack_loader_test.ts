@@ -104,7 +104,7 @@ Deno.test("pack loader accepts canonical CRM fixture", async () => {
       }
     }
   }
-  await collect("prototypes/crm-default-pack");
+  await collect("tests/fixtures/packs/crm-default-pack");
   const pack = await loadPackFromFiles(files);
   assertEquals(pack.namespace, "default");
   assertEquals(Object.keys(pack.resources).length, 12);

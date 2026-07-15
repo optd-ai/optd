@@ -1,0 +1,72 @@
+{
+  "kind": "Resource",
+  "apiVersion": "operant.dev/v1",
+  "metadata": {
+    "name": "lead",
+  },
+  "spec": {
+    "fields": {
+      "name": {
+        "type": "string",
+        "required": true,
+      },
+      "email": {
+        "type": "string",
+      },
+      "phone": {
+        "type": "string",
+      },
+      "company_name": {
+        "type": "string",
+      },
+      "source": {
+        "type": "string",
+      },
+      "score": {
+        "type": "integer",
+      },
+      "status": {
+        "type": "string",
+        "required": true,
+      },
+      "owner_id": {
+        "type": "string",
+      },
+      "sales_team_id": {
+        "type": "string",
+        "ref": "sales_team",
+      },
+      "lost_reason_id": {
+        "type": "string",
+        "ref": "lost_reason",
+      },
+      "next_activity_at": {
+        "type": "timestamp",
+      },
+    },
+    "lifecycle": {
+      "field": "status",
+      "states": [
+        "new",
+        "contacted",
+        "qualified",
+        "converted",
+        "disqualified",
+      ],
+    },
+    "axi": {
+      "list": {
+        "fields": [
+          "id",
+          "name",
+          "email",
+          "phone",
+        ],
+      },
+      "help": [
+        "optctl query default.lead",
+        "optctl metadata resource default.lead",
+      ],
+    },
+  },
+}

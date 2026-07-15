@@ -1,0 +1,30 @@
+{
+  "kind": "Relationship",
+  "apiVersion": "operant.dev/v1",
+  "metadata": {
+    "name": "contact_company",
+  },
+  "spec": {
+    "from": {
+      "resource": "contact",
+      "field": "id",
+    },
+    "to": {
+      "resource": "company",
+      "field": "id",
+    },
+    "fields": {
+      "role": {
+        "type": "string",
+      },
+      "primary": {
+        "type": "boolean",
+      },
+    },
+    "axi": {
+      "help": [
+        "optctl metadata relationship default.contact_company",
+      ],
+    },
+  },
+}

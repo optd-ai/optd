@@ -1,0 +1,79 @@
+{
+  "kind": "Policy",
+  "apiVersion": "operant.dev/v1",
+  "metadata": { "name": "project_access" },
+  "spec": {
+    "model": "sql_lowerable.v1",
+    "rules": [
+      { "role": "admin", "allow": ["*"] },
+      {
+        "role": "project_manager",
+        "allow": [
+          "read",
+          "create",
+          "update",
+          "archive",
+          "transition",
+          "comment",
+          "action",
+        ],
+        "resources": ["*"],
+        "where": "true",
+      },
+      {
+        "role": "project_member",
+        "allow": ["read"],
+        "resources": ["default.project"],
+        "where": "visibility == \"internal\" || owner_id == actor.id || id in actor.project_ids",
+      },
+      {
+        "role": "project_member",
+        "allow": ["read", "create"],
+        "resources": ["default.task", "default.project_milestone"],
+        "where": "project_id in actor.project_ids",
+      },
+      {
+        "role": "project_member",
+        "allow": ["read", "create"],
+        "resources": ["default.timesheet_entry"],
+        "where": "task_id in actor.task_ids",
+      },
+      {
+        "role": "project_member",
+        "allow": ["update", "transition", "comment"],
+        "resources": ["default.task"],
+        "where": "assignee_id == actor.id || project_id in actor.managed_project_ids",
+      },
+      {
+        "role": "project_member",
+        "allow": ["create"],
+        "resources": ["default.timesheet_entry"],
+        "where": "actor_id == actor.id",
+      },
+      {
+        "role": "project_member",
+        "allow": ["action"],
+        "resources": ["*"],
+        "where": "true",
+      },
+      {
+        "role": "viewer",
+        "allow": ["read"],
+        "resources": [
+          "default.project",
+          "default.task",
+          "default.task_stage",
+          "default.task_tag",
+        ],
+        "where": "visibility == \"internal\" || project_id in actor.project_ids",
+      },
+    ],
+    "axi": {
+      "purpose": "Project policy fixture using RBAC and actor project/task arrays; super_admin bypass remains audited by the engine.",
+      "actor_examples": [
+        "manager:project_manager",
+        "assignee with JSON actor {\"id\":\"alice\",\"roles\":[\"project_member\"],\"project_ids\":[\"proj_1\"],\"task_ids\":[\"task_1\"]}",
+      ],
+    },
+  },
+}

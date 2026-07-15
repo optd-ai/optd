@@ -1,0 +1,23 @@
+{
+  "kind": "Relationship",
+  "apiVersion": "operant.dev/v1",
+  "metadata": {
+    "name": "activity_contact",
+  },
+  "spec": {
+    "from": {
+      "resource": "activity",
+      "field": "id",
+    },
+    "to": {
+      "resource": "contact",
+      "field": "id",
+    },
+    "fields": {},
+    "axi": {
+      "help": [
+        "optctl metadata relationship default.activity_contact",
+      ],
+    },
+  },
+}

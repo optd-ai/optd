@@ -1,0 +1,36 @@
+{
+  "kind": "Resource",
+  "apiVersion": "operant.dev/v1",
+  "metadata": {
+    "name": "lost_reason",
+  },
+  "spec": {
+    "fields": {
+      "name": {
+        "type": "string",
+        "required": true,
+      },
+      "label": {
+        "type": "string",
+        "required": true,
+      },
+      "active": {
+        "type": "boolean",
+      },
+    },
+    "axi": {
+      "list": {
+        "fields": [
+          "id",
+          "name",
+          "label",
+          "active",
+        ],
+      },
+      "help": [
+        "optctl query default.lost_reason",
+        "optctl metadata resource default.lost_reason",
+      ],
+    },
+  },
+}

@@ -25,7 +25,7 @@ Deno.test("CRM hooks normalize/validate leads and convert_lead action enqueues o
       server.url,
       "pack",
       "apply",
-      "prototypes/crm-default-pack",
+      "tests/fixtures/packs/crm-default-pack",
       "--json",
     ]);
     assertEquals(apply.code, 0, apply.stderr);

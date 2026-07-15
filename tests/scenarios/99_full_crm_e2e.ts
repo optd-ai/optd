@@ -77,7 +77,7 @@ Deno.test("full CRM MVP e2e through compiled optctl, HTTP, app, and Postgres", a
     const preview = await optctl([
       "pack",
       "preview",
-      "prototypes/crm-default-pack",
+      "tests/fixtures/packs/crm-default-pack",
       "--json",
     ]);
     assertEquals(preview.code, 0, preview.stderr);
@@ -100,7 +100,7 @@ Deno.test("full CRM MVP e2e through compiled optctl, HTTP, app, and Postgres", a
     const apply = await optctl([
       "pack",
       "apply",
-      "prototypes/crm-default-pack",
+      "tests/fixtures/packs/crm-default-pack",
       "--json",
     ]);
     assertEquals(apply.code, 0, apply.stderr);
@@ -492,7 +492,7 @@ Deno.test("full CRM MVP e2e through compiled optctl, HTTP, app, and Postgres", a
     const projectPreview = await optctl([
       "pack",
       "preview",
-      "prototypes/project-management-pack",
+      "tests/fixtures/packs/project-management-pack",
       "--json",
     ]);
     assertEquals(projectPreview.code, 0, projectPreview.stderr);

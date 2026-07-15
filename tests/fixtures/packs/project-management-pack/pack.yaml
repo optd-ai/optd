@@ -1,0 +1,32 @@
+{
+  "kind": "Pack",
+  "apiVersion": "operant.dev/v1",
+  "metadata": {
+    "namespace": "default",
+    "name": "project_management",
+    "version": "0.1.0",
+  },
+  "spec": {
+    "purpose": "Project and task management resources for agent-operated work tracking.",
+    "axi": {
+      "home": {
+        "title": "Project management pack",
+        "resources": [
+          "default.project",
+          "default.task",
+          "default.timesheet_entry",
+        ],
+        "actions": [
+          "default.start_task",
+          "default.block_task",
+          "default.complete_task",
+        ],
+      },
+      "help": [
+        "optctl metadata resource default.task",
+        "optctl query default.task --where 'project_id == \"PROJECT_ID\"'",
+        "optctl action preview default.start_task --input '{\"task_id\":\"TASK_ID\"}'",
+      ],
+    },
+  },
+}

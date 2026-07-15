@@ -27,7 +27,7 @@ Deno.test("CRM lead changeset preview/commit/view/history and auditable idempote
       server.url,
       "pack",
       "apply",
-      "prototypes/crm-default-pack",
+      "tests/fixtures/packs/crm-default-pack",
       "--json",
     ]);
     assertEquals(apply.code, 0, apply.stderr);
@@ -310,7 +310,7 @@ Deno.test("CRM lead changeset preview/commit/view/history and auditable idempote
       server.url,
       "pack",
       "apply",
-      "prototypes/crm-default-pack",
+      "tests/fixtures/packs/crm-default-pack",
       "--json",
     ]);
     assertEquals(reapply.code, 0, reapply.stderr);

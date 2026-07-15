@@ -1,0 +1,39 @@
+{
+  "kind": "Resource",
+  "apiVersion": "operant.dev/v1",
+  "metadata": { "name": "project" },
+  "spec": {
+    "label": "Project",
+    "fields": {
+      "name": { "type": "string", "required": true },
+      "description": { "type": "string" },
+      "status": {
+        "type": "string",
+        "required": true,
+        "enum": ["active", "on_hold", "done", "archived"],
+      },
+      "owner_id": { "type": "string", "required": true },
+      "visibility": {
+        "type": "string",
+        "required": true,
+        "enum": ["private", "members", "internal"],
+      },
+      "start_date": { "type": "date" },
+      "target_date": { "type": "date" },
+    },
+    "hooks": {
+      "after_commit": ["notify_project_change"],
+    },
+    "axi": {
+      "purpose": "Track project ownership, visibility, target dates, and health.",
+      "create": {
+        "required_fields": ["name", "status", "owner_id", "visibility"],
+      },
+      "list": { "fields": ["id", "name", "status", "owner_id", "target_date"] },
+      "help": [
+        "optctl changeset preview create-project.json",
+        "optctl query default.project --where 'status == \"active\"' --fields id,name,status,owner_id",
+      ],
+    },
+  },
+}

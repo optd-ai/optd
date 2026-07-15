@@ -1,0 +1,21 @@
+{
+  "kind": "Action",
+  "apiVersion": "operant.dev/v1",
+  "metadata": {
+    "name": "mark_lost",
+  },
+  "spec": {
+    "hook": "mark_lost",
+    "input": [
+      "opportunity_id",
+      "lost_reason_id",
+      "note",
+    ],
+    "axi": {
+      "purpose": "Mark an opportunity as lost with a reason.",
+      "help": [
+        "optctl action preview default.mark_lost --input ...",
+      ],
+    },
+  },
+}

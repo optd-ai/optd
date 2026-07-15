@@ -25,7 +25,7 @@ Deno.test("project-management pack executes generic project/task workflow", asyn
       server.url,
       "pack",
       "apply",
-      "prototypes/project-management-pack",
+      "tests/fixtures/packs/project-management-pack",
       "--json",
     ]);
     assertEquals(apply.code, 0, apply.stderr);

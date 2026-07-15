@@ -75,7 +75,7 @@ spec:
       server.url,
       "pack",
       "preview",
-      "prototypes/crm-default-pack",
+      "tests/fixtures/packs/crm-default-pack",
       "--json",
     ]);
     assertEquals(preview.code, 0, preview.stderr);
@@ -102,7 +102,7 @@ spec:
       server.url,
       "pack",
       "apply",
-      "prototypes/crm-default-pack",
+      "tests/fixtures/packs/crm-default-pack",
       "--json",
     ]);
     assertEquals(apply.code, 0, apply.stderr);

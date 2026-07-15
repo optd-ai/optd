@@ -1,0 +1,30 @@
+{
+  "kind": "Hook",
+  "apiVersion": "operant.dev/v1",
+  "metadata": {
+    "name": "log_activity",
+  },
+  "spec": {
+    "script": "log_activity.ts",
+    "timeout": "2s",
+    "permissions": {
+      "net": false,
+      "read": false,
+      "write": false,
+      "env": false,
+      "run": false,
+    },
+    "output": {
+      "schema": "changeset.operations.v1",
+    },
+    "attachments": [
+      {
+        "phase": "action",
+      },
+    ],
+    "axi": {
+      "purpose": "log_activity hook for CRM prototype.",
+      "whenToUse": "Runs from metadata-driven attachment points; agents normally invoke actions instead.",
+    },
+  },
+}

@@ -1,0 +1,48 @@
+{
+  "kind": "Resource",
+  "apiVersion": "operant.dev/v1",
+  "metadata": {
+    "name": "note",
+  },
+  "spec": {
+    "fields": {
+      "body": {
+        "type": "string",
+        "required": true,
+      },
+      "author_id": {
+        "type": "string",
+      },
+      "lead_id": {
+        "type": "string",
+        "ref": "lead",
+      },
+      "opportunity_id": {
+        "type": "string",
+        "ref": "opportunity",
+      },
+      "contact_id": {
+        "type": "string",
+        "ref": "contact",
+      },
+      "company_id": {
+        "type": "string",
+        "ref": "company",
+      },
+    },
+    "axi": {
+      "list": {
+        "fields": [
+          "id",
+          "body",
+          "author_id",
+          "lead_id",
+        ],
+      },
+      "help": [
+        "optctl query default.note",
+        "optctl metadata resource default.note",
+      ],
+    },
+  },
+}

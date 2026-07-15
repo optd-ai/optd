@@ -1,0 +1,23 @@
+{
+  "kind": "Action",
+  "apiVersion": "operant.dev/v1",
+  "metadata": {
+    "name": "log_activity",
+  },
+  "spec": {
+    "hook": "log_activity",
+    "input": [
+      "resource",
+      "object_id",
+      "type",
+      "subject",
+      "note",
+    ],
+    "axi": {
+      "purpose": "Log an activity and optional note against a CRM object.",
+      "help": [
+        "optctl action preview default.log_activity --input ...",
+      ],
+    },
+  },
+}

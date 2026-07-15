@@ -1,0 +1,30 @@
+{
+  "kind": "Relationship",
+  "apiVersion": "operant.dev/v1",
+  "metadata": {
+    "name": "opportunity_contact",
+  },
+  "spec": {
+    "from": {
+      "resource": "opportunity",
+      "field": "id",
+    },
+    "to": {
+      "resource": "contact",
+      "field": "id",
+    },
+    "fields": {
+      "role": {
+        "type": "string",
+      },
+      "primary": {
+        "type": "boolean",
+      },
+    },
+    "axi": {
+      "help": [
+        "optctl metadata relationship default.opportunity_contact",
+      ],
+    },
+  },
+}

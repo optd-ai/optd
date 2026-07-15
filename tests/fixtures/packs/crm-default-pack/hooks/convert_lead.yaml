@@ -1,0 +1,45 @@
+{
+  "kind": "Hook",
+  "apiVersion": "operant.dev/v1",
+  "metadata": {
+    "name": "convert_lead",
+  },
+  "spec": {
+    "script": "convert_lead.ts",
+    "timeout": "2s",
+    "permissions": {
+      "net": false,
+      "read": false,
+      "write": false,
+      "env": false,
+      "run": false,
+    },
+    "output": {
+      "schema": "changeset.operations.v1",
+    },
+    "attachments": [
+      {
+        "phase": "action.preview",
+        "action": "default.convert_lead",
+        "order": 100,
+        "input": {
+          "lead": "$current",
+          "input": "$action.input",
+        },
+      },
+      {
+        "phase": "action.commit",
+        "action": "default.convert_lead",
+        "order": 100,
+        "input": {
+          "lead": "$current",
+          "input": "$action.input",
+        },
+      },
+    ],
+    "axi": {
+      "purpose": "convert_lead hook for CRM prototype.",
+      "whenToUse": "Runs from metadata-driven attachment points; agents normally invoke actions instead.",
+    },
+  },
+}

@@ -1,0 +1,19 @@
+{
+  "kind": "Action",
+  "apiVersion": "operant.dev/v1",
+  "metadata": {
+    "name": "mark_won",
+  },
+  "spec": {
+    "hook": "mark_won",
+    "input": [
+      "opportunity_id",
+    ],
+    "axi": {
+      "purpose": "Mark an opportunity as won.",
+      "help": [
+        "optctl action preview default.mark_won --input ...",
+      ],
+    },
+  },
+}
