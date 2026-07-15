@@ -409,7 +409,7 @@ async function launchServer(
   const stderrPump = pipeToLog(process.stderr, log);
   const decoder = new TextDecoder();
   let buffered = "";
-  const deadline = Date.now() + 30_000;
+  const deadline = Date.now() + 60_000;
   try {
     while (Date.now() < deadline) {
       const next = await raceWithTimeout(
@@ -598,7 +598,7 @@ async function queryHookDiagnostics(sql: Sql): Promise<string> {
   }
 }
 
-async function makeProcessTreeLauncher(
+export async function makeProcessTreeLauncher(
   kind: ProcessTreeKind,
   binaryPath: string,
   env: Record<string, string>,
@@ -646,10 +646,28 @@ async function makeProcessTreeLauncher(
   }).spawn();
   const input = child.stdin.getWriter();
   const output = child.stdout.getReader();
+  const errorOutput = child.stderr.getReader();
   const decoder = new TextDecoder();
   let buffered = "";
+  let stderr = "";
   let queue = Promise.resolve<unknown>(undefined);
   let closed = false;
+  let finalized: Promise<void> | undefined;
+
+  const stderrPump = (async () => {
+    try {
+      while (true) {
+        const next = await errorOutput.read();
+        if (next.done) return;
+        stderr += new TextDecoder().decode(next.value);
+        if (stderr.length > MAX_DIAGNOSTIC_BYTES) {
+          stderr = stderr.slice(-MAX_DIAGNOSTIC_BYTES);
+        }
+      }
+    } catch {
+      // Cancellation and process termination close the stream.
+    }
+  })();
 
   async function readLine(): Promise<string> {
     while (true) {
@@ -661,11 +679,42 @@ async function makeProcessTreeLauncher(
       }
       const next = await output.read();
       if (next.done) {
-        const stderr = await new Response(child.stderr).text().catch(() => "");
+        await stderrPump;
         throw new Error(`process-tree launcher exited: ${stderr}`);
       }
       buffered += decoder.decode(next.value, { stream: true });
     }
+  }
+
+  function finalize(graceful: boolean, waitForQueue: boolean): Promise<void> {
+    if (finalized) return finalized;
+    closed = true;
+    finalized = (async () => {
+      if (waitForQueue) await queue.catch(() => undefined);
+      if (graceful) {
+        await input.write(new TextEncoder().encode('{"close":true}\n')).catch(
+          () => undefined,
+        );
+      }
+      await input.close().catch(() => undefined);
+      const exited = await raceWithTimeout(
+        child.status,
+        5_000,
+        "launcher stop timed out",
+      ).then(() => true, () => false);
+      if (!exited) {
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          // Already exited.
+        }
+      }
+      await child.status.catch(() => undefined);
+      await output.cancel().catch(() => undefined);
+      await errorOutput.cancel().catch(() => undefined);
+      await stderrPump.catch(() => undefined);
+    })();
+    return finalized;
   }
 
   return {
@@ -685,39 +734,21 @@ async function makeProcessTreeLauncher(
         };
       });
       queue = operation.then(() => undefined, () => undefined);
-      const result = await operation;
-      return {
-        argv,
-        code: result.code,
-        stdout: result.stdout.trimEnd(),
-        stderr: result.stderr.trimEnd(),
-        startedAt,
-        durationMs: Date.now() - startedAt,
-      };
-    },
-    async close() {
-      if (closed) return;
-      closed = true;
-      await queue;
-      await input.write(new TextEncoder().encode('{"close":true}\n')).catch(
-        () => undefined,
-      );
-      await input.close().catch(() => undefined);
-      const exited = await raceWithTimeout(
-        child.status,
-        5_000,
-        "launcher stop timed out",
-      )
-        .then(() => true, () => false);
-      if (!exited) {
-        try {
-          child.kill("SIGKILL");
-        } catch {
-          // Already exited.
-        }
+      try {
+        const result = await operation;
+        return {
+          argv,
+          code: result.code,
+          stdout: result.stdout.trimEnd(),
+          stderr: result.stderr.trimEnd(),
+          startedAt,
+          durationMs: Date.now() - startedAt,
+        };
+      } catch (error) {
+        await finalize(false, false);
+        throw error;
       }
-      await child.status.catch(() => undefined);
-      await output.cancel().catch(() => undefined);
     },
+    close: () => finalize(true, true),
   };
 }
