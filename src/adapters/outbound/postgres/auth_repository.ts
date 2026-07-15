@@ -1,6 +1,9 @@
 import type { AuthRepository } from "../../../application/ports/authentication.ts";
 import type {
+  AgentAuthorization,
+  AgentAuthorizationRequest,
   AuthContext,
+  AuthorizationBoundary,
   BootstrapInput,
   BootstrapResult,
   CredentialKind,
@@ -8,6 +11,7 @@ import type {
   HumanUser,
   LoginResult,
   PasswordReset,
+  RoleAssignment,
 } from "../../../domain/auth/model.ts";
 import { immutableAuthContext } from "../../../domain/auth/model.ts";
 import { transitionPasswordReset } from "../../../domain/auth/password_reset_state.ts";
@@ -34,6 +38,9 @@ import { query } from "./client.ts";
 export class PostgresAuthRepository implements AuthRepository {
   private readonly hashes: ImmediateSemaphore;
   private resetListener: Promise<{ unlisten(): Promise<void> }> | undefined;
+  private agentRequestListener:
+    | Promise<{ unlisten(): Promise<void> }>
+    | undefined;
 
   constructor(
     private readonly sql: Sql,
@@ -191,23 +198,52 @@ export class PostgresAuthRepository implements AuthRepository {
       principal_id: string;
       human_user_id: string;
       credential_kind: CredentialKind;
+      authorization_id: string | null;
+      principal_type: "human_user" | "agent_user";
       created_at: Date;
       roles: string[] | null;
     }>(
       this.sql,
       `
+      with recursive lineage(id,parent_authorization_id,revoked_at,superseded_at) as (
+        select a.id,a.parent_authorization_id,a.revoked_at,a.superseded_at
+          from auth_sessions seed join agent_authorizations a on a.id=seed.authorization_id
+         where seed.token_digest=$1
+        union all
+        select parent.id,parent.parent_authorization_id,parent.revoked_at,parent.superseded_at
+          from agent_authorizations parent join lineage child on child.parent_authorization_id=parent.id
+      )
       select s.id as session_id, s.principal_id, s.human_user_id, s.credential_kind,
-             now() as created_at,
-             case when s.credential_kind = 'authorization_request'
-               then '{}'::text[]
+             s.authorization_id, p.type as principal_type, now() as created_at,
+             case when s.credential_kind = 'authorization_request' then '{}'::text[]
+               when s.credential_kind = 'agent_authorization' then
+                 array_remove(array_agg(ar.role_id order by ar.role_id), null)
                else array_remove(array_agg(ra.role_id order by ra.role_id), null)
              end as roles
         from auth_sessions s
         join principals p on p.id = s.principal_id and p.active
         join human_users u on u.id = s.human_user_id and u.status = 'active'
         left join role_assignments ra on ra.principal_id = s.principal_id and ra.active
+        left join agent_authorization_roles ar on ar.authorization_id=s.authorization_id
+          and not exists (
+            select 1
+              from lineage ancestor
+              join agent_authorizations original on original.id=ancestor.id
+             where ancestor.id<>s.authorization_id
+               and not exists (
+                 select 1
+                   from agent_authorizations current
+                   join agent_authorization_roles upstream on upstream.authorization_id=current.id
+                  where current.agent_user_id=original.agent_user_id
+                    and current.revoked_at is null and current.superseded_at is null
+                    and upstream.role_id=ar.role_id
+                    and upstream.boundary_type=ar.boundary_type
+                    and upstream.project_id is not distinct from ar.project_id
+               )
+          )
        where s.token_digest = $1 and s.revoked_at is null
-       group by s.id, s.principal_id, s.human_user_id, s.credential_kind
+         and (s.authorization_id is null or not exists(select 1 from lineage where revoked_at is not null))
+       group by s.id, s.principal_id, s.human_user_id, s.credential_kind, s.authorization_id, p.type
     `,
       [digest],
     );
@@ -224,21 +260,23 @@ export class PostgresAuthRepository implements AuthRepository {
     const context = immutableAuthContext({
       id: uuidV7(),
       principalId: row.principal_id,
-      principalType: "human_user",
+      principalType: row.principal_type,
       humanUserId: row.human_user_id,
       sessionId: row.session_id,
+      authorizationId: row.authorization_id ?? undefined,
       credentialKind: row.credential_kind,
       roles: row.roles ?? [],
       createdAt: new Date(row.created_at).toISOString(),
     });
     await query(
       this.sql,
-      `insert into auth_contexts(id, principal_id, human_user_id, session_id, credential_kind, roles, created_at) values ($1,$2,$3,$4,$5,$6,$7)`,
+      `insert into auth_contexts(id, principal_id, human_user_id, session_id, authorization_id, credential_kind, roles, created_at) values ($1,$2,$3,$4,$5,$6,$7,$8)`,
       [
         context.id,
         context.principalId,
         context.humanUserId,
         context.sessionId,
+        context.authorizationId ?? null,
         context.credentialKind,
         [...context.roles],
         context.createdAt,
@@ -886,9 +924,12 @@ export class PostgresAuthRepository implements AuthRepository {
   }
 
   async close(): Promise<void> {
-    const listener = this.resetListener;
+    const reset = this.resetListener;
+    const agent = this.agentRequestListener;
     this.resetListener = undefined;
-    if (listener) await (await listener).unlisten();
+    this.agentRequestListener = undefined;
+    if (reset) await (await reset).unlisten();
+    if (agent) await (await agent).unlisten();
   }
 
   async inspectPasswordReset(
@@ -1463,6 +1504,699 @@ export class PostgresAuthRepository implements AuthRepository {
       release();
     }
   }
+
+  async discoverRoles(auth: AuthContext, boundary: AuthorizationBoundary) {
+    if (
+      auth.credentialKind !== "authorization_request" &&
+      auth.credentialKind !== "human_full" &&
+      auth.credentialKind !== "agent_authorization"
+    ) {
+      return authorizationDenied();
+    }
+    const params = boundaryParams(boundary);
+    const rows = isSuperAdmin(auth)
+      ? (await query<{ role_id: string }>(
+        this.sql,
+        `select id role_id from system_roles order by id`,
+      )).rows
+      : auth.authorizationId
+      ? (await query<{ role_id: string }>(
+        this.sql,
+        `select role_id from agent_authorization_roles where authorization_id=$1 and boundary_type=$2 and project_id is not distinct from $3::uuid order by role_id`,
+        [auth.authorizationId, ...params],
+      )).rows
+      : (await query<{ role_id: string }>(
+        this.sql,
+        `select ra.role_id from role_assignments ra join human_users u on u.principal_id=ra.principal_id where u.id=$1 and ra.active and ra.boundary_type=$2 and ra.project_id is not distinct from $3::uuid order by ra.role_id`,
+        [auth.humanUserId, ...params],
+      )).rows;
+    return ok({ roles: rows.map((row) => row.role_id), boundary });
+  }
+
+  async createAuthorizationRequest(
+    auth: AuthContext,
+    input: {
+      roles: string[];
+      boundary: AuthorizationBoundary;
+      reason: string;
+      nonceHash: string;
+      idempotencyKey: string;
+      agentName?: string;
+    },
+  ) {
+    if (
+      auth.credentialKind !== "authorization_request" &&
+      auth.credentialKind !== "agent_authorization"
+    ) return authorizationDenied();
+    if (auth.authorizationId) {
+      const [boundaryType, projectId] = boundaryParams(input.boundary);
+      const held = (await query<{ role_id: string }>(
+        this.sql,
+        `select role_id from agent_authorization_roles where authorization_id=$1 and boundary_type=$2 and project_id is not distinct from $3::uuid`,
+        [auth.authorizationId, boundaryType, projectId],
+      )).rows.map((row) => row.role_id);
+      if (input.roles.every((role) => held.includes(role))) {
+        return ok({
+          id: auth.authorizationId,
+          status: "approved" as const,
+          version: 1,
+          roles: input.roles,
+          boundary: input.boundary,
+          reason: input.reason,
+          createdAt: auth.createdAt,
+          alreadyAuthorized: true,
+          authorizationId: auth.authorizationId,
+        });
+      }
+    }
+    return await this.sql.begin(async (tx) => {
+      const existing = (await query<AgentRequestRow>(
+        tx,
+        `select * from agent_authorization_requests where requester_session_id=$1 and idempotency_key=$2`,
+        [auth.sessionId, input.idempotencyKey],
+      )).rows[0];
+      if (existing) return ok(agentRequest(existing));
+      const requestable = await this.discoverRoles(auth, input.boundary);
+      if (!requestable.ok) return requestable;
+      const unavailable = input.roles.filter((role) =>
+        !requestable.value.roles.includes(role)
+      );
+      if (unavailable.length) {
+        return err(
+          authError(
+            "authorization_insufficient",
+            "one or more requested roles are not currently requestable",
+            "authorization",
+            { roles: unavailable },
+          ),
+        );
+      }
+      const id = uuidV7();
+      const [boundaryType, projectId] = boundaryParams(input.boundary);
+      const inserted = (await query<AgentRequestRow>(
+        tx,
+        `insert into agent_authorization_requests(id,requester_session_id,requester_authorization_id,human_user_id,idempotency_key,roles,boundary_type,project_id,reason,agent_name,nonce_digest,status) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'pending') returning *`,
+        [
+          id,
+          auth.sessionId,
+          auth.authorizationId ?? null,
+          auth.humanUserId,
+          input.idempotencyKey,
+          input.roles,
+          boundaryType,
+          projectId,
+          input.reason,
+          input.agentName ?? null,
+          input.nonceHash,
+        ],
+      )).rows[0]!;
+      await audit(
+        tx,
+        "auth.authorization_request.created",
+        auth.principalId,
+        auth.humanUserId,
+        auth.sessionId,
+        auth.id,
+      );
+      return ok(agentRequest(inserted));
+    }) as Result<AgentAuthorizationRequest>;
+  }
+
+  async inspectAuthorizationRequest(auth: AuthContext, id: string) {
+    const row = await agentRequestRow(this.sql, id);
+    if (
+      !row || (row.human_user_id !== auth.humanUserId && !isSuperAdmin(auth))
+    ) {
+      return err(
+        authError(
+          "not_found",
+          "authorization request was not found",
+          "not_found",
+        ),
+      );
+    }
+    return ok(agentRequest(row));
+  }
+
+  async decideAuthorizationRequest(
+    auth: AuthContext,
+    id: string,
+    input: {
+      decision: "approved" | "denied";
+      reason?: string;
+      agentName?: string;
+      capabilitySummaryDigest?: string;
+    },
+  ) {
+    return await this.sql.begin(async (tx) => {
+      const row = await agentRequestRow(tx, id, true);
+      if (!row || row.human_user_id !== auth.humanUserId) {
+        return err(
+          authError(
+            "not_found",
+            "authorization request was not found",
+            "not_found",
+          ),
+        );
+      }
+      if (row.status !== "pending") {
+        if (row.status === input.decision) return ok(agentRequest(row));
+        return err(
+          authError(
+            "request_already_decided",
+            "authorization request is already decided",
+            "conflict",
+          ),
+        );
+      }
+      // Until policy assignments are installed, only the built-in super-admin
+      // bypass has auth.request.decide. Agent super-admins still exercise the
+      // same-human delegation and lineage path.
+      if (!isSuperAdmin(auth)) return authorizationDenied();
+      let authorizationId: string | null = null;
+      if (input.decision === "approved") {
+        const prior = row.requester_authorization_id
+          ? (await query<
+            {
+              id: string;
+              agent_user_id: string;
+              parent_authorization_id: string | null;
+              root_authorization_id: string;
+            }
+          >(
+            tx,
+            `select id,agent_user_id,parent_authorization_id,root_authorization_id from agent_authorizations where id=$1 and revoked_at is null for update`,
+            [row.requester_authorization_id],
+          )).rows[0]
+          : undefined;
+        let agentUserId = prior?.agent_user_id;
+        if (!agentUserId) {
+          const principalId = uuidV7();
+          agentUserId = uuidV7();
+          await query(
+            tx,
+            `insert into principals(id,type,active) values($1,'agent_user',true)`,
+            [principalId],
+          );
+          await query(
+            tx,
+            `insert into agent_users(id,principal_id,human_user_id,name) values($1,$2,$3,$4)`,
+            [
+              agentUserId,
+              principalId,
+              row.human_user_id,
+              input.agentName ?? row.agent_name ?? null,
+            ],
+          );
+        }
+        authorizationId = uuidV7();
+        const parentId = prior
+          ? prior.parent_authorization_id
+          : auth.authorizationId ?? null;
+        const rootId = prior
+          ? prior.root_authorization_id
+          : auth.authorizationId ?? authorizationId;
+        await query(
+          tx,
+          `insert into agent_authorizations(id,agent_user_id,human_user_id,parent_authorization_id,root_authorization_id,approved_by_auth_context_id) values($1,$2,$3,$4,$5,$6)`,
+          [
+            authorizationId,
+            agentUserId,
+            row.human_user_id,
+            parentId,
+            rootId,
+            auth.id,
+          ],
+        );
+        if (prior) {
+          const priorRoles = (await query<
+            {
+              role_id: string;
+              boundary_type: string;
+              project_id: string | null;
+            }
+          >(
+            tx,
+            `select role_id,boundary_type,project_id from agent_authorization_roles where authorization_id=$1`,
+            [prior.id],
+          )).rows;
+          for (const role of priorRoles) {
+            await query(
+              tx,
+              `insert into agent_authorization_roles(id,authorization_id,role_id,boundary_type,project_id) values($1,$2,$3,$4,$5)`,
+              [
+                uuidV7(),
+                authorizationId,
+                role.role_id,
+                role.boundary_type,
+                role.project_id,
+              ],
+            );
+          }
+        }
+        for (const role of row.roles) {
+          await query(
+            tx,
+            `insert into agent_authorization_roles(id,authorization_id,role_id,boundary_type,project_id) values($1,$2,$3,$4,$5) on conflict do nothing`,
+            [
+              uuidV7(),
+              authorizationId,
+              role,
+              row.boundary_type,
+              row.project_id,
+            ],
+          );
+        }
+        if (prior) {
+          await query(
+            tx,
+            `update agent_authorizations set superseded_at=now() where id=$1`,
+            [prior.id],
+          );
+        }
+      }
+      const snapshot = {
+        schema: "auth.authorization_decision.v1",
+        request_id: id,
+        requested_roles: row.roles,
+        boundary: row.boundary_type === "project"
+          ? { type: "project", project_id: row.project_id }
+          : { type: row.boundary_type },
+        approver_auth_context_id: auth.id,
+        capability_summary_digest: input.capabilitySummaryDigest ?? null,
+      };
+      const updated = (await query<AgentRequestRow>(
+        tx,
+        `update agent_authorization_requests set status=$2,version=version+1,authorization_id=$3,decided_by_auth_context_id=$4,denial_reason=$5,agent_name=coalesce($6,agent_name),decision_snapshot=$7::jsonb,decided_at=now() where id=$1 returning *`,
+        [
+          id,
+          input.decision,
+          authorizationId,
+          auth.id,
+          input.decision === "denied" ? input.reason : null,
+          input.agentName ?? null,
+          JSON.stringify(snapshot),
+        ],
+      )).rows[0]!;
+      await signalAgentRequest(tx, id);
+      await audit(
+        tx,
+        `auth.authorization_request.${input.decision}`,
+        auth.principalId,
+        auth.humanUserId,
+        auth.sessionId,
+        auth.id,
+        snapshot,
+      );
+      return ok(agentRequest(updated));
+    }) as Result<AgentAuthorizationRequest>;
+  }
+
+  async cancelAuthorizationRequest(auth: AuthContext, id: string) {
+    return await this.sql.begin(async (tx) => {
+      const row = await agentRequestRow(tx, id, true);
+      if (!row || row.requester_session_id !== auth.sessionId) {
+        return err(
+          authError(
+            "not_found",
+            "authorization request was not found",
+            "not_found",
+          ),
+        );
+      }
+      if (row.status !== "pending") {
+        return err(
+          authError(
+            "request_not_pending",
+            "authorization request is not pending",
+            "conflict",
+          ),
+        );
+      }
+      const updated = (await query<AgentRequestRow>(
+        tx,
+        `update agent_authorization_requests set status='cancelled',version=version+1 where id=$1 returning *`,
+        [id],
+      )).rows[0]!;
+      await signalAgentRequest(tx, id);
+      return ok(agentRequest(updated));
+    }) as Result<AgentAuthorizationRequest>;
+  }
+
+  async createAuthorizationWatchTicket(auth: AuthContext, id: string) {
+    const row = await agentRequestRow(this.sql, id);
+    if (!row || row.requester_session_id !== auth.sessionId) {
+      return err(
+        authError(
+          "not_found",
+          "authorization request was not found",
+          "not_found",
+        ),
+      );
+    }
+    const ticket = opaqueToken();
+    await query(
+      this.sql,
+      `insert into agent_authorization_watch_tickets(token_digest,request_id,expires_at) values($1,$2,now()+interval '60 seconds')`,
+      [await tokenDigest(ticket), id],
+    );
+    return ok({ ticket });
+  }
+
+  async consumeAuthorizationWatchTicket(id: string, ticket: string) {
+    return await this.sql.begin(async (tx) => {
+      const digest = await tokenDigest(ticket);
+      const found = (await query<
+        { request_id: string; expires_at: Date; used_at: Date | null }
+      >(
+        tx,
+        `select request_id,expires_at,used_at from agent_authorization_watch_tickets where token_digest=$1 for update`,
+        [digest],
+      )).rows[0];
+      if (!found || found.request_id !== id || found.used_at) {
+        return err(
+          authError(
+            "watch_ticket_invalid",
+            "watch ticket is invalid",
+            "authentication",
+          ),
+        );
+      }
+      if (new Date(found.expires_at).getTime() <= Date.now()) {
+        return err(
+          authError(
+            "watch_ticket_expired",
+            "watch ticket has expired",
+            "expired",
+          ),
+        );
+      }
+      await query(
+        tx,
+        `update agent_authorization_watch_tickets set used_at=now() where token_digest=$1`,
+        [digest],
+      );
+      return await this.authorizationRequestStatus(id);
+    }) as Result<AgentAuthorizationRequest>;
+  }
+
+  async authorizationRequestStatus(id: string) {
+    const row = await agentRequestRow(this.sql, id);
+    return row ? ok(agentRequest(row)) : err(
+      authError(
+        "not_found",
+        "authorization request was not found",
+        "not_found",
+      ),
+    );
+  }
+
+  subscribeAuthorizationRequest(id: string, listener: () => void): () => void {
+    let listeners = agentRequestListeners.get(id);
+    if (!listeners) agentRequestListeners.set(id, listeners = new Set());
+    listeners.add(listener);
+    if (!this.agentRequestListener) {
+      this.agentRequestListener = this.sql.listen(
+        "operant_agent_authorization",
+        (requestId: string) => {
+          for (
+            const notify of agentRequestListeners.get(requestId) ?? []
+          ) notify();
+        },
+      );
+      void this.agentRequestListener.catch(() => {
+        this.agentRequestListener = undefined;
+      });
+    }
+    return () => {
+      listeners!.delete(listener);
+      if (!listeners!.size) agentRequestListeners.delete(id);
+    };
+  }
+
+  async redeemAuthorizationRequest(
+    auth: AuthContext,
+    id: string,
+    nonce: string,
+  ) {
+    return await this.sql.begin(async (tx) => {
+      const row = await agentRequestRow(tx, id, true);
+      if (
+        !row || row.requester_session_id !== auth.sessionId ||
+        !constantTimeDigestEqual(row.nonce_digest, await tokenDigest(nonce))
+      ) {
+        return err(
+          authError(
+            "redemption_invalid",
+            "redemption credential is invalid",
+            "authentication",
+          ),
+        );
+      }
+      if (row.status === "denied") {
+        return err(
+          authError(
+            "request_denied",
+            "authorization request was denied",
+            "authorization",
+            { reason: row.denial_reason },
+          ),
+        );
+      }
+      if (row.status !== "approved" || !row.authorization_id) {
+        return err(
+          authError(
+            "request_not_pending",
+            "authorization request is not approved",
+            "conflict",
+          ),
+        );
+      }
+      const authorization = await authorizationRow(tx, row.authorization_id);
+      if (!authorization) {
+        return err(
+          authError(
+            "request_invalidated",
+            "authorization request was invalidated",
+            "conflict",
+          ),
+        );
+      }
+      await query(
+        tx,
+        `update auth_sessions set revoked_at=now() where authorization_id=$1 and revoked_at is null`,
+        [authorization.id],
+      );
+      const principal = (await query<{ principal_id: string }>(
+        tx,
+        `select principal_id from agent_users where id=$1`,
+        [authorization.agentUserId],
+      )).rows[0]!;
+      const issued = await issueAgentSession(
+        tx,
+        principal.principal_id,
+        row.human_user_id,
+        authorization.id,
+      );
+      await query(
+        tx,
+        `update agent_authorization_requests set redeemed_at=now() where id=$1`,
+        [id],
+      );
+      await audit(
+        tx,
+        "auth.authorization.redeemed",
+        principal.principal_id,
+        row.human_user_id,
+        issued.id,
+        auth.id,
+      );
+      return ok({ authorization, token: issued.token });
+    }) as Result<{ authorization: AgentAuthorization; token: string }>;
+  }
+
+  async listAuthorizations(auth: AuthContext) {
+    const rows = (await query<{ id: string }>(
+      this.sql,
+      `select id from agent_authorizations where human_user_id=$1 order by created_at`,
+      [auth.humanUserId],
+    )).rows;
+    const values: AgentAuthorization[] = [];
+    for (const row of rows) {
+      const value = await authorizationRow(this.sql, row.id);
+      if (value) values.push(value);
+    }
+    return ok(values);
+  }
+
+  async revokeAuthorization(auth: AuthContext, id: string) {
+    return await this.sql.begin(async (tx) => {
+      const target =
+        (await query<{ human_user_id: string; agent_user_id: string }>(
+          tx,
+          `select human_user_id,agent_user_id from agent_authorizations where id=$1 for update`,
+          [id],
+        )).rows[0];
+      if (!target || target.human_user_id !== auth.humanUserId) {
+        return err(
+          authError("not_found", "authorization was not found", "not_found"),
+        );
+      }
+      if (auth.authorizationId !== id && !isSuperAdmin(auth)) {
+        return authorizationDenied();
+      }
+      await query(
+        tx,
+        `update agent_authorizations set revoked_at=coalesce(revoked_at,now()) where id=$1`,
+        [id],
+      );
+      await query(
+        tx,
+        `update auth_sessions set revoked_at=coalesce(revoked_at,now()) where authorization_id=$1`,
+        [id],
+      );
+      await audit(
+        tx,
+        "auth.authorization.revoked",
+        auth.principalId,
+        auth.humanUserId,
+        auth.sessionId,
+        auth.id,
+      );
+      return ok({ revoked: true as const });
+    }) as Result<{ revoked: true }>;
+  }
+}
+
+type AgentRequestRow = {
+  id: string;
+  requester_session_id: string;
+  requester_authorization_id: string | null;
+  human_user_id: string;
+  roles: string[];
+  boundary_type: "project" | "all_projects" | "system";
+  project_id: string | null;
+  reason: string;
+  agent_name: string | null;
+  nonce_digest: string;
+  status: AgentAuthorizationRequest["status"];
+  version: number;
+  authorization_id: string | null;
+  denial_reason: string | null;
+  created_at: Date;
+};
+
+function boundaryParams(
+  boundary: AuthorizationBoundary,
+): [string, string | null] {
+  return boundary.type === "project"
+    ? [boundary.type, boundary.projectId]
+    : [boundary.type, null];
+}
+function boundaryFromRow(
+  row: {
+    boundary_type: "project" | "all_projects" | "system";
+    project_id: string | null;
+  },
+): AuthorizationBoundary {
+  return row.boundary_type === "project"
+    ? { type: "project", projectId: row.project_id! }
+    : { type: row.boundary_type };
+}
+function agentRequest(row: AgentRequestRow): AgentAuthorizationRequest {
+  return {
+    id: row.id,
+    status: row.status,
+    version: Number(row.version),
+    roles: row.roles,
+    boundary: boundaryFromRow(row),
+    reason: row.reason,
+    ...(row.denial_reason ? { denialReason: row.denial_reason } : {}),
+    ...(row.agent_name ? { agentName: row.agent_name } : {}),
+    createdAt: new Date(row.created_at).toISOString(),
+  };
+}
+async function agentRequestRow(
+  sql: Queryable,
+  id: string,
+  lock = false,
+): Promise<AgentRequestRow | undefined> {
+  return (await query<AgentRequestRow>(
+    sql,
+    `select * from agent_authorization_requests where id=$1${
+      lock ? " for update" : ""
+    }`,
+    [id],
+  )).rows[0];
+}
+async function authorizationRow(
+  sql: Queryable,
+  id: string,
+): Promise<AgentAuthorization | undefined> {
+  const row = (await query<
+    {
+      id: string;
+      agent_user_id: string;
+      human_user_id: string;
+      parent_authorization_id: string | null;
+      root_authorization_id: string;
+      created_at: Date;
+      revoked_at: Date | null;
+    }
+  >(
+    sql,
+    `select id,agent_user_id,human_user_id,parent_authorization_id,root_authorization_id,created_at,revoked_at from agent_authorizations where id=$1`,
+    [id],
+  )).rows[0];
+  if (!row) return;
+  const roles = (await query<
+    {
+      role_id: string;
+      boundary_type: "project" | "all_projects" | "system";
+      project_id: string | null;
+    }
+  >(
+    sql,
+    `select role_id,boundary_type,project_id from agent_authorization_roles where authorization_id=$1 order by boundary_type,project_id,role_id`,
+    [id],
+  )).rows;
+  return {
+    id: row.id,
+    agentUserId: row.agent_user_id,
+    humanUserId: row.human_user_id,
+    ...(row.parent_authorization_id
+      ? { parentAuthorizationId: row.parent_authorization_id }
+      : {}),
+    rootAuthorizationId: row.root_authorization_id,
+    roleAssignments: roles.map((role): RoleAssignment => ({
+      role: role.role_id,
+      boundary: boundaryFromRow(role),
+    })),
+    active: !row.revoked_at,
+    createdAt: new Date(row.created_at).toISOString(),
+  };
+}
+async function issueAgentSession(
+  sql: Queryable,
+  principalId: string,
+  humanUserId: string,
+  authorizationId: string,
+): Promise<{ id: string; token: string }> {
+  const id = uuidV7();
+  const token = opaqueToken();
+  await query(
+    sql,
+    `insert into auth_sessions(id,principal_id,human_user_id,credential_kind,authorization_id,token_digest) values($1,$2,$3,'agent_authorization',$4,$5)`,
+    [id, principalId, humanUserId, authorizationId, await tokenDigest(token)],
+  );
+  return { id, token };
+}
+const agentRequestListeners = new Map<string, Set<() => void>>();
+async function signalAgentRequest(sql: Queryable, id: string): Promise<void> {
+  await query(sql, `select pg_notify('operant_agent_authorization',$1)`, [id]);
+  queueMicrotask(() => {
+    for (const listener of agentRequestListeners.get(id) ?? []) listener();
+  });
 }
 
 const passwordResetListeners = new Map<string, Set<() => void>>();
@@ -1731,7 +2465,7 @@ async function resetRow(
   )).rows[0];
 }
 function isSuperAdmin(auth: AuthContext): boolean {
-  return auth.credentialKind === "human_full" &&
+  return auth.credentialKind !== "authorization_request" &&
     auth.roles.includes("system:super_admin");
 }
 function authorizationDenied() {
@@ -1860,6 +2594,16 @@ async function revokeAnchored(sql: Queryable, userId: string): Promise<void> {
     `update auth_sessions set revoked_at=coalesce(revoked_at,now()) where human_user_id=$1 and revoked_at is null`,
     [userId],
   );
+  await query(
+    sql,
+    `update agent_authorizations set revoked_at=coalesce(revoked_at,now()) where human_user_id=$1 and revoked_at is null`,
+    [userId],
+  );
+  await query(
+    sql,
+    `update agent_authorization_requests set status='invalidated',version=version+1 where human_user_id=$1 and status='pending'`,
+    [userId],
+  );
 }
 type RecoveryAuditInput = {
   targetHumanUserId: string;
@@ -1922,10 +2666,11 @@ async function audit(
   humanUserId: string,
   sessionId?: string,
   authContextId?: string,
+  details: unknown = {},
 ): Promise<void> {
   await query(
     sql,
-    `insert into auth_audit_events(id,event_type,auth_context_id,principal_id,human_user_id,session_id,details) values($1,$2,$3,$4,$5,$6,'{}'::jsonb)`,
+    `insert into auth_audit_events(id,event_type,auth_context_id,principal_id,human_user_id,session_id,details) values($1,$2,$3,$4,$5,$6,$7::jsonb)`,
     [
       uuidV7(),
       eventType,
@@ -1933,6 +2678,7 @@ async function audit(
       principalId,
       humanUserId,
       sessionId ?? null,
+      JSON.stringify(details),
     ],
   );
 }

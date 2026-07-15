@@ -31,6 +31,7 @@ import {
   serverActor,
 } from "./auth_middleware.ts";
 import {
+  type AgentAuthHttpService,
   type BootstrapHttpService,
   type HumanAuthHttpService,
   registerAuthRoutes,
@@ -44,6 +45,7 @@ export type HttpDependencies = {
   authentication: RequestAuthenticator;
   bootstrap: BootstrapHttpService;
   humanAuth: HumanAuthHttpService;
+  agentAuth: AgentAuthHttpService;
   projects: ProjectHttpService;
   metadata: {
     home(): Promise<Result<HomeDto>>;
@@ -134,7 +136,7 @@ export function makeHttpApp(
         /^\/api\/v1\/auth\/password-reset\/requests\/[^/]+\/(cancel|redeem|complete|watch-ticket)$/
           .test(c.req.path)) ||
       (c.req.method === "GET" &&
-        /^\/api\/v1\/auth\/password-reset\/requests\/[^/]+\/watch$/.test(
+        /^\/api\/v1\/auth\/(?:password-reset\/)?requests\/[^/]+\/watch$/.test(
           c.req.path,
         )) ||
       c.req.path === "/api/v1/auth/recovery/complete"
@@ -170,7 +172,7 @@ export function makeHttpApp(
     );
   });
 
-  registerAuthRoutes(app, deps.bootstrap, deps.humanAuth);
+  registerAuthRoutes(app, deps.bootstrap, deps.humanAuth, deps.agentAuth);
   registerProjectRoutes(app, deps.projects);
 
   app.get(

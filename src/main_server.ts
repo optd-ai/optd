@@ -46,6 +46,7 @@ export async function createFetchHandler() {
     authentication: application.authentication,
     bootstrap: application.bootstrap,
     humanAuth: application.humanAuth,
+    agentAuth: application.agentAuth,
     projects: application.projects,
     metadata: application.metadata,
     packs: application.packs,

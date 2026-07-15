@@ -33,6 +33,13 @@ async function credentialHeaders(url: string): Promise<Record<string, string>> {
   const token = (await readOrigin(new URL(url).origin)).token;
   return token ? { authorization: `Bearer ${token}` } : {};
 }
+async function requestCredentialHeaders(
+  url: string,
+): Promise<Record<string, string>> {
+  const state = await readOrigin(new URL(url).origin);
+  const token = state.requestToken ?? state.token;
+  return token ? { authorization: `Bearer ${token}` } : {};
+}
 async function getJson(url: string): Promise<unknown> {
   return await decodeJsonResponse(
     await fetch(url, { headers: await credentialHeaders(url) }),
@@ -340,6 +347,16 @@ function option(args: string[], name: string): string | undefined {
     ? args[index + 1]
     : args[index].slice(name.length + 1);
 }
+function options(args: string[], name: string): string[] {
+  const values: string[] = [];
+  for (let index = 0; index < args.length; index++) {
+    if (args[index] === name && args[index + 1]) values.push(args[++index]);
+    else if (args[index].startsWith(`${name}=`)) {
+      values.push(args[index].slice(name.length + 1));
+    }
+  }
+  return values;
+}
 function issuedCredentialUpdate(
   credentials: Record<string, unknown>,
   prior: { requestToken?: string; requestSessionId?: string } = {},
@@ -447,6 +464,75 @@ async function waitForPasswordReset(
       if (
         error instanceof OptctlError &&
         ["password_reset_not_found", "password_reset_expired"].includes(
+          error.envelope.error.code,
+        )
+      ) throw error;
+      await new Promise((resolve) => setTimeout(resolve, backoff));
+      backoff = Math.min(2_000, backoff * 2);
+    }
+  }
+}
+
+async function waitForAuthorization(
+  server: string,
+  requestId: string,
+): Promise<{ status: string; reason?: string }> {
+  let backoff = 100;
+  while (true) {
+    try {
+      const ticketEnvelope = await decodeJsonResponse(
+        await fetch(
+          `${server}/api/v1/auth/requests/${
+            encodeURIComponent(requestId)
+          }/watch-ticket`,
+          {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              ...await requestCredentialHeaders(server),
+            },
+            body: "{}",
+          },
+        ),
+      );
+      const ticket = String(envelopeData(ticketEnvelope).ticket);
+      const socketUrl = new URL(
+        `${server}/api/v1/auth/requests/${encodeURIComponent(requestId)}/watch`,
+      );
+      socketUrl.protocol = socketUrl.protocol === "https:" ? "wss:" : "ws:";
+      socketUrl.searchParams.set("ticket", ticket);
+      return await new Promise((resolve, reject) => {
+        const socket = new WebSocket(socketUrl);
+        let terminal = false;
+        socket.onmessage = (event) => {
+          const message = JSON.parse(String(event.data)) as {
+            type?: string;
+            status?: string;
+            reason?: string;
+          };
+          if (
+            message.type !== "auth_request_status" || !message.status ||
+            message.status === "pending"
+          ) return;
+          terminal = true;
+          resolve({ status: message.status, reason: message.reason });
+          socket.close(1000);
+        };
+        socket.onerror = () => {
+          if (!terminal) {
+            try {
+              socket.close();
+            } catch { /* reconnect */ }
+          }
+        };
+        socket.onclose = () => {
+          if (!terminal) reject(new Error("authorization watch disconnected"));
+        };
+      });
+    } catch (error) {
+      if (
+        error instanceof OptctlError &&
+        ["request_denied", "request_cancelled", "request_invalidated"].includes(
           error.envelope.error.code,
         )
       ) throw error;
@@ -635,63 +721,178 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
         )
       ) throw usageError("auth wait has no timeout option");
       const prior = await readOrigin(parsed.server);
-      const nonce = prior.resetNonces?.[value];
-      if (!nonce) {
-        throw usageError(
-          "password-reset requester nonce is unavailable in this local auth store",
+      const authorizationNonce = prior.authorizationNonces?.[value];
+      if (authorizationNonce) {
+        const state = await waitForAuthorization(parsed.server, value);
+        if (state.status !== "approved") {
+          throw new OptctlError(errorEnvelope({
+            code: state.status === "denied"
+              ? "request_denied"
+              : `request_${state.status}`,
+            message: state.reason ?? `authorization request is ${state.status}`,
+            details: { request_id: value, status: state.status },
+          }));
+        }
+        const redeemed = await decodeJsonResponse(
+          await fetch(
+            `${parsed.server}/api/v1/auth/requests/${
+              encodeURIComponent(value)
+            }/redeem`,
+            {
+              method: "POST",
+              headers: {
+                "content-type": "application/json",
+                ...await requestCredentialHeaders(parsed.server),
+              },
+              body: JSON.stringify({ redemption_nonce: authorizationNonce }),
+            },
+          ),
         );
-      }
-      const status = await waitForPasswordReset(parsed.server, value, nonce);
-      if (status !== "approved") {
-        const code = status === "denied"
-          ? "password_reset_denied"
-          : status === "expired"
-          ? "password_reset_expired"
-          : "request_cancelled";
-        throw new OptctlError(
-          errorEnvelope({
-            code,
-            message: `password reset is ${status}`,
-            details: { request_id: value, status },
-          }),
+        const data = envelopeData(redeemed);
+        await writeOrigin(parsed.server, {
+          token: String(data.token),
+          requestToken: undefined,
+        });
+        result = redeemed;
+      } else {
+        const nonce = prior.resetNonces?.[value];
+        if (!nonce) {
+          throw usageError(
+            "requester nonce is unavailable in this local auth store",
+          );
+        }
+        const status = await waitForPasswordReset(parsed.server, value, nonce);
+        if (status !== "approved") {
+          const code = status === "denied"
+            ? "password_reset_denied"
+            : status === "expired"
+            ? "password_reset_expired"
+            : "request_cancelled";
+          throw new OptctlError(
+            errorEnvelope({
+              code,
+              message: `password reset is ${status}`,
+              details: { request_id: value, status },
+            }),
+          );
+        }
+        const redeemed = await decodeJsonResponse(
+          await fetch(
+            `${parsed.server}/api/v1/auth/password-reset/requests/${
+              encodeURIComponent(value)
+            }/redeem`,
+            {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ redemption_nonce: nonce }),
+            },
+          ),
         );
+        const capability = String(envelopeData(redeemed).capability);
+        const password = await readPassword(waitArgs);
+        result = await decodeJsonResponse(
+          await fetch(
+            `${parsed.server}/api/v1/auth/password-reset/requests/${
+              encodeURIComponent(value)
+            }/complete`,
+            {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ capability, password }),
+            },
+          ),
+        );
+        const data = envelopeData(result);
+        const credentials = data.credentials as Record<string, unknown>;
+        const user = data.user as Record<string, unknown>;
+        await writeOrigin(parsed.server, {
+          token: String(credentials.token),
+          requestToken: String(credentials.authorization_request_token),
+          requestSessionId: String(
+            credentials.authorization_request_session_id,
+          ),
+          username: String(user.username),
+        });
+        result = authenticatedOutput(user, { request_id: value });
       }
-      const redeemed = await decodeJsonResponse(
-        await fetch(
-          `${parsed.server}/api/v1/auth/password-reset/requests/${
-            encodeURIComponent(value)
-          }/redeem`,
-          {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ redemption_nonce: nonce }),
-          },
-        ),
-      );
-      const capability = String(envelopeData(redeemed).capability);
-      const password = await readPassword(waitArgs);
+    } else if (cmd === "auth" && sub === "roles") {
+      const authArgs = parsed.positional.slice(2);
+      const projectId = option(authArgs, "--project");
+      const boundaryType = projectId
+        ? "project"
+        : option(authArgs, "--boundary") ?? "system";
+      const url = new URL(`${parsed.server}/api/v1/auth/roles`);
+      url.searchParams.set("boundary_type", boundaryType);
+      if (projectId) url.searchParams.set("project_id", projectId);
       result = await decodeJsonResponse(
-        await fetch(
-          `${parsed.server}/api/v1/auth/password-reset/requests/${
-            encodeURIComponent(value)
-          }/complete`,
-          {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ capability, password }),
-          },
-        ),
+        await fetch(url, {
+          headers: await requestCredentialHeaders(parsed.server),
+        }),
       );
-      const data = envelopeData(result);
-      const credentials = data.credentials as Record<string, unknown>;
-      const user = data.user as Record<string, unknown>;
+    } else if (cmd === "auth" && sub === "request") {
+      const authArgs = parsed.positional.slice(2);
+      const roles = options(authArgs, "--role");
+      const reason = option(authArgs, "--reason") ?? "";
+      const projectId = option(authArgs, "--project");
+      const boundaryType = projectId
+        ? "project"
+        : option(authArgs, "--boundary") ?? "system";
+      if (!roles.length) {
+        throw usageError("auth request requires at least one --role");
+      }
+      const nonce = opaqueToken();
+      result = await decodeJsonResponse(
+        await fetch(`${parsed.server}/api/v1/auth/requests`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "idempotency-key": opaqueToken(),
+            ...await requestCredentialHeaders(parsed.server),
+          },
+          body: JSON.stringify({
+            roles,
+            boundary: projectId
+              ? { type: "project", project_id: projectId }
+              : { type: boundaryType },
+            reason,
+            redemption_nonce_hash: await tokenDigest(nonce),
+            agent: option(authArgs, "--agent-name")
+              ? { name: option(authArgs, "--agent-name") }
+              : undefined,
+          }),
+        }),
+      );
+      const id = String(envelopeData(result).id);
       await writeOrigin(parsed.server, {
-        token: String(credentials.token),
-        requestToken: String(credentials.authorization_request_token),
-        requestSessionId: String(credentials.authorization_request_session_id),
-        username: String(user.username),
+        authorizationNonces: {
+          ...(await readOrigin(parsed.server)).authorizationNonces,
+          [id]: nonce,
+        },
       });
-      result = authenticatedOutput(user, { request_id: value });
+    } else if (
+      cmd === "auth" && (sub === "approve" || sub === "deny") && value
+    ) {
+      const authArgs = parsed.positional.slice(3);
+      result = await postJson(
+        `${parsed.server}/api/v1/auth/requests/${
+          encodeURIComponent(value)
+        }/decision`,
+        sub === "approve"
+          ? {
+            decision: "approved",
+            agent_name: option(authArgs, "--agent-name"),
+          }
+          : { decision: "denied", reason: option(authArgs, "--reason") },
+      );
+    } else if (cmd === "auth" && sub === "authorizations") {
+      result = await getJson(`${parsed.server}/api/v1/auth/authorizations`);
+    } else if (cmd === "auth" && sub === "revoke" && value) {
+      result = await postJson(
+        `${parsed.server}/api/v1/auth/authorizations/${
+          encodeURIComponent(value)
+        }/revoke`,
+        {},
+      );
     } else if (cmd === "auth" && sub === "password-reset") {
       const action = value;
       const resetArgs = parsed.positional.slice(3);

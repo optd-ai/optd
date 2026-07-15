@@ -1,5 +1,8 @@
 import type {
+  AgentAuthorization,
+  AgentAuthorizationRequest,
   AuthContext,
+  AuthorizationBoundary,
   BootstrapInput,
   BootstrapResult,
   HumanSession,
@@ -108,6 +111,59 @@ export interface AuthRepository extends BootstrapRepository {
     token: string;
     password: string;
   }): Promise<Result<LoginResult>>;
+  discoverRoles(
+    auth: AuthContext,
+    boundary: AuthorizationBoundary,
+  ): Promise<Result<{ roles: string[]; boundary: AuthorizationBoundary }>>;
+  createAuthorizationRequest(auth: AuthContext, input: {
+    roles: string[];
+    boundary: AuthorizationBoundary;
+    reason: string;
+    nonceHash: string;
+    idempotencyKey: string;
+    agentName?: string;
+  }): Promise<Result<AgentAuthorizationRequest>>;
+  inspectAuthorizationRequest(
+    auth: AuthContext,
+    id: string,
+  ): Promise<Result<AgentAuthorizationRequest>>;
+  decideAuthorizationRequest(auth: AuthContext, id: string, input: {
+    decision: "approved" | "denied";
+    reason?: string;
+    agentName?: string;
+    capabilitySummaryDigest?: string;
+  }): Promise<Result<AgentAuthorizationRequest>>;
+  cancelAuthorizationRequest(
+    auth: AuthContext,
+    id: string,
+  ): Promise<Result<AgentAuthorizationRequest>>;
+  createAuthorizationWatchTicket(
+    auth: AuthContext,
+    id: string,
+  ): Promise<Result<{ ticket: string }>>;
+  consumeAuthorizationWatchTicket(
+    id: string,
+    ticket: string,
+  ): Promise<Result<AgentAuthorizationRequest>>;
+  authorizationRequestStatus(
+    id: string,
+  ): Promise<Result<AgentAuthorizationRequest>>;
+  subscribeAuthorizationRequest(id: string, listener: () => void): () => void;
+  redeemAuthorizationRequest(
+    auth: AuthContext,
+    id: string,
+    nonce: string,
+  ): Promise<
+    Result<{
+      authorization: AgentAuthorization;
+      token: string;
+    }>
+  >;
+  listAuthorizations(auth: AuthContext): Promise<Result<AgentAuthorization[]>>;
+  revokeAuthorization(
+    auth: AuthContext,
+    id: string,
+  ): Promise<Result<{ revoked: true }>>;
 }
 
 export interface RequestAuthenticator {

@@ -2,7 +2,10 @@ import type { Hono } from "npm:hono";
 import { upgradeWebSocket } from "npm:hono/deno";
 import type { Result } from "../../../domain/errors/result.ts";
 import type {
+  AgentAuthorization,
+  AgentAuthorizationRequest,
   AuthContext,
+  AuthorizationBoundary,
   BootstrapResult,
   HumanSession,
   HumanUser,
@@ -105,10 +108,53 @@ export type HumanAuthHttpService = {
   ): Promise<Result<LoginResult>>;
 };
 
+export type AgentAuthHttpService = {
+  roles(
+    auth: AuthContext,
+    boundary: unknown,
+  ): Promise<Result<{ roles: string[]; boundary: AuthorizationBoundary }>>;
+  request(
+    auth: AuthContext,
+    input: Record<string, unknown>,
+    idempotencyKey: unknown,
+  ): Promise<Result<AgentAuthorizationRequest>>;
+  inspect(
+    auth: AuthContext,
+    id: string,
+  ): Promise<Result<AgentAuthorizationRequest>>;
+  decide(
+    auth: AuthContext,
+    id: string,
+    input: Record<string, unknown>,
+  ): Promise<Result<AgentAuthorizationRequest>>;
+  cancel(
+    auth: AuthContext,
+    id: string,
+  ): Promise<Result<AgentAuthorizationRequest>>;
+  watchTicket(
+    auth: AuthContext,
+    id: string,
+  ): Promise<Result<{ ticket: string }>>;
+  consumeWatchTicket(
+    id: string,
+    ticket: string,
+  ): Promise<Result<AgentAuthorizationRequest>>;
+  status(id: string): Promise<Result<AgentAuthorizationRequest>>;
+  subscribe(id: string, listener: () => void): () => void;
+  redeem(
+    auth: AuthContext,
+    id: string,
+    nonce: string,
+  ): Promise<Result<{ authorization: AgentAuthorization; token: string }>>;
+  list(auth: AuthContext): Promise<Result<AgentAuthorization[]>>;
+  revoke(auth: AuthContext, id: string): Promise<Result<{ revoked: true }>>;
+};
+
 export function registerAuthRoutes(
   app: Hono<{ Variables: AuthVariables }>,
   bootstrap: BootstrapHttpService,
   human: HumanAuthHttpService,
+  agent: AgentAuthHttpService,
 ) {
   const send = <T>(
     c: {
@@ -474,6 +520,151 @@ export function registerAuthRoutes(
       ),
     );
   });
+  app.get("/api/v1/auth/roles", async (c) => {
+    const type = c.req.query("boundary_type");
+    const boundary = type === "project"
+      ? { type, project_id: c.req.query("project_id") }
+      : { type };
+    return send(
+      c,
+      mapResult(await agent.roles(c.get("auth"), boundary), (value) => ({
+        roles: value.roles,
+        boundary: boundaryDto(value.boundary),
+      })),
+    );
+  });
+  app.post("/api/v1/auth/requests", async (c) => {
+    const parsed = await json(c);
+    if (parsed.response) return parsed.response;
+    return send(
+      c,
+      mapResult(
+        await agent.request(
+          c.get("auth"),
+          parsed.body!,
+          c.req.header("idempotency-key"),
+        ),
+        agentRequestDto,
+      ),
+      201,
+    );
+  });
+  app.get(
+    "/api/v1/auth/requests/:id",
+    async (c) =>
+      send(
+        c,
+        mapResult(
+          await agent.inspect(c.get("auth"), c.req.param("id")),
+          agentRequestDto,
+        ),
+      ),
+  );
+  app.post("/api/v1/auth/requests/:id/decision", async (c) => {
+    const parsed = await json(c);
+    if (parsed.response) return parsed.response;
+    return send(
+      c,
+      mapResult(
+        await agent.decide(c.get("auth"), c.req.param("id"), parsed.body!),
+        agentRequestDto,
+      ),
+    );
+  });
+  app.post(
+    "/api/v1/auth/requests/:id/cancel",
+    async (c) =>
+      send(
+        c,
+        mapResult(
+          await agent.cancel(c.get("auth"), c.req.param("id")),
+          agentRequestDto,
+        ),
+      ),
+  );
+  app.post(
+    "/api/v1/auth/requests/:id/watch-ticket",
+    async (c) =>
+      send(c, await agent.watchTicket(c.get("auth"), c.req.param("id"))),
+  );
+  app.get(
+    "/api/v1/auth/requests/:id/watch",
+    upgradeWebSocket((c) => {
+      const id = c.req.param("id") ?? "";
+      const ticket = c.req.query("ticket") ?? "";
+      let unsubscribe: (() => void) | undefined;
+      let lastVersion = -1;
+      const sendState = async (
+        ws: {
+          send(data: string): void;
+          close(code?: number, reason?: string): void;
+        },
+      ) => {
+        const state = await agent.status(id);
+        if (!state.ok) return ws.close(1008, state.error.code);
+        if (state.value.version <= lastVersion) return;
+        lastVersion = state.value.version;
+        ws.send(JSON.stringify({
+          type: "auth_request_status",
+          request_id: id,
+          version: state.value.version,
+          status: state.value.status,
+          ...(state.value.denialReason
+            ? { reason: state.value.denialReason }
+            : {}),
+        }));
+        if (state.value.status !== "pending") {
+          ws.close(1000, state.value.status);
+        }
+      };
+      return {
+        async onOpen(_event, ws) {
+          const consumed = await agent.consumeWatchTicket(id, ticket);
+          if (!consumed.ok) return ws.close(1008, consumed.error.code);
+          unsubscribe = agent.subscribe(id, () => void sendState(ws));
+          await sendState(ws);
+        },
+        onClose() {
+          unsubscribe?.();
+        },
+        onError() {
+          unsubscribe?.();
+        },
+      };
+    }),
+  );
+  app.post("/api/v1/auth/requests/:id/redeem", async (c) => {
+    const parsed = await json(c);
+    if (parsed.response) return parsed.response;
+    return send(
+      c,
+      mapResult(
+        await agent.redeem(
+          c.get("auth"),
+          c.req.param("id"),
+          String(parsed.body!.redemption_nonce ?? ""),
+        ),
+        (value) => ({
+          token: value.token,
+          authorization: authorizationDto(value.authorization),
+        }),
+      ),
+    );
+  });
+  app.get(
+    "/api/v1/auth/authorizations",
+    async (c) =>
+      send(
+        c,
+        mapResult(await agent.list(c.get("auth")), (values) =>
+          values.map(authorizationDto)),
+      ),
+  );
+  app.post(
+    "/api/v1/auth/authorizations/:id/revoke",
+    async (c) => send(c, await agent.revoke(c.get("auth"), c.req.param("id"))),
+  );
+
   app.post("/api/v1/auth/recovery/complete", async (c) => {
     const parsed = await json(c);
     if (parsed.response) return parsed.response;
@@ -498,6 +689,45 @@ function mapResult<T, U>(
   transform: (value: T) => U,
 ): Result<U> {
   return result.ok ? { ok: true, value: transform(result.value) } : result;
+}
+function boundaryDto(boundary: AuthorizationBoundary) {
+  return boundary.type === "project"
+    ? { type: boundary.type, project_id: boundary.projectId }
+    : { type: boundary.type };
+}
+function agentRequestDto(request: AgentAuthorizationRequest) {
+  return {
+    id: request.id,
+    status: request.status,
+    version: request.version,
+    roles: request.roles,
+    boundary: boundaryDto(request.boundary),
+    reason: request.reason,
+    ...(request.denialReason ? { denial_reason: request.denialReason } : {}),
+    ...(request.agentName ? { agent_name: request.agentName } : {}),
+    created_at: request.createdAt,
+    ...(request.alreadyAuthorized ? { already_authorized: true } : {}),
+    ...(request.authorizationId
+      ? { authorization_id: request.authorizationId }
+      : {}),
+  };
+}
+function authorizationDto(authorization: AgentAuthorization) {
+  return {
+    id: authorization.id,
+    agent_user_id: authorization.agentUserId,
+    human_user_id: authorization.humanUserId,
+    ...(authorization.parentAuthorizationId
+      ? { parent_authorization_id: authorization.parentAuthorizationId }
+      : {}),
+    root_authorization_id: authorization.rootAuthorizationId,
+    role_assignments: authorization.roleAssignments.map((assignment) => ({
+      role: assignment.role,
+      boundary: boundaryDto(assignment.boundary),
+    })),
+    active: authorization.active,
+    created_at: authorization.createdAt,
+  };
 }
 function userDto(user: HumanUser) {
   return {

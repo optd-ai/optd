@@ -9,6 +9,7 @@ type OriginState = {
   username?: string;
   resetNonces?: Record<string, string>;
   resetCapabilities?: Record<string, string>;
+  authorizationNonces?: Record<string, string>;
 };
 type Store = { origins: Record<string, OriginState> };
 

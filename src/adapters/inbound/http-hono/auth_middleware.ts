@@ -64,7 +64,7 @@ export async function requireBearer(
         );
       }
       const body = await c.req.raw.clone().json().catch(() => undefined);
-      if (containsAuthority(body)) {
+      if (containsAuthority(body, c.req.path === "/api/v1/auth/requests")) {
         return c.json(
           errorEnvelope({
             code: "validation_failed",
@@ -142,12 +142,20 @@ export function isAuthorityKey(key: string): boolean {
   ].includes(key.toLowerCase().replaceAll("-", "_"));
 }
 
-export function containsAuthority(value: unknown): boolean {
+export function containsAuthority(
+  value: unknown,
+  allowRequestedRoles = false,
+): boolean {
   if (!value || typeof value !== "object") return false;
-  if (Array.isArray(value)) return value.some(containsAuthority);
+  if (Array.isArray(value)) {
+    return value.some((child) => containsAuthority(child, allowRequestedRoles));
+  }
   for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
-    if (isAuthorityKey(key)) return true;
-    if (containsAuthority(child)) return true;
+    const normalized = key.toLowerCase().replaceAll("-", "_");
+    if (
+      isAuthorityKey(key) && !(allowRequestedRoles && normalized === "roles")
+    ) return true;
+    if (containsAuthority(child, allowRequestedRoles)) return true;
   }
   return false;
 }

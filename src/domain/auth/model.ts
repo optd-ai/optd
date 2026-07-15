@@ -1,11 +1,25 @@
-export type CredentialKind = "human_full" | "authorization_request";
+export type CredentialKind =
+  | "human_full"
+  | "authorization_request"
+  | "agent_authorization";
+
+export type AuthorizationBoundary =
+  | { type: "project"; projectId: string }
+  | { type: "all_projects" }
+  | { type: "system" };
+
+export type RoleAssignment = {
+  role: string;
+  boundary: AuthorizationBoundary;
+};
 
 export type AuthContext = Readonly<{
   id: string;
   principalId: string;
-  principalType: "human_user";
+  principalType: "human_user" | "agent_user";
   humanUserId: string;
   sessionId: string;
+  authorizationId?: string;
   credentialKind: CredentialKind;
   roles: readonly string[];
   createdAt: string;
@@ -55,6 +69,31 @@ export type PasswordPolicy = {
   requireLowercase: boolean;
   requireDigit: boolean;
   requireSymbol: boolean;
+};
+
+export type AgentAuthorizationRequest = {
+  id: string;
+  status: "pending" | "approved" | "denied" | "cancelled" | "invalidated";
+  version: number;
+  roles: string[];
+  boundary: AuthorizationBoundary;
+  reason: string;
+  denialReason?: string;
+  agentName?: string;
+  createdAt: string;
+  alreadyAuthorized?: boolean;
+  authorizationId?: string;
+};
+
+export type AgentAuthorization = {
+  id: string;
+  agentUserId: string;
+  humanUserId: string;
+  parentAuthorizationId?: string;
+  rootAuthorizationId: string;
+  roleAssignments: RoleAssignment[];
+  active: boolean;
+  createdAt: string;
 };
 
 export type PasswordReset = {

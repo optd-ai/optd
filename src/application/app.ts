@@ -14,6 +14,7 @@ import { PostgresTransactionManager } from "../adapters/outbound/postgres/transa
 import { PostgresAuthRepository } from "../adapters/outbound/postgres/auth_repository.ts";
 import { PostgresProjectRepository } from "../adapters/outbound/postgres/project_repository.ts";
 import { makeBootstrapService } from "./services/auth/bootstrap.ts";
+import { makeAgentAuthService } from "./services/auth/agent.ts";
 import {
   loadPasswordPolicy,
   makeHumanAuthService,
@@ -48,6 +49,7 @@ export function makeApplication(
     authentication,
     bootstrap: makeBootstrapService(authentication, passwordPolicy),
     humanAuth: makeHumanAuthService(authentication, passwordPolicy),
+    agentAuth: makeAgentAuthService(authentication),
     projects: makeProjectService(new PostgresProjectRepository(sql)),
     metadata: makeInspectMetadataService({
       sql,

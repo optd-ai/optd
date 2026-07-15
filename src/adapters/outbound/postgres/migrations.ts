@@ -491,6 +491,89 @@ export const platformMigrations: PlatformMigration[] = [
       create index password_reset_throttle_updated_idx on password_reset_throttles(updated_at);
     `,
   },
+  {
+    id: "1011_agent_authorization",
+    sql: `
+      alter table auth_sessions drop constraint auth_sessions_credential_kind_check;
+      alter table auth_sessions add constraint auth_sessions_credential_kind_check check(credential_kind in ('human_full','authorization_request','agent_authorization'));
+      alter table auth_sessions add column authorization_id uuid;
+      alter table auth_contexts add column authorization_id uuid;
+
+      create table agent_users (
+        id uuid primary key,
+        principal_id uuid not null unique references principals(id),
+        human_user_id uuid not null references human_users(id),
+        name text,
+        created_at timestamptz not null default now()
+      );
+      create table agent_authorizations (
+        id uuid primary key,
+        agent_user_id uuid not null references agent_users(id),
+        human_user_id uuid not null references human_users(id),
+        parent_authorization_id uuid references agent_authorizations(id),
+        root_authorization_id uuid,
+        approved_by_auth_context_id uuid not null references auth_contexts(id),
+        created_at timestamptz not null default now(),
+        revoked_at timestamptz,
+        superseded_at timestamptz
+      );
+      alter table agent_authorizations add constraint agent_authorization_root_fk foreign key(root_authorization_id) references agent_authorizations(id) deferrable initially deferred;
+      alter table auth_sessions add constraint auth_sessions_authorization_fk foreign key(authorization_id) references agent_authorizations(id);
+      alter table auth_contexts add constraint auth_contexts_authorization_fk foreign key(authorization_id) references agent_authorizations(id);
+      create table agent_authorization_roles (
+        id uuid primary key,
+        authorization_id uuid not null references agent_authorizations(id),
+        role_id text not null references system_roles(id),
+        boundary_type text not null check(boundary_type in ('system','all_projects','project')),
+        project_id uuid references projects(id),
+        unique nulls not distinct(authorization_id,role_id,boundary_type,project_id),
+        check((boundary_type='project')=(project_id is not null))
+      );
+      create table agent_authorization_requests (
+        id uuid primary key,
+        requester_session_id uuid not null references auth_sessions(id),
+        requester_authorization_id uuid references agent_authorizations(id),
+        human_user_id uuid not null references human_users(id),
+        idempotency_key text not null,
+        roles text[] not null,
+        boundary_type text not null check(boundary_type in ('system','all_projects','project')),
+        project_id uuid references projects(id),
+        reason text not null,
+        agent_name text,
+        nonce_digest text not null,
+        status text not null check(status in ('pending','approved','denied','cancelled','invalidated')),
+        version bigint not null default 1,
+        authorization_id uuid references agent_authorizations(id),
+        decided_by_auth_context_id uuid references auth_contexts(id),
+        denial_reason text,
+        decision_snapshot jsonb,
+        created_at timestamptz not null default now(),
+        decided_at timestamptz,
+        redeemed_at timestamptz,
+        unique(requester_session_id,idempotency_key),
+        check((boundary_type='project')=(project_id is not null))
+      );
+      create table agent_authorization_watch_tickets (
+        token_digest text primary key,
+        request_id uuid not null references agent_authorization_requests(id),
+        expires_at timestamptz not null,
+        used_at timestamptz
+      );
+      create unique index agent_auth_active_session_idx on auth_sessions(authorization_id) where credential_kind='agent_authorization' and revoked_at is null;
+      create index agent_auth_anchor_idx on agent_authorizations(human_user_id,created_at);
+      create index agent_request_anchor_idx on agent_authorization_requests(human_user_id,created_at);
+
+      alter table auth_audit_events drop constraint auth_audit_events_event_type_check;
+      alter table auth_audit_events add constraint auth_audit_events_event_type_check check(event_type in (
+        'auth.bootstrap.completed','auth.human_user.created','auth.human_user.enabled','auth.human_user.disabled',
+        'auth.role_assignment.created','auth.session.created','auth.session.revoked','auth.sessions.revoked_all',
+        'auth.login.succeeded','auth.password.changed','auth.password_reset.approved','auth.password_reset.denied',
+        'auth.password_reset.completed','auth.recovery.initiated','auth.recovery.completed','auth.recovery.cancelled','auth.recovery.expired',
+        'auth.authorization_request.created','auth.authorization_request.approved','auth.authorization_request.denied',
+        'auth.authorization.redeemed','auth.authorization.revoked'
+      ));
+    `,
+  },
 ];
 
 export async function applyPlatformMigrations(
