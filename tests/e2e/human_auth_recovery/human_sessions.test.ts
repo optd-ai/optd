@@ -2,6 +2,37 @@ import { assertEquals, assertFalse } from "jsr:@std/assert";
 import { startLiveHarness } from "../../support/live_harness.ts";
 import { query } from "../../../src/adapters/outbound/postgres/client.ts";
 
+Deno.test("server warns while honoring an operator-lowered password minimum", async () => {
+  const prior = Deno.env.get("OPERANT_PASSWORD_MIN_LENGTH");
+  Deno.env.set("OPERANT_PASSWORD_MIN_LENGTH", "6");
+  const harness = await startLiveHarness();
+  try {
+    const bootstrap = await harness.bootstrap({
+      username: "lowered-policy-admin",
+      password: "sixsix",
+    });
+    assertEquals(bootstrap.code, 0, bootstrap.stderr);
+    const policy = await harness.runOptctl([
+      "--json",
+      "auth",
+      "password-policy",
+    ]);
+    assertEquals(policy.code, 0, policy.stderr);
+    assertEquals(JSON.parse(policy.stdout).data.minimumLength, 6);
+    const diagnostics = await harness.diagnostics();
+    assertEquals(
+      diagnostics.server.includes(
+        "warning: OPERANT_PASSWORD_MIN_LENGTH=6 is below the default minimum of 8",
+      ),
+      true,
+    );
+  } finally {
+    await harness.close();
+    if (prior === undefined) Deno.env.delete("OPERANT_PASSWORD_MIN_LENGTH");
+    else Deno.env.set("OPERANT_PASSWORD_MIN_LENGTH", prior);
+  }
+});
+
 Deno.test("compiled optctl logs in, lists sessions, logs out, and survives restart", async () => {
   const harness = await startLiveHarness();
   try {

@@ -9,11 +9,19 @@ import {
   validatePassword,
 } from "../../../domain/auth/validation.ts";
 
-export function loadPasswordPolicy(env: Deno.Env = Deno.env): PasswordPolicy {
+export function loadPasswordPolicy(
+  env: Deno.Env = Deno.env,
+  warn: (message: string) => void = (message) => console.warn(message),
+): PasswordPolicy {
   const integer = env.get("OPERANT_PASSWORD_MIN_LENGTH") ?? "8";
   const minimumLength = Number(integer);
   if (!Number.isInteger(minimumLength) || minimumLength < 1) {
     throw new Error("OPERANT_PASSWORD_MIN_LENGTH must be a positive integer");
+  }
+  if (minimumLength < 8) {
+    warn(
+      `warning: OPERANT_PASSWORD_MIN_LENGTH=${minimumLength} is below the default minimum of 8`,
+    );
   }
   const flag = (name: string) => {
     const value = env.get(name) ?? "false";

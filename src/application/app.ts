@@ -46,7 +46,7 @@ export function makeApplication(
   const passwordPolicy = loadPasswordPolicy();
   return {
     authentication,
-    bootstrap: makeBootstrapService(authentication),
+    bootstrap: makeBootstrapService(authentication, passwordPolicy),
     humanAuth: makeHumanAuthService(authentication, passwordPolicy),
     projects: makeProjectService(new PostgresProjectRepository(sql)),
     metadata: makeInspectMetadataService({

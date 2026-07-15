@@ -4,6 +4,11 @@ import { loadPasswordPolicy } from "../../../src/application/services/auth/human
 import { transitionPasswordReset } from "../../../src/domain/auth/password_reset_state.ts";
 import { ImmediateSemaphore } from "../../../src/adapters/outbound/postgres/auth_repository.ts";
 import { authenticatedOutput } from "../../../src/adapters/inbound/cli-cliffy/optctl.ts";
+import {
+  ARGON2ID_V1,
+  parseArgonPhc,
+  planArgonMaintenance,
+} from "../../../src/domain/auth/argon_profile.ts";
 
 Deno.test("password policy normalizes Unicode and enforces configured classes", () => {
   const env = {
@@ -21,6 +26,52 @@ Deno.test("password policy normalizes Unicode and enforces configured classes", 
   assertEquals(validatePassword("Abcdef7!", policy).ok, true);
   assertEquals(validatePassword("abcdef7!", policy).ok, false);
   assertEquals(validatePassword("Abcdef7\n", policy).ok, false);
+});
+
+Deno.test("Argon profile parser plans upgrades without parameter downgrades", () => {
+  const weak = parseArgonPhc(
+    "$argon2id$v=19$m=8192,t=1,p=1$c2FsdHNhbHQ$AAAAAAAAAAAAAAAAAAAAAA",
+  );
+  assertEquals(weak, {
+    algorithm: "argon2id",
+    version: 19,
+    memoryCost: 8192,
+    timeCost: 1,
+    parallelism: 1,
+    outputLen: 16,
+  });
+  const upgrade = planArgonMaintenance("argon2id.v0", weak);
+  assertEquals(upgrade.rehash, true);
+  assertEquals(upgrade.target.memoryCost, ARGON2ID_V1.memoryCost);
+  assertEquals(upgrade.target.outputLen, ARGON2ID_V1.outputLen);
+  const mixed = planArgonMaintenance("argon2id.v1", {
+    ...weak!,
+    memoryCost: 32_768,
+  });
+  assertEquals(mixed.target.memoryCost, 32_768);
+  assertEquals(mixed.target.timeCost, ARGON2ID_V1.timeCost);
+  const stronger = planArgonMaintenance("argon2id.v0", {
+    ...ARGON2ID_V1,
+    memoryCost: 32_768,
+  });
+  assertEquals(stronger.rehash, false);
+  assertEquals(stronger.updateProfile, true);
+  assertEquals(parseArgonPhc("not-a-phc"), undefined);
+});
+
+Deno.test("password policy warns explicitly when operator lowers the default", () => {
+  const warnings: string[] = [];
+  const env = {
+    get(name: string) {
+      return name === "OPERANT_PASSWORD_MIN_LENGTH" ? "6" : undefined;
+    },
+  } as Deno.Env;
+  const policy = loadPasswordPolicy(env, (message) => warnings.push(message));
+  assertEquals(policy.minimumLength, 6);
+  assertEquals(warnings, [
+    "warning: OPERANT_PASSWORD_MIN_LENGTH=6 is below the default minimum of 8",
+  ]);
+  assertEquals(validatePassword("sixsix", policy).ok, true);
 });
 
 Deno.test("password reset state transitions are terminal and idempotent", () => {

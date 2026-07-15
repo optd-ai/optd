@@ -1,6 +1,105 @@
 import { assertEquals, assertFalse } from "jsr:@std/assert";
 import { startLiveHarness } from "../support/live_harness.ts";
 import { query } from "../../src/adapters/outbound/postgres/client.ts";
+import {
+  ARGON2ID_V1,
+  parseArgonPhc,
+} from "../../src/domain/auth/argon_profile.ts";
+
+Deno.test("successful concurrent login atomically upgrades a weaker Argon credential", async () => {
+  const harness = await startLiveHarness();
+  try {
+    const password = "credential maintenance password";
+    assertEquals(
+      (await harness.bootstrap({ username: "rehash-admin", password })).code,
+      0,
+    );
+    const original = (await query<{ changed_at: Date }>(
+      harness.server.sql,
+      `select password_changed_at changed_at from password_credentials where human_user_id=(select id from human_users where username='rehash-admin')`,
+    )).rows[0];
+    const weakPhc = await hashForTest(password, {
+      memoryCost: 8_192,
+      timeCost: 1,
+      parallelism: 1,
+      outputLen: 16,
+    });
+    await query(
+      harness.server.sql,
+      `update password_credentials set profile='argon2id.v0',phc_hash=$2 where human_user_id=(select id from human_users where username=$1)`,
+      ["rehash-admin", weakPhc],
+    );
+
+    const failed = await harness.login({
+      username: "rehash-admin",
+      password: "incorrect maintenance password",
+    });
+    assertEquals(failed.code, 1);
+    assertFalse(failed.stderr.includes(weakPhc));
+    const unchanged = (await query<{ profile: string; phc_hash: string }>(
+      harness.server.sql,
+      `select profile,phc_hash from password_credentials where human_user_id=(select id from human_users where username='rehash-admin')`,
+    )).rows[0];
+    assertEquals(unchanged, { profile: "argon2id.v0", phc_hash: weakPhc });
+
+    const logins = await harness.runConcurrent([
+      {
+        args: [
+          "--json",
+          "auth",
+          "login",
+          "--username",
+          "rehash-admin",
+          "--password-stdin",
+        ],
+        stdin: `${password}\n`,
+      },
+      {
+        args: [
+          "--json",
+          "auth",
+          "login",
+          "--username",
+          "rehash-admin",
+          "--password-stdin",
+        ],
+        stdin: `${password}\n`,
+      },
+    ]);
+    assertEquals(logins.every((result) => result.code === 0), true);
+    assertEquals(
+      logins.some((result) =>
+        result.stdout.includes(weakPhc) || result.stderr.includes(weakPhc)
+      ),
+      false,
+    );
+    const upgraded =
+      (await query<{ profile: string; phc_hash: string; changed_at: Date }>(
+        harness.server.sql,
+        `select profile,phc_hash,password_changed_at changed_at from password_credentials where human_user_id=(select id from human_users where username='rehash-admin')`,
+      )).rows[0];
+    assertEquals(upgraded.profile, ARGON2ID_V1.profile);
+    assertFalse(upgraded.phc_hash === weakPhc);
+    assertEquals(
+      new Date(upgraded.changed_at).getTime(),
+      new Date(original.changed_at).getTime(),
+    );
+    const parameters = parseArgonPhc(upgraded.phc_hash)!;
+    assertEquals(parameters.algorithm, ARGON2ID_V1.algorithm);
+    assertEquals(parameters.version, ARGON2ID_V1.version);
+    assertEquals(parameters.memoryCost >= ARGON2ID_V1.memoryCost, true);
+    assertEquals(parameters.timeCost >= ARGON2ID_V1.timeCost, true);
+    assertEquals(parameters.parallelism >= ARGON2ID_V1.parallelism, true);
+    assertEquals(parameters.outputLen >= ARGON2ID_V1.outputLen, true);
+    const activeRequests = await query<{ count: string }>(
+      harness.server.sql,
+      `select count(*)::text count from auth_sessions where human_user_id=(select id from human_users where username='rehash-admin') and credential_kind='authorization_request' and revoked_at is null`,
+    );
+    assertEquals(activeRequests.rows[0]?.count, "1");
+  } finally {
+    await harness.close();
+  }
+});
 
 Deno.test("destructive confirmations share serialized login throttling", async () => {
   const harness = await startLiveHarness();
@@ -464,6 +563,42 @@ Deno.test("reset completion rejects capabilities after request expiry", async ()
     await harness.close();
   }
 });
+
+async function hashForTest(
+  password: string,
+  parameters: {
+    memoryCost: number;
+    timeCost: number;
+    parallelism: number;
+    outputLen: number;
+  },
+): Promise<string> {
+  const child = new Deno.Command(Deno.execPath(), {
+    args: [
+      "run",
+      "--allow-ffi",
+      "--allow-sys",
+      "--allow-env",
+      new URL(
+        "../../src/adapters/outbound/postgres/auth_password_worker.ts",
+        import.meta.url,
+      ).pathname,
+    ],
+    stdin: "piped",
+    stdout: "piped",
+    stderr: "piped",
+  }).spawn();
+  const writer = child.stdin.getWriter();
+  await writer.write(
+    new TextEncoder().encode(
+      JSON.stringify({ operation: "hash", password, parameters }),
+    ),
+  );
+  await writer.close();
+  const output = await child.output();
+  if (!output.success) throw new Error(new TextDecoder().decode(output.stderr));
+  return JSON.parse(new TextDecoder().decode(output.stdout)).phc;
+}
 
 async function waitForSuperAdminWaiters(
   sql: Parameters<typeof query>[0],

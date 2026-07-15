@@ -11,6 +11,12 @@ import type {
 } from "../../../domain/auth/model.ts";
 import { immutableAuthContext } from "../../../domain/auth/model.ts";
 import { transitionPasswordReset } from "../../../domain/auth/password_reset_state.ts";
+import {
+  ARGON2ID_V1,
+  type ArgonParameters,
+  parseArgonPhc,
+  planArgonMaintenance,
+} from "../../../domain/auth/argon_profile.ts";
 import { err, ok, type Result } from "../../../domain/errors/result.ts";
 import { uuidV7 } from "../../../domain/ids/uuid_v7.ts";
 import {
@@ -298,10 +304,11 @@ export class PostgresAuthRepository implements AuthRepository {
             display_name: string;
             status: "active" | "disabled";
             phc_hash: string;
+            profile: string;
           }
         >(
           tx,
-          `select u.id,u.principal_id,u.username,u.display_name,u.status,pw.phc_hash from human_users u join password_credentials pw on pw.human_user_id=u.id where u.username=$1`,
+          `select u.id,u.principal_id,u.username,u.display_name,u.status,pw.phc_hash,pw.profile from human_users u join password_credentials pw on pw.human_user_id=u.id where u.username=$1`,
           [username],
         )).rows[0];
         const valid = await verifyPassword(
@@ -322,6 +329,24 @@ export class PostgresAuthRepository implements AuthRepository {
               "username or password is invalid",
               "authentication",
             ),
+          );
+        }
+        const maintenance = planArgonMaintenance(
+          row.profile,
+          parseArgonPhc(row.phc_hash),
+        );
+        if (maintenance.rehash) {
+          const upgraded = await hashPassword(password, maintenance.target);
+          await query(
+            tx,
+            `update password_credentials set profile=$2,phc_hash=$3 where human_user_id=$1`,
+            [row.id, ARGON2ID_V1.profile, upgraded],
+          );
+        } else if (maintenance.updateProfile) {
+          await query(
+            tx,
+            `update password_credentials set profile=$2 where human_user_id=$1`,
+            [row.id, ARGON2ID_V1.profile],
           );
         }
         await query(
@@ -1401,7 +1426,10 @@ export class ImmediateSemaphore {
   }
 }
 
-async function hashPassword(password: string): Promise<string> {
+async function hashPassword(
+  password: string,
+  parameters?: ArgonParameters,
+): Promise<string> {
   const child = new Deno.Command(Deno.execPath(), {
     args: [
       "run",
@@ -1416,7 +1444,20 @@ async function hashPassword(password: string): Promise<string> {
   }).spawn();
   const writer = child.stdin.getWriter();
   await writer.write(
-    new TextEncoder().encode(JSON.stringify({ operation: "hash", password })),
+    new TextEncoder().encode(JSON.stringify({
+      operation: "hash",
+      password,
+      ...(parameters
+        ? {
+          parameters: {
+            memoryCost: parameters.memoryCost,
+            timeCost: parameters.timeCost,
+            parallelism: parameters.parallelism,
+            outputLen: parameters.outputLen,
+          },
+        }
+        : {}),
+    })),
   );
   await writer.close();
   const output = await child.output();
