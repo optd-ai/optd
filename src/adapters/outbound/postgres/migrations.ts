@@ -419,6 +419,55 @@ export const platformMigrations: PlatformMigration[] = [
       create index project_audit_context_idx on project_audit_events(auth_context_id, created_at)
     `,
   },
+  {
+    id: "1009_human_auth_recovery",
+    sql: `
+      alter table human_users add column disabled_at timestamptz;
+      create table login_throttles (
+        username text primary key,
+        failure_count integer not null default 0,
+        next_allowed_at timestamptz,
+        updated_at timestamptz not null default now()
+      );
+      create table password_reset_requests (
+        id text primary key,
+        human_user_id uuid references human_users(id),
+        username text not null,
+        idempotency_key text not null,
+        nonce_digest text not null,
+        capability_digest text,
+        status text not null check(status in ('pending','approved','denied','cancelled','completed')),
+        created_at timestamptz not null default now(),
+        expires_at timestamptz not null,
+        decided_by_auth_context_id uuid references auth_contexts(id),
+        decided_at timestamptz,
+        redeemed_at timestamptz,
+        completed_at timestamptz,
+        unique(username,idempotency_key)
+      );
+      create table recovery_challenges (
+        id uuid primary key,
+        human_user_id uuid not null references human_users(id),
+        token_digest text,
+        enable_user boolean not null,
+        restore_super_admin boolean not null,
+        status text not null check(status in ('active','completed','cancelled')),
+        created_at timestamptz not null default now(),
+        expires_at timestamptz not null,
+        completed_at timestamptz
+      );
+      alter table auth_audit_events drop constraint auth_audit_events_event_type_check;
+      alter table auth_audit_events add constraint auth_audit_events_event_type_check check(event_type in (
+        'auth.bootstrap.completed','auth.human_user.created','auth.human_user.enabled','auth.human_user.disabled',
+        'auth.role_assignment.created','auth.session.created','auth.session.revoked','auth.sessions.revoked_all',
+        'auth.login.succeeded','auth.password.changed','auth.password_reset.approved','auth.password_reset.denied',
+        'auth.password_reset.completed','auth.recovery.initiated','auth.recovery.completed'
+      ));
+      create index login_throttles_updated_idx on login_throttles(updated_at);
+      create index password_reset_target_idx on password_reset_requests(human_user_id,created_at);
+      create unique index recovery_one_active_target_idx on recovery_challenges(human_user_id) where status='active';
+    `,
+  },
 ];
 
 export async function applyPlatformMigrations(

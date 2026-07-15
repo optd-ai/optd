@@ -20,7 +20,7 @@ import {
   validateDisplayName,
   validatePassword,
 } from "../../../src/domain/auth/validation.ts";
-import type { AuthRepository } from "../../../src/application/ports/authentication.ts";
+import type { BootstrapRepository } from "../../../src/application/ports/authentication.ts";
 import { bootstrapStatusDataValidator } from "../../../src/schemas/auth/bootstrap.ts";
 
 Deno.test("opaque credentials hash deterministically without retaining plaintext", async () => {
@@ -95,19 +95,9 @@ Deno.test("bootstrap DTO and service reject unknown and invalid input strictly",
     ),
   );
   let called = false;
-  const repository: AuthRepository = {
+  const repository: BootstrapRepository = {
     bootstrapStatus: () =>
       Promise.resolve({ ok: true, value: "bootstrap_required" }),
-    authenticate: () =>
-      Promise.resolve({
-        ok: false,
-        error: {
-          code: "credential_invalid",
-          message: "invalid",
-          severity: "authentication",
-          details: {},
-        },
-      }),
     bootstrap: () => {
       called = true;
       throw new Error("must not be called");

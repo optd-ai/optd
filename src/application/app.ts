@@ -14,6 +14,10 @@ import { PostgresTransactionManager } from "../adapters/outbound/postgres/transa
 import { PostgresAuthRepository } from "../adapters/outbound/postgres/auth_repository.ts";
 import { PostgresProjectRepository } from "../adapters/outbound/postgres/project_repository.ts";
 import { makeBootstrapService } from "./services/auth/bootstrap.ts";
+import {
+  loadPasswordPolicy,
+  makeHumanAuthService,
+} from "./services/auth/human.ts";
 import { makeProjectService } from "./services/projects/manage_projects.ts";
 
 export function makeApplication(
@@ -31,13 +35,19 @@ export function makeApplication(
     tx,
     hookRunner,
   });
+  const maximumHashes = Number(
+    Deno.env.get("OPERANT_PASSWORD_MAX_CONCURRENT_HASHES") ?? "4",
+  );
   const authentication = new PostgresAuthRepository(
     sql,
     options.bootstrapToken,
+    maximumHashes,
   );
+  const passwordPolicy = loadPasswordPolicy();
   return {
     authentication,
     bootstrap: makeBootstrapService(authentication),
+    humanAuth: makeHumanAuthService(authentication, passwordPolicy),
     projects: makeProjectService(new PostgresProjectRepository(sql)),
     metadata: makeInspectMetadataService({
       sql,

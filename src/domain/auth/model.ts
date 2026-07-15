@@ -23,14 +23,43 @@ export type IssuedCredentials = {
   requestToken: string;
 };
 
-export type BootstrapResult = {
-  user: {
-    id: string;
-    principalId: string;
-    username: string;
-    displayName: string;
-  };
+export type HumanUser = {
+  id: string;
+  principalId: string;
+  username: string;
+  displayName: string;
+  status: "active" | "disabled";
+};
+
+export type HumanSession = {
+  id: string;
+  credentialKind: CredentialKind;
+  createdAt: string;
+  current: boolean;
+};
+
+export type LoginResult = {
+  user: HumanUser;
   credentials: IssuedCredentials;
+};
+
+export type BootstrapResult = LoginResult;
+
+export type PasswordPolicy = {
+  minimumLength: number;
+  maximumBytes: 1024;
+  requireUppercase: boolean;
+  requireLowercase: boolean;
+  requireDigit: boolean;
+  requireSymbol: boolean;
+};
+
+export type PasswordReset = {
+  id: string;
+  username: string;
+  status: "pending" | "approved" | "denied" | "cancelled" | "completed";
+  createdAt: string;
+  expiresAt: string;
 };
 
 export function immutableAuthContext(input: AuthContext): AuthContext {

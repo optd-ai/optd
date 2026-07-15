@@ -1,6 +1,14 @@
 import type { Hono } from "npm:hono";
 import type { Result } from "../../../domain/errors/result.ts";
-import type { BootstrapResult } from "../../../domain/auth/model.ts";
+import type {
+  AuthContext,
+  BootstrapResult,
+  HumanSession,
+  HumanUser,
+  LoginResult,
+  PasswordPolicy,
+  PasswordReset,
+} from "../../../domain/auth/model.ts";
 import type { BootstrapStatus } from "../../../application/ports/authentication.ts";
 import {
   errorEnvelope,
@@ -21,37 +29,134 @@ export type BootstrapHttpService = {
     },
   ): Promise<Result<BootstrapResult>>;
 };
+export type HumanAuthHttpService = {
+  policy(): Result<PasswordPolicy>;
+  login(
+    input: { username: unknown; password: unknown },
+  ): Promise<Result<LoginResult>>;
+  current(auth: AuthContext): Promise<Result<HumanUser>>;
+  sessions(auth: AuthContext): Promise<Result<HumanSession[]>>;
+  logout(auth: AuthContext): Promise<Result<{ revoked: true }>>;
+  logoutAll(
+    auth: AuthContext,
+    password: unknown,
+  ): Promise<Result<{ revoked: number }>>;
+  changePassword(
+    auth: AuthContext,
+    currentPassword: unknown,
+    newPassword: unknown,
+  ): Promise<Result<LoginResult>>;
+  users(auth: AuthContext): Promise<Result<HumanUser[]>>;
+  createUser(
+    auth: AuthContext,
+    input: { username: unknown; displayName: unknown; password: unknown },
+  ): Promise<Result<HumanUser>>;
+  setUserStatus(
+    auth: AuthContext,
+    id: string,
+    status: "active" | "disabled",
+  ): Promise<Result<HumanUser>>;
+  requestReset(
+    input: { username: unknown; nonceHash: unknown; idempotencyKey: unknown },
+  ): Promise<Result<{ requestId: string }>>;
+  inspectReset(auth: AuthContext, id: string): Promise<Result<PasswordReset>>;
+  decideReset(
+    auth: AuthContext,
+    id: string,
+    decision: "approved" | "denied",
+  ): Promise<Result<PasswordReset>>;
+  cancelReset(id: string, nonce: string): Promise<Result<PasswordReset>>;
+  redeemReset(
+    id: string,
+    nonce: string,
+  ): Promise<Result<{ capability: string }>>;
+  completeReset(
+    id: string,
+    capability: string,
+    password: unknown,
+  ): Promise<Result<LoginResult>>;
+  completeRecovery(
+    input: { username: unknown; token: string; password: unknown },
+  ): Promise<Result<LoginResult>>;
+};
 
 export function registerAuthRoutes(
   app: Hono<{ Variables: AuthVariables }>,
-  service: BootstrapHttpService,
+  bootstrap: BootstrapHttpService,
+  human: HumanAuthHttpService,
 ) {
-  app.get("/api/v1/auth/bootstrap/status", async (c) => {
-    const result = await service.status();
-    if (!result.ok) {
-      return c.json(
-        errorEnvelope(result.error),
-        toHttpStatus(result.error) as 503,
-      );
+  const send = <T>(
+    c: {
+      json(data: unknown, status?: number): Response;
+      header(name: string, value: string): void;
+    },
+    result: Result<T>,
+    status = 200,
+  ) => {
+    if (
+      !result.ok &&
+      (result.error.code === "authentication_busy" ||
+        result.error.code === "login_throttled")
+    ) {
+      const details = result.error.details as
+        | { retry_after_seconds?: number }
+        | undefined;
+      c.header("Retry-After", String(details?.retry_after_seconds ?? 1));
     }
+    return result.ok
+      ? c.json(successEnvelope(result.value), status)
+      : c.json(errorEnvelope(result.error), toHttpStatus(result.error));
+  };
+  const json = async (
+    c: {
+      req: {
+        header(name: string): string | undefined;
+        json(): Promise<unknown>;
+      };
+      json(data: unknown, status?: number): Response;
+    },
+  ) => {
+    if (!isJsonContentType(c.req.header("content-type") ?? "")) {
+      return {
+        response: c.json(
+          errorEnvelope({
+            code: "unsupported_media_type",
+            message: "JSON routes require Content-Type application/json",
+            details: {},
+          }),
+          415,
+        ),
+      };
+    }
+    const body = await c.req.json().catch(() => undefined);
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      return {
+        response: c.json(
+          errorEnvelope({
+            code: "invalid_json",
+            message: "request body must be a JSON object",
+            details: {},
+          }),
+          400,
+        ),
+      };
+    }
+    return { body: body as Record<string, unknown> };
+  };
+  const userData = (result: Result<LoginResult>): Result<unknown> =>
+    result.ok ? { ok: true, value: loginData(result.value) } : result;
+
+  app.get("/api/v1/auth/bootstrap/status", async (c) => {
+    const result = await bootstrap.status();
+    if (!result.ok) return send(c, result);
     const data = { state: result.value };
     bootstrapStatusDataValidator.assert(data);
     return c.json(successEnvelope(data));
   });
   app.post("/api/v1/auth/bootstrap", async (c) => {
-    if (!isJsonContentType(c.req.header("content-type") ?? "")) {
-      return c.json(
-        errorEnvelope({
-          code: "unsupported_media_type",
-          message: "JSON routes require Content-Type application/json",
-          details: {},
-        }),
-        415,
-      );
-    }
-    const authorization = c.req.header("authorization") ?? "";
-    const match = /^Operant-Bootstrap (.+)$/.exec(authorization);
-    const body = await c.req.json().catch(() => undefined);
+    const parsed = await json(c);
+    if (parsed.response) return parsed.response;
+    const body = parsed.body!;
     if (
       !strictObject(body, ["username", "display_name", "password"], [
         "username",
@@ -67,36 +172,265 @@ export function registerAuthRoutes(
         422,
       );
     }
-    const result = await service.initialize({
-      bootstrapToken: match?.[1] ?? "",
-      username: body.username,
-      displayName: body.display_name ?? body.username,
-      password: body.password,
-    });
-    if (!result.ok) {
+    const match = /^Operant-Bootstrap (.+)$/.exec(
+      c.req.header("authorization") ?? "",
+    );
+    return send(
+      c,
+      userData(
+        await bootstrap.initialize({
+          bootstrapToken: match?.[1] ?? "",
+          username: body.username,
+          displayName: body.display_name ?? body.username,
+          password: body.password,
+        }),
+      ),
+      201,
+    );
+  });
+  app.get("/api/v1/auth/password-policy", (c) => send(c, human.policy()));
+  app.post("/api/v1/auth/login", async (c) => {
+    const parsed = await json(c);
+    if (parsed.response) return parsed.response;
+    if (
+      !strictObject(parsed.body, [
+        "username",
+        "password",
+        "existing_request_session_id",
+      ], ["username", "password"])
+    ) {
       return c.json(
-        errorEnvelope(result.error),
-        toHttpStatus(result.error) as 400,
+        errorEnvelope({
+          code: "validation_failed",
+          message: "login request is invalid",
+          details: {},
+        }),
+        422,
       );
     }
-    return c.json(
-      successEnvelope({
-        user: {
-          id: result.value.user.id,
-          principal_id: result.value.user.principalId,
-          username: result.value.user.username,
-          display_name: result.value.user.displayName,
-        },
-        credentials: {
-          token: result.value.credentials.token,
-          authorization_request_token: result.value.credentials.requestToken,
-        },
-      }),
+    return send(
+      c,
+      userData(
+        await human.login({
+          username: parsed.body!.username,
+          password: parsed.body!.password,
+        }),
+      ),
+    );
+  });
+  app.get(
+    "/api/v1/auth/me",
+    async (c) =>
+      send(c, mapResult(await human.current(c.get("auth")), userDto)),
+  );
+  app.get(
+    "/api/v1/auth/sessions",
+    async (c) =>
+      send(
+        c,
+        mapResult(await human.sessions(c.get("auth")), (sessions) =>
+          sessions.map((session) => ({
+            id: session.id,
+            credential_kind: session.credentialKind,
+            created_at: session.createdAt,
+            current: session.current,
+          }))),
+      ),
+  );
+  app.post(
+    "/api/v1/auth/logout",
+    async (c) => send(c, await human.logout(c.get("auth"))),
+  );
+  app.post("/api/v1/auth/logout-all", async (c) => {
+    const parsed = await json(c);
+    if (parsed.response) return parsed.response;
+    return send(c, await human.logoutAll(c.get("auth"), parsed.body!.password));
+  });
+  app.post("/api/v1/auth/password/change", async (c) => {
+    const parsed = await json(c);
+    if (parsed.response) return parsed.response;
+    return send(
+      c,
+      userData(
+        await human.changePassword(
+          c.get("auth"),
+          parsed.body!.current_password,
+          parsed.body!.new_password,
+        ),
+      ),
+    );
+  });
+  app.get(
+    "/api/v1/auth/users",
+    async (c) =>
+      send(
+        c,
+        mapResult(await human.users(c.get("auth")), (users) =>
+          users.map(userDto)),
+      ),
+  );
+  app.post("/api/v1/auth/users", async (c) => {
+    const parsed = await json(c);
+    if (parsed.response) return parsed.response;
+    const body = parsed.body!;
+    return send(
+      c,
+      mapResult(
+        await human.createUser(c.get("auth"), {
+          username: body.username,
+          displayName: body.display_name ?? body.username,
+          password: body.password,
+        }),
+        userDto,
+      ),
       201,
+    );
+  });
+  app.patch("/api/v1/auth/users/:id", async (c) => {
+    const parsed = await json(c);
+    if (parsed.response) return parsed.response;
+    const status = parsed.body!.status;
+    if (status !== "active" && status !== "disabled") {
+      return c.json(
+        errorEnvelope({
+          code: "validation_failed",
+          message: "status must be active or disabled",
+          details: {},
+        }),
+        422,
+      );
+    }
+    return send(
+      c,
+      mapResult(
+        await human.setUserStatus(c.get("auth"), c.req.param("id"), status),
+        userDto,
+      ),
+    );
+  });
+
+  app.post("/api/v1/auth/password-reset/requests", async (c) => {
+    const parsed = await json(c);
+    if (parsed.response) return parsed.response;
+    const body = parsed.body!;
+    const result = await human.requestReset({
+      username: body.username,
+      nonceHash: body.redemption_nonce_hash,
+      idempotencyKey: c.req.header("idempotency-key"),
+    });
+    return result.ok
+      ? c.json(successEnvelope({ request_id: result.value.requestId }), 202)
+      : send(c, result);
+  });
+  app.get(
+    "/api/v1/auth/password-reset/requests/:id",
+    async (c) =>
+      send(c, await human.inspectReset(c.get("auth"), c.req.param("id"))),
+  );
+  app.post("/api/v1/auth/password-reset/requests/:id/decision", async (c) => {
+    const parsed = await json(c);
+    if (parsed.response) return parsed.response;
+    const decision = parsed.body!.decision;
+    if (decision !== "approved" && decision !== "denied") {
+      return c.json(
+        errorEnvelope({
+          code: "validation_failed",
+          message: "decision is invalid",
+          details: {},
+        }),
+        422,
+      );
+    }
+    return send(
+      c,
+      await human.decideReset(c.get("auth"), c.req.param("id"), decision),
+    );
+  });
+  app.post("/api/v1/auth/password-reset/requests/:id/cancel", async (c) => {
+    const parsed = await json(c);
+    if (parsed.response) return parsed.response;
+    return send(
+      c,
+      await human.cancelReset(
+        c.req.param("id"),
+        String(parsed.body!.redemption_nonce ?? ""),
+      ),
+    );
+  });
+  app.post("/api/v1/auth/password-reset/requests/:id/redeem", async (c) => {
+    const parsed = await json(c);
+    if (parsed.response) return parsed.response;
+    return send(
+      c,
+      await human.redeemReset(
+        c.req.param("id"),
+        String(parsed.body!.redemption_nonce ?? ""),
+      ),
+    );
+  });
+  app.post("/api/v1/auth/password-reset/requests/:id/complete", async (c) => {
+    const parsed = await json(c);
+    if (parsed.response) return parsed.response;
+    return send(
+      c,
+      userData(
+        await human.completeReset(
+          c.req.param("id"),
+          String(parsed.body!.capability ?? ""),
+          parsed.body!.password,
+        ),
+      ),
+    );
+  });
+  app.post("/api/v1/auth/recovery/complete", async (c) => {
+    const parsed = await json(c);
+    if (parsed.response) return parsed.response;
+    const match = /^Operant-Recovery (.+)$/.exec(
+      c.req.header("authorization") ?? "",
+    );
+    return send(
+      c,
+      userData(
+        await human.completeRecovery({
+          username: parsed.body!.username,
+          token: match?.[1] ?? "",
+          password: parsed.body!.password,
+        }),
+      ),
     );
   });
 }
 
+function mapResult<T, U>(
+  result: Result<T>,
+  transform: (value: T) => U,
+): Result<U> {
+  return result.ok ? { ok: true, value: transform(result.value) } : result;
+}
+function userDto(user: HumanUser) {
+  return {
+    id: user.id,
+    principal_id: user.principalId,
+    username: user.username,
+    display_name: user.displayName,
+    status: user.status,
+  };
+}
+function loginData(result: LoginResult) {
+  return {
+    user: {
+      id: result.user.id,
+      principal_id: result.user.principalId,
+      username: result.user.username,
+      display_name: result.user.displayName,
+      status: result.user.status,
+    },
+    credentials: {
+      token: result.credentials.token,
+      authorization_request_token: result.credentials.requestToken,
+    },
+  };
+}
 export function strictObject(
   value: unknown,
   allowed: string[],

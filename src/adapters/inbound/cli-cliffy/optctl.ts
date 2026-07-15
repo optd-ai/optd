@@ -7,6 +7,7 @@ import {
   errorEnvelope,
 } from "../../../schemas/api/contracts.ts";
 import { readOrigin, writeOrigin } from "./auth_store.ts";
+import { opaqueToken, tokenDigest } from "../../../domain/auth/token.ts";
 
 export type OptctlRunResult = { stdout: string; stderr: string; code: number };
 type Parsed = {
@@ -181,7 +182,7 @@ function interactiveInputError(message: string): OptctlError {
   );
 }
 
-async function readPassword(args: string[]): Promise<string> {
+async function readPassword(args: string[], confirm = true): Promise<string> {
   if (
     args.some((arg) => arg === "--password" || arg.startsWith("--password="))
   ) {
@@ -199,6 +200,7 @@ async function readPassword(args: string[]): Promise<string> {
     );
   }
   const first = await promptSecret("Password: ");
+  if (!confirm) return first;
   const confirmation = await promptSecret("Confirm password: ");
   if (first !== confirmation) {
     throw new OptctlError(
@@ -415,7 +417,253 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       await writeOrigin(parsed.server, {
         token: String(credentials.token),
         requestToken: String(credentials.authorization_request_token),
+        username,
       });
+      result = {
+        ok: true,
+        data: { user: envelopeData(result).user, authenticated: true },
+      };
+    } else if (cmd === "auth" && sub === "login") {
+      const authArgs = parsed.positional.slice(2);
+      const prior = await readOrigin(parsed.server);
+      const username = option(authArgs, "--username") ?? prior.username;
+      if (!username) {
+        throw usageError("auth login requires --username on first use");
+      }
+      const password = await readPassword(authArgs, false);
+      result = await decodeJsonResponse(
+        await fetch(`${parsed.server}/api/v1/auth/login`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ username, password }),
+        }),
+      );
+      const credentials = envelopeData(result).credentials as Record<
+        string,
+        unknown
+      >;
+      await writeOrigin(parsed.server, {
+        token: String(credentials.token),
+        requestToken: String(credentials.authorization_request_token),
+        username,
+      });
+      result = {
+        ok: true,
+        data: { user: envelopeData(result).user, authenticated: true },
+      };
+    } else if (cmd === "auth" && (sub === "whoami" || sub === "status")) {
+      result = await getJson(`${parsed.server}/api/v1/auth/me`);
+    } else if (cmd === "auth" && sub === "sessions") {
+      result = await getJson(`${parsed.server}/api/v1/auth/sessions`);
+    } else if (cmd === "auth" && sub === "logout") {
+      const authArgs = parsed.positional.slice(2);
+      if (authArgs.includes("--all")) {
+        if (!authArgs.includes("--yes")) {
+          throw usageError("auth logout --all requires --yes");
+        }
+        result = await postJson(`${parsed.server}/api/v1/auth/logout-all`, {
+          password: await readPassword(authArgs, false),
+        });
+        await writeOrigin(parsed.server, {
+          token: undefined,
+          requestToken: undefined,
+        });
+      } else {
+        result = await postJson(`${parsed.server}/api/v1/auth/logout`, {});
+        await writeOrigin(parsed.server, { token: undefined });
+      }
+    } else if (cmd === "auth" && sub === "user" && value === "list") {
+      result = await getJson(`${parsed.server}/api/v1/auth/users`);
+    } else if (cmd === "auth" && sub === "user" && value === "create") {
+      const userArgs = parsed.positional.slice(3);
+      const username = option(userArgs, "--username");
+      if (!username) throw usageError("auth user create requires --username");
+      result = await postJson(`${parsed.server}/api/v1/auth/users`, {
+        username,
+        display_name: option(userArgs, "--display-name") ?? username,
+        password: await readPassword(userArgs),
+      });
+    } else if (
+      cmd === "auth" && sub === "user" &&
+      (value === "disable" || value === "enable")
+    ) {
+      const userId = parsed.positional[3];
+      if (!userId) throw usageError(`auth user ${value} requires a user id`);
+      result = await decodeJsonResponse(
+        await fetch(
+          `${parsed.server}/api/v1/auth/users/${encodeURIComponent(userId)}`,
+          {
+            method: "PATCH",
+            headers: {
+              "content-type": "application/json",
+              ...await credentialHeaders(parsed.server),
+            },
+            body: JSON.stringify({
+              status: value === "enable" ? "active" : "disabled",
+            }),
+          },
+        ),
+      );
+    } else if (cmd === "auth" && sub === "password" && value === "change") {
+      const passwordArgs = parsed.positional.slice(3);
+      if (!passwordArgs.includes("--password-stdin")) {
+        throw interactiveInputError(
+          "password change currently requires --password-stdin with current and new password lines",
+        );
+      }
+      const lines = (await new Response(Deno.stdin.readable).text()).replace(
+        /\r/g,
+        "",
+      ).split("\n");
+      if (!lines[0] || !lines[1]) {
+        throw interactiveInputError(
+          "password change requires current and new password lines",
+        );
+      }
+      result = await postJson(`${parsed.server}/api/v1/auth/password/change`, {
+        current_password: lines[0],
+        new_password: lines[1],
+      });
+      const data = envelopeData(result);
+      const credentials = data.credentials as Record<string, unknown>;
+      const user = data.user as Record<string, unknown>;
+      await writeOrigin(parsed.server, {
+        token: String(credentials.token),
+        requestToken: String(credentials.authorization_request_token),
+        username: String(user.username),
+      });
+      result = { ok: true, data: { user, authenticated: true } };
+    } else if (cmd === "auth" && sub === "password-policy") {
+      result = await getJson(`${parsed.server}/api/v1/auth/password-policy`);
+    } else if (cmd === "auth" && sub === "password-reset") {
+      const action = value;
+      const resetArgs = parsed.positional.slice(3);
+      const requestId = resetArgs.find((arg) => !arg.startsWith("--"));
+      if (action === "request") {
+        const username = option(resetArgs, "--username");
+        if (!username) {
+          throw usageError("password-reset request requires --username");
+        }
+        const nonce = opaqueToken();
+        const idempotencyKey = opaqueToken();
+        result = await decodeJsonResponse(
+          await fetch(`${parsed.server}/api/v1/auth/password-reset/requests`, {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              "idempotency-key": idempotencyKey,
+            },
+            body: JSON.stringify({
+              username,
+              redemption_nonce_hash: await tokenDigest(nonce),
+            }),
+          }),
+        );
+        const id = String(envelopeData(result).request_id);
+        const prior = await readOrigin(parsed.server);
+        await writeOrigin(parsed.server, {
+          resetNonces: { ...(prior.resetNonces ?? {}), [id]: nonce },
+        });
+      } else if (action === "inspect" && requestId) {
+        result = await getJson(
+          `${parsed.server}/api/v1/auth/password-reset/requests/${
+            encodeURIComponent(requestId)
+          }`,
+        );
+      } else if ((action === "approve" || action === "deny") && requestId) {
+        result = await postJson(
+          `${parsed.server}/api/v1/auth/password-reset/requests/${
+            encodeURIComponent(requestId)
+          }/decision`,
+          { decision: action === "approve" ? "approved" : "denied" },
+        );
+      } else if ((action === "complete" || action === "cancel") && requestId) {
+        const prior = await readOrigin(parsed.server);
+        const nonce = prior.resetNonces?.[requestId];
+        if (!nonce) {
+          throw usageError(
+            "password-reset requester nonce is unavailable in this local auth store",
+          );
+        }
+        if (action === "cancel") {
+          result = await decodeJsonResponse(
+            await fetch(
+              `${parsed.server}/api/v1/auth/password-reset/requests/${
+                encodeURIComponent(requestId)
+              }/cancel`,
+              {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ redemption_nonce: nonce }),
+              },
+            ),
+          );
+        } else {
+          const redeemed = await decodeJsonResponse(
+            await fetch(
+              `${parsed.server}/api/v1/auth/password-reset/requests/${
+                encodeURIComponent(requestId)
+              }/redeem`,
+              {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ redemption_nonce: nonce }),
+              },
+            ),
+          );
+          const capability = String(envelopeData(redeemed).capability);
+          const password = await readPassword(resetArgs);
+          result = await decodeJsonResponse(
+            await fetch(
+              `${parsed.server}/api/v1/auth/password-reset/requests/${
+                encodeURIComponent(requestId)
+              }/complete`,
+              {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ capability, password }),
+              },
+            ),
+          );
+          const data = envelopeData(result);
+          const credentials = data.credentials as Record<string, unknown>;
+          const user = data.user as Record<string, unknown>;
+          await writeOrigin(parsed.server, {
+            token: String(credentials.token),
+            requestToken: String(credentials.authorization_request_token),
+            username: String(user.username),
+          });
+          result = { ok: true, data: { user, authenticated: true } };
+        }
+      } else throw usageError("invalid auth password-reset command");
+    } else if (cmd === "auth" && sub === "recover") {
+      const recoveryArgs = parsed.positional.slice(2);
+      const username = option(recoveryArgs, "--username");
+      const recoveryToken = Deno.env.get("OPERANT_RECOVERY_TOKEN");
+      if (!username || !recoveryToken) {
+        throw usageError(
+          "auth recover requires --username and OPERANT_RECOVERY_TOKEN",
+        );
+      }
+      const password = await readPassword(recoveryArgs);
+      result = await decodeJsonResponse(
+        await fetch(`${parsed.server}/api/v1/auth/recovery/complete`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Operant-Recovery ${recoveryToken}`,
+          },
+          body: JSON.stringify({ username, password }),
+        }),
+      );
+      const data = envelopeData(result);
+      const credentials = data.credentials as Record<string, unknown>;
+      await writeOrigin(parsed.server, {
+        token: String(credentials.token),
+        requestToken: String(credentials.authorization_request_token),
+        username,
+      });
+      result = { ok: true, data: { user: data.user, authenticated: true } };
     } else if (cmd === "project" && sub === "list") {
       const listArgs = parsed.positional.slice(2);
       const parameters = new URLSearchParams();

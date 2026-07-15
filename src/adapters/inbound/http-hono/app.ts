@@ -32,6 +32,7 @@ import {
 } from "./auth_middleware.ts";
 import {
   type BootstrapHttpService,
+  type HumanAuthHttpService,
   registerAuthRoutes,
 } from "./auth_routes.ts";
 import {
@@ -42,6 +43,7 @@ import {
 export type HttpDependencies = {
   authentication: RequestAuthenticator;
   bootstrap: BootstrapHttpService;
+  humanAuth: HumanAuthHttpService;
   projects: ProjectHttpService;
   metadata: {
     home(): Promise<Result<HomeDto>>;
@@ -123,7 +125,15 @@ export function makeHttpApp(
     if (
       c.req.path === "/live" || c.req.path === "/ready" ||
       c.req.path === "/api/v1/auth/bootstrap/status" ||
-      c.req.path === "/api/v1/auth/bootstrap"
+      c.req.path === "/api/v1/auth/bootstrap" ||
+      c.req.path === "/api/v1/auth/login" ||
+      c.req.path === "/api/v1/auth/password-policy" ||
+      (c.req.method === "POST" &&
+        c.req.path === "/api/v1/auth/password-reset/requests") ||
+      (c.req.method === "POST" &&
+        /^\/api\/v1\/auth\/password-reset\/requests\/[^/]+\/(cancel|redeem|complete)$/
+          .test(c.req.path)) ||
+      c.req.path === "/api/v1/auth/recovery/complete"
     ) {
       await next();
       return;
@@ -156,7 +166,7 @@ export function makeHttpApp(
     );
   });
 
-  registerAuthRoutes(app, deps.bootstrap);
+  registerAuthRoutes(app, deps.bootstrap, deps.humanAuth);
   registerProjectRoutes(app, deps.projects);
 
   app.get(

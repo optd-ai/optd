@@ -19,7 +19,18 @@ export function normalizeUsername(value: unknown): Result<string> {
   return ok(normalized);
 }
 
-export function validatePassword(value: unknown): Result<string> {
+export type PasswordPolicyInput = {
+  minimumLength?: number;
+  requireUppercase?: boolean;
+  requireLowercase?: boolean;
+  requireDigit?: boolean;
+  requireSymbol?: boolean;
+};
+
+export function validatePassword(
+  value: unknown,
+  policy: PasswordPolicyInput = {},
+): Result<string> {
   if (typeof value !== "string") {
     return err(
       validationError("password_policy_failed", "password is required", {
@@ -29,15 +40,20 @@ export function validatePassword(value: unknown): Result<string> {
   }
   const normalized = value.normalize("NFC");
   const bytes = new TextEncoder().encode(normalized).length;
+  const minimumLength = policy.minimumLength ?? 8;
   if (
-    unicodeLength(normalized) < 8 || bytes > 1024 ||
+    unicodeLength(normalized) < minimumLength || bytes > 1024 ||
     unicodeLength(normalized.trim()) === 0 ||
-    /[\n\r\0]/.test(normalized)
+    /[\n\r\0]/.test(normalized) ||
+    (policy.requireUppercase === true && !/\p{Lu}/u.test(normalized)) ||
+    (policy.requireLowercase === true && !/\p{Ll}/u.test(normalized)) ||
+    (policy.requireDigit === true && !/\p{N}/u.test(normalized)) ||
+    (policy.requireSymbol === true && !/[^\p{L}\p{N}\s]/u.test(normalized))
   ) {
     return err(validationError(
       "password_policy_failed",
       "password does not satisfy the configured policy",
-      { minimum_length: 8, maximum_bytes: 1024 },
+      { minimum_length: minimumLength, maximum_bytes: 1024 },
     ));
   }
   return ok(normalized);

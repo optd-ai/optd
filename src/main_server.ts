@@ -45,6 +45,7 @@ export async function createFetchHandler() {
   const app = makeHttpApp({
     authentication: application.authentication,
     bootstrap: application.bootstrap,
+    humanAuth: application.humanAuth,
     projects: application.projects,
     metadata: application.metadata,
     packs: application.packs,
@@ -132,7 +133,44 @@ function makeHealthService(
   };
 }
 
-if (import.meta.main) {
+async function runRecoveryHostCommand(args: string[]): Promise<void> {
+  const runtime = await startPostgresRuntime();
+  const sql = createPostgresClient(runtime.databaseUrl);
+  try {
+    await sql.begin(async (tx) => await applyPlatformMigrations(tx));
+    const application = makeApplication(sql);
+    const action = args[2];
+    const usernameIndex = args.indexOf("--username");
+    const username = usernameIndex >= 0 ? args[usernameIndex + 1] : undefined;
+    if (!username || (action !== "begin" && action !== "cancel")) {
+      throw new Error(
+        "usage: operant auth recovery begin|cancel --username <username>",
+      );
+    }
+    const result = action === "begin"
+      ? await application.authentication.beginRecovery({
+        username,
+        token: Deno.env.get("OPERANT_RECOVERY_TOKEN") ?? "",
+        enableUser: args.includes("--enable-user"),
+        restoreSuperAdmin: args.includes("--restore-super-admin"),
+        replace: args.includes("--replace"),
+      })
+      : await application.authentication.cancelRecovery(username);
+    if (!result.ok) {
+      throw new Error(`${result.error.code}: ${result.error.message}`);
+    }
+    console.log(JSON.stringify({ ok: true, data: result.value }));
+  } finally {
+    await closePostgresClient(sql);
+    await runtime.stop();
+  }
+}
+
+if (
+  import.meta.main && Deno.args[0] === "auth" && Deno.args[1] === "recovery"
+) {
+  await runRecoveryHostCommand(Deno.args);
+} else if (import.meta.main) {
   const config = loadRuntimeConfig();
   const server = await startServer({
     hostname: config.host,

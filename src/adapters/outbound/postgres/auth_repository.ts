@@ -4,6 +4,10 @@ import type {
   BootstrapInput,
   BootstrapResult,
   CredentialKind,
+  HumanSession,
+  HumanUser,
+  LoginResult,
+  PasswordReset,
 } from "../../../domain/auth/model.ts";
 import { immutableAuthContext } from "../../../domain/auth/model.ts";
 import { err, ok, type Result } from "../../../domain/errors/result.ts";
@@ -21,10 +25,15 @@ import type { Queryable, Sql } from "./client.ts";
 import { query } from "./client.ts";
 
 export class PostgresAuthRepository implements AuthRepository {
+  private readonly hashes: ImmediateSemaphore;
+
   constructor(
     private readonly sql: Sql,
     private readonly configuredBootstrapToken?: string,
-  ) {}
+    maxConcurrentHashes = 4,
+  ) {
+    this.hashes = new ImmediateSemaphore(maxConcurrentHashes);
+  }
 
   async bootstrapStatus() {
     return await this.sql.begin(async (tx) => {
@@ -93,7 +102,23 @@ export class PostgresAuthRepository implements AuthRepository {
       const principalId = uuidV7();
       const userId = uuidV7();
       const assignmentId = uuidV7();
-      const passwordHash = await hashPassword(input.password);
+      const release = this.hashes.tryAcquire();
+      if (!release) {
+        return err(
+          authError(
+            "authentication_busy",
+            "authentication is busy",
+            "unavailable",
+            { retry_after_seconds: 1 },
+          ),
+        );
+      }
+      let passwordHash: string;
+      try {
+        passwordHash = await hashPassword(input.password);
+      } finally {
+        release();
+      }
       await query(
         tx,
         "insert into principals(id, type, active) values ($1, 'human_user', true)",
@@ -213,6 +238,949 @@ export class PostgresAuthRepository implements AuthRepository {
     );
     return ok(context);
   }
+
+  async login(
+    username: string,
+    password: string,
+  ): Promise<Result<LoginResult>> {
+    const release = this.hashes.tryAcquire();
+    if (!release) {
+      return err(
+        authError(
+          "authentication_busy",
+          "authentication is busy",
+          "unavailable",
+          { retry_after_seconds: 1 },
+        ),
+      );
+    }
+    try {
+      return await this.sql.begin(async (tx) => {
+        await query(
+          tx,
+          `insert into login_throttles(username) values ($1) on conflict do nothing`,
+          [username],
+        );
+        const throttle =
+          (await query<{ failure_count: number; next_allowed_at: Date | null }>(
+            tx,
+            `select failure_count, next_allowed_at from login_throttles where username=$1 for update`,
+            [username],
+          )).rows[0]!;
+        if (
+          throttle.next_allowed_at &&
+          new Date(throttle.next_allowed_at).getTime() > Date.now()
+        ) {
+          const retry = Math.max(
+            1,
+            Math.ceil(
+              (new Date(throttle.next_allowed_at).getTime() - Date.now()) /
+                1000,
+            ),
+          );
+          return err(
+            authError(
+              "login_throttled",
+              "login is temporarily throttled",
+              "rate_limited",
+              { retry_after_seconds: retry },
+            ),
+          );
+        }
+        const row = (await query<
+          {
+            id: string;
+            principal_id: string;
+            username: string;
+            display_name: string;
+            status: "active" | "disabled";
+            phc_hash: string;
+          }
+        >(
+          tx,
+          `select u.id,u.principal_id,u.username,u.display_name,u.status,pw.phc_hash from human_users u join password_credentials pw on pw.human_user_id=u.id where u.username=$1`,
+          [username],
+        )).rows[0];
+        const valid = await verifyPassword(
+          password,
+          row?.phc_hash ?? DUMMY_PASSWORD_HASH,
+        );
+        if (!row || !valid || row.status !== "active") {
+          const failures = throttle.failure_count + 1;
+          const delay = failures < 5 ? 0 : Math.min(30, 2 ** (failures - 5));
+          await query(
+            tx,
+            `update login_throttles set failure_count=$2, next_allowed_at=case when $3::int=0 then null else now()+make_interval(secs => $3) end, updated_at=now() where username=$1`,
+            [username, failures, delay],
+          );
+          return err(
+            authError(
+              "login_invalid",
+              "username or password is invalid",
+              "authentication",
+            ),
+          );
+        }
+        await query(
+          tx,
+          `update login_throttles set failure_count=0,next_allowed_at=null,updated_at=now() where username=$1`,
+          [username],
+        );
+        const full = await issueSession(
+          tx,
+          row.principal_id,
+          row.id,
+          "human_full",
+        );
+        const request = await issueSession(
+          tx,
+          row.principal_id,
+          row.id,
+          "authorization_request",
+        );
+        await audit(
+          tx,
+          "auth.login.succeeded",
+          row.principal_id,
+          row.id,
+          full.id,
+        );
+        return ok({
+          user: humanUser(row),
+          credentials: { token: full.token, requestToken: request.token },
+        });
+      }) as Result<LoginResult>;
+    } finally {
+      release();
+    }
+  }
+
+  async current(auth: AuthContext): Promise<Result<HumanUser>> {
+    const row = (await query<UserRow>(
+      this.sql,
+      `select id,principal_id,username,display_name,status from human_users where id=$1`,
+      [auth.humanUserId],
+    )).rows[0];
+    return row ? ok(humanUser(row)) : err(
+      authError(
+        "credential_invalid",
+        "credential is invalid",
+        "authentication",
+      ),
+    );
+  }
+
+  async sessions(auth: AuthContext): Promise<Result<HumanSession[]>> {
+    const rows = (await query<
+      { id: string; credential_kind: CredentialKind; created_at: Date }
+    >(
+      this.sql,
+      `select id,credential_kind,created_at from auth_sessions where human_user_id=$1 and revoked_at is null order by created_at`,
+      [auth.humanUserId],
+    )).rows;
+    return ok(
+      rows.map((row) => ({
+        id: row.id,
+        credentialKind: row.credential_kind,
+        createdAt: new Date(row.created_at).toISOString(),
+        current: row.id === auth.sessionId,
+      })),
+    );
+  }
+
+  async logout(auth: AuthContext): Promise<Result<{ revoked: true }>> {
+    await query(
+      this.sql,
+      `update auth_sessions set revoked_at=now() where id=$1 and revoked_at is null`,
+      [auth.sessionId],
+    );
+    await audit(
+      this.sql,
+      "auth.session.revoked",
+      auth.principalId,
+      auth.humanUserId,
+      auth.sessionId,
+      auth.id,
+    );
+    return ok({ revoked: true });
+  }
+
+  async logoutAll(
+    auth: AuthContext,
+    password: string,
+  ): Promise<Result<{ revoked: number }>> {
+    const release = this.hashes.tryAcquire();
+    if (!release) {
+      return err(
+        authError(
+          "authentication_busy",
+          "authentication is busy",
+          "unavailable",
+          { retry_after_seconds: 1 },
+        ),
+      );
+    }
+    try {
+      const row = (await query<{ phc_hash: string }>(
+        this.sql,
+        `select phc_hash from password_credentials where human_user_id=$1`,
+        [auth.humanUserId],
+      )).rows[0];
+      if (!row || !await verifyPassword(password, row.phc_hash)) {
+        return err(
+          authError(
+            "login_invalid",
+            "username or password is invalid",
+            "authentication",
+          ),
+        );
+      }
+      const result = await query(
+        this.sql,
+        `update auth_sessions set revoked_at=now() where human_user_id=$1 and revoked_at is null returning id`,
+        [auth.humanUserId],
+      );
+      await audit(
+        this.sql,
+        "auth.sessions.revoked_all",
+        auth.principalId,
+        auth.humanUserId,
+        auth.sessionId,
+        auth.id,
+      );
+      return ok({ revoked: result.rows.length });
+    } finally {
+      release();
+    }
+  }
+
+  async changePassword(
+    auth: AuthContext,
+    currentPassword: string,
+    newPassword: string,
+  ): Promise<Result<LoginResult>> {
+    const release = this.hashes.tryAcquire();
+    if (!release) {
+      return err(
+        authError(
+          "authentication_busy",
+          "authentication is busy",
+          "unavailable",
+          { retry_after_seconds: 1 },
+        ),
+      );
+    }
+    try {
+      const credential = (await query<{ phc_hash: string }>(
+        this.sql,
+        `select phc_hash from password_credentials where human_user_id=$1`,
+        [auth.humanUserId],
+      )).rows[0];
+      if (
+        !credential ||
+        !await verifyPassword(currentPassword, credential.phc_hash)
+      ) {
+        return err(
+          authError(
+            "login_invalid",
+            "username or password is invalid",
+            "authentication",
+          ),
+        );
+      }
+      const phc = await hashPassword(newPassword);
+      return await this.sql.begin(async (tx) => {
+        const user = (await query<UserRow>(
+          tx,
+          `select id,principal_id,username,display_name,status from human_users where id=$1 for update`,
+          [auth.humanUserId],
+        )).rows[0]!;
+        await query(
+          tx,
+          `update password_credentials set phc_hash=$2,profile='argon2id.v1',password_changed_at=now() where human_user_id=$1`,
+          [user.id, phc],
+        );
+        await revokeAnchored(tx, user.id);
+        await query(
+          tx,
+          `update login_throttles set failure_count=0,next_allowed_at=null,updated_at=now() where username=$1`,
+          [user.username],
+        );
+        const full = await issueSession(
+          tx,
+          user.principal_id,
+          user.id,
+          "human_full",
+        );
+        const request = await issueSession(
+          tx,
+          user.principal_id,
+          user.id,
+          "authorization_request",
+        );
+        await audit(
+          tx,
+          "auth.password.changed",
+          user.principal_id,
+          user.id,
+          full.id,
+          auth.id,
+        );
+        return ok({
+          user: humanUser(user),
+          credentials: { token: full.token, requestToken: request.token },
+        });
+      }) as Result<LoginResult>;
+    } finally {
+      release();
+    }
+  }
+
+  async listUsers(auth: AuthContext): Promise<Result<HumanUser[]>> {
+    if (!isSuperAdmin(auth)) return authorizationDenied();
+    const rows = (await query<UserRow>(
+      this.sql,
+      `select id,principal_id,username,display_name,status from human_users order by username`,
+    )).rows;
+    return ok(rows.map(humanUser));
+  }
+
+  async createUser(
+    auth: AuthContext,
+    input: { username: string; displayName: string; password: string },
+  ): Promise<Result<HumanUser>> {
+    if (!isSuperAdmin(auth)) return authorizationDenied();
+    const release = this.hashes.tryAcquire();
+    if (!release) {
+      return err(
+        authError(
+          "authentication_busy",
+          "authentication is busy",
+          "unavailable",
+          { retry_after_seconds: 1 },
+        ),
+      );
+    }
+    try {
+      const phc = await hashPassword(input.password);
+      return await this.sql.begin(async (tx) => {
+        const principalId = uuidV7();
+        const id = uuidV7();
+        await query(
+          tx,
+          `insert into principals(id,type,active) values($1,'human_user',true)`,
+          [principalId],
+        );
+        await query(
+          tx,
+          `insert into human_users(id,principal_id,username,display_name,status) values($1,$2,$3,$4,'active')`,
+          [id, principalId, input.username, input.displayName],
+        );
+        await query(
+          tx,
+          `insert into password_credentials(human_user_id,profile,phc_hash) values($1,'argon2id.v1',$2)`,
+          [id, phc],
+        );
+        await audit(
+          tx,
+          "auth.human_user.created",
+          auth.principalId,
+          id,
+          undefined,
+          auth.id,
+        );
+        return ok({
+          id,
+          principalId,
+          username: input.username,
+          displayName: input.displayName,
+          status: "active" as const,
+        });
+      }) as Result<HumanUser>;
+    } catch (error) {
+      if (String(error).includes("human_users_username_key")) {
+        return err(
+          authError("validation_failed", "username already exists", "conflict"),
+        );
+      }
+      throw error;
+    } finally {
+      release();
+    }
+  }
+
+  async setUserStatus(
+    auth: AuthContext,
+    userId: string,
+    status: "active" | "disabled",
+  ): Promise<Result<HumanUser>> {
+    if (!isSuperAdmin(auth)) return authorizationDenied();
+    return await this.sql.begin(async (tx) => {
+      const target = (await query<UserRow>(
+        tx,
+        `select id,principal_id,username,display_name,status from human_users where id=$1 for update`,
+        [userId],
+      )).rows[0];
+      if (!target) {
+        return err(authError("not_found", "user was not found", "not_found"));
+      }
+      if (status === "disabled") {
+        const hasSuper = (await query(
+          tx,
+          `select 1 from role_assignments where principal_id=$1 and role_id='system:super_admin' and active`,
+          [target.principal_id],
+        )).rows.length > 0;
+        if (hasSuper) {
+          const count = Number(
+            (await query<{ count: string }>(
+              tx,
+              `select count(*)::text count from human_users u join role_assignments r on r.principal_id=u.principal_id and r.role_id='system:super_admin' and r.active where u.status='active'`,
+            )).rows[0]?.count ?? "0",
+          );
+          if (count <= 1) {
+            return err(
+              authError(
+                "last_super_admin",
+                "the final active human super-admin cannot be disabled",
+                "conflict",
+              ),
+            );
+          }
+        }
+        await revokeAnchored(tx, userId);
+      }
+      await query(
+        tx,
+        `update human_users set status=$2,disabled_at=case when $2='disabled' then now() else null end where id=$1`,
+        [userId, status],
+      );
+      await query(tx, `update principals set active=$2 where id=$1`, [
+        target.principal_id,
+        status === "active",
+      ]);
+      await audit(
+        tx,
+        status === "active"
+          ? "auth.human_user.enabled"
+          : "auth.human_user.disabled",
+        auth.principalId,
+        userId,
+        undefined,
+        auth.id,
+      );
+      return ok({ ...humanUser(target), status });
+    }) as Result<HumanUser>;
+  }
+
+  async createPasswordReset(
+    input: { username: string; nonceHash: string; idempotencyKey: string },
+  ): Promise<Result<{ requestId: string }>> {
+    return await this.sql.begin(async (tx) => {
+      const existing = (await query<{ id: string }>(
+        tx,
+        `select id from password_reset_requests where username=$1 and idempotency_key=$2`,
+        [input.username, input.idempotencyKey],
+      )).rows[0];
+      if (existing) return ok({ requestId: existing.id });
+      const user = (await query<{ id: string }>(
+        tx,
+        `select id from human_users where username=$1`,
+        [input.username],
+      )).rows[0];
+      const id = `reset_${crypto.randomUUID().replaceAll("-", "")}`;
+      await query(
+        tx,
+        `insert into password_reset_requests(id,human_user_id,username,idempotency_key,nonce_digest,status,expires_at) values($1,$2,$3,$4,$5,'pending',now()+interval '30 minutes')`,
+        [
+          id,
+          user?.id ?? null,
+          input.username,
+          input.idempotencyKey,
+          input.nonceHash,
+        ],
+      );
+      return ok({ requestId: id });
+    }) as Result<{ requestId: string }>;
+  }
+
+  async inspectPasswordReset(
+    auth: AuthContext,
+    id: string,
+  ): Promise<Result<PasswordReset>> {
+    if (!isSuperAdmin(auth)) return authorizationDenied();
+    const row = await resetRow(this.sql, id);
+    if (!row || !row.human_user_id) {
+      return err(
+        authError(
+          "password_reset_not_found",
+          "password reset was not found",
+          "not_found",
+        ),
+      );
+    }
+    return ok(passwordReset(row));
+  }
+
+  async decidePasswordReset(
+    auth: AuthContext,
+    id: string,
+    decision: "approved" | "denied",
+  ): Promise<Result<PasswordReset>> {
+    if (!isSuperAdmin(auth)) return authorizationDenied();
+    return await this.sql.begin(async (tx) => {
+      const row = await resetRow(tx, id, true);
+      if (!row || !row.human_user_id) {
+        return err(
+          authError(
+            "password_reset_not_found",
+            "password reset was not found",
+            "not_found",
+          ),
+        );
+      }
+      if (row.status !== "pending") {
+        return err(
+          authError(
+            "request_already_decided",
+            "password reset is already decided",
+            "conflict",
+          ),
+        );
+      }
+      if (new Date(row.expires_at).getTime() <= Date.now()) {
+        return err(
+          authError(
+            "password_reset_expired",
+            "password reset has expired",
+            "expired",
+          ),
+        );
+      }
+      const status = decision === "approved" ? "approved" : "denied";
+      await query(
+        tx,
+        `update password_reset_requests set status=$2,decided_by_auth_context_id=$3,decided_at=now() where id=$1`,
+        [id, status, auth.id],
+      );
+      await audit(
+        tx,
+        `auth.password_reset.${status}`,
+        auth.principalId,
+        row.human_user_id,
+        undefined,
+        auth.id,
+      );
+      return ok(passwordReset({ ...row, status }));
+    }) as Result<PasswordReset>;
+  }
+
+  async cancelPasswordReset(
+    id: string,
+    nonce: string,
+  ): Promise<Result<PasswordReset>> {
+    return await this.sql.begin(async (tx) => {
+      const row = await resetRow(tx, id, true);
+      if (
+        !row ||
+        !constantTimeDigestEqual(row.nonce_digest, await tokenDigest(nonce))
+      ) {
+        return err(
+          authError(
+            "password_reset_not_found",
+            "password reset was not found",
+            "not_found",
+          ),
+        );
+      }
+      if (row.status !== "pending") {
+        return err(
+          authError(
+            "request_not_pending",
+            "password reset is not pending",
+            "conflict",
+          ),
+        );
+      }
+      await query(
+        tx,
+        `update password_reset_requests set status='cancelled' where id=$1`,
+        [id],
+      );
+      return ok(passwordReset({ ...row, status: "cancelled" }));
+    }) as Result<PasswordReset>;
+  }
+
+  async redeemPasswordReset(
+    id: string,
+    nonce: string,
+  ): Promise<Result<{ capability: string }>> {
+    return await this.sql.begin(async (tx) => {
+      const row = await resetRow(tx, id, true);
+      if (
+        !row || !row.human_user_id ||
+        !constantTimeDigestEqual(row.nonce_digest, await tokenDigest(nonce))
+      ) {
+        return err(
+          authError(
+            "redemption_invalid",
+            "redemption credential is invalid",
+            "authentication",
+          ),
+        );
+      }
+      if (row.status !== "approved") {
+        return err(authError(
+          row.status === "denied"
+            ? "password_reset_denied"
+            : "request_not_pending",
+          "password reset cannot be redeemed",
+          "conflict",
+        ));
+      }
+      if (new Date(row.expires_at).getTime() <= Date.now()) {
+        return err(
+          authError(
+            "password_reset_expired",
+            "password reset has expired",
+            "expired",
+          ),
+        );
+      }
+      const capability = opaqueToken();
+      await query(
+        tx,
+        `update password_reset_requests set capability_digest=$2,redeemed_at=now() where id=$1`,
+        [id, await tokenDigest(capability)],
+      );
+      return ok({ capability });
+    }) as Result<{ capability: string }>;
+  }
+
+  async completePasswordReset(
+    id: string,
+    capability: string,
+    password: string,
+  ): Promise<Result<LoginResult>> {
+    const release = this.hashes.tryAcquire();
+    if (!release) {
+      return err(
+        authError(
+          "authentication_busy",
+          "authentication is busy",
+          "unavailable",
+          { retry_after_seconds: 1 },
+        ),
+      );
+    }
+    try {
+      const phc = await hashPassword(password);
+      return await this.sql.begin(async (tx) => {
+        const row = await resetRow(tx, id, true);
+        if (
+          !row || !row.human_user_id || !row.capability_digest ||
+          !constantTimeDigestEqual(
+            row.capability_digest,
+            await tokenDigest(capability),
+          )
+        ) {
+          return err(
+            authError(
+              "password_reset_capability_invalid",
+              "reset capability is invalid",
+              "authentication",
+            ),
+          );
+        }
+        if (row.status === "completed") {
+          return err(
+            authError(
+              "redemption_already_used",
+              "reset capability was already used",
+              "conflict",
+            ),
+          );
+        }
+        if (row.status !== "approved") {
+          return err(
+            authError(
+              "password_reset_capability_invalid",
+              "reset capability is invalid",
+              "authentication",
+            ),
+          );
+        }
+        const user = (await query<UserRow>(
+          tx,
+          `select id,principal_id,username,display_name,status from human_users where id=$1 for update`,
+          [row.human_user_id],
+        )).rows[0]!;
+        await query(
+          tx,
+          `update password_credentials set phc_hash=$2,profile='argon2id.v1',password_changed_at=now() where human_user_id=$1`,
+          [user.id, phc],
+        );
+        await revokeAnchored(tx, user.id);
+        await query(
+          tx,
+          `update login_throttles set failure_count=0,next_allowed_at=null,updated_at=now() where username=$1`,
+          [user.username],
+        );
+        const full = await issueSession(
+          tx,
+          user.principal_id,
+          user.id,
+          "human_full",
+        );
+        const request = await issueSession(
+          tx,
+          user.principal_id,
+          user.id,
+          "authorization_request",
+        );
+        await query(
+          tx,
+          `update password_reset_requests set status='completed',completed_at=now(),capability_digest=null where id=$1`,
+          [id],
+        );
+        await audit(
+          tx,
+          "auth.password_reset.completed",
+          user.principal_id,
+          user.id,
+          full.id,
+        );
+        return ok({
+          user: humanUser(user),
+          credentials: { token: full.token, requestToken: request.token },
+        });
+      }) as Result<LoginResult>;
+    } finally {
+      release();
+    }
+  }
+
+  async beginRecovery(
+    input: {
+      username: string;
+      token: string;
+      enableUser: boolean;
+      restoreSuperAdmin: boolean;
+      replace?: boolean;
+    },
+  ): Promise<Result<{ challengeId: string }>> {
+    if (input.token.length < 32) {
+      return err(
+        authError(
+          "recovery_invalid",
+          "recovery credential must contain at least 32 characters",
+          "authentication",
+        ),
+      );
+    }
+    return await this.sql.begin(async (tx) => {
+      await query(
+        tx,
+        `select pg_advisory_xact_lock(hashtext('operant.auth.recovery'))`,
+      );
+      const user = (await query<UserRow>(
+        tx,
+        `select id,principal_id,username,display_name,status from human_users where username=$1 for update`,
+        [input.username],
+      )).rows[0];
+      if (!user) {
+        return err(
+          authError(
+            "recovery_invalid",
+            "recovery target is invalid",
+            "authentication",
+          ),
+        );
+      }
+      const active = (await query(
+        tx,
+        `select id from recovery_challenges where human_user_id=$1 and status='active' and expires_at>now() for update`,
+        [user.id],
+      )).rows[0];
+      if (active && !input.replace) {
+        return err(
+          authError(
+            "recovery_invalid",
+            "an active recovery challenge already exists",
+            "conflict",
+          ),
+        );
+      }
+      if (active) {
+        await query(
+          tx,
+          `update recovery_challenges set status='cancelled' where human_user_id=$1 and status='active'`,
+          [user.id],
+        );
+      }
+      await revokeAnchored(tx, user.id);
+      const id = uuidV7();
+      await query(
+        tx,
+        `insert into recovery_challenges(id,human_user_id,token_digest,enable_user,restore_super_admin,status,expires_at) values($1,$2,$3,$4,$5,'active',now()+interval '15 minutes')`,
+        [
+          id,
+          user.id,
+          await tokenDigest(input.token),
+          input.enableUser,
+          input.restoreSuperAdmin,
+        ],
+      );
+      await audit(tx, "auth.recovery.initiated", user.principal_id, user.id);
+      return ok({ challengeId: id });
+    }) as Result<{ challengeId: string }>;
+  }
+
+  async cancelRecovery(username: string): Promise<Result<{ cancelled: true }>> {
+    await query(
+      this.sql,
+      `update recovery_challenges r set status='cancelled' from human_users u where r.human_user_id=u.id and u.username=$1 and r.status='active'`,
+      [username],
+    );
+    return ok({ cancelled: true });
+  }
+
+  async completeRecovery(
+    input: { username: string; token: string; password: string },
+  ): Promise<Result<LoginResult>> {
+    const release = this.hashes.tryAcquire();
+    if (!release) {
+      return err(
+        authError(
+          "authentication_busy",
+          "authentication is busy",
+          "unavailable",
+          { retry_after_seconds: 1 },
+        ),
+      );
+    }
+    try {
+      const phc = await hashPassword(input.password);
+      return await this.sql.begin(async (tx) => {
+        const row = (await query<
+          UserRow & {
+            token_digest: string;
+            challenge_id: string;
+            expires_at: Date;
+            enable_user: boolean;
+            restore_super_admin: boolean;
+          }
+        >(
+          tx,
+          `select u.id,u.principal_id,u.username,u.display_name,u.status,r.id challenge_id,r.token_digest,r.expires_at,r.enable_user,r.restore_super_admin from recovery_challenges r join human_users u on u.id=r.human_user_id where u.username=$1 and r.status='active' for update`,
+          [input.username],
+        )).rows[0];
+        if (
+          !row ||
+          !constantTimeDigestEqual(
+            row.token_digest,
+            await tokenDigest(input.token),
+          )
+        ) {
+          return err(
+            authError(
+              "recovery_invalid",
+              "recovery credential is invalid",
+              "authentication",
+            ),
+          );
+        }
+        if (new Date(row.expires_at).getTime() <= Date.now()) {
+          return err(
+            authError(
+              "recovery_expired",
+              "recovery challenge has expired",
+              "expired",
+            ),
+          );
+        }
+        await query(
+          tx,
+          `update password_credentials set phc_hash=$2,profile='argon2id.v1',password_changed_at=now() where human_user_id=$1`,
+          [row.id, phc],
+        );
+        if (row.enable_user) {
+          await query(
+            tx,
+            `update human_users set status='active',disabled_at=null where id=$1`,
+            [row.id],
+          );
+          await query(tx, `update principals set active=true where id=$1`, [
+            row.principal_id,
+          ]);
+        }
+        if (row.restore_super_admin) {
+          await query(
+            tx,
+            `insert into role_assignments(id,principal_id,role_id,boundary_type,active) select $1,$2,'system:super_admin','system',true where not exists(select 1 from role_assignments where principal_id=$2 and role_id='system:super_admin' and active)`,
+            [uuidV7(), row.principal_id],
+          );
+        }
+        const full = await issueSession(
+          tx,
+          row.principal_id,
+          row.id,
+          "human_full",
+        );
+        const request = await issueSession(
+          tx,
+          row.principal_id,
+          row.id,
+          "authorization_request",
+        );
+        await query(
+          tx,
+          `update recovery_challenges set status='completed',completed_at=now(),token_digest=null where id=$1`,
+          [row.challenge_id],
+        );
+        await audit(
+          tx,
+          "auth.recovery.completed",
+          row.principal_id,
+          row.id,
+          full.id,
+        );
+        return ok({
+          user: humanUser({
+            ...row,
+            status: row.enable_user ? "active" : row.status,
+          }),
+          credentials: { token: full.token, requestToken: request.token },
+        });
+      }) as Result<LoginResult>;
+    } finally {
+      release();
+    }
+  }
+}
+
+const DUMMY_PASSWORD_HASH =
+  "$argon2id$v=19$m=19456,t=2,p=1$hVNuIMcQVCGTBSGnJ6Bg8A$IA2Q5Wevful1bg2s1x2mfuyqmNlXMfR/M+jIUD4U85w";
+
+class ImmediateSemaphore {
+  private active = 0;
+  constructor(private readonly maximum: number) {
+    if (!Number.isInteger(maximum) || maximum < 1) {
+      throw new Error(
+        "OPERANT_PASSWORD_MAX_CONCURRENT_HASHES must be a positive integer",
+      );
+    }
+  }
+  tryAcquire(): (() => void) | undefined {
+    if (this.active >= this.maximum) return undefined;
+    this.active++;
+    let released = false;
+    return () => {
+      if (!released) {
+        released = true;
+        this.active--;
+      }
+    };
+  }
 }
 
 async function hashPassword(password: string): Promise<string> {
@@ -229,7 +1197,9 @@ async function hashPassword(password: string): Promise<string> {
     stderr: "piped",
   }).spawn();
   const writer = child.stdin.getWriter();
-  await writer.write(new TextEncoder().encode(password));
+  await writer.write(
+    new TextEncoder().encode(JSON.stringify({ operation: "hash", password })),
+  );
   await writer.close();
   const output = await child.output();
   if (!output.success) {
@@ -237,7 +1207,42 @@ async function hashPassword(password: string): Promise<string> {
       `password hashing failed: ${new TextDecoder().decode(output.stderr)}`,
     );
   }
-  return new TextDecoder().decode(output.stdout);
+  return (JSON.parse(new TextDecoder().decode(output.stdout)) as {
+    phc: string;
+  }).phc;
+}
+
+async function verifyPassword(password: string, phc: string): Promise<boolean> {
+  const child = new Deno.Command(Deno.execPath(), {
+    args: [
+      "run",
+      "--allow-ffi",
+      "--allow-sys",
+      "--allow-env",
+      new URL("./auth_password_worker.ts", import.meta.url).pathname,
+    ],
+    stdin: "piped",
+    stdout: "piped",
+    stderr: "piped",
+  }).spawn();
+  const writer = child.stdin.getWriter();
+  await writer.write(
+    new TextEncoder().encode(
+      JSON.stringify({ operation: "verify", password, phc }),
+    ),
+  );
+  await writer.close();
+  const output = await child.output();
+  if (!output.success) {
+    throw new Error(
+      `password verification failed: ${
+        new TextDecoder().decode(output.stderr)
+      }`,
+    );
+  }
+  return (JSON.parse(new TextDecoder().decode(output.stdout)) as {
+    valid: boolean;
+  }).valid;
 }
 
 async function issueSession(
@@ -295,10 +1300,108 @@ async function insertBootstrapAudit(
     ],
   );
 }
+type UserRow = {
+  id: string;
+  principal_id: string;
+  username: string;
+  display_name: string;
+  status: "active" | "disabled";
+};
+type ResetRow = {
+  id: string;
+  human_user_id: string | null;
+  username: string;
+  nonce_digest: string;
+  capability_digest: string | null;
+  status: PasswordReset["status"];
+  created_at: Date;
+  expires_at: Date;
+};
+
+function humanUser(row: UserRow): HumanUser {
+  return {
+    id: row.id,
+    principalId: row.principal_id,
+    username: row.username,
+    displayName: row.display_name,
+    status: row.status,
+  };
+}
+function passwordReset(row: ResetRow): PasswordReset {
+  return {
+    id: row.id,
+    username: row.username,
+    status: row.status,
+    createdAt: new Date(row.created_at).toISOString(),
+    expiresAt: new Date(row.expires_at).toISOString(),
+  };
+}
+async function resetRow(
+  sql: Queryable,
+  id: string,
+  lock = false,
+): Promise<ResetRow | undefined> {
+  return (await query<ResetRow>(
+    sql,
+    `select id,human_user_id,username,nonce_digest,capability_digest,status,created_at,expires_at from password_reset_requests where id=$1${
+      lock ? " for update" : ""
+    }`,
+    [id],
+  )).rows[0];
+}
+function isSuperAdmin(auth: AuthContext): boolean {
+  return auth.credentialKind === "human_full" &&
+    auth.roles.includes("system:super_admin");
+}
+function authorizationDenied() {
+  return err(
+    authError(
+      "authorization_insufficient",
+      "super-admin authority is required",
+      "authorization",
+    ),
+  );
+}
+async function revokeAnchored(sql: Queryable, userId: string): Promise<void> {
+  await query(
+    sql,
+    `update auth_sessions set revoked_at=coalesce(revoked_at,now()) where human_user_id=$1 and revoked_at is null`,
+    [userId],
+  );
+}
+async function audit(
+  sql: Queryable,
+  eventType: string,
+  principalId: string,
+  humanUserId: string,
+  sessionId?: string,
+  authContextId?: string,
+): Promise<void> {
+  await query(
+    sql,
+    `insert into auth_audit_events(id,event_type,auth_context_id,principal_id,human_user_id,session_id,details) values($1,$2,$3,$4,$5,$6,'{}'::jsonb)`,
+    [
+      uuidV7(),
+      eventType,
+      authContextId ?? null,
+      principalId,
+      humanUserId,
+      sessionId ?? null,
+    ],
+  );
+}
 function authError(
   code: string,
   message: string,
-  severity: "authentication" | "conflict" | "unavailable",
+  severity:
+    | "authentication"
+    | "authorization"
+    | "not_found"
+    | "conflict"
+    | "expired"
+    | "rate_limited"
+    | "unavailable",
+  details: unknown = {},
 ) {
-  return { code, message, severity, details: {} } as const;
+  return { code, message, severity, details } as const;
 }

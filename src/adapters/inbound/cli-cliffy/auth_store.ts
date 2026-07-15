@@ -5,6 +5,9 @@ type OriginState = {
   requestToken?: string;
   projectId?: string;
   projectSlug?: string;
+  username?: string;
+  resetNonces?: Record<string, string>;
+  resetCapabilities?: Record<string, string>;
 };
 type Store = { origins: Record<string, OriginState> };
 

@@ -1,4 +1,4 @@
-import type { AuthRepository } from "../../ports/authentication.ts";
+import type { BootstrapRepository } from "../../ports/authentication.ts";
 import { err, type Result } from "../../../domain/errors/result.ts";
 import type { BootstrapResult } from "../../../domain/auth/model.ts";
 import {
@@ -7,7 +7,7 @@ import {
   validatePassword,
 } from "../../../domain/auth/validation.ts";
 
-export function makeBootstrapService(repository: AuthRepository) {
+export function makeBootstrapService(repository: BootstrapRepository) {
   return {
     status: () => repository.bootstrapStatus(),
     async initialize(
