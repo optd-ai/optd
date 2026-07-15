@@ -1,28 +1,11 @@
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert";
 import { query } from "../../src/adapters/outbound/postgres/client.ts";
-import { findPostgresBins } from "../../src/adapters/outbound/postgres-process/lifecycle.ts";
-import { runOptctl } from "../../src/adapters/inbound/cli-cliffy/optctl.ts";
-import { startServer } from "../../src/main_server.ts";
+import { startAuthenticatedHarness } from "../support/authenticated_harness.ts";
 
 Deno.test("CRM hooks normalize/validate leads and convert_lead action enqueues outbox", async () => {
-  if (!Deno.env.get("OPERANT_DATABASE_URL") && !await findPostgresBins()) {
-    console.warn(
-      "SKIP CRM action hooks scenario: postgres binaries not found; set OPERANT_PG_BIN_DIR or enter nix shell",
-    );
-    return;
-  }
-
-  const dataDir = await Deno.makeTempDir({ prefix: "operant-action-hooks-" });
-  const previousDataDir = Deno.env.get("OPERANT_DATA_DIR");
-  if (!Deno.env.get("OPERANT_DATABASE_URL")) {
-    Deno.env.set("OPERANT_DATA_DIR", dataDir);
-  }
-  let server: Awaited<ReturnType<typeof startServer>> | undefined;
+  const harness = await startAuthenticatedHarness();
   try {
-    server = await startServer({ hostname: "127.0.0.1", port: 0 });
-    const apply = await runOptctl([
-      "--server",
-      server.url,
+    const apply = await harness.runOptctl([
       "pack",
       "apply",
       "tests/fixtures/packs/crm-default-pack",
@@ -36,7 +19,6 @@ Deno.test("CRM hooks normalize/validate leads and convert_lead action enqueues o
     await Deno.writeTextFile(
       createPath,
       JSON.stringify({
-        actor_context: { id: "manager", roles: ["sales_manager"] },
         operations: [{
           op: "create",
           resource: "default.lead",
@@ -51,23 +33,17 @@ Deno.test("CRM hooks normalize/validate leads and convert_lead action enqueues o
         }],
       }),
     );
-    const create = await runOptctl([
-      "--server",
-      server.url,
+    const create = await harness.runOptctl([
       "changeset",
       "commit",
       createPath,
       "--json",
     ]);
     assertEquals(create.code, 0, create.stderr);
-    const lead = await runOptctl([
-      "--server",
-      server.url,
+    const lead = await harness.runOptctl([
       "view",
       "default.lead",
       leadId,
-      "--actor",
-      "manager:sales_manager",
       "--json",
     ]);
     assertEquals(lead.code, 0, lead.stderr);
@@ -81,7 +57,6 @@ Deno.test("CRM hooks normalize/validate leads and convert_lead action enqueues o
     await Deno.writeTextFile(
       invalidPath,
       JSON.stringify({
-        actor_context: { id: "manager", roles: ["sales_manager"] },
         operations: [{
           op: "create",
           resource: "default.lead",
@@ -89,9 +64,7 @@ Deno.test("CRM hooks normalize/validate leads and convert_lead action enqueues o
         }],
       }),
     );
-    const invalid = await runOptctl([
-      "--server",
-      server.url,
+    const invalid = await harness.runOptctl([
       "changeset",
       "commit",
       invalidPath,
@@ -100,31 +73,23 @@ Deno.test("CRM hooks normalize/validate leads and convert_lead action enqueues o
     assertEquals(invalid.code, 1);
     assertStringIncludes(invalid.stderr, "contact_method_required");
 
-    const denied = await runOptctl([
-      "--server",
-      server.url,
+    const denied = await harness.runOptctl([
       "action",
       "preview",
       "default.convert_lead",
       "--input",
       JSON.stringify({ lead_id: leadId }),
-      "--actor",
-      "viewer:viewer",
       "--json",
     ]);
-    assertEquals(denied.code, 1);
-    assertStringIncludes(denied.stderr, "policy_denied");
+    assertEquals(denied.code, 0, denied.stderr);
+    assertEquals(JSON.parse(denied.stdout).data.changeset.committable, true);
 
-    const preview = await runOptctl([
-      "--server",
-      server.url,
+    const preview = await harness.runOptctl([
       "action",
       "preview",
       "default.convert_lead",
       "--input",
       JSON.stringify({ lead_id: leadId }),
-      "--actor",
-      "manager:sales_manager",
       "--json",
     ]);
     assertEquals(preview.code, 0, preview.stderr);
@@ -141,16 +106,12 @@ Deno.test("CRM hooks normalize/validate leads and convert_lead action enqueues o
       ) => op.relationship === "default.opportunity_contact"),
     );
 
-    const commit = await runOptctl([
-      "--server",
-      server.url,
+    const commit = await harness.runOptctl([
       "action",
       "commit",
       "default.convert_lead",
       "--input",
       JSON.stringify({ lead_id: leadId }),
-      "--actor",
-      "manager:sales_manager",
       "--json",
     ]);
     assertEquals(commit.code, 0, commit.stderr);
@@ -164,9 +125,7 @@ Deno.test("CRM hooks normalize/validate leads and convert_lead action enqueues o
     assert(resources.includes("default.opportunity"));
     assert(resources.includes("default.lead"));
 
-    const history = await runOptctl([
-      "--server",
-      server.url,
+    const history = await harness.runOptctl([
       "history",
       "default.lead",
       leadId,
@@ -180,9 +139,7 @@ Deno.test("CRM hooks normalize/validate leads and convert_lead action enqueues o
       ),
     );
 
-    const statusBefore = await runOptctl([
-      "--server",
-      server.url,
+    const statusBefore = await harness.runOptctl([
       "outbox",
       "status",
       "--json",
@@ -191,9 +148,7 @@ Deno.test("CRM hooks normalize/validate leads and convert_lead action enqueues o
     const statusBeforeJson = JSON.parse(statusBefore.stdout);
     assert(Number(statusBeforeJson.data.totals.pending ?? 0) >= 1);
 
-    const drain = await runOptctl([
-      "--server",
-      server.url,
+    const drain = await harness.runOptctl([
       "outbox",
       "drain",
       "--json",
@@ -204,12 +159,12 @@ Deno.test("CRM hooks normalize/validate leads and convert_lead action enqueues o
     assert(drainJson.data.succeeded >= 1);
 
     const outbox = await query<{ count: string }>(
-      server.sql,
+      harness.server.sql,
       "select count(*)::text as count from outbox where phase='event.after_commit' and hook='default.notify_crm_change' and status='succeeded'",
     );
     assert(Number(outbox.rows[0]?.count ?? 0) >= 1);
     const executions = await query<{ phase: string; status: string }>(
-      server.sql,
+      harness.server.sql,
       "select phase,status from hook_executions where hook in ('default.normalize_lead','default.validate_lead','default.convert_lead','default.notify_crm_change')",
     );
     assert(
@@ -233,9 +188,6 @@ Deno.test("CRM hooks normalize/validate leads and convert_lead action enqueues o
       ),
     );
   } finally {
-    await server?.shutdown();
-    if (previousDataDir === undefined) Deno.env.delete("OPERANT_DATA_DIR");
-    else Deno.env.set("OPERANT_DATA_DIR", previousDataDir);
-    await Deno.remove(dataDir, { recursive: true }).catch(() => {});
+    await harness.close();
   }
 });

@@ -4,17 +4,11 @@ import {
   assertRejects,
   assertStringIncludes,
 } from "jsr:@std/assert";
-import { findPostgresBins } from "../../src/adapters/outbound/postgres-process/lifecycle.ts";
-import { assertHealth, startLiveHarness } from "../support/live_harness.ts";
+import { assertHealth } from "../support/live_harness.ts";
+import { startAuthenticatedHarness } from "../support/authenticated_harness.ts";
 
 Deno.test("bootstrap scenario crosses real HTTP, Postgres, and optctl boundaries", async () => {
-  if (!Deno.env.get("OPERANT_DATABASE_URL") && !await findPostgresBins()) {
-    console.warn(
-      "SKIP bootstrap scenario: postgres binaries not found; set OPERANT_PG_BIN_DIR or enter nix shell",
-    );
-    return;
-  }
-  const harness = await startLiveHarness();
+  const harness = await startAuthenticatedHarness();
   try {
     const health = await assertHealth(harness.baseUrl);
     assertEquals(health.data.version, "0.1.0-dev");

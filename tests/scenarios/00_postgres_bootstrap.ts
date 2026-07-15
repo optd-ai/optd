@@ -1,7 +1,7 @@
 import { assert, assertEquals } from "jsr:@std/assert";
 import { query } from "../../src/adapters/outbound/postgres/client.ts";
 import { findPostgresBins } from "../../src/adapters/outbound/postgres-process/lifecycle.ts";
-import { startServer } from "../../src/main_server.ts";
+import { startAuthenticatedHarness } from "../support/authenticated_harness.ts";
 
 Deno.test("postgres bootstrap scenario validates HTTP health and restart persistence", async () => {
   if (!Deno.env.get("OPERANT_DATABASE_URL") && !await findPostgresBins()) {
@@ -10,46 +10,34 @@ Deno.test("postgres bootstrap scenario validates HTTP health and restart persist
     );
     return;
   }
-
-  const dataDir = await Deno.makeTempDir({
-    prefix: "operant-postgres-scenario-",
-  });
-  const previousDataDir = Deno.env.get("OPERANT_DATA_DIR");
-  if (!Deno.env.get("OPERANT_DATABASE_URL")) {
-    Deno.env.set("OPERANT_DATA_DIR", dataDir);
-  }
-
-  let server: Awaited<ReturnType<typeof startServer>> | undefined;
+  const harness = await startAuthenticatedHarness();
   try {
-    server = await startServer({ hostname: "127.0.0.1", port: 0 });
-    let health = await (await fetch(`${server.url}/health`)).json();
-    assertEquals(health.data.database.ok, true);
-    assertEquals(health.data.migrations.ok, true);
-    assert(health.data.migrations.appliedCount >= 2);
+    let ready = await harness.runOptctl(["--json", "status", "ready"]);
+    assertEquals(ready.code, 0, ready.stderr);
+    let health = JSON.parse(ready.stdout).data;
+    assertEquals(health.database.ok, true);
+    assertEquals(health.migrations.ok, true);
+    assert(health.migrations.appliedCount >= 2);
 
     await query(
-      server.sql,
+      harness.server.sql,
       "insert into platform_kv(key, value) values ($1, jsonb_build_object('survived', true)) on conflict (key) do update set value = excluded.value, updated_at = now()",
       ["http_restart_sentinel"],
     );
-    await server.shutdown();
-    server = undefined;
-
-    server = await startServer({ hostname: "127.0.0.1", port: 0 });
-    health = await (await fetch(`${server.url}/health`)).json();
-    assertEquals(health.data.database.ok, true);
-    assertEquals(health.data.migrations.ok, true);
+    await harness.restart();
+    ready = await harness.runOptctl(["--json", "status", "ready"]);
+    assertEquals(ready.code, 0, ready.stderr);
+    health = JSON.parse(ready.stdout).data;
+    assertEquals(health.database.ok, true);
+    assertEquals(health.migrations.ok, true);
 
     const sentinel = await query<{ survived: boolean }>(
-      server.sql,
+      harness.server.sql,
       "select (value->>'survived')::boolean as survived from platform_kv where key = $1",
       ["http_restart_sentinel"],
     );
     assertEquals(sentinel.rows[0]?.survived, true);
   } finally {
-    if (server) await server.shutdown().catch(() => undefined);
-    if (previousDataDir === undefined) Deno.env.delete("OPERANT_DATA_DIR");
-    else Deno.env.set("OPERANT_DATA_DIR", previousDataDir);
-    await Deno.remove(dataDir, { recursive: true }).catch(() => {});
+    await harness.close();
   }
 });

@@ -1,11 +1,11 @@
 import { assert, assertEquals, assertMatch } from "jsr:@std/assert";
 import { query } from "../../src/adapters/outbound/postgres/client.ts";
-import { startLiveHarness } from "../support/live_harness.ts";
+import { startAuthenticatedHarness } from "../support/authenticated_harness.ts";
 
 Deno.test("live pack migration stages destructive cleanup and confirms by digest", async () => {
   let harness;
   try {
-    harness = await startLiveHarness();
+    harness = await startAuthenticatedHarness();
   } catch (error) {
     if (error instanceof Error && error.message.startsWith("SKIP:")) {
       console.log(error.message);
@@ -27,7 +27,6 @@ Deno.test("live pack migration stages destructive cleanup and confirms by digest
       "changeset",
       "commit",
       await writeJson({
-        actor: { id: "admin", roles: ["super_admin"] },
         operations: [{
           op: "create",
           resource: "default.lead",
@@ -91,7 +90,6 @@ Deno.test("live pack migration stages destructive cleanup and confirms by digest
       "changeset",
       "commit",
       await writeJson({
-        actor: { id: "admin", roles: ["super_admin"] },
         source: "migration-cleanup",
         operations: [{
           op: "update",

@@ -187,6 +187,7 @@ export async function startLiveHarness(
       const launcher = await harness.createProcessTreeLauncher("human");
       try {
         const result = await launcher.runOptctl([
+          "--json",
           "bootstrap",
           "init",
           "--username",
@@ -204,6 +205,7 @@ export async function startLiveHarness(
       const launcher = await harness.createProcessTreeLauncher("human");
       try {
         const result = await launcher.runOptctl([
+          "--json",
           "auth",
           "login",
           "--username",

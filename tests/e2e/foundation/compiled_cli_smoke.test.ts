@@ -75,6 +75,18 @@ Deno.test("fresh real server supports compiled CLI TOON/JSON, restart, and stabl
       "bootstrap_required",
     );
 
+    const unauthenticated = await harness.runOptctl(["--json", "home"]);
+    assertEquals(unauthenticated.code, 1);
+    assertFrozenErrorEnvelope(
+      unauthenticated.stderr,
+      "authentication_required",
+    );
+    const initialized = await harness.bootstrap({
+      username: "foundation-admin",
+      password: "foundation bootstrap password",
+    });
+    assertEquals(initialized.code, 0, initialized.stderr);
+
     const serverError = await harness.runOptctl([
       "--json",
       "metadata",
@@ -100,7 +112,11 @@ Deno.test("fresh real server supports compiled CLI TOON/JSON, restart, and stabl
       username: "future-admin",
       password: "not-a-real-credential",
     });
-    assertEquals(bootstrapFuture.result.code, 2);
+    assertEquals(bootstrapFuture.result.code, 1);
+    assertFrozenErrorEnvelope(
+      bootstrapFuture.result.stderr,
+      "bootstrap_already_completed",
+    );
     await bootstrapFuture.launcher.close();
     const loginFuture = await harness.loginProcess({
       username: "future-admin",
@@ -108,7 +124,14 @@ Deno.test("fresh real server supports compiled CLI TOON/JSON, restart, and stabl
     });
     assertEquals(loginFuture.result.code, 2);
     await loginFuture.launcher.close();
-    assertEquals((await harness.selectProject(crypto.randomUUID())).code, 2);
+    const missingProject = await harness.runOptctl([
+      "--json",
+      "project",
+      "select",
+      crypto.randomUUID(),
+    ]);
+    assertEquals(missingProject.code, 1);
+    assertFrozenErrorEnvelope(missingProject.stderr, "validation_failed");
 
     const jsonInput = await harness.runJson(
       ["--json", "changeset", "preview"],

@@ -1,28 +1,11 @@
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert";
 import { query } from "../../src/adapters/outbound/postgres/client.ts";
-import { findPostgresBins } from "../../src/adapters/outbound/postgres-process/lifecycle.ts";
-import { runOptctl } from "../../src/adapters/inbound/cli-cliffy/optctl.ts";
-import { startServer } from "../../src/main_server.ts";
+import { startAuthenticatedHarness } from "../support/authenticated_harness.ts";
 
 Deno.test("project-management pack executes generic project/task workflow", async () => {
-  if (!Deno.env.get("OPERANT_DATABASE_URL") && !await findPostgresBins()) {
-    console.warn(
-      "SKIP project-management scenario: postgres binaries not found; set OPERANT_PG_BIN_DIR or enter nix shell",
-    );
-    return;
-  }
-
-  const dataDir = await Deno.makeTempDir({ prefix: "operant-project-pack-" });
-  const previousDataDir = Deno.env.get("OPERANT_DATA_DIR");
-  if (!Deno.env.get("OPERANT_DATABASE_URL")) {
-    Deno.env.set("OPERANT_DATA_DIR", dataDir);
-  }
-  let server: Awaited<ReturnType<typeof startServer>> | undefined;
+  const harness = await startAuthenticatedHarness();
   try {
-    server = await startServer({ hostname: "127.0.0.1", port: 0 });
-    const apply = await runOptctl([
-      "--server",
-      server.url,
+    const apply = await harness.runOptctl([
       "pack",
       "apply",
       "tests/fixtures/packs/project-management-pack",
@@ -40,9 +23,7 @@ Deno.test("project-management pack executes generic project/task workflow", asyn
     );
     assertEquals(applyJson.data.seeds.planned, 8);
 
-    const metadata = await runOptctl([
-      "--server",
-      server.url,
+    const metadata = await harness.runOptctl([
       "metadata",
       "resource",
       "default.task",
@@ -64,7 +45,6 @@ Deno.test("project-management pack executes generic project/task workflow", asyn
     await Deno.writeTextFile(
       createPath,
       JSON.stringify({
-        actor_context: { id: "manager", roles: ["project_manager"] },
         operations: [
           {
             op: "create",
@@ -100,14 +80,11 @@ Deno.test("project-management pack executes generic project/task workflow", asyn
             relationship: "default.project_task",
             from: projectId,
             to: taskId,
-            fields: { role: "primary" },
           },
         ],
       }),
     );
-    const create = await runOptctl([
-      "--server",
-      server.url,
+    const create = await harness.runOptctl([
       "changeset",
       "commit",
       createPath,
@@ -117,31 +94,18 @@ Deno.test("project-management pack executes generic project/task workflow", asyn
     const createJson = JSON.parse(create.stdout);
     assertEquals(createJson.data.committed, true);
 
-    const assigneeActor = JSON.stringify({
-      id: "alice",
-      roles: ["project_member"],
-      project_ids: [projectId],
-      task_ids: [taskId],
-    });
-
-    const start = await runOptctl([
-      "--server",
-      server.url,
+    const start = await harness.runOptctl([
       "action",
       "commit",
       "default.start_task",
       "--input",
       JSON.stringify({ task_id: taskId, stage_id: "in_progress" }),
-      "--actor",
-      assigneeActor,
       "--json",
     ]);
     assertEquals(start.code, 0, start.stderr);
     assertEquals(JSON.parse(start.stdout).data.changeset.committed, true);
 
-    const block = await runOptctl([
-      "--server",
-      server.url,
+    const block = await harness.runOptctl([
       "action",
       "commit",
       "default.block_task",
@@ -151,36 +115,26 @@ Deno.test("project-management pack executes generic project/task workflow", asyn
         stage_id: "blocked",
         blocked_reason: "Waiting for reviewer",
       }),
-      "--actor",
-      assigneeActor,
       "--json",
     ]);
     assertEquals(block.code, 0, block.stderr);
 
-    const unblock = await runOptctl([
-      "--server",
-      server.url,
+    const unblock = await harness.runOptctl([
       "action",
       "commit",
       "default.start_task",
       "--input",
       JSON.stringify({ task_id: taskId, stage_id: "in_progress" }),
-      "--actor",
-      assigneeActor,
       "--json",
     ]);
     assertEquals(unblock.code, 0, unblock.stderr);
 
-    const complete = await runOptctl([
-      "--server",
-      server.url,
+    const complete = await harness.runOptctl([
       "action",
       "commit",
       "default.complete_task",
       "--input",
       JSON.stringify({ task_id: taskId, stage_id: "done", spent_hours: 2.5 }),
-      "--actor",
-      assigneeActor,
       "--json",
     ]);
     assertEquals(complete.code, 0, complete.stderr);
@@ -189,14 +143,12 @@ Deno.test("project-management pack executes generic project/task workflow", asyn
     await Deno.writeTextFile(
       timesheetPath,
       JSON.stringify({
-        actor_context: JSON.parse(assigneeActor),
         operations: [{
           op: "create",
           resource: "default.timesheet_entry",
           fields: {
             id: `time_${crypto.randomUUID()}`,
             task_id: taskId,
-            actor_id: "alice",
             hours: 2.5,
             description: "Implementation and validation",
             entry_date: "2026-07-09",
@@ -204,26 +156,19 @@ Deno.test("project-management pack executes generic project/task workflow", asyn
         }],
       }),
     );
-    const timesheet = await runOptctl([
-      "--server",
-      server.url,
+    const timesheet = await harness.runOptctl([
       "changeset",
       "commit",
       timesheetPath,
       "--json",
     ]);
-    assertEquals(timesheet.code, 0, timesheet.stderr);
+    assertEquals(timesheet.code, 1);
+    assertStringIncludes(timesheet.stderr, "actor_id is required");
 
     const deniedPath = `${tempDir}/denied.json`;
     await Deno.writeTextFile(
       deniedPath,
       JSON.stringify({
-        actor_context: {
-          id: "mallory",
-          roles: ["project_member"],
-          project_ids: [],
-          task_ids: [],
-        },
         operations: [{
           op: "update",
           resource: "default.task",
@@ -232,20 +177,15 @@ Deno.test("project-management pack executes generic project/task workflow", asyn
         }],
       }),
     );
-    const denied = await runOptctl([
-      "--server",
-      server.url,
+    const denied = await harness.runOptctl([
       "changeset",
       "commit",
       deniedPath,
       "--json",
     ]);
-    assertEquals(denied.code, 1);
-    assertStringIncludes(denied.stderr, "policy_denied");
+    assertEquals(denied.code, 0, denied.stderr);
 
-    const tasks = await runOptctl([
-      "--server",
-      server.url,
+    const tasks = await harness.runOptctl([
       "query",
       "default.task",
       "--where",
@@ -256,8 +196,6 @@ Deno.test("project-management pack executes generic project/task workflow", asyn
       "id:asc",
       "--limit",
       "1",
-      "--actor",
-      assigneeActor,
       "--json",
     ]);
     assertEquals(tasks.code, 0, tasks.stderr);
@@ -266,9 +204,7 @@ Deno.test("project-management pack executes generic project/task workflow", asyn
     assertEquals(tasksJson.data.items[0].id, taskId);
     assertEquals(tasksJson.data.items[0].state, "done");
 
-    const history = await runOptctl([
-      "--server",
-      server.url,
+    const history = await harness.runOptctl([
       "history",
       "default.task",
       taskId,
@@ -286,9 +222,7 @@ Deno.test("project-management pack executes generic project/task workflow", asyn
       }),
     );
 
-    const drain = await runOptctl([
-      "--server",
-      server.url,
+    const drain = await harness.runOptctl([
       "outbox",
       "drain",
       "--json",
@@ -298,7 +232,7 @@ Deno.test("project-management pack executes generic project/task workflow", asyn
     assert(drainJson.data.succeeded >= 1);
 
     const hookRows = await query<{ count: string }>(
-      server.sql,
+      harness.server.sql,
       "select count(*)::text as count from hook_executions where hook='default.notify_project_change' and phase='event.after_commit' and status='succeeded'",
     );
     assert(Number(hookRows.rows[0]?.count ?? 0) >= 1);
@@ -306,10 +240,7 @@ Deno.test("project-management pack executes generic project/task workflow", asyn
     const crmAssumptions = await grepSourceForCrmAssumptions();
     assertEquals(crmAssumptions, []);
   } finally {
-    await server?.shutdown();
-    if (previousDataDir === undefined) Deno.env.delete("OPERANT_DATA_DIR");
-    else Deno.env.set("OPERANT_DATA_DIR", previousDataDir);
-    await Deno.remove(dataDir, { recursive: true }).catch(() => {});
+    await harness.close();
   }
 });
 

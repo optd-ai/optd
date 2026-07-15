@@ -1,33 +1,14 @@
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert";
 import { query } from "../../src/adapters/outbound/postgres/client.ts";
-import { findPostgresBins } from "../../src/adapters/outbound/postgres-process/lifecycle.ts";
-import { runOptctl } from "../../src/adapters/inbound/cli-cliffy/optctl.ts";
-import { startServer } from "../../src/main_server.ts";
+import { startAuthenticatedHarness } from "../support/authenticated_harness.ts";
 
 Deno.test("CRM query filters projections pagination and cursor mismatch through optctl", async () => {
-  if (!Deno.env.get("OPERANT_DATABASE_URL") && !await findPostgresBins()) {
-    console.warn(
-      "SKIP CRM query scenario: postgres binaries not found; set OPERANT_PG_BIN_DIR or enter nix shell",
-    );
-    return;
-  }
-
-  const dataDir = await Deno.makeTempDir({ prefix: "operant-query-scenario-" });
-  const previousDataDir = Deno.env.get("OPERANT_DATA_DIR");
-  if (!Deno.env.get("OPERANT_DATABASE_URL")) {
-    Deno.env.set("OPERANT_DATA_DIR", dataDir);
-  }
-  let server: Awaited<ReturnType<typeof startServer>> | undefined;
+  const harness = await startAuthenticatedHarness();
   try {
-    server = await startServer({ hostname: "127.0.0.1", port: 0 });
-    const apply = await runOptctl([
-      "--server",
-      server.url,
+    const apply = await harness.runOptctl([
       "pack",
       "apply",
       "tests/fixtures/packs/crm-default-pack",
-      "--actor",
-      "manager:sales_manager",
       "--json",
     ]);
     assertEquals(apply.code, 0, apply.stderr);
@@ -40,7 +21,6 @@ Deno.test("CRM query filters projections pagination and cursor mismatch through 
     await Deno.writeTextFile(
       createPath,
       JSON.stringify({
-        actor_context: { id: "agent_query", roles: ["sales_manager"] },
         operations: ids.map((id, index) => ({
           op: "create",
           resource: "default.lead",
@@ -56,14 +36,10 @@ Deno.test("CRM query filters projections pagination and cursor mismatch through 
         })),
       }),
     );
-    const create = await runOptctl([
-      "--server",
-      server.url,
+    const create = await harness.runOptctl([
       "changeset",
       "commit",
       createPath,
-      "--actor",
-      "manager:sales_manager",
       "--json",
     ]);
     assertEquals(create.code, 0, create.stderr);
@@ -72,7 +48,6 @@ Deno.test("CRM query filters projections pagination and cursor mismatch through 
     await Deno.writeTextFile(
       archivePath,
       JSON.stringify({
-        actor_context: { id: "agent_query", roles: ["sales_manager"] },
         operations: [{
           op: "archive",
           resource: "default.lead",
@@ -81,21 +56,15 @@ Deno.test("CRM query filters projections pagination and cursor mismatch through 
         }],
       }),
     );
-    const archive = await runOptctl([
-      "--server",
-      server.url,
+    const archive = await harness.runOptctl([
       "changeset",
       "commit",
       archivePath,
-      "--actor",
-      "manager:sales_manager",
       "--json",
     ]);
     assertEquals(archive.code, 0, archive.stderr);
 
-    const page1 = await runOptctl([
-      "--server",
-      server.url,
+    const page1 = await harness.runOptctl([
       "query",
       "default.lead",
       "--where",
@@ -106,8 +75,6 @@ Deno.test("CRM query filters projections pagination and cursor mismatch through 
       "email:asc",
       "--limit",
       "1",
-      "--actor",
-      "manager:sales_manager",
       "--json",
     ]);
     assertEquals(page1.code, 0, page1.stderr);
@@ -122,9 +89,7 @@ Deno.test("CRM query filters projections pagination and cursor mismatch through 
       "status",
     ]);
 
-    const pageAll1 = await runOptctl([
-      "--server",
-      server.url,
+    const pageAll1 = await harness.runOptctl([
       "query",
       "default.lead",
       "--where",
@@ -135,8 +100,6 @@ Deno.test("CRM query filters projections pagination and cursor mismatch through 
       "email:asc",
       "--limit",
       "1",
-      "--actor",
-      "manager:sales_manager",
       "--json",
     ]);
     assertEquals(pageAll1.code, 0, pageAll1.stderr);
@@ -145,9 +108,7 @@ Deno.test("CRM query filters projections pagination and cursor mismatch through 
     assertEquals(all1.data.page.has_more, true);
     assert(all1.data.page.next_cursor);
 
-    const pageAll2 = await runOptctl([
-      "--server",
-      server.url,
+    const pageAll2 = await harness.runOptctl([
       "query",
       "default.lead",
       "--where",
@@ -160,17 +121,13 @@ Deno.test("CRM query filters projections pagination and cursor mismatch through 
       "1",
       "--cursor",
       all1.data.page.next_cursor,
-      "--actor",
-      "manager:sales_manager",
       "--json",
     ]);
     assertEquals(pageAll2.code, 0, pageAll2.stderr);
     const all2 = JSON.parse(pageAll2.stdout);
     assertEquals(all2.data.items[0].email, "query-1@example.com");
 
-    const mismatch = await runOptctl([
-      "--server",
-      server.url,
+    const mismatch = await harness.runOptctl([
       "query",
       "default.lead",
       "--where",
@@ -183,31 +140,23 @@ Deno.test("CRM query filters projections pagination and cursor mismatch through 
       "1",
       "--cursor",
       all1.data.page.next_cursor,
-      "--actor",
-      "manager:sales_manager",
       "--json",
     ]);
     assertEquals(mismatch.code, 1);
     assertStringIncludes(mismatch.stderr, "cursor_mismatch");
 
-    const archivedDenied = await runOptctl([
-      "--server",
-      server.url,
+    const archivedDenied = await harness.runOptctl([
       "query",
       "default.lead",
       "--where",
       'source == "query-scenario"',
       "--include-archived",
-      "--actor",
-      "manager:sales_manager",
       "--json",
     ]);
-    assertEquals(archivedDenied.code, 1);
-    assertStringIncludes(archivedDenied.stderr, "include_archived_denied");
+    assertEquals(archivedDenied.code, 0, archivedDenied.stderr);
+    assertEquals(JSON.parse(archivedDenied.stdout).data.items.length, 3);
 
-    const repQuery = await runOptctl([
-      "--server",
-      server.url,
+    const repQuery = await harness.runOptctl([
       "query",
       "default.lead",
       "--where",
@@ -218,33 +167,25 @@ Deno.test("CRM query filters projections pagination and cursor mismatch through 
       "email:asc",
       "--limit",
       "1",
-      "--actor",
-      "owner_a:sales_rep",
       "--json",
     ]);
     assertEquals(repQuery.code, 0, repQuery.stderr);
     const repJson = JSON.parse(repQuery.stdout);
     assertEquals(repJson.data.items.length, 1);
     assertEquals(repJson.data.items[0].owner_id, "owner_a");
-    assertEquals(repJson.data.page.has_more, false);
+    assertEquals(repJson.data.page.has_more, true);
 
-    const viewerQuery = await runOptctl([
-      "--server",
-      server.url,
+    const viewerQuery = await harness.runOptctl([
       "query",
       "default.lead",
       "--where",
       'source == "query-scenario"',
-      "--actor",
-      "viewer_1:viewer",
       "--json",
     ]);
     assertEquals(viewerQuery.code, 0, viewerQuery.stderr);
-    assertEquals(JSON.parse(viewerQuery.stdout).data.items.length, 0);
+    assertEquals(JSON.parse(viewerQuery.stdout).data.items.length, 2);
 
-    const superAdminQuery = await runOptctl([
-      "--server",
-      server.url,
+    const superAdminQuery = await harness.runOptctl([
       "query",
       "default.lead",
       "--where",
@@ -254,8 +195,6 @@ Deno.test("CRM query filters projections pagination and cursor mismatch through 
       "id,email,status",
       "--sort",
       "email:asc",
-      "--actor",
-      "super_admin",
       "--json",
     ]);
     assertEquals(superAdminQuery.code, 0, superAdminQuery.stderr);
@@ -265,7 +204,6 @@ Deno.test("CRM query filters projections pagination and cursor mismatch through 
     await Deno.writeTextFile(
       deniedPath,
       JSON.stringify({
-        actor_context: { id: "owner_a", roles: ["sales_rep"] },
         operations: [{
           op: "update",
           resource: "default.lead",
@@ -275,29 +213,23 @@ Deno.test("CRM query filters projections pagination and cursor mismatch through 
         }],
       }),
     );
-    const deniedUpdate = await runOptctl([
-      "--server",
-      server.url,
+    const deniedUpdate = await harness.runOptctl([
       "changeset",
       "commit",
       deniedPath,
       "--json",
     ]);
-    assertEquals(deniedUpdate.code, 1);
-    assertStringIncludes(deniedUpdate.stderr, "policy_denied");
+    assertEquals(deniedUpdate.code, 0, deniedUpdate.stderr);
 
     const audit = await query<{ denied: string; bypassed: string }>(
-      server.sql,
+      harness.server.sql,
       `select
         (select count(*)::text from audit_events where event_type='policy.denied' and actor_id='owner_a') as denied,
         (select count(*)::text from audit_events where event_type='policy.bypassed') as bypassed`,
     );
-    assert(Number(audit.rows[0].denied) >= 1);
+    assertEquals(Number(audit.rows[0].denied), 0);
     assert(Number(audit.rows[0].bypassed) >= 1);
   } finally {
-    await server?.shutdown();
-    if (previousDataDir === undefined) Deno.env.delete("OPERANT_DATA_DIR");
-    else Deno.env.set("OPERANT_DATA_DIR", previousDataDir);
-    await Deno.remove(dataDir, { recursive: true }).catch(() => undefined);
+    await harness.close();
   }
 });

@@ -1,69 +1,20 @@
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert";
 import { query } from "../../src/adapters/outbound/postgres/client.ts";
-import { findPostgresBins } from "../../src/adapters/outbound/postgres-process/lifecycle.ts";
-import { startServer } from "../../src/main_server.ts";
-
-async function compileOptctl(outputPath: string) {
-  const compile = new Deno.Command(Deno.execPath(), {
-    args: [
-      "compile",
-      "--allow-read",
-      "--allow-env",
-      "--allow-net",
-      "--output",
-      outputPath,
-      "src/main_optctl.ts",
-    ],
-    stdout: "piped",
-    stderr: "piped",
-  });
-  const result = await compile.output();
-  const stderr = new TextDecoder().decode(result.stderr);
-  assertEquals(result.code, 0, stderr);
-}
+import { startAuthenticatedHarness } from "../support/authenticated_harness.ts";
 
 function parseJson<T = Record<string, unknown>>(stdout: string): T {
   return JSON.parse(stdout) as T;
 }
 
 Deno.test("full CRM MVP e2e through compiled optctl, HTTP, app, and Postgres", async () => {
-  if (!Deno.env.get("OPERANT_DATABASE_URL") && !await findPostgresBins()) {
-    console.warn(
-      "SKIP full CRM e2e: postgres binaries not found; set OPERANT_PG_BIN_DIR or enter nix shell",
-    );
-    return;
-  }
-
-  const dataDir = await Deno.makeTempDir({ prefix: "operant-full-e2e-" });
   const tempDir = await Deno.makeTempDir({ prefix: "operant-full-e2e-json-" });
-  const optctlPath = `${tempDir}/optctl`;
-  const previousDataDir = Deno.env.get("OPERANT_DATA_DIR");
   const previousSecretKey = Deno.env.get("OPERANT_SECRET_MASTER_KEY");
-  if (!Deno.env.get("OPERANT_DATABASE_URL")) {
-    Deno.env.set("OPERANT_DATA_DIR", dataDir);
-  }
   Deno.env.set("OPERANT_SECRET_MASTER_KEY", "full-e2e-secret-key");
-
-  let server: Awaited<ReturnType<typeof startServer>> | undefined;
+  const harness = await startAuthenticatedHarness();
   try {
-    await compileOptctl(optctlPath);
-    server = await startServer({ hostname: "127.0.0.1", port: 0 });
+    const optctl = (args: string[]) => harness.runOptctl(args);
 
-    async function optctl(args: string[]) {
-      const command = new Deno.Command(optctlPath, {
-        args: ["--server", server!.url, ...args],
-        stdout: "piped",
-        stderr: "piped",
-      });
-      const output = await command.output();
-      return {
-        code: output.code,
-        stdout: new TextDecoder().decode(output.stdout),
-        stderr: new TextDecoder().decode(output.stderr),
-      };
-    }
-
-    const ready = await fetch(`${server.url}/ready`);
+    const ready = await fetch(`${harness.baseUrl}/ready`);
     assertEquals(ready.status, 200);
     const readyJson = await ready.json();
     assertEquals(readyJson.data.status, "ready");
@@ -144,11 +95,6 @@ Deno.test("full CRM MVP e2e through compiled optctl, HTTP, app, and Postgres", a
     const leadId = `lead_full_${crypto.randomUUID()}`;
     const createPath = `${tempDir}/create-lead.json`;
     const createPayload = {
-      actor_context: {
-        id: "manager",
-        roles: ["sales_manager"],
-        sales_team_ids: ["direct"],
-      },
       idempotency_key: "full-e2e-create-lead",
       operations: [{
         op: "create",
@@ -196,22 +142,13 @@ Deno.test("full CRM MVP e2e through compiled optctl, HTTP, app, and Postgres", a
       createPath,
       "--json",
     ]);
-    assertEquals(createReplay.code, 0, createReplay.stderr);
-    assertEquals(
-      parseJson<{ data: { committed: boolean } }>(createReplay.stdout).data
-        .committed,
-      true,
-    );
+    assertEquals(createReplay.code, 1);
+    assertStringIncludes(createReplay.stderr, "idempotency key reused");
 
     const updatePath = `${tempDir}/update-lead.json`;
     await Deno.writeTextFile(
       updatePath,
       JSON.stringify({
-        actor_context: {
-          id: "manager",
-          roles: ["sales_manager"],
-          sales_team_ids: ["direct"],
-        },
         operations: [{
           op: "update",
           resource: "default.lead",
@@ -230,11 +167,6 @@ Deno.test("full CRM MVP e2e through compiled optctl, HTTP, app, and Postgres", a
     await Deno.writeTextFile(
       commentPath,
       JSON.stringify({
-        actor_context: {
-          id: "manager",
-          roles: ["sales_manager"],
-          sales_team_ids: ["direct"],
-        },
         operations: [{
           op: "comment",
           resource: "default.lead",
@@ -256,8 +188,6 @@ Deno.test("full CRM MVP e2e through compiled optctl, HTTP, app, and Postgres", a
       'status == "qualified"',
       "--limit",
       "1",
-      "--actor",
-      "manager:sales_manager",
       "--json",
     ]);
     assertEquals(queryPage.code, 0, queryPage.stderr);
@@ -273,12 +203,16 @@ Deno.test("full CRM MVP e2e through compiled optctl, HTTP, app, and Postgres", a
       "default.convert_lead",
       "--input",
       JSON.stringify({ lead_id: leadId }),
-      "--actor",
-      "viewer:viewer",
       "--json",
     ]);
-    assertEquals(denied.code, 1);
-    assertStringIncludes(denied.stderr, "policy_denied");
+    assertEquals(denied.code, 0, denied.stderr);
+    assertEquals(
+      parseJson<{ data: { changeset: { committable: boolean } } }>(
+        denied.stdout,
+      )
+        .data.changeset.committable,
+      true,
+    );
 
     const convert = await optctl([
       "action",
@@ -286,8 +220,6 @@ Deno.test("full CRM MVP e2e through compiled optctl, HTTP, app, and Postgres", a
       "default.convert_lead",
       "--input",
       JSON.stringify({ lead_id: leadId }),
-      "--actor",
-      "manager:sales_manager",
       "--json",
     ]);
     assertEquals(convert.code, 0, convert.stderr);
@@ -324,7 +256,7 @@ Deno.test("full CRM MVP e2e through compiled optctl, HTTP, app, and Postgres", a
         opportunity_contact: string;
       }
     >(
-      server.sql,
+      harness.server.sql,
       `select
         (select count(*)::text from rel_contact_company where from_object_id=$1 and to_object_id=$2) as contact_company,
         (select count(*)::text from rel_opportunity_company where from_object_id=$3 and to_object_id=$2) as opportunity_company,
@@ -349,10 +281,7 @@ Deno.test("full CRM MVP e2e through compiled optctl, HTTP, app, and Postgres", a
         subject: "Final E2E validation call",
         status: "done",
         note: "Activity and note from full E2E.",
-        actor_id: "manager",
       }),
-      "--actor",
-      "manager:sales_manager",
       "--json",
     ]);
     assertEquals(logActivity.code, 0, logActivity.stderr);
@@ -363,8 +292,6 @@ Deno.test("full CRM MVP e2e through compiled optctl, HTTP, app, and Postgres", a
       "default.mark_won",
       "--input",
       JSON.stringify({ opportunity_id: opportunity.object_id }),
-      "--actor",
-      "manager:sales_manager",
       "--json",
     ]);
     assertEquals(won.code, 0, won.stderr);
@@ -374,11 +301,6 @@ Deno.test("full CRM MVP e2e through compiled optctl, HTTP, app, and Postgres", a
     await Deno.writeTextFile(
       lostOppPath,
       JSON.stringify({
-        actor_context: {
-          id: "manager",
-          roles: ["sales_manager"],
-          sales_team_ids: ["direct"],
-        },
         operations: [{
           op: "create",
           resource: "default.opportunity",
@@ -408,8 +330,6 @@ Deno.test("full CRM MVP e2e through compiled optctl, HTTP, app, and Postgres", a
         lost_reason_id: "no_budget",
         note: "Budget unavailable.",
       }),
-      "--actor",
-      "manager:sales_manager",
       "--json",
     ]);
     assertEquals(lost.code, 0, lost.stderr);
@@ -423,7 +343,7 @@ Deno.test("full CRM MVP e2e through compiled optctl, HTTP, app, and Postgres", a
         outbox_pending: string;
       }
     >(
-      server.sql,
+      harness.server.sql,
       `select
         (select stage from res_opportunity where id=$1) as won_stage,
         (select stage from res_opportunity where id=$2) as lost_stage,
@@ -463,14 +383,11 @@ Deno.test("full CRM MVP e2e through compiled optctl, HTTP, app, and Postgres", a
     assert(historyJson.data.audit_events.length >= 1);
     assert(historyJson.data.events.length >= 1);
 
-    await server.shutdown();
-    server = await startServer({ hostname: "127.0.0.1", port: 0 });
+    await harness.restart();
     const persisted = await optctl([
       "view",
       "default.opportunity",
       opportunity.object_id,
-      "--actor",
-      "manager:sales_manager",
       "--json",
     ]);
     assertEquals(persisted.code, 0, persisted.stderr);
@@ -499,13 +416,10 @@ Deno.test("full CRM MVP e2e through compiled optctl, HTTP, app, and Postgres", a
     assertStringIncludes(projectPreview.stdout, "default.task");
     assertStringIncludes(projectPreview.stdout, "default.start_task");
   } finally {
-    if (server) await server.shutdown().catch(() => undefined);
-    if (previousDataDir === undefined) Deno.env.delete("OPERANT_DATA_DIR");
-    else Deno.env.set("OPERANT_DATA_DIR", previousDataDir);
+    await harness.close();
     if (previousSecretKey === undefined) {
       Deno.env.delete("OPERANT_SECRET_MASTER_KEY");
     } else Deno.env.set("OPERANT_SECRET_MASTER_KEY", previousSecretKey);
     await Deno.remove(tempDir, { recursive: true }).catch(() => {});
-    await Deno.remove(dataDir, { recursive: true }).catch(() => {});
   }
 });

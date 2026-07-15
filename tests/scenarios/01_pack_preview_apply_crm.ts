@@ -1,26 +1,10 @@
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert";
 import { query } from "../../src/adapters/outbound/postgres/client.ts";
-import { findPostgresBins } from "../../src/adapters/outbound/postgres-process/lifecycle.ts";
-import { runOptctl } from "../../src/adapters/inbound/cli-cliffy/optctl.ts";
-import { startServer } from "../../src/main_server.ts";
+import { startAuthenticatedHarness } from "../support/authenticated_harness.ts";
 
 Deno.test("pack preview/apply CRM scenario crosses optctl HTTP boundary and survives restart", async () => {
-  if (!Deno.env.get("OPERANT_DATABASE_URL") && !await findPostgresBins()) {
-    console.warn(
-      "SKIP pack preview/apply CRM scenario: postgres binaries not found; set OPERANT_PG_BIN_DIR or enter nix shell",
-    );
-    return;
-  }
-
-  const dataDir = await Deno.makeTempDir({ prefix: "operant-pack-scenario-" });
-  const previousDataDir = Deno.env.get("OPERANT_DATA_DIR");
-  if (!Deno.env.get("OPERANT_DATABASE_URL")) {
-    Deno.env.set("OPERANT_DATA_DIR", dataDir);
-  }
-  let server: Awaited<ReturnType<typeof startServer>> | undefined;
+  const harness = await startAuthenticatedHarness();
   try {
-    server = await startServer({ hostname: "127.0.0.1", port: 0 });
-
     const invalidPackDir = await Deno.makeTempDir({
       prefix: "operant-invalid-pack-",
     });
@@ -48,9 +32,7 @@ spec:
       type: unsupported
 `,
     );
-    const badPreview = await runOptctl([
-      "--server",
-      server.url,
+    const badPreview = await harness.runOptctl([
       "pack",
       "preview",
       invalidPackDir,
@@ -60,19 +42,17 @@ spec:
     assertEquals(badPreview.code, 1);
     assertStringIncludes(badPreview.stderr, "unsupported field type");
     const partialTable = await query<{ exists: boolean }>(
-      server.sql,
+      harness.server.sql,
       "select to_regclass('public.res_bad') is not null as exists",
     );
     assertEquals(partialTable.rows[0]?.exists, false);
     const countAfterBadPreview = await query<{ count: string }>(
-      server.sql,
+      harness.server.sql,
       "select count(*)::text as count from pack_revisions",
     );
     assertEquals(countAfterBadPreview.rows[0]?.count, "0");
 
-    const preview = await runOptctl([
-      "--server",
-      server.url,
+    const preview = await harness.runOptctl([
       "pack",
       "preview",
       "tests/fixtures/packs/crm-default-pack",
@@ -92,14 +72,12 @@ spec:
       ) => table.table_name === "res_lead"),
     );
     const countAfterPreview = await query<{ count: string }>(
-      server.sql,
+      harness.server.sql,
       "select count(*)::text as count from pack_revisions",
     );
     assertEquals(countAfterPreview.rows[0]?.count, "0");
 
-    const apply = await runOptctl([
-      "--server",
-      server.url,
+    const apply = await harness.runOptctl([
       "pack",
       "apply",
       "tests/fixtures/packs/crm-default-pack",
@@ -120,7 +98,7 @@ spec:
       data_type: string;
       is_nullable: string;
     }>(
-      server.sql,
+      harness.server.sql,
       `select table_name, column_name, data_type, is_nullable
        from information_schema.columns
        where table_schema = 'public'
@@ -139,14 +117,12 @@ spec:
     assert(columns.includes("rel_contact_company.primary:boolean:YES"));
 
     const storedDdl = await query<{ count: string }>(
-      server.sql,
+      harness.server.sql,
       "select count(*)::text as count from generated_sql_objects where table_name in ('res_lead', 'res_opportunity', 'rel_contact_company')",
     );
     assertEquals(storedDdl.rows[0]?.count, "3");
 
-    const resource = await runOptctl([
-      "--server",
-      server.url,
+    const resource = await harness.runOptctl([
       "metadata",
       "resource",
       "default.lead",
@@ -156,9 +132,7 @@ spec:
     assertStringIncludes(resource.stdout, "default.lead");
     assertStringIncludes(resource.stdout, "email");
 
-    const actionToon = await runOptctl([
-      "--server",
-      server.url,
+    const actionToon = await harness.runOptctl([
       "metadata",
       "action",
       "default.convert_lead",
@@ -167,16 +141,12 @@ spec:
     assertStringIncludes(actionToon.stdout, "default.convert_lead");
     assertStringIncludes(actionToon.stdout, "Convert a qualified lead");
 
-    await server.shutdown();
-    server = await startServer({ hostname: "127.0.0.1", port: 0 });
-    const home = await runOptctl(["--server", server.url, "home"]);
+    await harness.restart();
+    const home = await harness.runOptctl(["home"]);
     assertEquals(home.code, 0, home.stderr);
     assertStringIncludes(home.stdout, "default.lead");
     assertStringIncludes(home.stdout, "default.convert_lead");
   } finally {
-    if (server) await server.shutdown().catch(() => undefined);
-    if (previousDataDir === undefined) Deno.env.delete("OPERANT_DATA_DIR");
-    else Deno.env.set("OPERANT_DATA_DIR", previousDataDir);
-    await Deno.remove(dataDir, { recursive: true }).catch(() => {});
+    await harness.close();
   }
 });

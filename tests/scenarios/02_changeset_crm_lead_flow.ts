@@ -1,30 +1,11 @@
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert";
 import { query } from "../../src/adapters/outbound/postgres/client.ts";
-import { findPostgresBins } from "../../src/adapters/outbound/postgres-process/lifecycle.ts";
-import { runOptctl } from "../../src/adapters/inbound/cli-cliffy/optctl.ts";
-import { startServer } from "../../src/main_server.ts";
+import { startAuthenticatedHarness } from "../support/authenticated_harness.ts";
 
 Deno.test("CRM lead changeset preview/commit/view/history and auditable idempotent seeds", async () => {
-  if (!Deno.env.get("OPERANT_DATABASE_URL") && !await findPostgresBins()) {
-    console.warn(
-      "SKIP CRM changeset scenario: postgres binaries not found; set OPERANT_PG_BIN_DIR or enter nix shell",
-    );
-    return;
-  }
-
-  const dataDir = await Deno.makeTempDir({
-    prefix: "operant-changeset-scenario-",
-  });
-  const previousDataDir = Deno.env.get("OPERANT_DATA_DIR");
-  if (!Deno.env.get("OPERANT_DATABASE_URL")) {
-    Deno.env.set("OPERANT_DATA_DIR", dataDir);
-  }
-  let server: Awaited<ReturnType<typeof startServer>> | undefined;
+  const harness = await startAuthenticatedHarness();
   try {
-    server = await startServer({ hostname: "127.0.0.1", port: 0 });
-    const apply = await runOptctl([
-      "--server",
-      server.url,
+    const apply = await harness.runOptctl([
       "pack",
       "apply",
       "tests/fixtures/packs/crm-default-pack",
@@ -48,7 +29,7 @@ Deno.test("CRM lead changeset preview/commit/view/history and auditable idempote
         seed_events: string;
       }
     >(
-      server.sql,
+      harness.server.sql,
       `select
         (select count(*)::text from res_lead_status) as lead_statuses,
         (select count(*)::text from res_opportunity_stage) as stages,
@@ -77,11 +58,6 @@ Deno.test("CRM lead changeset preview/commit/view/history and auditable idempote
     await Deno.writeTextFile(
       createPath,
       JSON.stringify({
-        actor_context: {
-          id: "agent_1",
-          roles: ["sales_rep"],
-          sales_team_ids: ["direct"],
-        },
         idempotency_key: "lead-live-create",
         operations: [{
           op: "create",
@@ -98,9 +74,7 @@ Deno.test("CRM lead changeset preview/commit/view/history and auditable idempote
         }],
       }),
     );
-    const preview = await runOptctl([
-      "--server",
-      server.url,
+    const preview = await harness.runOptctl([
       "changeset",
       "preview",
       createPath,
@@ -111,9 +85,7 @@ Deno.test("CRM lead changeset preview/commit/view/history and auditable idempote
     assertEquals(previewJson.data.committable, true);
     assertEquals(previewJson.data.operations[0].id, leadId);
 
-    const create = await runOptctl([
-      "--server",
-      server.url,
+    const create = await harness.runOptctl([
       "changeset",
       "commit",
       createPath,
@@ -128,11 +100,6 @@ Deno.test("CRM lead changeset preview/commit/view/history and auditable idempote
     await Deno.writeTextFile(
       updatePath,
       JSON.stringify({
-        actor_context: {
-          id: "agent_1",
-          roles: ["sales_rep"],
-          sales_team_ids: ["direct"],
-        },
         operations: [{
           op: "update",
           resource: "default.lead",
@@ -142,9 +109,7 @@ Deno.test("CRM lead changeset preview/commit/view/history and auditable idempote
         }],
       }),
     );
-    const update = await runOptctl([
-      "--server",
-      server.url,
+    const update = await harness.runOptctl([
       "changeset",
       "commit",
       updatePath,
@@ -156,11 +121,6 @@ Deno.test("CRM lead changeset preview/commit/view/history and auditable idempote
     await Deno.writeTextFile(
       conflictPath,
       JSON.stringify({
-        actor_context: {
-          id: "agent_1",
-          roles: ["sales_rep"],
-          sales_team_ids: ["direct"],
-        },
         operations: [{
           op: "update",
           resource: "default.lead",
@@ -170,9 +130,7 @@ Deno.test("CRM lead changeset preview/commit/view/history and auditable idempote
         }],
       }),
     );
-    const conflict = await runOptctl([
-      "--server",
-      server.url,
+    const conflict = await harness.runOptctl([
       "changeset",
       "commit",
       conflictPath,
@@ -185,11 +143,6 @@ Deno.test("CRM lead changeset preview/commit/view/history and auditable idempote
     await Deno.writeTextFile(
       commentPath,
       JSON.stringify({
-        actor_context: {
-          id: "agent_1",
-          roles: ["sales_rep"],
-          sales_team_ids: ["direct"],
-        },
         operations: [{
           op: "comment",
           resource: "default.lead",
@@ -199,9 +152,7 @@ Deno.test("CRM lead changeset preview/commit/view/history and auditable idempote
         }],
       }),
     );
-    const comment = await runOptctl([
-      "--server",
-      server.url,
+    const comment = await harness.runOptctl([
       "changeset",
       "commit",
       commentPath,
@@ -209,14 +160,10 @@ Deno.test("CRM lead changeset preview/commit/view/history and auditable idempote
     ]);
     assertEquals(comment.code, 0, comment.stderr);
 
-    const view = await runOptctl([
-      "--server",
-      server.url,
+    const view = await harness.runOptctl([
       "view",
       "default.lead",
       leadId,
-      "--actor",
-      "agent_1:sales_rep",
       "--json",
     ]);
     assertEquals(view.code, 0, view.stderr);
@@ -232,11 +179,6 @@ Deno.test("CRM lead changeset preview/commit/view/history and auditable idempote
     await Deno.writeTextFile(
       archivePath,
       JSON.stringify({
-        actor_context: {
-          id: "agent_1",
-          roles: ["sales_rep"],
-          sales_team_ids: ["direct"],
-        },
         operations: [{
           op: "archive",
           resource: "default.lead",
@@ -245,9 +187,7 @@ Deno.test("CRM lead changeset preview/commit/view/history and auditable idempote
         }],
       }),
     );
-    const archive = await runOptctl([
-      "--server",
-      server.url,
+    const archive = await harness.runOptctl([
       "changeset",
       "commit",
       archivePath,
@@ -255,14 +195,10 @@ Deno.test("CRM lead changeset preview/commit/view/history and auditable idempote
     ]);
     assertEquals(archive.code, 0, archive.stderr);
 
-    const history = await runOptctl([
-      "--server",
-      server.url,
+    const history = await harness.runOptctl([
       "history",
       "default.lead",
       leadId,
-      "--actor",
-      "agent_1:sales_rep",
       "--json",
     ]);
     assertEquals(history.code, 0, history.stderr);
@@ -287,14 +223,14 @@ Deno.test("CRM lead changeset preview/commit/view/history and auditable idempote
     const current = await query<
       { version: number; current_object_version_id: string }
     >(
-      server.sql,
+      harness.server.sql,
       "select version,current_object_version_id from res_lead where id=$1",
       [leadId],
     );
     const latest = await query<
       { id: string; version: number; snapshot_json: { version: number } }
     >(
-      server.sql,
+      harness.server.sql,
       "select id,version,snapshot_json from object_versions where resource='default.lead' and object_id=$1 order by version desc limit 1",
       [leadId],
     );
@@ -305,9 +241,7 @@ Deno.test("CRM lead changeset preview/commit/view/history and auditable idempote
       : latest.rows[0].snapshot_json;
     assertEquals(latestSnapshot.version, 4);
 
-    const reapply = await runOptctl([
-      "--server",
-      server.url,
+    const reapply = await harness.runOptctl([
       "pack",
       "apply",
       "tests/fixtures/packs/crm-default-pack",
@@ -317,7 +251,7 @@ Deno.test("CRM lead changeset preview/commit/view/history and auditable idempote
     const countsAfterReapply = await query<
       { lead_statuses: string; stages: string; teams: string }
     >(
-      server.sql,
+      harness.server.sql,
       `select
         (select count(*)::text from res_lead_status) as lead_statuses,
         (select count(*)::text from res_opportunity_stage) as stages,
@@ -326,9 +260,6 @@ Deno.test("CRM lead changeset preview/commit/view/history and auditable idempote
     assertEquals(countsAfterReapply.rows[0], countsBeforeReapply);
     await Deno.remove(tempDir, { recursive: true }).catch(() => {});
   } finally {
-    if (server) await server.shutdown().catch(() => undefined);
-    if (previousDataDir === undefined) Deno.env.delete("OPERANT_DATA_DIR");
-    else Deno.env.set("OPERANT_DATA_DIR", previousDataDir);
-    await Deno.remove(dataDir, { recursive: true }).catch(() => {});
+    await harness.close();
   }
 });
