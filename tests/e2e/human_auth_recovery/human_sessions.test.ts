@@ -1,6 +1,7 @@
-import { assertEquals, assertFalse } from "jsr:@std/assert";
+import { assertEquals, assertFalse, assertRejects } from "jsr:@std/assert";
 import { startLiveHarness } from "../../support/live_harness.ts";
 import { query } from "../../../src/adapters/outbound/postgres/client.ts";
+import { isUuidV7 } from "../../../src/domain/ids/uuid_v7.ts";
 
 Deno.test("server warns while honoring an operator-lowered password minimum", async () => {
   const prior = Deno.env.get("OPERANT_PASSWORD_MIN_LENGTH");
@@ -47,10 +48,26 @@ Deno.test("compiled optctl logs in, lists sessions, logs out, and survives resta
     assertEquals(sessions.code, 0, sessions.stderr);
     const initialSessions = JSON.parse(sessions.stdout).data;
     assertEquals(initialSessions.length, 2);
+    assertEquals(
+      initialSessions.every((session: { id: string }) => isUuidV7(session.id)),
+      true,
+    );
     const initialRequestSessionId =
       initialSessions.find((session: { credential_kind: string }) =>
         session.credential_kind === "authorization_request"
       ).id;
+    const platformIds = await query<{ id: string }>(
+      harness.server.sql,
+      `
+      select id::text id from principals
+      union all select id::text from human_users
+      union all select id::text from role_assignments
+      union all select id::text from auth_sessions
+      union all select id::text from auth_contexts
+      union all select id::text from auth_audit_events
+    `,
+    );
+    assertEquals(platformIds.rows.every((row) => isUuidV7(row.id)), true);
     assertEquals(
       (await harness.runOptctl(["--json", "auth", "logout"])).code,
       0,
@@ -155,9 +172,9 @@ Deno.test("password reset request throttling is Postgres-backed and non-enumerat
           username,
         ]);
         assertEquals(result.code, 0, result.stderr);
-        assertEquals(Object.keys(JSON.parse(result.stdout).data), [
-          "request_id",
-        ]);
+        const requestData = JSON.parse(result.stdout).data;
+        assertEquals(Object.keys(requestData), ["request_id"]);
+        assertEquals(isUuidV7(requestData.request_id), true);
       }
       const throttled = await harness.runOptctl([
         "--json",
@@ -259,6 +276,12 @@ Deno.test("compiled host command covers recovery revocation repair cancellation 
       "--restore-super-admin",
     ]);
     assertEquals(begun.success, true, new TextDecoder().decode(begun.stderr));
+    const begunText = new TextDecoder().decode(begun.stdout);
+    const begunJson = begunText.split("\n").find((line) =>
+      line.startsWith('{"ok"')
+    )!;
+    const begunBody = JSON.parse(begunJson);
+    assertEquals(isUuidV7(begunBody.data.challengeId), true);
     const activeSessions = await query<{ count: string }>(
       harness.server.sql,
       `select count(*)::text count from auth_sessions where human_user_id=$1 and revoked_at is null`,
@@ -365,6 +388,112 @@ Deno.test("compiled host command covers recovery revocation repair cancellation 
       [userId],
     );
     assertEquals(expiredState.rows[0]?.status, "expired");
+
+    const challenges = await query<{
+      id: string;
+      created_at: Date;
+      completed_at: Date | null;
+      cancelled_at: Date | null;
+      expired_at: Date | null;
+      enable_user: boolean;
+      restore_super_admin: boolean;
+      status: "completed" | "cancelled" | "expired";
+    }>(
+      harness.server.sql,
+      `select id,created_at,completed_at,cancelled_at,expired_at,enable_user,restore_super_admin,status from recovery_challenges where human_user_id=$1 order by created_at`,
+      [userId],
+    );
+    assertEquals(challenges.rows.length, 4);
+    assertEquals(
+      challenges.rows.every((challenge) => isUuidV7(challenge.id)),
+      true,
+    );
+    const audits = await query<{
+      id: string;
+      event_type: string;
+      human_user_id: string;
+      session_id: string | null;
+      auth_context_id: string | null;
+      principal_id: string | null;
+      details: Record<string, unknown> | string;
+    }>(
+      harness.server.sql,
+      `select id,event_type,human_user_id,session_id,auth_context_id,principal_id,details from auth_audit_events where human_user_id=$1 and event_type like 'auth.recovery.%' order by created_at`,
+      [userId],
+    );
+    assertEquals(audits.rows.length, 8);
+    for (const audit of audits.rows) {
+      assertEquals(isUuidV7(audit.id), true);
+      assertEquals(audit.human_user_id, userId);
+      assertEquals(audit.auth_context_id, null);
+      assertEquals(audit.principal_id, null);
+      const details = typeof audit.details === "string"
+        ? JSON.parse(audit.details) as Record<string, unknown>
+        : audit.details;
+      const challenge = challenges.rows.find((candidate) =>
+        candidate.id === details.challenge_id
+      )!;
+      assertEquals(Boolean(challenge), true);
+      assertEquals(details.schema, "auth.recovery.audit.v1");
+      assertEquals(details.target_human_user_id, userId);
+      assertEquals(
+        details.initiated_at,
+        new Date(challenge.created_at).toISOString(),
+      );
+      assertEquals(details.requested_repairs, {
+        enable_user: challenge.enable_user,
+        restore_super_admin: challenge.restore_super_admin,
+      });
+      assertEquals(details.executor, {
+        principal_id: "system:host_recovery",
+        principal_type: "system",
+        context: "host_operator",
+      });
+      const outcome = audit.event_type.slice("auth.recovery.".length);
+      assertEquals(details.outcome, outcome);
+      assertEquals(typeof details.reason, "string");
+      if (outcome !== "initiated") {
+        const terminal = outcome === "completed"
+          ? challenge.completed_at
+          : outcome === "cancelled"
+          ? challenge.cancelled_at
+          : challenge.expired_at;
+        assertEquals(details.terminal_at, new Date(terminal!).toISOString());
+      }
+      const serialized = JSON.stringify(details).toLowerCase();
+      assertEquals(serialized.includes(recoveryToken.toLowerCase()), false);
+      assertEquals(serialized.includes("password"), false);
+      assertEquals(serialized.includes("token_digest"), false);
+    }
+    const parsedAudits = audits.rows.map((audit) => ({
+      ...audit,
+      parsedDetails: typeof audit.details === "string"
+        ? JSON.parse(audit.details) as Record<string, unknown>
+        : audit.details,
+    }));
+    for (const challenge of challenges.rows) {
+      assertEquals(
+        parsedAudits.filter((audit) =>
+          audit.parsedDetails.challenge_id === challenge.id &&
+          audit.event_type === "auth.recovery.initiated"
+        ).length,
+        1,
+      );
+      assertEquals(
+        parsedAudits.filter((audit) =>
+          audit.parsedDetails.challenge_id === challenge.id &&
+          audit.event_type === `auth.recovery.${challenge.status}`
+        ).length,
+        1,
+      );
+    }
+    await assertRejects(() =>
+      query(
+        harness.server.sql,
+        `update auth_audit_events set details='{}'::jsonb where id=$1`,
+        [audits.rows[0].id],
+      )
+    );
   } finally {
     await harness.close();
     if (prior === undefined) Deno.env.delete("OPERANT_RECOVERY_TOKEN");
@@ -566,6 +695,8 @@ Deno.test("compiled optctl completes non-enumerating approved password reset", a
     const requestData = JSON.parse(requested.stdout).data;
     assertEquals(Object.keys(unknownData), ["request_id"]);
     assertEquals(Object.keys(requestData), ["request_id"]);
+    assertEquals(isUuidV7(unknownData.request_id), true);
+    assertEquals(isUuidV7(requestData.request_id), true);
     assertFalse(unknownData.request_id === requestData.request_id);
     const approved = await harness.runOptctl([
       "--json",

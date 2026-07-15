@@ -454,7 +454,9 @@ export const platformMigrations: PlatformMigration[] = [
         status text not null check(status in ('active','completed','cancelled','expired')),
         created_at timestamptz not null default now(),
         expires_at timestamptz not null,
-        completed_at timestamptz
+        completed_at timestamptz,
+        cancelled_at timestamptz,
+        expired_at timestamptz
       );
       alter table auth_audit_events drop constraint auth_audit_events_event_type_check;
       alter table auth_audit_events add constraint auth_audit_events_event_type_check check(event_type in (

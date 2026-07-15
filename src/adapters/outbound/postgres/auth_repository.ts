@@ -750,7 +750,7 @@ export class PostgresAuthRepository implements AuthRepository {
         `select id from human_users where username=$1`,
         [input.username],
       )).rows[0];
-      const id = `reset_${crypto.randomUUID().replaceAll("-", "")}`;
+      const id = uuidV7();
       await query(
         tx,
         `insert into password_reset_requests(id,human_user_id,username,idempotency_key,nonce_digest,status,expires_at) values($1,$2,$3,$4,$5,'pending',now()+interval '30 minutes')`,
@@ -1200,11 +1200,41 @@ export class PostgresAuthRepository implements AuthRepository {
           ),
         );
       }
-      const active = (await query(
+      let active: {
+        id: string;
+        created_at: Date;
+        expires_at: Date;
+        enable_user: boolean;
+        restore_super_admin: boolean;
+      } | undefined = (await query<{
+        id: string;
+        created_at: Date;
+        expires_at: Date;
+        enable_user: boolean;
+        restore_super_admin: boolean;
+      }>(
         tx,
-        `select id from recovery_challenges where human_user_id=$1 and status='active' and expires_at>now() for update`,
+        `select id,created_at,expires_at,enable_user,restore_super_admin from recovery_challenges where human_user_id=$1 and status='active' for update`,
         [user.id],
       )).rows[0];
+      if (active && new Date(active.expires_at).getTime() <= Date.now()) {
+        const expired = (await query<{ expired_at: Date }>(
+          tx,
+          `update recovery_challenges set status='expired',expired_at=now(),token_digest=null where id=$1 returning expired_at`,
+          [active.id],
+        )).rows[0]!;
+        await auditRecovery(tx, "auth.recovery.expired", {
+          targetHumanUserId: user.id,
+          challengeId: active.id,
+          initiatedAt: active.created_at,
+          terminalAt: expired.expired_at,
+          enableUser: active.enable_user,
+          restoreSuperAdmin: active.restore_super_admin,
+          outcome: "expired",
+          reason: "challenge_expired_before_replacement",
+        });
+        active = undefined;
+      }
       if (active && !input.replace) {
         return err(
           authError(
@@ -1215,17 +1245,27 @@ export class PostgresAuthRepository implements AuthRepository {
         );
       }
       if (active) {
-        await query(
+        const cancelled = (await query<{ cancelled_at: Date }>(
           tx,
-          `update recovery_challenges set status='cancelled' where human_user_id=$1 and status='active'`,
-          [user.id],
-        );
+          `update recovery_challenges set status='cancelled',cancelled_at=now(),token_digest=null where id=$1 returning cancelled_at`,
+          [active.id],
+        )).rows[0]!;
+        await auditRecovery(tx, "auth.recovery.cancelled", {
+          targetHumanUserId: user.id,
+          challengeId: active.id,
+          initiatedAt: active.created_at,
+          terminalAt: cancelled.cancelled_at,
+          enableUser: active.enable_user,
+          restoreSuperAdmin: active.restore_super_admin,
+          outcome: "cancelled",
+          reason: "challenge_replaced",
+        });
       }
       await revokeAnchored(tx, user.id);
       const id = uuidV7();
-      await query(
+      const initiated = (await query<{ created_at: Date }>(
         tx,
-        `insert into recovery_challenges(id,human_user_id,token_digest,enable_user,restore_super_admin,status,expires_at) values($1,$2,$3,$4,$5,'active',now()+interval '15 minutes')`,
+        `insert into recovery_challenges(id,human_user_id,token_digest,enable_user,restore_super_admin,status,expires_at) values($1,$2,$3,$4,$5,'active',now()+interval '15 minutes') returning created_at`,
         [
           id,
           user.id,
@@ -1233,8 +1273,16 @@ export class PostgresAuthRepository implements AuthRepository {
           input.enableUser,
           input.restoreSuperAdmin,
         ],
-      );
-      await audit(tx, "auth.recovery.initiated", user.principal_id, user.id);
+      )).rows[0]!;
+      await auditRecovery(tx, "auth.recovery.initiated", {
+        targetHumanUserId: user.id,
+        challengeId: id,
+        initiatedAt: initiated.created_at,
+        enableUser: input.enableUser,
+        restoreSuperAdmin: input.restoreSuperAdmin,
+        outcome: "initiated",
+        reason: "host_operator_requested",
+      });
       return ok({ challengeId: id });
     }) as Result<{ challengeId: string }>;
   }
@@ -1242,10 +1290,17 @@ export class PostgresAuthRepository implements AuthRepository {
   async cancelRecovery(username: string): Promise<Result<{ cancelled: true }>> {
     return await this.sql.begin(async (tx) => {
       const row = (await query<
-        { id: string; human_user_id: string; principal_id: string }
+        {
+          id: string;
+          human_user_id: string;
+          principal_id: string;
+          created_at: Date;
+          enable_user: boolean;
+          restore_super_admin: boolean;
+        }
       >(
         tx,
-        `select r.id,r.human_user_id,u.principal_id from recovery_challenges r join human_users u on u.id=r.human_user_id where u.username=$1 and r.status='active' for update`,
+        `select r.id,r.human_user_id,u.principal_id,r.created_at,r.enable_user,r.restore_super_admin from recovery_challenges r join human_users u on u.id=r.human_user_id where u.username=$1 and r.status='active' for update`,
         [username],
       )).rows[0];
       if (!row) {
@@ -1257,17 +1312,21 @@ export class PostgresAuthRepository implements AuthRepository {
           ),
         );
       }
-      await query(
+      const cancelled = (await query<{ cancelled_at: Date }>(
         tx,
-        `update recovery_challenges set status='cancelled',token_digest=null where id=$1`,
+        `update recovery_challenges set status='cancelled',cancelled_at=now(),token_digest=null where id=$1 returning cancelled_at`,
         [row.id],
-      );
-      await audit(
-        tx,
-        "auth.recovery.cancelled",
-        row.principal_id,
-        row.human_user_id,
-      );
+      )).rows[0]!;
+      await auditRecovery(tx, "auth.recovery.cancelled", {
+        targetHumanUserId: row.human_user_id,
+        challengeId: row.id,
+        initiatedAt: row.created_at,
+        terminalAt: cancelled.cancelled_at,
+        enableUser: row.enable_user,
+        restoreSuperAdmin: row.restore_super_admin,
+        outcome: "cancelled",
+        reason: "host_operator_cancelled",
+      });
       return ok({ cancelled: true as const });
     }) as Result<{ cancelled: true }>;
   }
@@ -1296,10 +1355,11 @@ export class PostgresAuthRepository implements AuthRepository {
             expires_at: Date;
             enable_user: boolean;
             restore_super_admin: boolean;
+            created_at: Date;
           }
         >(
           tx,
-          `select u.id,u.principal_id,u.username,u.display_name,u.status,r.id challenge_id,r.token_digest,r.expires_at,r.enable_user,r.restore_super_admin from recovery_challenges r join human_users u on u.id=r.human_user_id where u.username=$1 and r.status='active' for update`,
+          `select u.id,u.principal_id,u.username,u.display_name,u.status,r.id challenge_id,r.token_digest,r.expires_at,r.enable_user,r.restore_super_admin,r.created_at from recovery_challenges r join human_users u on u.id=r.human_user_id where u.username=$1 and r.status='active' for update`,
           [input.username],
         )).rows[0];
         if (
@@ -1318,12 +1378,21 @@ export class PostgresAuthRepository implements AuthRepository {
           );
         }
         if (new Date(row.expires_at).getTime() <= Date.now()) {
-          await query(
+          const expired = (await query<{ expired_at: Date }>(
             tx,
-            `update recovery_challenges set status='expired',token_digest=null where id=$1`,
+            `update recovery_challenges set status='expired',expired_at=now(),token_digest=null where id=$1 returning expired_at`,
             [row.challenge_id],
-          );
-          await audit(tx, "auth.recovery.expired", row.principal_id, row.id);
+          )).rows[0]!;
+          await auditRecovery(tx, "auth.recovery.expired", {
+            targetHumanUserId: row.id,
+            challengeId: row.challenge_id,
+            initiatedAt: row.created_at,
+            terminalAt: expired.expired_at,
+            enableUser: row.enable_user,
+            restoreSuperAdmin: row.restore_super_admin,
+            outcome: "expired",
+            reason: "challenge_expired",
+          });
           return err(
             authError(
               "recovery_expired",
@@ -1366,18 +1435,22 @@ export class PostgresAuthRepository implements AuthRepository {
           row.id,
           "authorization_request",
         );
-        await query(
+        const completed = (await query<{ completed_at: Date }>(
           tx,
-          `update recovery_challenges set status='completed',completed_at=now(),token_digest=null where id=$1`,
+          `update recovery_challenges set status='completed',completed_at=now(),token_digest=null where id=$1 returning completed_at`,
           [row.challenge_id],
-        );
-        await audit(
-          tx,
-          "auth.recovery.completed",
-          row.principal_id,
-          row.id,
-          full.id,
-        );
+        )).rows[0]!;
+        await auditRecovery(tx, "auth.recovery.completed", {
+          targetHumanUserId: row.id,
+          challengeId: row.challenge_id,
+          initiatedAt: row.created_at,
+          terminalAt: completed.completed_at,
+          enableUser: row.enable_user,
+          restoreSuperAdmin: row.restore_super_admin,
+          outcome: "completed",
+          reason: "recovery_completed",
+          replacementSessionId: full.id,
+        });
         return ok({
           user: humanUser({
             ...row,
@@ -1788,6 +1861,60 @@ async function revokeAnchored(sql: Queryable, userId: string): Promise<void> {
     [userId],
   );
 }
+type RecoveryAuditInput = {
+  targetHumanUserId: string;
+  challengeId: string;
+  initiatedAt: Date;
+  terminalAt?: Date;
+  enableUser: boolean;
+  restoreSuperAdmin: boolean;
+  outcome: "initiated" | "completed" | "cancelled" | "expired";
+  reason: string;
+  replacementSessionId?: string;
+};
+
+async function auditRecovery(
+  sql: Queryable,
+  eventType:
+    | "auth.recovery.initiated"
+    | "auth.recovery.completed"
+    | "auth.recovery.cancelled"
+    | "auth.recovery.expired",
+  input: RecoveryAuditInput,
+): Promise<void> {
+  const details = {
+    schema: "auth.recovery.audit.v1",
+    target_human_user_id: input.targetHumanUserId,
+    challenge_id: input.challengeId,
+    initiated_at: new Date(input.initiatedAt).toISOString(),
+    ...(input.terminalAt
+      ? { terminal_at: new Date(input.terminalAt).toISOString() }
+      : {}),
+    requested_repairs: {
+      enable_user: input.enableUser,
+      restore_super_admin: input.restoreSuperAdmin,
+    },
+    executor: {
+      principal_id: "system:host_recovery",
+      principal_type: "system",
+      context: "host_operator",
+    },
+    outcome: input.outcome,
+    reason: input.reason,
+  };
+  await query(
+    sql,
+    `insert into auth_audit_events(id,event_type,auth_context_id,principal_id,human_user_id,session_id,details) values($1,$2,null,null,$3,$4,$5::jsonb)`,
+    [
+      uuidV7(),
+      eventType,
+      input.targetHumanUserId,
+      input.replacementSessionId ?? null,
+      JSON.stringify(details),
+    ],
+  );
+}
+
 async function audit(
   sql: Queryable,
   eventType: string,
