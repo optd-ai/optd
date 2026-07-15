@@ -15,12 +15,7 @@
     "output": { "schema": "changeset.operations.v1" },
     "attachments": [
       {
-        "phase": "action.preview",
-        "action": "default.start_task",
-        "order": 100,
-      },
-      {
-        "phase": "action.commit",
+        "phase": "action.stage",
         "action": "default.start_task",
         "order": 100,
       },

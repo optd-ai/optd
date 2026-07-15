@@ -1,7 +1,7 @@
 const envelope = JSON.parse(await new Response(Deno.stdin.readable).text());
 const input = envelope.input ?? {};
 const opportunityId = input.opportunity_id ?? input.id;
-const expectedVersion = input.expected_version ?? input.version;
+const expected_version = input.expected_version ?? input.version;
 if (!opportunityId) {
   console.log(
     JSON.stringify({
@@ -16,18 +16,13 @@ if (!opportunityId) {
 } else {
   console.error(`mark_won ${opportunityId}`);
   console.log(JSON.stringify({
-    summary: "Mark opportunity as won.",
     operations: [{
       op: "transition",
       resource: "opportunity",
-      id: opportunityId,
+      object_id: opportunityId,
       to: "won",
-      expectedVersion,
-    }, {
-      op: "update",
-      resource: "opportunity",
-      id: opportunityId,
-      fields: { probability: 100 },
+      expected_version,
+      set: { probability: 100 },
     }],
   }));
 }

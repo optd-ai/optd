@@ -31,7 +31,7 @@
       },
       "list": { "fields": ["id", "name", "status", "owner_id", "target_date"] },
       "help": [
-        "optctl changeset preview create-project.json",
+        "optctl changeset stage --input create-project.json",
         "optctl query default.project --where 'status == \"active\"' --fields id,name,status,owner_id",
       ],
     },

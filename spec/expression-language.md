@@ -43,7 +43,7 @@ status != "open" || present(due_at)
 Used by:
 
 - resource validation
-- preview error explanations
+- staging error explanations
 - database check constraints when safely lowerable
 
 ### Conditional database constraints and partial indexes
@@ -82,7 +82,7 @@ present(lost_reason_id)
 
 Used by:
 
-- lifecycle preview
+- lifecycle staging/availability
 - commit revalidation
 - available action/transition display
 
@@ -116,7 +116,7 @@ discount_percent > 20
 Used by:
 
 - hook attachment config
-- preview explanation
+- staging explanation
 
 ### AXI/help display conditions
 
@@ -157,6 +157,21 @@ approval requirements, but with a stricter SQL-lowerable subset.
 
 ## Allowed CEL Subset v1
 
+### Query filters
+
+Query `where` exposes only declared resource fields plus platform
+`id|created_at|updated_at|archived_at` and helpers. It cannot reference actor,
+relationships, action input, or arbitrary JSON paths; authorization policy is
+compiled separately and ANDed by the server.
+
+### Policy predicates
+
+Policy `where` exposes the same protected-object row fields plus exactly
+`actor.id`, `actor.principal_type`, and nullable `actor.human_user_id`. Roles and
+assignments select rules outside CEL; `actor.role`, arbitrary metadata, arrays,
+environment, and relationship traversal are not CEL variables. One-hop ReBAC is
+the structured policy `relation` clause, not expression traversal.
+
 ### Variables
 
 For row/resource-local contexts such as constraints and partial indexes, allow
@@ -184,8 +199,8 @@ input.foo
 self["dynamic_field"]
 ```
 
-Other contexts may expose context-specific variables later, but each context
-must define them explicitly in platform code.
+The policy context adds only the three actor fields above. Action/hook/AXI
+conditions remain row-local in v1. Packs cannot introduce variables.
 
 ### Helpers
 
@@ -227,9 +242,10 @@ in
 (...)
 ```
 
-### Literals
+### Literals and scalar typing
 
-Allowed:
+Allowed literals are bounded strings, JSON-safe integers, booleans, and
+homogeneous non-empty arrays of those scalars:
 
 ```cel
 "open"
@@ -238,6 +254,13 @@ true
 false
 ["new", "contacted"]
 ```
+
+There are no null or fractional numeric literals in v1. Optionality uses
+`present`. Decimal fields (stored/input as canonical decimal strings) may compare
+to safe integer literals or another compatible decimal field; lowering casts the
+integer to Postgres numeric and targeted stage/policy evaluation uses Postgres,
+never IEEE-754 arithmetic. Date/timestamp fields compare to validated string
+literals coerced to their declared type. `in` requires a type-compatible array.
 
 Disallowed initially:
 
@@ -254,10 +277,10 @@ Disallowed initially:
 
 Archive/soft-delete is a built-in platform capability.
 
-Every resource should get generated archival fields:
+Every resource gets generated archival fields:
 
 - `archived_at`
-- `archived_by`
+- `archived_by_auth_context_id`
 
 Expression helpers:
 
@@ -294,7 +317,7 @@ Commands:
 ```text
 optctl expression help
 optctl expression help partial-index
-optctl expression validate crm.lead --context partial-index 'status == "open" && active()'
+optctl expression validate operant/crm:lead --context partial-index 'status == "open" && active()'
 ```
 
 `optctl expression help` should show:
@@ -327,15 +350,18 @@ code: EXPRESSION_UNSUPPORTED
 help[3]:
 Run `optctl expression help partial-index`
 Use only supported helpers: present(field), active(), archived()
-Run `optctl expression validate crm.lead --context partial-index '<expr>'`
+Run `optctl expression validate operant/crm:lead --context partial-index '<expr>'`
 ```
 
-## Open Questions
+## Frozen implementation decisions
 
-- Which CEL implementation will the server use?
-- Which CEL implementation, if any, should `optctl` use client-side?
-- Can we reuse an existing CEL-to-SQL compiler, or implement a tiny lowerer for
-  our subset?
-- Should CEL expressions use only bare fields, or also allow `self.field` as an
-  alias?
-- How much policy logic should share this expression language later?
+- The server parses CEL with `@bufbuild/cel` and lowers the hardcoded supported
+  AST subset through Operant's auditable typed SQL lowerer. Unsupported AST
+  forms fail closed; no general third-party CEL-to-SQL compiler is used.
+- `optctl` does not maintain a competing CEL evaluator/parser. It sends source
+  to server validation and exposes server-authored subset help/examples.
+- Bare fields are canonical and `self.<field>` is an accepted alias. Actor
+  values use `actor.<field>` only in contexts that declare actor fields.
+- Resource constraints, partial indexes, lifecycle/action/hook conditions,
+  query filters, and policy `where` clauses share this exact subset with
+  context-specific fields/functions. Packs cannot extend it.

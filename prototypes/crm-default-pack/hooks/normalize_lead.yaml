@@ -19,7 +19,7 @@
     },
     "attachments": [
       {
-        "phase": "changeset.before_preview",
+        "phase": "changeset.before_stage",
         "resource": "default.lead",
         "order": 100,
         "input": {

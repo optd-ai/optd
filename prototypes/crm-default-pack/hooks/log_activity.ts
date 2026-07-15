@@ -15,7 +15,7 @@ if (!resource || !objectId || !input.subject || !input.type) {
   );
   Deno.exit(0);
 }
-const fields = {
+const fields: Record<string, unknown> = {
   subject: input.subject,
   type: input.type,
   status: input.status ?? "planned",
@@ -25,10 +25,10 @@ const fields = {
 if (resource === "lead") fields.lead_id = objectId;
 if (resource === "opportunity") fields.opportunity_id = objectId;
 if (resource === "contact") fields.contact_id = objectId;
-const operations = [{
+const operations: Array<Record<string, unknown>> = [{
   op: "create",
   resource: "activity",
-  as: "activity",
+  key: "activity",
   fields,
 }];
 if (input.note) {
@@ -43,4 +43,4 @@ if (input.note) {
   });
 }
 console.error(`log_activity ${resource}:${objectId}`);
-console.log(JSON.stringify({ summary: "Log CRM activity.", operations }));
+console.log(JSON.stringify({ operations }));

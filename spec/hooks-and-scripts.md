@@ -25,9 +25,8 @@ Reasons:
 - Strong JSON ergonomics via `JSON.parse/stringify`.
 - No compile step for single-file scripts.
 - Script text can be executed by the platform through Deno.
-- Built-in subprocess API via `Deno.Command`.
-- Explicit permissions for filesystem, network, environment, and subprocess
-  access.
+- Explicit host/port network and named-environment permissions.
+- Dates, entropy, and ordinary in-process computation without a compile step.
 - Agents are generally strong at TypeScript/JavaScript.
 
 Operational implications:
@@ -35,8 +34,10 @@ Operational implications:
 - The container/runtime ships Deno.
 - Hook config does not specify a language/runtime.
 - The platform may typecheck scripts during pack preview/apply.
-- Dependency imports require an explicit policy for reproducibility and
-  supply-chain safety.
+- MVP scripts are single-file: static/dynamic, URL, JSR, and npm imports are
+  rejected during pack preview/apply.
+- Pack hooks never receive filesystem, subprocess, system-information, FFI,
+  direct-database, or initiating-token capabilities.
 
 ## Runtime Selection
 
@@ -69,30 +70,30 @@ packs/crm/
   resources/lead.yaml
   actions/convert-lead.yaml
   hooks/validate-lead.ts
-  hooks/normalize-email.nu
+  hooks/normalize-email.ts
   hooks/convert-lead.ts
   seeds/pipeline-stages.yaml
 ```
 
-Hooks should use explicit metadata namespaces for identity, while dotted names
-are accepted as ergonomic references:
+Hook identity comes from the owning pack plus `metadata.name`. Pack source may
+use an unambiguous local reference, while persisted/cross-pack references are
+publisher-qualified:
 
 ```yaml
 metadata:
-  namespace: crm
   name: validate_lead
 ```
 
 ```yaml
-ref: crm.validate_lead
+ref: operant/crm:validate_lead
 ```
 
-Internally, dotted refs parse to structured `(namespace, name)` identity.
+The platform stores structured `(publisher, pack, name)` identity; dotted
+namespace aliases are not part of the target contract.
 
-At apply time, the platform should:
+During multipart pack preview/candidate-revision creation, the server must:
 
-1. Resolve script paths relative to the pack root when applying from a local
-   directory/archive.
+1. Resolve script paths relative to the validated uploaded pack root.
 2. Validate hook metadata and Deno-compatible script text.
 3. Hash script content.
 4. Store the script content and digest with the applied config revision.
@@ -102,47 +103,44 @@ The editable pack file remains the source during development. The applied config
 revision stored by the platform is the source for execution, audit, and
 reproducibility.
 
-## Pack Upload, Storage, and Execution
+## Pack Preview Upload, Storage, and Execution
 
 ### Upload Transport
 
-Decision: pack upload/apply uses **HTTP multipart** as the canonical transport.
+Decision: pack source preview uses **HTTP multipart** as the canonical transport;
+migration-plan apply uses JSON with no repeated source upload.
 Local pack directories use the strict layout defined in
 [Pack Structure](pack-structure.md).
 
-The CLI may accept a local directory or archive for developer ergonomics:
-
-- `optctl pack apply ./packs/crm`
-- `optctl pack apply crm.tar.gz`
-
-But the CLI should package those files and submit the same multipart API request
-that UI/agent clients use. This lets the server validate that every referenced
-hook script/resource file is present in the upload.
+MVP CLI accepts one local directory (`optctl pack apply ./packs/crm`), packages
+its regular files, and submits the same multipart preview request any future
+UI/client uses. Archive input is deferred to avoid a second extraction/security
+contract. `optctl pack apply` then applies the
+returned exact migration ID through the JSON migration route. This lets the
+server validate that every referenced hook script/resource file is present
+before candidate revision creation.
 
 Multipart shape:
 
 - One root `pack.yaml` part.
-- Zero or more resource/action/hook/seed config file parts from expected
-  directories.
-- Zero or more Deno script file parts from `hooks/`.
-- Hook config references scripts by file name, not relative path. The directory
-  is implied by pack structure.
+- Zero or more strict child-definition parts from every allowed directory in
+  `pack-structure.md`.
+- One paired Deno script part for every Hook YAML.
+- Hook config references scripts by filename; directory is implied.
 
-Avoid making multiline script strings inside a large JSON payload the primary
-upload format. Multiline JSON strings are awkward to edit, diff, escape, and
-review. Inline scripts may be allowed for tiny tests/examples, but file uploads
-or local files should be the normal path.
+Inline/multiline script properties and script-only hooks are rejected, including
+for tests. Tests construct the same paired pack input contract.
 
 ### Storage Model
 
-Store applied packs in the database as immutable config revisions:
+Store validated candidate and applied packs as immutable config revisions:
 
 - Pack metadata.
-- Normalized resource/action/hook/seed definitions.
-- Script content as text/blob records.
+- All normalized strict child definition revisions.
+- Script content as bounded text/bytea source records (not domain attachments).
 - Script digest, size, path, and media type.
-- Config revision id.
-- Apply timestamp and actor.
+- UUIDv7 config revision ID.
+- Activation timestamp and auth context.
 
 The filesystem is an input/source format, not the runtime source of truth. Once
 applied, hooks execute from the database-backed config revision. This makes
@@ -191,37 +189,35 @@ deno test --allow-read --allow-write --allow-env --allow-net --allow-run prototy
 
 ## Hook Types
 
-Hooks should be explicit and attached to resource definitions, actions,
-transitions, events, or schedules.
+Hooks are explicit and attach through their Hook document to resource/action
+filters or committed event types. Scheduled hooks are not in MVP.
 
-Candidate hooks:
+MVP attachment phases are:
 
-- `before_validate`
-- `validate`
-- `before_preview`
-- `after_preview`
-- `before_commit`
-- `after_commit`
-- `on_transition`
-- `on_approval_requested`
-- `on_approved`
-- `on_rejected`
-- `on_event`
-- `scheduled`
+- `action.stage`
+- `changeset.before_stage`
+- `changeset.validate`
+- `event.after_commit`
+
+There is no `action.commit` hook phase. Action staging expands operations once;
+commit applies the immutable stage without rerunning hooks.
 
 ## Important Safety Boundary
 
-Hooks that run before commit participate in correctness decisions. Hooks that
-run after commit are side effects.
+Stage hooks are trusted pack application code. They may use dates, entropy,
+declared secrets/environment, and declared network hosts for validation or data
+acquisition. They must not intentionally create external side effects because a
+staging attempt may fail, be repeated, or never commit. This is a pack-authoring
+contract: network access cannot prove that a remote request is read-only.
 
-Recommended split:
+Intentional effects such as sending messages, charging, reserving inventory, or
+writing another CRM belong in `event.after_commit` hooks. After-commit failures
+become delivery failures rather than transaction rollbacks.
 
-- **Validation hooks:** deterministic, bounded, no durable side effects, return
-  structured allow/deny/warnings/derived changes.
-- **Commit hooks:** should not mutate data outside the transaction unless
-  expressed as changeset operations.
-- **After-commit hooks:** may call external systems, enqueue notifications, run
-  enrichment, etc.; failures become retryable events, not transaction rollbacks.
+A stage hook executes once per staging attempt. Successful output is normalized
+into and persisted with the stage; commit never reruns it. Hook failure or
+validation denial returns an error/result and creates no stage. Running the
+stage command again is a new attempt, not a platform retry operation.
 
 ## Action vs Hook Boundary
 
@@ -230,84 +226,49 @@ Recommended split:
 - `Hook` is executable implementation or lifecycle behavior: validate input,
   normalize data, generate changeset operations, send notification.
 
-Actions define input schema, availability, reads/context, policy, preview/commit
-semantics, documentation, and events. Hooks define code path or stored script
+Actions define input schema, availability, declared reads/context, policy,
+stage/commit semantics, documentation, and events. Hooks define code path or stored script
 artifact, timeout, permissions, input schema, output schema, and failure mode.
 
 A complex action may be implemented by one or more hooks, but hooks are not
 themselves the public business API.
 
-Hooks do not decide when they run. They run because they are attached to a
-resource operation, lifecycle transition, action phase, event, or schedule. The
-attachment point maps available context into the hook's declared input schema.
-Actions are invocable “buttons”; hooks are callbacks.
+Hooks do not decide when they run. They run only through their own explicit
+`spec.attachments` in one of the four frozen phases. Actions are invocable
+buttons; hooks are callbacks. Schedules are not an MVP attachment phase.
 
-## Script Input Contract
+## Script input contract
 
-Hooks should define their own input contract. The script is the implementation,
-but the `Hook` config should declare the schema the platform validates before
-execution.
-
-The attachment point does not invent arbitrary inputs. It wires available
-context into the hook's declared inputs.
-
-Recommended model:
-
-1. Hook declares named inputs and their schema.
-2. Attachment point maps action input, current object, proposed object, related
-   records, transition info, or constants into those hook inputs.
-3. Platform validates the mapped hook input.
-4. Platform executes the script with a standard envelope containing the
-   validated hook input plus invocation metadata.
-
-Example hook declaration:
+Each attachment maps named input keys from the finite curated context vocabulary
+or JSON constants. Operant validates reference availability/type at pack preview
+and materializes the selected values at invocation; hooks cannot request opaque
+raw context.
 
 ```yaml
 kind: Hook
+apiVersion: operant.dev/v1
 metadata:
-  namespace: crm
   name: require_primary_contact
 spec:
-  path: hooks/require-primary-contact.ts
-  input:
-    schema:
-      opportunity:
-        type: object
-        resource: opportunity
-        required: true
-      primary_contact:
-        type: object
-        resource: contact
-        # Optional because required is omitted.
-        # If unavailable, the key is absent from input.
-  output:
-    schema: hook.validation.v1
+  script: require_primary_contact.ts
+  timeout: 2s
+  permissions: {net: false, env: false, read: false, write: false, run: false}
+  secrets: []
+  effects: {operations: []}
+  output: {schema: validation.v1}
+  attachments:
+    - phase: changeset.validate
+      resource: opportunity
+      order: 100
+      input:
+        opportunity: "$proposed"
+        primary_contact: "$reads.primary_contact"
 ```
 
-Missing optional values are omitted from hook input. Empty strings remain real
-present values and can be validated independently.
-
-Example lifecycle attachment wiring:
-
-```yaml
-hooks:
-  before:
-    - ref: crm.require_primary_contact
-      with:
-        opportunity: current
-        primary_contact: related.primary_contact
-```
-
-Example action attachment wiring:
-
-```yaml
-validate:
-  hooks:
-    - ref: crm.require_primary_contact
-      with:
-        opportunity: reads.opportunity
-        primary_contact: reads.primary_contact
-```
+The owning action/resource definition must declare any `$reads.<name>` object
+read. Missing optional reads omit that input key; empty string/list/object values
+remain present values. Exact sources and phase availability are frozen in
+`mvp-hook-schema.md`.
 
 ## Canonical Parameter Transport
 
@@ -320,9 +281,9 @@ require escaping rules that are easy to get wrong.
 Do not pass hook inputs through environment variables. Env vars are reserved for
 true environment configuration and secret references/values.
 
-Do not pass hook inputs through magic files by default. Files can be used for
-large blobs/artifacts referenced from the JSON envelope, but they are not the
-canonical parameter transport.
+Do not pass hook inputs through magic files. Pack hooks never receive runtime
+filesystem access. Inputs must fit configured JSON guardrails; a future blob
+reference contract is out of MVP and cannot be assumed.
 
 Canonical execution contract:
 
@@ -333,16 +294,11 @@ Canonical execution contract:
 - Hook writes logs/debug output to stderr.
 - Non-zero exit means hook execution failure.
 
-The envelope should include:
-
-- Hook identity and phase.
-- Invocation metadata.
-- Actor identity.
-- Validated hook `input` object.
-- Optional raw context for debugging only if allowed.
-- Secret references or explicitly injected secret env var names, not accidental
-  ambient secrets.
-- Artifact/file references only for large payloads, if needed.
+The envelope contains exactly the version, phase, validated curated `input`, and
+bounded non-secret invocation metadata frozen in `mvp-hook-schema.md`. It does
+not include actor identity/roles, raw context, initiating credentials, process
+information, secret references/values, or ambient environment. Secret values
+exist only in exact granted child env names.
 
 Deno example:
 
@@ -353,10 +309,21 @@ const { opportunity, primary_contact } = envelope.input;
 if (!primary_contact) {
   console.log(JSON.stringify({
     allow: false,
-    errors: [{ message: "Opportunity requires a primary contact" }],
+    errors: [{
+      path: "/primary_contact",
+      code: "required",
+      message: "Opportunity requires a primary contact",
+    }],
+    warnings: [],
+    required_approvals: [],
   }));
 } else {
-  console.log(JSON.stringify({ allow: true }));
+  console.log(JSON.stringify({
+    allow: true,
+    errors: [],
+    warnings: [],
+    required_approvals: [],
+  }));
 }
 ```
 
@@ -364,15 +331,24 @@ Deno/TypeScript is the only supported hook runtime.
 
 ## Script Output Contract
 
-Scripts should return structured JSON:
+Scripts return exactly the strict phase schema declared by the hook:
 
-- `allow: true|false`
-- `errors: []`
-- `warnings: []`
-- `patches: []` for derived changes, if allowed
-- `required_approvals: []`
-- `events: []`
-- `summary` / explanation
+- `action.stage`: `changeset.operations.v1` with required `operations` and
+  optional `warnings`/`errors`.
+- `changeset.before_stage`: `patch.v1` with required `patches` and optional
+  `warnings`.
+- `changeset.validate`: `validation.v1` with required `allow`, `errors`,
+  `warnings`, and `required_approvals`.
+- `event.after_commit`: `delivery.v1` with one delivery outcome.
+
+`validation.v1` errors/warnings use the standard `path`, `code`, `message`, and
+optional `details` shape. `required_approvals` uses
+[Changeset Approval Contract](changeset-approvals.md). If `allow` is false at
+least one error is required; if errors are non-empty `allow` must be false.
+Unknown fields are rejected. Custom event output is not a stage-hook schema in
+v1: committed object/action events are derived by the engine from the canonical
+graph/action identity. Explanations belong in bounded stderr or warning/error
+messages, not an untyped `summary` property.
 
 Exit codes:
 
@@ -381,33 +357,37 @@ Exit codes:
 
 ## Permissions, Sandboxing, and Operational Limits
 
-Because arbitrary code is powerful, hooks need guardrails. Deno permissions
-should be explicit at the hook level and constrained by global policy.
+Packs are trusted application extensions, while Deno permissions provide
+capability disclosure, hygiene, and containment rather than proof of semantic
+correctness.
 
-Hook-level permissions can include:
+Allowed declarations are:
 
-- `net`: allowed hosts or disabled.
-- `read`: allowed paths or disabled.
-- `write`: allowed paths or disabled.
-- `env`: allowed environment variables or disabled.
-- `run`: allowed subprocess commands or disabled.
+- `net`: `false` or a host/port allowlist translated to Deno `--allow-net`.
+- `env`: `false` or explicitly named non-secret names using the operator
+  allowlist/reserved-prefix contract in [MVP Hook Schema](mvp-hook-schema.md).
+- `secrets`: explicit secret-resource-to-environment mappings.
 
-Global policy can further restrict what hooks are allowed to request. For
-example, an installation may globally disable network access or subprocess
-execution regardless of hook config.
+Unrestricted network permission is never emitted. Operators may further narrow
+network/environment policy. Redirect destinations must independently satisfy
+Deno's network permission check.
 
-Other guardrails:
+Filesystem read/write and subprocess execution are permanently forbidden for
+all pack hooks. Subprocesses are forbidden because they would bypass filesystem
+hygiene. Hooks also receive no system-information, FFI, direct database,
+initiating bearer token, or remote-import permission. Internal materialization
+of the applied entry script does not grant script filesystem access.
 
-- Timeout.
-- Memory/process limits where possible.
-- Working directory isolation.
-- Minimal explicit environment variables.
-- Secret injection by reference and permission.
-- Audit every script execution.
-- Version scripts and record script digest in changeset/audit logs.
+Runtime guardrails are operationally configurable rather than intentionally
+small application limits. A hook may request a timeout subject to the server's
+configurable default/maximum. Suggested defaults are 30 seconds and 10 minutes,
+with configurable stdout/stderr byte limits (suggested 16 MiB/4 MiB). Stdout
+overflow and timeout fail staging; stderr overflow truncates retained logs and
+sets a marker. Container/server limits control concurrency and memory.
 
-The platform hook runner should translate hook permission config into Deno flags
-and reject hooks that request permissions denied by global policy.
+The platform does not automatically retry stage hooks. It audits each execution,
+versions scripts, records script/input/output digests, and persists bounded
+redacted stderr with a successful stage or failed-attempt audit record.
 
 ## CRM Workflow Examples
 
@@ -423,41 +403,84 @@ A headless CRM can be assembled from resource configuration plus scripts:
 - After-commit hook sends Slack/email notification or creates a task.
 - Scheduled hook marks stale opportunities and creates follow-up tasks.
 
+## Hook Authority and Preview
+
+Users authorize semantic operations/actions, not hook implementation details. A
+principal allowed to invoke `action.convert_lead` does not separately need raw
+create permissions for every declared company/contact/opportunity effect of that
+action. Hook/action attachments declare reviewed resource/action effects and
+runtime capabilities. Pack preview/install validates those declarations.
+
+For each invocation the platform creates a constrained internal capability bound
+to hook revision/script digest, invocation and causation ids, affected project
+boundary, declared API/resource/action effects, and short invocation lifetime.
+System executors authorize mechanics only and never imply super-admin. An
+undeclared effect fails closed.
+
+Changeset/action staging executes synchronous hooks once, expands all effects,
+and checks runtime restrictions, API scope, secret grants/availability, and
+declared effects. Dates, entropy, and network responses are allowed because the
+normalized output is persisted in the immutable stage. Commit compares and
+applies that graph and cannot add unseen effects or rerun hooks.
+
+After-commit work pins code/config/effect scope at enqueue, stores only minimal
+references/routing data, and injects secrets only in worker memory. One polling
+loop inside the main server process claims Postgres rows; no separate worker
+container is required. Each attempt checks pinned revision/grants and current
+global runtime restrictions but does not re-evaluate initiating roles.
+`delivery.v1` classifies success, retry, and permanent dead-letter. MVP delivery
+is at-least-once and unordered; the stable delivery UUID is the provider
+idempotency key. Cancellation is explicit and only possible before claim.
+Delivery status remains separate from changeset commit success. See
+[Durable Outbox Delivery](outbox-delivery.md).
+
 ## Hook Data Access and Secrets
 
-Hooks receive curated context in their stdin envelope. They must not connect
-directly to the database. If a hook needs more data, it may call platform HTTP
-APIs like any other client, subject to explicit network permissions, policy, and
-audit.
+Hooks receive curated ephemeral context in their stdin envelope and must not
+connect directly to the database. Stage hooks cannot call Operant's own HTTP API
+or receive the initiating human/agent bearer token; Operant objects are supplied
+through current/proposed context and declared object-by-id reads whose immutable
+versions become stage dependencies. Arbitrary collection queries are deferred.
+
+The immutable stage contains the canonical operations being staged, not a
+second raw request payload or a generic bag of external API responses supplied
+only for validation. A hook may write explanatory external-validation details
+to stderr. Any external value that affects a write must be present in the
+canonical operation graph.
 
 Secrets use a built-in platform resource type, not normal pack resources. Hook
 configs reference secrets by name and map them to explicit environment variable
 names:
 
+Relevant Hook `spec` fragment:
+
 ```yaml
-kind: Hook
-metadata:
-  name: enrich_lead
 spec:
-  script: enrich_lead.ts
   secrets:
-    - name: clearbit_api_key
+    - slot: clearbit_api_key
       env: CLEARBIT_API_KEY
   permissions:
-    net: true
+    net:
+      - api.clearbit.com:443
+    env: false
+    read: false
+    write: false
+    run: false
 ```
 
 Runner requirements:
 
-- Resolve secret refs before execution.
-- Fail closed if a secret is missing or unauthorized.
+- Resolve every required slot through one effective revision-specific
+  hook-secret grant before execution.
+- Fail closed if a grant or secret is missing, revoked, disabled, superseded, or
+  undecryptable.
 - Inject only declared env vars.
 - Use narrow Deno env permissions such as `--allow-env=CLEARBIT_API_KEY`.
-- Record secret names/env names in audit metadata, never values.
+- Record grant/secret/value-version IDs and slot/env names, never values.
+- Follow the normative [Hook-Secret Grants](hook-secret-grants.md) contract.
 
-## Open Questions
+## MVP Contract Reference
 
-- How are hook dependencies packaged?
-- Should the runtime cache materialize scripts as files or use Deno APIs that
-  can execute source another way?
-- What multipart upload shape is most ergonomic for agents and clients?
+Exact phases, declared object reads, ordering/chaining, permission fields, logs,
+failure behavior, runtime guardrails, and output schemas are normative in
+[MVP Hook Schema](mvp-hook-schema.md).

@@ -39,7 +39,9 @@ Properties:
 
 - Postgres remains the only required coordination point.
 - App nodes are stateless aside from local caches.
-- Workers claim jobs/outbox rows through database locks.
+- MVP runs one outbox polling loop inside the main server process/container;
+  it claims rows through Postgres locks. Separate worker containers are a future
+  scaling option, not a deployment requirement.
 - Can run against external Postgres or a bundled/sidecar Postgres profile.
 
 ### Local Postgres Options
@@ -98,7 +100,14 @@ OPERANT_DATA_DIR=/data
 OPERANT_DATABASE_URL=postgres://... # if set, use external Postgres
 OPERANT_PG_BIN_DIR=/opt/operant/postgres/bin # optional override; container supplies a default
 OPERANT_PG_PORT=0 # app-managed mode; 0 chooses a free port/socket
+OPERANT_SECRET_MASTER_KEY=<base64-32-bytes> # required once encrypted secrets exist
+OPERANT_HOOK_NET_ALLOW=<comma-separated-host[:port]-ceiling> # optional narrowing
+OPERANT_HOOK_ENV_ALLOW=<comma-separated-nonsecret-env-names> # absent means none
 ```
+
+Bootstrap/recovery tokens and the secret master key are injected as secret
+environment/mounted values per their specs and never printed. There is no auth
+mode/bypass configuration variable.
 
 When `OPERANT_DATABASE_URL` is absent, app-managed Postgres is the default. It
 lets the app initialize/start a managed Postgres process under

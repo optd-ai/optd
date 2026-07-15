@@ -12,7 +12,7 @@
     "axi": {
       "purpose": "Mark an opportunity as won.",
       "help": [
-        "optctl action preview default.mark_won --input ...",
+        "optctl action stage default.mark_won --input ...",
       ],
     },
   },

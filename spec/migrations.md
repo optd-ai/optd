@@ -2,8 +2,7 @@
 
 ## Status
 
-This is the canonical spec for pack/resource migrations. Some implementation
-details remain provisional and are called out explicitly.
+This is the canonical spec for pack/resource migrations.
 
 ## Purpose
 
@@ -29,11 +28,13 @@ status: whether it can proceed right now
 
 ### Statuses
 
-- `ready`: can be applied according to its class rules.
-- `blocked`: cannot be applied until data/config issues are resolved.
-- `staged`: non-destructive staging has been applied; destructive cleanup not
-  yet done.
-- `applied`: completed.
+- `ready`: the complete plan can be applied atomically according to its class.
+- `blocked`: the complete plan cannot apply until data/config issues are resolved
+  or an explicit intermediate pack revision is applied first.
+- `applied`: the whole plan completed in one transaction.
+
+Failed apply attempts are append-only attempt/audit records, not plan statuses.
+There is no partially applied/staged migration-plan state.
 
 Example: removing a field with present values is `class: destructive`,
 `status: blocked`. The destructiveness is intrinsic; blocked is current
@@ -51,100 +52,72 @@ review/audit/coordination object shared by:
 - confirmation-token generation
 - migration execution
 
-Initial canonical shape:
+The exact top-level shape is frozen below. Illustrative fragment:
 
 ```yaml
-id: mig_123
-from_revision: packrev_old
-to_revision: packrev_new
+schema_version: migration.plan.v1
+id: 019b7a2e-7c10-7000-8000-000000000001
+publisher: operant
+pack: crm
+from_pack_revision_id: 019b7a2e-7c10-7000-8000-000000000002
+to_pack_revision_id: 019b7a2e-7c10-7000-8000-000000000003
+candidate_source_digest: sha256:...
 plan_digest: sha256:...
+class: destructive
 status: blocked
-summary:
-  safe: 2
-  risky: 3
-  destructive: 4
-  blocked: 3
+summary: {safe: 2, risky: 3, destructive: 4, blocked: 3}
 changes:
-  - id: chg_1
+  - id: 019b7a2e-7c10-7000-8000-000000000004
     class: destructive
     status: blocked
     kind: remove_field
-    target:
-      resource: lead
-      field: company_name
+    target: {resource: operant/crm:lead, field: company_name}
     reason: field removed from desired config
-    facts:
-      present_values: 700
-      references: [hook:convert_lead]
-    stage_action: deprecate field and block writes
+    facts: {present_values: 700, references: [operant/crm:convert_lead]}
+    hazard_codes: [DATA_LOSS]
+    intermediate_revision_guidance: add replacement field and block/dual-write old field
     cleanup_required: export_or_clear_values
     destructive_action: drop column
 hazards:
   - code: DATA_LOSS
     severity: blocking
-    change: chg_1
+    change_id: 019b7a2e-7c10-7000-8000-000000000004
     message: Dropping lead.company_name would discard present values.
 blockers:
-  - change: chg_1
+  - change_id: 019b7a2e-7c10-7000-8000-000000000004
     code: PRESENT_VALUES
     count: 700
-stages:
-  - id: stage_1
-    kind: staging
-    changes: [chg_1]
-    operations:
-      - mark field deprecated
-      - block writes to field
-confirmations: []
+    message: Existing values must be explicitly cleaned up.
+steps:
+  - id: 019b7a2e-7c10-7000-8000-000000000005
+    kind: drop_column
+    change_ids: [019b7a2e-7c10-7000-8000-000000000004]
+live_facts_digest: sha256:...
+last_validation: null
+application: null
 ```
 
-## Staging Metadata
+## Explicit intermediate revisions
 
-Staging should be represented in platform metadata, not by immediately changing
-user tables destructively.
+One migration plan never installs a hidden transitional/staged schema. If safe
+cleanup cannot happen under the current schema, the author applies an explicit
+intermediate pack revision first—for example, add a replacement field and
+validation/normalization hooks that block or dual-write the old field. Ordinary
+changesets then backfill/clean data. The final pack revision is previewed as a
+new plan and applies atomically only when blockers are gone.
 
-### Resource staging fields
-
-For each resource definition/revision:
-
-- `deprecated`: resource should not be used for new designs.
-- `create_blocked`: new object creation is blocked.
-- `read_allowed`: reads remain allowed by default.
-- `query_allowed`: queries remain allowed by default.
-- `archive_required_before_drop`: destructive cleanup cannot drop until active
-  rows are gone.
-- `replacement_resource`: optional pointer to replacement resource.
-
-### Field staging fields
-
-For fields:
-
-- `deprecated`: field should not be used in new configs/actions/AXI.
-- `write_blocked`: changesets cannot set/update this field.
-- `read_allowed`: reads remain allowed by default.
-- `export_required_before_drop`: require export before destructive cleanup, if
-  configured.
-- `replacement_field`: optional pointer to replacement field.
-
-### Action/hook/lifecycle staging
-
-- actions can be `deprecated` and hidden from default `optctl` action lists.
-- hooks can be retained for historical audit while detached from new flows.
-- lifecycle states can be `deprecated` so new transitions into them are blocked
-  while existing rows remain readable.
-
-### AXI behavior
-
-Deprecated items should be hidden from default list/detail guidance but
-discoverable through metadata commands with flags such as
-`--include-deprecated`.
+This deliberately moves complexity for genuinely complex upgrades into visible,
+versioned pack source rather than a partially applied server plan. There is no
+built-in `deprecated`, `write_blocked`, shadow-table, or dual-write migration
+mode; a pack may express transitional validation/behavior through its normal
+strict resource/hook/action definitions and AXI guidance.
 
 ## Rename Support
 
 Renames are hard to detect safely. A removed thing plus an added thing may be a
 rename, but it may also be two separate changes.
 
-### Proposal
+### V1 decision
 
 Do **not** support automatic renames in v1.
 
@@ -178,43 +151,21 @@ spec:
 
 ## Type Changes
 
-Treat type changes as destructive by default unless explicitly allowlisted as
-widening or supported as a generated staged cast.
+Every field `type` change is destructive/API-breaking and blocked as an in-place
+MVP change. Increasing a string `maxLength` without changing type is semantically
+compatible but classed risky when generated constraint DDL scans/locks,
+otherwise safe.
 
-### Initial rules
-
-Safe/risky allowlist may include:
-
-- `integer -> decimal`: risky, validate/backfill.
-- `string(maxLength: smaller) -> string(maxLength: larger)`: safe/risky
-  depending on operational behavior.
-
-Generated staged casts supported initially:
-
-- `integer -> string`
-- `integer -> decimal`
-- `decimal -> string`
-
-Everything else is invalid/blocking as an in-place type change. The agent
-workaround is to add a new field with the desired type, populate it using
-ordinary changesets or an action/hook-generated changeset, update
-readers/writers/AXI, and then remove the old field in a later migration.
-
-### Staged type-change mechanics
-
-For destructive type changes:
-
-1. Add replacement field/column with new type.
-2. Backfill replacement from old value using explicit conversion behavior.
-3. Validate replacement completeness and conversion errors.
-4. Update reads/writes/actions/hooks/AXI to use replacement.
-5. Deprecate old field.
-6. Later destructive cleanup drops old field and optionally renames replacement.
+Type conversion uses explicit revisions: add a new field with the desired type
+in an atomic intermediate revision, populate it with ordinary changesets or an
+action, update readers/writers/hooks/AXI in source, then preview a later final
+revision that removes the old field. The server does not infer conversion,
+rename the replacement, or run an automatic cast/backfill DSL.
 
 Migration cleanup/backfill should use ordinary changesets. Do not introduce a
 separate migration cleanup DSL. A migration can surface blockers and suggested
 cleanup operations, but the actual data changes should flow through the same
-preview/commit/audit/policy path as any other write.
+stage/commit/audit/policy path as any other write.
 
 Initial cleanup/backfill strategy:
 
@@ -234,22 +185,10 @@ A confirmation token prevents accidental or stale destructive execution.
 It proves the user/agent is confirming the exact destructive plan they
 previewed, not a different plan produced after config/data changed.
 
-A token should bind to:
-
-- migration id
-- plan digest
-- destructive step ids
-- actor/session, if useful
-- expiration, if useful
-
-Example:
-
-```text
-mig_123:sha256:abc123:drop-deprecated-fields
-```
-
-If the migration plan changes, data blockers change materially, or destructive
-steps change, the digest changes and the old token is invalid.
+The opaque token binds to migration ID, plan digest, live-facts digest,
+destructive change IDs, issuing principal/authorization root, and the configured
+expiry exactly as frozen below. It is not a human-constructed digest string.
+If plan/data facts/destructive steps change, the old token is invalid.
 
 ## Hazard Codes
 
@@ -292,7 +231,7 @@ Edges include:
 - expressions referencing fields/states.
 - indexes/constraints referencing fields.
 - AXI guidance referencing fields/actions/resources.
-- comments/attachments/audit metadata referencing resource ids, where relevant.
+- comments/audit/event metadata referencing resource identities, where relevant.
 
 Use cases:
 
@@ -315,47 +254,51 @@ normalized config references and simple database facts.
 optctl pack preview ./packs/crm-v2
 ```
 
-Returns migration plan with classes, statuses, hazards, blockers, and suggested
-stages.
+Returns the atomic migration plan with classes, hazards, blockers, and any
+suggested cleanup/intermediate-revision guidance.
 
 ### Apply safe changes
 
 If all changes are safe and ready:
 
 ```text
-optctl migration apply mig_123 --safe
+optctl migration apply <migration-id> --safe
 ```
 
 ### Review risky changes
 
 ```text
-optctl migration inspect mig_123
-optctl migration inspect mig_123 --sql
-optctl migration validate mig_123
-optctl migration apply mig_123 --reviewed
+optctl migration inspect <migration-id>
+optctl migration inspect <migration-id> --sql
+optctl migration validate <migration-id>
+optctl migration apply <migration-id> --reviewed
 ```
 
 ### Resolve blockers
 
 ```text
-optctl migration inspect mig_123 --violations
-optctl changeset preview --file cleanup.yaml
-optctl changeset commit cs_456
-optctl migration validate mig_123
+optctl migration inspect <migration-id> --violations
+optctl changeset stage --input cleanup.json
+optctl changeset commit <stage-id>
+optctl migration validate <migration-id>
 ```
 
-### Stage destructive changes
+### Use an intermediate revision when blocked
 
 ```text
-optctl migration plan mig_123 --stage-deprecations
-optctl migration apply mig_123 --stage 1
+optctl pack preview ./packs/crm-v1.1-transition
+optctl pack apply ./packs/crm-v1.1-transition --reviewed
+optctl changeset stage --input cleanup.json
+optctl changeset commit <stage-id>
+optctl pack preview ./packs/crm-v2
 ```
 
 ### Destructive cleanup
 
 ```text
-optctl migration preview-drop mig_123
-optctl migration apply mig_123 --confirm mig_123:sha256:abc123:drop-deprecated-fields
+optctl migration inspect <migration-id> --sql
+optctl migration validate <migration-id> --json
+optctl migration apply <migration-id> --confirm-token <opaque-token>
 ```
 
 ## Prototype Evidence
@@ -369,12 +312,102 @@ Executable prototypes live in `prototypes/migration/`:
 - combined end-to-end pack diff + PGlite execution walkthrough from `crm-v1` to
   `crm-v2`
 
-## Provisional Details
+## Frozen migration-plan DTO
 
-The migration lifecycle is spec-level. These implementation details remain open:
+Migration plans are durable built-in system resources with immutable plan
+content and separate append-only validations/application result. IDs are UUIDv7.
+The canonical `migration.plan.v1` data shape is:
 
-- Exact migration plan JSON schema field names.
-- Exact cleanup/backfill command UX around ordinary changesets.
-- Whether migration plans are themselves resources.
-- Table size thresholds for operational hazards.
-- Whether confirmation tokens expire.
+```text
+id, schema_version, publisher, pack,
+from_pack_revision_id|null, to_pack_revision_id,
+candidate_source_digest, plan_digest, created_auth_context_id, created_at,
+class, status, summary,
+changes[], hazards[], blockers[], steps[],
+live_facts_digest, last_validation|null, application|null
+```
+
+- `class`: highest intrinsic `safe|risky|destructive` class.
+- `status`: `ready|blocked|applied`; validation may change computed
+  readiness/facts but never rewrites immutable plan content.
+- `summary`: exact counts by class/status/hazard severity.
+- `changes[]`: ordered by canonical target then kind and contains UUID `id`,
+  `kind`, `class`, `status`, structured target identity, reason, facts,
+  hazard-code references, intermediate-revision guidance, cleanup requirement,
+  and destructive action. Inapplicable fields are explicit `null`, not omitted aliases.
+- `hazards[]`: ordered objects with stable uppercase `code`,
+  `warning|blocking` severity, change ID, and safe message.
+- `blockers[]`: ordered objects with change ID, stable uppercase code, current
+  count/fact value, and safe message.
+- `steps[]`: canonically ordered SQL/metadata step descriptors for the one atomic
+  transaction. SQL text is served only by the authorized `/sql` route, not
+  duplicated throughout the plan.
+- `live_facts_digest`: SHA-256 over canonical planner-visible live facts.
+- `last_validation` and `application` are projections from append-only records,
+  so inspect APIs return one complete current representation.
+
+Unknown fields/enum values are rejected. Canonical array ordering participates
+in `plan_digest` using RFC 8785 JSON and SHA-256.
+
+## Cleanup UX
+
+There is no migration-specific cleanup/backfill mutation command. The migration
+inspection/violations endpoints expose structured blockers and suggested
+ordinary operation templates; agents author normal changeset stage/commit input.
+After cleanup under the same active pack revision, `optctl migration validate
+<id>` refreshes live facts/readiness. If cleanup required an intermediate pack
+revision, the old plan's `from_pack_revision_id` is stale and the final desired
+revision must be previewed into a new plan.
+
+## Operational hazard size
+
+No row/byte threshold changes safety class in MVP. Scan, rewrite, or strong-lock
+operations are intrinsically risky as frozen in
+[Migration Classification](migration-classification.md); current relation
+statistics are still reported.
+
+## Atomic application request
+
+The apply route executes the complete ready plan in one Postgres transaction:
+
+```json
+{
+  "acknowledgement": "reviewed",
+  "confirmation_token": null,
+  "lock_timeout": "10s"
+}
+```
+
+- `acknowledgement` is required: `safe` for a safe plan, `reviewed` for risky,
+  and `destructive` for destructive; weaker/mismatched values fail.
+- `confirmation_token` is required only for destructive and otherwise must be
+  null/omitted.
+- `lock_timeout` is optional under the commit/apply lock-timeout contract.
+- DDL, metadata, default assignments/grant carry-forward, and active-revision
+  switch commit together or all roll back.
+- Repeating a successfully applied plan returns its existing application result.
+
+MVP does not pretend to provide zero-downtime/online migration automation.
+Strong locks, scans, rewrites, and expected interruption are reported plainly.
+The planner blocks unsafe work and requires explicit intermediate revisions; it
+does not add partial plans, shadow tables, implicit dual writes, background copy
+orchestration, or other false complexity.
+
+## Destructive confirmation
+
+`POST /migrations/{id}/validate` returns no confirmation for safe/risky plans.
+For a currently ready destructive plan it may issue one opaque 256-bit
+single-use confirmation token. Only its hash is stored. The token binds:
+
+- migration ID and immutable plan digest;
+- live-facts digest from that validation;
+- exact destructive change IDs;
+- issuing principal and authorization root;
+- issuance and expiry, default 15 minutes and server-configurable.
+
+`POST /migrations/{id}/apply` must include that token for destructive work. Apply
+rechecks current authority and live facts under the pack/runtime locks; any
+binding mismatch, expiry, prior use, or facts/plan change rejects it. Token use
+and successful activation occur atomically. Safe/risky apply uses explicit
+class-aware CLI flags but no confirmation token. Repeated apply after successful
+activation returns the existing application result.

@@ -4,11 +4,11 @@ const before = envelope.input?.current ?? null;
 const after = envelope.input?.proposed ?? operation.fields ?? {};
 const resource = operation.resource ?? "";
 const errors = [];
-const warnings = [];
+const warnings: unknown[] = [];
 if (resource.endsWith(".task") || resource === "task") {
   if (!after.title || String(after.title).trim() === "") {
     errors.push({
-      path: "/fields/title",
+      path: "/title",
       code: "required",
       message: "Task title is required.",
     });
@@ -18,7 +18,7 @@ if (resource.endsWith(".task") || resource === "task") {
     (!after.blocked_reason || String(after.blocked_reason).trim() === "")
   ) {
     errors.push({
-      path: "/fields/blocked_reason",
+      path: "/blocked_reason",
       code: "blocked_reason_required",
       message: "Blocked tasks require blocked_reason.",
     });
@@ -28,7 +28,7 @@ if (resource.endsWith(".task") || resource === "task") {
     String(after.blocked_reason).trim() !== ""
   ) {
     errors.push({
-      path: "/fields/blocked_reason",
+      path: "/blocked_reason",
       code: "blocked_reason_unresolved",
       message: "Done tasks must have no active blocked_reason.",
     });
@@ -45,7 +45,7 @@ if (resource.endsWith(".task") || resource === "task") {
     const edge = `${before.state}->${after.state}`;
     if (!allowed.has(edge)) {
       errors.push({
-        path: "/fields/state",
+        path: "/state",
         code: "invalid_transition",
         message: `Task transition ${edge} is not allowed.`,
       });
@@ -56,7 +56,7 @@ if (resource.endsWith(".timesheet_entry") || resource === "timesheet_entry") {
   const hours = Number(after.hours);
   if (!Number.isFinite(hours) || hours <= 0 || hours > 24) {
     errors.push({
-      path: "/fields/hours",
+      path: "/hours",
       code: "invalid_hours",
       message: "Timesheet hours must be greater than 0 and no more than 24.",
     });

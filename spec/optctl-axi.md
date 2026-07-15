@@ -56,17 +56,17 @@ Observed AXI patterns:
 - Agents should learn how to use a pack from `optctl` output, not external docs.
 - Output should be structured, compact, and content-first.
 - Help should be contextual and concrete, not a generic wall of commands.
-- Mutations should preview by default when appropriate and make commit explicit.
+- Mutations should make immutable staging and commit explicit.
 
 ## Resource `axi` Property
 
 Each `kind: Resource` can include an `axi` property that teaches `optctl` how to
 present and guide the resource.
 
-Resource kind names in `optctl` commands are always lowercase, using snake case
-for multi-word kinds. Examples: `crm.contact`, `crm.deal`, `crm.pipeline_stage`.
-Display text may say “Contact” or “Pipeline Stage,” but command/config
-identifiers stay lowercase.
+Resource/action component names are lowercase snake case. Public CLI definition
+identities are publisher-qualified, for example `operant/crm:contact` and
+`operant/crm:pipeline_stage`; runtime project is selected separately with
+`--project` or context. Display text may use human titles.
 
 Example:
 
@@ -74,7 +74,6 @@ Example:
 kind: Resource
 apiVersion: operant.dev/v1
 metadata:
-  namespace: crm
   name: contact
 spec:
   fields:
@@ -85,7 +84,7 @@ spec:
     email:
       type: string
     company_id:
-      type: ref
+      type: string
       ref: company
   axi:
     purpose: People associated with companies, leads, and opportunities.
@@ -101,8 +100,8 @@ spec:
       empty:
         message: No contacts found.
         help:
-          - optctl create crm.contact --preview
-          - optctl list crm.company
+          - optctl --project ${project} create operant/crm:contact --stage
+          - optctl --project ${project} list operant/crm:company
     detail:
       sections:
         - title: Contact
@@ -110,22 +109,22 @@ spec:
         - title: Relationships
           fields: [company_id, owner_id]
       help:
-        - optctl action crm.contact.merge --id ${id} --preview
-        - optctl list crm.opportunity --where primary_contact_id=${id}
+        - optctl action stage operant/crm:contact.merge --input merge.json
+        - optctl --project ${project} list operant/crm:opportunity --where primary_contact_id=${id}
     search:
       fields: [first_name, last_name, email, phone]
       examples:
-        - optctl search crm.contact alice@example.com
+        - optctl --project ${project} search operant/crm:contact alice@example.com
     help:
       list:
-        - optctl view crm.contact <id>
-        - optctl create crm.contact --preview
+        - optctl --project ${project} view operant/crm:contact <id>
+        - optctl --project ${project} create operant/crm:contact --stage
       created:
-        - optctl view crm.contact ${id}
-        - optctl action crm.activity.create_follow_up --contact ${id} --preview
+        - optctl --project ${project} view operant/crm:contact ${id}
+        - optctl action stage operant/crm:create_follow_up --input follow-up.json
 ```
 
-## Suggested `axi` Schema
+## Canonical `axi` schema
 
 ### `purpose`
 
@@ -186,11 +185,11 @@ context.
 ```yaml
 actions:
   primary:
-    - crm.contact.merge
-    - crm.activity.create_follow_up
+    - operant/crm:merge_contact
+    - operant/crm:create_follow_up
   byState:
     active:
-      - crm.contact.mark_inactive
+      - operant/crm:mark_contact_inactive
 ```
 
 ### `help`
@@ -218,7 +217,6 @@ Actions should also support guidance, because they are the agent-invocable
 ```yaml
 kind: Action
 metadata:
-  namespace: crm
   name: convert_lead
 spec:
   availability:
@@ -226,49 +224,76 @@ spec:
     states: [qualified]
   input:
     lead_id:
-      type: ref
-      ref: lead
+      type: string
+      format: uuid
       required: true
-  behavior:
-    mode: hook
-    preview: crm.preview_convert_lead
-    commit: crm.commit_convert_lead
+  reads:
+    lead:
+      resource: lead
+      id_from: input.lead_id
+      required: true
   axi:
     purpose: Convert a qualified lead into CRM operating records.
     whenToUse:
       - Use after a lead has been qualified and should become an active opportunity.
-    previewFirst: true
+    stageFirst: true
     examples:
-      - optctl action crm.convert_lead --lead <id> --preview
+      - optctl action stage operant/crm:convert_lead --input action.json
+      - optctl action commit operant/crm:convert_lead --input action.json
     successHelp:
-      - optctl view crm.opportunity ${created.opportunity_id}
-      - optctl list crm.activity --where related_id=${created.opportunity_id}
+      - optctl --project ${project} view operant/crm:opportunity ${created.opportunity_id}
+      - optctl --project ${project} list operant/crm:activity --where related_id=${created.opportunity_id}
 ```
 
 ## Pack-Level AXI Guidance
 
-Packs can define home-level guidance for `optctl pack home crm` or `optctl`
-no-args when the pack is active.
+Packs can define home-level guidance for `optctl pack home operant/crm` or
+`optctl` no-args when the pack is active.
 
 ```yaml
 kind: Pack
 metadata:
-  namespace: crm
+  publisher: operant
   name: crm
 spec:
   axi:
     purpose: Headless CRM resources for leads, contacts, companies, opportunities, and sales activities.
     home:
       resources:
-        - crm.lead
-        - crm.opportunity
-        - crm.contact
-        - crm.company
+        - operant/crm:lead
+        - operant/crm:opportunity
+        - operant/crm:contact
+        - operant/crm:company
       help:
-        - optctl list crm.lead
-        - optctl list crm.opportunity
-        - optctl search crm.contact <email-or-name>
+        - optctl --project ${project} list operant/crm:lead
+        - optctl --project ${project} list operant/crm:opportunity
+        - optctl --project ${project} search operant/crm:contact <email-or-name>
 ```
+
+## Authentication and context UX
+
+`optctl` contexts store only normalized server origin and optional default
+project; they never select identity, roles, or authorization. Commands include
+`context list/show/add/use/set-project/remove`. Bootstrap automatically creates
+and activates the successful origin context without confirmation.
+
+Credential selection walks to the nearest process binding and uses its one
+current authorization token. It never searches for a better credential based on
+roles/projects. `auth wait` redeems approved authority and atomically installs
+the replacement token. `auth isolate -- <agent-command>` creates a request-only
+subtree. `auth doctor [--fix]` diagnoses/repairs local auth files and contexts.
+
+Authorization denials explain current principal/roles/boundary and failed
+capability but do not recommend escalation, roles, or auth commands. A denied
+auth request reports the human reason and stops. Global `--non-interactive` and
+`OPERANT_NON_INTERACTIVE=1` disable prompts; piped-input and JSON commands do
+not prompt.
+
+Successful `changeset stage` and `action stage` commands return the complete
+staged-changeset representation produced by `changeset inspect`; an agent does
+not need a second command to review what it just staged. Direct commit commands
+are client-side stage-then-commit conveniences. Required-capability/effect
+manifests remain available in that representation and JSON output.
 
 ## optctl Command Surface Sketch
 
@@ -277,21 +302,28 @@ Resource commands:
 ```text
 optctl                    # content-first home/dashboard
 optctl resources          # configured resource kinds with purposes
-optctl describe crm.lead  # schema + lifecycle + actions + axi guidance
-optctl list crm.lead [--fields ...] [--where ...]
-optctl view crm.lead <id> [--full]
-optctl search crm.contact <query>
-optctl create crm.lead --file lead.json --preview
-optctl update crm.lead <id> --set status=contacted --preview
-optctl transition crm.opportunity <id> proposal --preview
+optctl metadata resource operant/crm:lead
+optctl --project sales list operant/crm:lead [--fields ...] [--where ...]
+optctl --project sales view operant/crm:lead <id> [--full]
+optctl --project sales search operant/crm:contact <query>
+optctl --project sales create operant/crm:lead --input lead.json --stage
+optctl --project sales create operant/crm:lead --input lead.json --commit
+optctl --project sales update operant/crm:lead <id> --input update.json --stage
+optctl --project sales transition operant/crm:opportunity <id> proposal --stage
+
+optctl changeset stage --input changeset.json
+optctl changeset inspect <stage-id>
+optctl changeset commit <stage-id>
+optctl changeset commit --input changeset.json  # client stages, then commits
+optctl changeset cancel <stage-id>
 ```
 
 Action commands:
 
 ```text
-optctl actions crm.lead
-optctl action crm.convert_lead --lead <id> --preview
-optctl action crm.close_won --opportunity <id> --preview
+optctl metadata actions operant/crm:lead
+optctl --project sales action stage operant/crm:convert_lead --input action.json
+optctl --project sales action commit operant/crm:convert_lead --input action.json
 ```
 
 Pack commands:
@@ -299,9 +331,42 @@ Pack commands:
 ```text
 optctl pack preview ./packs/crm
 optctl pack apply ./packs/crm
-optctl pack upload crm.tar.gz
-optctl pack describe crm
+optctl pack inspect operant/crm
 ```
+
+System secret and hook-secret grant commands:
+
+```text
+optctl secret list
+optctl secret create <name> --stdin
+optctl secret rotate <name> --stdin
+optctl secret disable <name>
+optctl secret grants
+optctl secret grant <secret> --hook <hook> --slot <slot>
+optctl secret replace-grant <grant-id> --secret <secret>
+optctl secret revoke-grant <grant-id>
+```
+
+Secret values use stdin or an interactive no-echo prompt, never normal arguments
+or flags. Grant confirmation displays non-plaintext hook revision/security,
+network, read, effect, slot, and environment details. Exact DTOs and authority
+are defined in [Hook-Secret Grants](hook-secret-grants.md).
+
+Outbox delivery commands:
+
+```text
+optctl outbox list [--status ...]
+optctl outbox inspect <delivery-id>
+optctl outbox attempts <delivery-id>
+optctl outbox retry <delivery-id> [--reason ...]
+optctl outbox cancel <delivery-id> [--reason ...]
+optctl outbox drain [--limit 25]
+```
+
+The main server performs normal delivery through one in-process polling loop;
+`drain` is an audited admin/test trigger. Retry/cancel output the complete
+resulting delivery representation. See
+[Durable Outbox Delivery](outbox-delivery.md).
 
 ## Query/Pagination Guidance
 
@@ -316,8 +381,8 @@ spec:
     list:
       fields: [id, name, status, updated_at]
       help:
-        - optctl view crm.lead <id>
-        - optctl query crm.lead --where 'status == "qualified"'
+        - optctl --project ${project} view operant/crm:lead <id>
+        - optctl --project ${project} query operant/crm:lead --where 'status == "qualified"'
 ```
 
 Structured list/query APIs should return compact fields by default, include
@@ -326,14 +391,15 @@ they are seeing.
 
 ## Output Rules for optctl
 
-- Use a compact structured format; TOON is a strong candidate because AXI tools
-  use it for token efficiency.
+- Render TOON by default; `--json` emits the canonical API envelope.
 - Default list schemas should be small.
 - Include total counts/completeness when known.
 - Empty states must be explicit.
 - Long text must truncate with size hints and `--full` escape hatch.
-- Errors should include `error`, `code`, and `help[]`.
-- Mutating actions should support preview-first flows.
+- Errors preserve the shared `error.code/message/details` envelope.
+  `details.help[]` is limited to safe 400/422 AXI repair guidance; authorization
+  and authentication denials never add escalation commands.
+- Mutating actions should support explicit stage-first and direct-commit flows.
 - Contextual `help[]` should be generated from resource/action/pack `axi` config
   plus command context.
 
@@ -348,17 +414,22 @@ they are seeing.
   commands.
 - **`view <resource> <id>`:** detail sections, available actions for current
   state, next commands.
-- **`action ... --preview`:** proposed changes, validation/policy/hook results,
-  commit command.
+- **`action stage ...`:** the complete persisted stage, including operations,
+  validation/policy/hook results and the commit command.
 - **Errors:** corrective command suggestions from relevant resource/action
   guidance.
 
-## Open Questions
+## Frozen v1 guidance decisions
 
-- Should `optctl` output TOON or JSON by default? AXI precedent strongly favors
-  TOON, but implementation may keep JSON internally and encode at the boundary.
-- Should `axi` templates use `${id}` syntax, JSONPath-like paths, or a safer
-  limited placeholder system?
-- How much of `axi` should be required for a resource to be considered
-  agent-ready?
-- Should `axi.whenToUse` also be compiled into an installable Agent Skill?
+- `optctl` renders TOON by default and `--json` emits the canonical JSON DTO.
+- AXI templates use a safe `${field}` placeholder subset over explicitly
+  supplied result/context fields. No JSONPath, expression evaluation, property
+  traversal, function calls, or environment expansion is allowed. Unknown
+  placeholders fail pack preview.
+- An agent-ready resource requires non-empty `purpose`, at least one
+  `whenToUse`, identity/title fields, compact list default fields, explicit empty
+  state, and concrete list/view/create-or-primary-action help. An agent-ready
+  action requires `purpose`, input schema, one example, and success guidance.
+  Pack preview reports missing readiness guidance; bundled proof packs must pass.
+- Compiling `axi.whenToUse` into an installable Agent Skill is deferred and is
+  not an MVP pack-apply or CLI requirement.

@@ -14,7 +14,7 @@
     "axi": {
       "purpose": "Mark an opportunity as lost with a reason.",
       "help": [
-        "optctl action preview default.mark_lost --input ...",
+        "optctl action stage default.mark_lost --input ...",
       ],
     },
   },

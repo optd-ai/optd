@@ -64,6 +64,10 @@ packs/crm/
     notify_lead_change.yaml
     notify_lead_change.ts
 
+  roles/
+    sales_rep.yaml
+    sales_manager.yaml
+
   policies/
     sales_access.yaml
 
@@ -105,7 +109,7 @@ AXI guidance. Pack-level AXI belongs in `pack.yaml`; do not introduce a separate
 kind: Pack
 apiVersion: operant.dev/v1
 metadata:
-  namespace: crm
+  publisher: operant
   name: crm
   version: 0.1.0
 spec:
@@ -113,21 +117,21 @@ spec:
   axi:
     home:
       resources:
-        - crm.lead
-        - crm.opportunity
-        - crm.contact
-        - crm.company
+        - operant/crm:lead
+        - operant/crm:opportunity
+        - operant/crm:contact
+        - operant/crm:company
       help:
-        - optctl list crm.lead
-        - optctl list crm.opportunity
-        - optctl search crm.contact <email-or-name>
+        - optctl --project ${project} list operant/crm:lead
+        - optctl --project ${project} list operant/crm:opportunity
+        - optctl --project ${project} search operant/crm:contact <email-or-name>
 ```
 
 No `includes:` block. No file paths.
 
 ## Scanning Rules
 
-When applying a pack directory, `optctl` scans:
+When previewing a pack directory, `optctl` scans:
 
 | Directory              | File type | Kind expected                                         |
 | ---------------------- | --------- | ----------------------------------------------------- |
@@ -137,13 +141,15 @@ When applying a pack directory, `optctl` scans:
 | `actions/*.yaml`       | YAML      | `kind: Action`                                        |
 | `hooks/*.yaml`         | YAML      | `kind: Hook` metadata, required for every hook script |
 | `hooks/*.ts`           | Deno/TS   | hook script paired with `hooks/<name>.yaml`           |
+| `roles/*.yaml`         | YAML      | `kind: Role`                                          |
 | `policies/*.yaml`      | YAML      | `kind: Policy`                                        |
 | `seeds/*.yaml`         | YAML      | `kind: Seed`                                          |
 
 Unknown top-level directories should fail preview unless explicitly ignored by
 convention, e.g. `.git`, `.DS_Store`. Packs do not have a general-purpose
 `docs/` directory; documentation for agents belongs in first-class `axi` fields
-on the relevant Pack, Resource, Action, Hook, Lifecycle, or Seed config.
+on the relevant Pack, Resource, Relationship, Lifecycle, Action, Hook, Role,
+Policy, or Seed config.
 
 ## File Naming Rules
 
@@ -157,27 +163,31 @@ Rules:
   - `actions/convert_lead.yaml` -> `metadata.name: convert_lead`
 - Hook script basename should match hook `metadata.name`.
   - `hooks/validate_lead.ts` -> hook name `validate_lead`
-- Relationship/lifecycle/seed files follow the same rule.
+- Relationship, lifecycle, role, policy, and seed files follow the same rule.
 
-If `metadata.namespace` is omitted inside child files, it defaults to the pack
-namespace.
+Pack child definitions are global definition templates and omit runtime project
+identity. Applying a pack installs exactly one active server-wide revision; it
+does not materialize definitions or seed objects into a selected project. Runtime
+objects and explicit seed application carry project IDs separately. The pack
+`publisher` is global definition identity/provenance, not a runtime project. See
+[Pack Publishers and Projects](pack-publishers-and-projects.md).
+
+The current MVP loader still calls this field `namespace` and defaults child
+objects from it. That behavior requires migration and must not be treated as the
+target identity model.
 
 Every child YAML file must include `metadata.name`. The file basename must match
 `metadata.name`. The platform must not infer names from file paths because packs
 should have one obvious way to express object identity.
 
-## Hook Authoring
+## Hook authoring and attachment
 
-### Option A: Explicit Hook YAML + Script File
-
-For hooks with permissions/input/output schemas, use paired files:
+Every hook uses required paired metadata/script files:
 
 ```text
 hooks/validate_lead.yaml
 hooks/validate_lead.ts
 ```
-
-`hooks/validate_lead.yaml`:
 
 ```yaml
 kind: Hook
@@ -189,65 +199,37 @@ spec:
   timeout: 2s
   permissions:
     net: false
+    env: false
     read: false
     write: false
-    env: false
     run: false
-  input:
-    schema:
-      proposed:
-        type: object
-        resource: lead
-        required: true
-  output:
-    schema: validation.v1
+  secrets: []
+  effects: {operations: []}
+  output: {schema: validation.v1}
+  attachments:
+    - phase: changeset.validate
+      resource: lead
+      order: 100
+      input:
+        operation: "$operation"
+        current: "$current"
+        proposed: "$proposed"
   axi:
-    purpose: Validate lead changes before preview/commit.
-    whenToUse: Runs automatically; agents normally do not invoke this directly.
+    purpose: Validate lead changes during staging before commit.
+    whenToUse:
+      - Runs automatically; agents normally invoke actions/resources.
 ```
 
-AXI guidance is first-class wherever it is relevant. Pack-level AXI belongs in
-`pack.yaml`; hook-specific AXI belongs in the Hook YAML;
-action/resource/lifecycle/seed guidance belongs on those respective documents.
+Only the script filename is specified; paths and script-only hooks are rejected.
+The hook owns attachment records. Action/resource/lifecycle files do not contain
+a second hook list and never reference `hooks/validate_lead.ts`. Pack-local
+attachment targets such as `lead` are qualified against the owning candidate
+revision; cross-pack targets must use publisher-qualified identity and become
+explicit migration/commit dependencies.
 
-Only the file name is specified, not a relative path. The CLI/server knows hook
-scripts live in `hooks/`.
-
-### Script-Only Hooks
-
-Script-only hooks are not supported. Every hook script must have a corresponding
-Hook YAML file. This keeps hook permissions, input schema, output schema,
-timeout, and AXI guidance explicit.
-
-## Referencing Hooks
-
-Resources/actions/transitions reference hooks by dotted name or local name.
-
-Within the same namespace:
-
-```yaml
-hooks:
-  validate:
-    - ref: validate_lead
-```
-
-Cross-namespace:
-
-```yaml
-hooks:
-  validate:
-    - ref: crm.validate_lead
-```
-
-The hook definition points to the script file name:
-
-```yaml
-spec:
-  script: validate_lead.ts
-```
-
-No resource/action/lifecycle config should reference `hooks/validate_lead.ts`
-directly.
+AXI guidance is first-class wherever relevant. Pack-level AXI belongs in
+`pack.yaml`; component guidance belongs on its component document. The exact
+Hook/attachment/input/permission/output contract is `mvp-hook-schema.md`.
 
 ## Prototype Evidence
 
@@ -270,18 +252,74 @@ Run:
 deno test --allow-read --allow-write --allow-env --allow-net prototypes/pack-sql/pack-sql-server.test.ts
 ```
 
+## Seed definitions and application
+
+A seed definition has one pack-local resource, one required `key` field, mode
+`changeset`, and an ordered non-empty `rows` array. The key must be a required
+scalar field covered by a project-scoped unique constraint on that resource;
+every row must contain a distinct key and pass the ordinary resource schema.
+References use normal structured/local pack references and must resolve during
+pack preview.
+
+Seed staging is an explicit per-project reconcile operation against the exact
+active pack revision:
+
+1. Resolve selected seed names (or all pack seeds only when the request/CLI
+   explicitly sets `all: true`) and sort them by name, then rows by canonical
+   key. Empty/unknown/ambiguous selection is rejected.
+2. For each row, read the current object with the same project/resource/key.
+3. If absent, emit `create` with a server-issued UUIDv7.
+4. If present and declared seed fields differ, emit `update` against that
+   existing object's UUID and expected version, setting exactly the declared
+   seed fields; unspecified object fields are preserved.
+5. If equal, emit no operation. Seed application never archives rows removed
+   from a later seed revision.
+
+Seed authors never specify platform object IDs. The first creation generates the
+UUIDv7; every later reconcile locates and preserves that identity through the
+stable project-scoped business key. Concurrent missing-key creation is resolved
+by the database unique constraint and normal commit conflict behavior.
+
+Reads and uniqueness facts become frozen stage dependencies. Preview records the
+seed effect manifest (`create|update` on its one resource). The invoking caller
+must have exact `seed:<publisher>/<pack>:<seed>` permission in the request
+project; the invocation-bound internal seed runner receives only that manifest.
+Ordinary schema/hooks still apply, and seed definitions are not a privileged
+bypass. Concurrent creation/update is caught by normal commit
+revalidation and constraints.
+
+CLI `optctl --project <slug> seed stage <publisher>/<pack> --all` returns a
+stage, while `seed commit` is the client-side stage-then-commit convenience;
+repeatable `--seed <name>` replaces `--all` for explicit subsets.
+
+If reconciliation emits no operations, the seed-stage route returns
+`status: unchanged`, selected project/revision/seed names, and `stage: null`
+without persisting a stage. Otherwise it returns the complete ordinary immutable
+stage representation. Repeating a committed unchanged seed request therefore
+creates neither duplicate rows nor object versions. There is no seed-specific
+commit endpoint.
+
 ## Multipart Upload Mapping
 
-Even when using CLI, pack apply uses HTTP multipart.
+Even when using CLI, pack preview uses HTTP multipart.
 
-`optctl pack preview ./packs/crm` should:
+`optctl pack preview ./packs/crm` must:
 
-1. Scan the strict directory tree.
+1. Scan the strict directory tree; reject symlinks/hardlinks/special files/path
+   traversal. Archive input is not supported in MVP.
 2. Validate file locations and names.
 3. Build a manifest of discovered files.
 4. Submit multipart upload to server.
 
-Multipart parts can preserve paths:
+`POST /api/v1/packs/preview` uses `multipart/form-data`. Every part has form name
+`file`, a UTF-8 `filename` equal to one normalized relative pack path, and bytes
+as the body (`text/yaml` or `application/typescript`; MIME is advisory). There
+are no parallel manifest/identity fields: `pack.yaml` is authoritative. Duplicate
+filenames, empty parts, backslashes, absolute/`.`/`..` segments, symlinks, and
+unknown form names fail. Configurable total/file/count guardrails are checked
+before parsing.
+
+Multipart filenames preserve paths:
 
 ```text
 pack.yaml
@@ -311,6 +349,8 @@ Server repeats validation and rejects:
 - CLI can produce better errors: “hook `validate_lead` must live at
   `hooks/validate_lead.ts`.”
 
-## Open Questions
+## Deferred beyond MVP
 
-- Should config support templating or generated pack fragments later?
+Config templating and generated pack fragments are not supported. Agents author
+the normalized strict pack files directly; revisit only with concrete repetition
+evidence.

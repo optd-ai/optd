@@ -1,126 +1,211 @@
 # MVP API Routes
 
-Decision: use Proposal A for MVP server routes.
+## Decision
 
-The server API is JSON-only. `optctl` is the primary agent interface and renders
-TOON by default. Historical Proposal B is retained below only as rejected design
-context; implementation subagents should use Proposal A.
+The MVP uses resource-oriented JSON routes under `/api/v1`. `optctl` is a typed
+client and TOON renderer over these contracts. All responses use
+[API Response and Error Contract](api-errors.md); auth-specific DTOs are frozen
+in [Authentication API](auth-api.md).
 
-## Proposal A: resource-oriented routes
+Definition identities are publisher-qualified. Runtime project is always a
+separate UUID/body/path value. The API has no user-facing `namespace`, dotted
+identity alias, actor header, role header, or combined stage-and-commit route.
 
-This proposal uses stable nouns and explicit subresources.
+Operational `/live` and `/ready` remain at server root.
+
+## Route inventory
 
 ```text
-GET  /health
+GET  /live
+GET  /ready
 
+# Authentication, users, sessions, requests, recovery, and role assignments
+# See auth-api.md for /api/v1/auth/*
+
+# Platform projects (not operant/projects:project domain objects)
+GET  /projects
+POST /projects
+GET  /projects/{project_id}
+POST /projects/{project_id}/update
+POST /projects/{project_id}/archive
+
+# Metadata and globally installed definitions
 GET  /metadata/home
 GET  /metadata/packs
-GET  /metadata/packs/{namespace}/{name}
-GET  /metadata/resources/{namespace}/{resource}
-GET  /metadata/actions/{namespace}/{action}
-GET  /metadata/hooks/{namespace}/{hook}
-GET  /metadata/policies/{namespace}/{policy}
+GET  /metadata/packs/{publisher}/{pack}
+GET  /metadata/packs/{publisher}/{pack}/resources/{resource}
+GET  /metadata/packs/{publisher}/{pack}/relationships/{relationship}
+GET  /metadata/packs/{publisher}/{pack}/lifecycles/{lifecycle}
+GET  /metadata/packs/{publisher}/{pack}/actions/{action}
+GET  /metadata/packs/{publisher}/{pack}/hooks/{hook}
+GET  /metadata/packs/{publisher}/{pack}/roles/{role}
+GET  /metadata/packs/{publisher}/{pack}/policies/{policy}
+GET  /metadata/packs/{publisher}/{pack}/seeds/{seed}
 
+# Multipart pack preview creates a durable migration plan/candidate revision
 POST /packs/preview
-POST /packs/apply
 
 GET  /migrations/{migration_id}
 GET  /migrations/{migration_id}/violations
 GET  /migrations/{migration_id}/sql
 POST /migrations/{migration_id}/validate
 POST /migrations/{migration_id}/apply
-POST /migrations/{migration_id}/confirm
 
+# Query/object reads; DTO/pagination are frozen in query-api.md
 POST /queries
-GET  /objects/{namespace}/{resource}/{id}
-GET  /objects/{namespace}/{resource}/{id}/history
+GET  /projects/{project_id}/objects/{publisher}/{pack}/{resource}/{object_id}
+GET  /projects/{project_id}/objects/{publisher}/{pack}/{resource}/{object_id}/history
+GET  /projects/{project_id}/relationships/{publisher}/{pack}/{relationship}/{relationship_id}
+GET  /projects/{project_id}/relationships/{publisher}/{pack}/{relationship}/{relationship_id}/history
 
-POST /changesets/preview
-POST /changesets/commit
-GET  /changesets/{changeset_id}
-POST /changesets/{changeset_id}/commit
+# Immutable staging; operations may span explicit projects
+POST /changesets/stage
+GET  /changesets/{stage_id}
+POST /changesets/{stage_id}/commit
+POST /changesets/{stage_id}/cancel
+GET  /changesets/{stage_id}/approvals
+POST /changesets/{stage_id}/approvals/{requirement_id}/decide
 
-POST /actions/{namespace}/{action}/preview
-POST /actions/{namespace}/{action}/commit
+# Semantic actions stage only; CLI direct commit stages then commits returned ID
+POST /actions/{publisher}/{pack}/{action}/stage
+
+# Explicit seed expansion stages ordinary immutable operations
+POST /packs/{publisher}/{pack}/seeds/stage
 
 GET  /outbox
+GET  /outbox/{delivery_id}
+GET  /outbox/{delivery_id}/attempts
+POST /outbox/{delivery_id}/retry
+POST /outbox/{delivery_id}/cancel
 POST /outbox/drain
-POST /outbox/{id}/retry
 
 GET  /secrets
 POST /secrets
-DELETE /secrets/{name}
+POST /secrets/{secret_id}/rotate
+POST /secrets/{secret_id}/disable
+
+GET  /hook-secret-grants
+POST /hook-secret-grants
+POST /hook-secret-grants/{grant_id}/replace
+POST /hook-secret-grants/{grant_id}/revoke
+
+GET  /policy-assignments
+POST /policy-assignments
+POST /policy-assignments/{assignment_id}/disable
 ```
 
-Pros:
+## Addressing rules
 
-- Familiar REST-ish shape.
-- Clear nouns and subresources.
-- Easy for external clients to understand.
-- Good fit for future OpenAPI.
+- `{publisher}`, `{pack}`, and child-name segments are lowercase canonical names;
+  the server resolves the one active revision and returns its immutable revision
+  ID/digest in metadata.
+- `{project_id}`, `{object_id}`, `{stage_id}`, migration/grant/delivery IDs, and
+  generated operation/entity IDs are UUIDv7 values. CLI may resolve a project
+  slug/name before invoking project-ID routes.
+- `POST /queries` carries one explicit `project_id` and one structured definition
+  identity `{kind: resource|relationship, publisher, pack, name}`. Cross-project list/query is not an MVP
+  query mode.
+- A multi-project stage carries `project_id` on each operation. Stage inspection
+  exposes the canonical set of affected projects.
+- Object reads include project in the path even though object UUIDv7 values are
+  globally unique; a mismatch returns safe `not_found`/`project_conflict` per the
+  authorization/error contracts.
 
-Cons:
+## Write sequencing
 
-- More path parameters.
-- Dotted CLI identifiers need conversion to path segments.
-- Actions are separate from objects even when object-scoped.
+### Packs
 
-## Proposal B: command-oriented routes with dotted identifiers
+`POST /packs/preview` validates multipart source, normalizes definitions, stores
+or reuses the content-addressed candidate revision, and creates/returns a
+complete durable migration plan with a new UUIDv7. There is no caller idempotency
+key; repeated preview may create multiple plan records against refreshed live
+facts.
+It does not activate the pack. `POST /migrations/{id}/apply` performs the locked
+transactional activation using the exact plan/revision; confirmation material
+for destructive plans is supplied in that apply body. There is no separate
+`/packs/apply` upload path or migration-confirm mutation.
 
-This proposal mirrors `optctl` and keeps identifiers as dotted strings in JSON
-bodies.
+`optctl pack apply <dir>` is client orchestration: preview, render the exact
+plan, then apply its returned migration ID when class/status and explicit CLI
+flags allow it.
+
+### Changesets and actions
+
+`POST /changesets/stage` and semantic action staging return the exact complete
+stage representation later returned by `GET /changesets/{stage_id}`. Commit
+body is exactly `{ "lock_timeout": "10s" }`, with the field optional; an omitted
+body is equivalent to `{}`. It never accepts replacement operations or reruns
+stage hooks. Cancellation body has only optional bounded `reason`.
+
+If a valid stage requires approvals, approval rows are created as part of stage
+persistence. Each decision route accepts exactly one `decision` (`approve` or `reject`) and
+the reason rules in [Changeset Approval Contract](changeset-approvals.md).
+Decisions, cancellation, and commit serialize on the lifecycle coordination row.
+Approval does not mutate the immutable operation graph.
+
+### Seeds
+
+Seed staging accepts:
+
+```json
+{
+  "project_id": "019b...",
+  "seed_names": ["pipeline_stages"],
+  "all": false
+}
+```
+
+Exactly one selection is valid: non-empty unique `seed_names` with `all: false`,
+or omitted `seed_names` with `all: true`.
+
+It resolves seed definitions from the exact active pack revision and expands
+them into the same frozen operation graph as ordinary staging. Changed
+reconciliation returns a normal stage representation; an unchanged reconcile
+returns `status: unchanged` and `stage: null`. Commit uses the normal changeset
+route. Seed identity/idempotency semantics are frozen in `pack-structure.md`.
+
+## Metadata behavior
+
+Metadata definitions are global, but responses may include current capability/
+AXI projections only for an explicit `project_id` query parameter. `optctl` sends
+its resolved context project when present. Without it, metadata returns global
+definition/schema guidance and labels project-bound capabilities as requiring a
+boundary; the server never guesses a project. Safe schema/AXI definition reads
+are available to every authenticated human/agent session (request-only
+credentials remain limited to auth workflow routes). Default Hook metadata
+contains identity/purpose/phases/output/effect summary only. Policy default metadata exposes identity/AXI/capability summary, not full
+predicates. Exact query `include_security=true` on pack/Hook/Policy metadata
+requires `pack.inspect_security` and adds full policy rules plus Hook script/
+source digests, network/env/secret-slot/read mappings;
+secret/grant values/details and migration SQL remain on their separately
+authorized routes.
+Project capability projections evaluate current authority in that boundary.
+
+## Required request behavior
+
+- Bearer authentication is mandatory except for the explicitly public
+  bootstrap/login/readiness endpoints in `auth-api.md`.
+- Unknown JSON and multipart fields are rejected.
+- Structured identity fields are used in JSON; concatenated dotted aliases are
+  rejected.
+- `POST /actions/.../stage` body contains `project_id`, action `input`, and
+  optional documented stage-request controls only.
+- Request lock-timeout override is accepted only on commit/apply routes and is
+  bounded/configured as specified by their transactional contracts.
+- Filter/sort/projection/cursor bodies use exactly
+  [Query and Object Read API](query-api.md); CLI does not invent another query
+  language/DTO.
+
+## CLI mapping examples
 
 ```text
-GET  /health
+optctl --project sales view operant/crm:lead 019b...
+  -> resolve project `sales` to UUID
+  -> GET /api/v1/projects/{project_id}/objects/operant/crm/lead/{object_id}
 
-GET  /metadata/home
-POST /metadata/get          { "kind": "resource", "id": "default.lead" }
-POST /metadata/list         { "kind": "resource" }
+optctl --project sales action stage operant/crm:convert_lead --input action.json
+  -> POST /api/v1/actions/operant/crm/convert_lead/stage
 
-POST /pack/preview
-POST /pack/apply
-
-POST /migration/inspect     { "migration_id": "..." }
-POST /migration/validate    { "migration_id": "..." }
-POST /migration/apply       { "migration_id": "...", "mode": "safe|reviewed|confirm" }
-
-POST /query
-POST /object/view           { "resource": "default.lead", "id": "lead_123" }
-POST /object/history        { "resource": "default.lead", "id": "lead_123" }
-
-POST /changeset/preview
-POST /changeset/commit
-POST /changeset/get         { "changeset_id": "..." }
-
-POST /action/preview        { "action": "default.convert_lead", "input": {} }
-POST /action/commit         { "action": "default.convert_lead", "input": {} }
-
-POST /outbox/status
-POST /outbox/drain
-POST /outbox/retry          { "id": "..." }
-
-POST /secret/list
-POST /secret/set
-POST /secret/delete
+optctl changeset commit 019c...
+  -> POST /api/v1/changesets/{stage_id}/commit
 ```
-
-Pros:
-
-- Very close to `optctl` command model.
-- Dotted identifiers remain unchanged between CLI and API.
-- Fewer route patterns.
-- Easier to evolve bodies without changing paths.
-
-Cons:
-
-- Less idiomatic for HTTP clients.
-- Harder to browse manually.
-- OpenAPI/resource docs look less conventional.
-
-## Recommendation
-
-Prefer **Proposal A** for MVP server routes because it gives clearer external
-HTTP contracts and a better future OpenAPI path. `optctl` can keep dotted
-identifiers and translate them to path segments.
-
-Keep request/response schemas explicit either way.

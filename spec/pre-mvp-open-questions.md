@@ -1,6 +1,7 @@
-# Pre-MVP Open Questions and Proposals
+# Historical Pre-MVP Questions and Proposals
 
-These items must be resolved before detailed MVP implementation planning.
+> **Status:** resolved/superseded design history. This file no longer gates
+> planning. Frozen topic specs and `spec/README.md` are authoritative.
 
 ## 1. App-managed Postgres decision
 

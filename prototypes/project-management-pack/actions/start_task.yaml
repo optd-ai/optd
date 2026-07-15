@@ -9,7 +9,7 @@
     "axi": {
       "purpose": "Start or unblock assigned project work.",
       "help": [
-        "optctl action preview default.start_task --input '{\"task_id\":\"TASK_ID\",\"stage_id\":\"in_progress\"}'",
+        "optctl action stage default.start_task --input '{\"task_id\":\"TASK_ID\",\"stage_id\":\"in_progress\"}'",
       ],
     },
   },

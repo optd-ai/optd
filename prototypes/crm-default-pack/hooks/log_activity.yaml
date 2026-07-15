@@ -19,7 +19,7 @@
     },
     "attachments": [
       {
-        "phase": "action",
+        "phase": "action.stage",
       },
     ],
     "axi": {

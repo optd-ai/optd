@@ -13,7 +13,7 @@ if (!input.task_id) {
   );
   Deno.exit(0);
 }
-const fields = {
+const fields: Record<string, unknown> = {
   state: "done",
   stage_id: input.stage_id ?? "done",
   blocked_reason: "",
@@ -22,6 +22,11 @@ if (input.spent_hours !== undefined) fields.spent_hours = input.spent_hours;
 console.error(`complete_task generating update for ${input.task_id}`);
 console.log(
   JSON.stringify({
-    operations: [{ op: "update", resource: "task", id: input.task_id, fields }],
+    operations: [{
+      op: "update",
+      resource: "task",
+      object_id: input.task_id,
+      set: fields,
+    }],
   }),
 );

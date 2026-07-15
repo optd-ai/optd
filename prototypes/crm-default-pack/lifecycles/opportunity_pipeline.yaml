@@ -34,8 +34,8 @@
     ],
     "axi": {
       "help": [
-        "optctl action preview default.mark_won --input ...",
-        "optctl action preview default.mark_lost --input ...",
+        "optctl action stage default.mark_won --input ...",
+        "optctl action stage default.mark_lost --input ...",
       ],
     },
   },

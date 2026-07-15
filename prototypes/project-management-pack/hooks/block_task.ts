@@ -24,8 +24,8 @@ console.log(JSON.stringify({
   operations: [{
     op: "update",
     resource: "task",
-    id: input.task_id,
-    fields: {
+    object_id: input.task_id,
+    set: {
       state: "blocked",
       stage_id: input.stage_id ?? "blocked",
       blocked_reason: String(input.blocked_reason).trim(),

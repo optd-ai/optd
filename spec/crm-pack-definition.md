@@ -1,4 +1,8 @@
-# CRM Pack Definition Prototype
+# Historical CRM Pack Definition
+
+> **Status:** detailed pre-auth design history. The repository CRM fixture is the
+> executable proof pack, while frozen pack identity, hook, operation, policy,
+> staging, and acceptance specs override conflicting namespace/preview examples. Prototype
 
 ## Status
 

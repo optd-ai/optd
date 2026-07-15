@@ -13,19 +13,14 @@ if (!opportunityId || !input.lost_reason_id) {
     }),
   );
 } else {
-  const operations = [
+  const operations: Array<Record<string, unknown>> = [
     {
       op: "transition",
       resource: "opportunity",
-      id: opportunityId,
+      object_id: opportunityId,
       to: "lost",
-      expectedVersion: input.expected_version ?? input.version,
-    },
-    {
-      op: "update",
-      resource: "opportunity",
-      id: opportunityId,
-      fields: { probability: 0, lost_reason_id: input.lost_reason_id },
+      expected_version: input.expected_version ?? input.version,
+      set: { probability: 0, lost_reason_id: input.lost_reason_id },
     },
   ];
   if (input.note) {
@@ -41,6 +36,6 @@ if (!opportunityId || !input.lost_reason_id) {
   }
   console.error(`mark_lost ${opportunityId}`);
   console.log(
-    JSON.stringify({ summary: "Mark opportunity as lost.", operations }),
+    JSON.stringify({ operations }),
   );
 }

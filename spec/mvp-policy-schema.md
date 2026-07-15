@@ -1,7 +1,8 @@
-# MVP Policy Schema v0
+# MVP Policy Schema v1
 
-Policy uses structured YAML plus SQL-lowerable CEL-like expressions. Rego/OPA
-and arbitrary SQL are not part of v0.
+Policy uses structured YAML plus the frozen SQL-lowerable CEL subset. Rego/OPA,
+arbitrary SQL, caller-supplied roles, and pack-defined permission vocabularies are
+not supported.
 
 ## Policy document
 
@@ -11,47 +12,69 @@ apiVersion: operant.dev/v1
 metadata:
   name: sales_access
 spec:
+  default_assignment: all_projects
   rules:
-    - name: admin_all
-      effect: allow
-      roles: [admin]
-      actions: ["*"]
-      resources: ["*"]
-
     - name: sales_rep_own_leads
       effect: allow
-      roles: [sales_rep]
-      actions: [read, create, update, archive, transition, action]
-      resources: [default.lead]
-      where: "owner_id == actor.id || sales_team_id in actor.sales_team_ids"
+      roles: [operant/crm:sales_rep]
+      actions: [read, create, update, archive, transition, comment]
+      resources: [operant/crm:lead]
+      where: "owner_id == actor.id"
+      axi:
+        summary: Work leads owned by the actor or assigned to the actor's sales teams.
 
-    - name: company_member_opportunities
+    - name: explicit_opportunity_viewer
       effect: allow
-      roles: [sales_rep]
+      roles: [operant/crm:sales_rep]
       actions: [read]
-      resources: [default.opportunity]
+      resources: [operant/crm:opportunity]
       relation:
-        relationship: default.opportunity_company
-        objectSide: from
-        subjectResource: default.company
-        subjectIdsFromActor: company_ids
+        relationship: operant/crm:opportunity_viewer
+        object_side: from
+        subject_side: to
+        subject: actor.id
+
+    - name: convert_qualified_lead
+      effect: allow
+      roles: [operant/crm:sales_rep]
+      actions: [action:operant/crm:convert_lead]
+      resources: [operant/crm:lead]
+      where: "status == 'qualified'"
 ```
+
+Pack-local role/resource/action/relationship references may be abbreviated in
+source and are canonicalized against the owning pack during preview. Persisted
+policy definitions contain only publisher-qualified identities.
+
+`spec.default_assignment` is required and is `none|all_projects`. Pack policies
+cannot default-activate at `system` or one project. `all_projects` activation is
+security-relevant, shown in preview, and atomically tied to the exact active pack
+revision. It grants no role by itself.
 
 ## Rule fields
 
-- `name`: unique within policy.
-- `effect`: `allow` only for MVP. Deny can be added later if needed.
-- `roles`: actor roles that activate the rule. `*` matches any role.
-- `actions`: action vocabulary below. `*` matches any action.
-- `resources`: dotted resources. `*` matches any resource.
-- `where`: optional SQL-lowerable expression evaluated against object fields
-  plus actor fields.
+- `name`: unique lowercase snake-case identity within the policy.
+- `effect`: `allow` only for v1. Absence of a matching allow denies.
+- `roles`: canonical role identities. `*` is allowed only in built-in system
+  policy authored by the platform, not ordinary packs.
+- `actions`: exact domain/semantic/system action strings. `*` is allowed only in
+  built-in super-admin policy mechanics.
+- `resources`: canonical resource identities. `*` is allowed only where the
+  active system policy schema explicitly permits it.
+- `where`: optional frozen CEL-subset predicate evaluated against declared object
+  and actor fields.
 - `relation`: optional one-hop ReBAC clause.
+- `axi.summary`: optional explanation used in boundary capability summaries;
+  explanatory only.
 
 ## Action vocabulary
 
+Domain resource actions:
+
 ```text
 read
+read_archived
+history.read
 create
 update
 archive
@@ -59,62 +82,154 @@ transition
 link
 unlink
 comment
-action
-manage_pack
-manage_migration
-manage_secret
 ```
 
-## Actor context v0
+Semantic pack action/seed permissions are exact qualified strings:
+
+```text
+action:operant/crm:convert_lead
+action:operant/projects:start_task
+seed:operant/crm:lead_statuses
+```
+
+Semantic action/seed permission covers only its reviewed declared/generated
+effect manifest in the one request project; it is not a wildcard over the
+underlying resources.
+
+System API capabilities use exact dotted identities owned by the platform rather
+than generic `manage_*` aliases. The initial set includes the frozen API
+contracts, for example:
+
+```text
+project.read
+project.create
+project.update
+project.archive
+pack.preview
+pack.apply
+pack.inspect_security
+migration.inspect
+migration.validate
+migration.apply
+changeset.inspect
+changeset.cancel
+changeset.commit_others
+changeset.approval.decide
+auth.request.decide
+auth.user.manage
+auth.password_reset.decide
+auth.authorization.inspect
+auth.authorization.revoke
+secret.inspect
+secret.create
+secret.rotate
+secret.disable
+secret.grant
+hook.secret.configure
+policy.assignment.manage
+role.assignment.manage
+outbox.inspect
+outbox.retry
+outbox.cancel
+outbox.drain
+```
+
+Together with the domain actions and dynamic `action:`/`seed:` identities above,
+this is the closed v1 action registry. Route/service authorization must use one
+canonical string; aliases such as `manage_secret` are rejected. Adding a system
+route/action requires a spec/schema version change, not an arbitrary pack
+string.
+
+## Actor and boundary context
+
+Actor context is entirely server-derived from the authenticated credential,
+principal, authorization chain, and active assignments. Public requests cannot
+supply roles, permissions, ownership arrays, or actor identity.
+
+Conceptually, policy evaluation receives:
 
 ```json
 {
-  "id": "user_123",
-  "roles": ["sales_rep"],
-  "sales_team_ids": ["direct"],
-  "company_ids": ["company_123"],
-  "permissions": []
+  "principal": {
+    "type": "agent_user",
+    "id": "019b...",
+    "human_user_id": "019a..."
+  },
+  "boundary": {
+    "type": "project",
+    "project_id": "019c..."
+  },
+  "roles": ["operant/crm:sales_rep"],
+  "attributes": {
+    "id": "019b...",
+    "principal_type": "agent_user",
+    "human_user_id": "019a..."
+  }
 }
 ```
 
-`super_admin` is a special role that bypasses permission checks.
+CEL exposes only curated immutable principal aliases in v1: `actor.id`,
+`actor.principal_type`, and nullable `actor.human_user_id`; the transport object
+above is not caller input. Arbitrary assignment/user metadata arrays are not
+policy attributes. Role and policy
+assignments use exactly one `project`, `all_projects`, or `system` boundary as
+defined in [Authorization Definitions and Assignments](authorization-assignments.md).
 
-## ReBAC v0
+`system:super_admin` is a built-in policy bypass, not an ordinary pack rule. It
+still requires valid authentication/authorization chain, structural validation,
+last-human-super-admin invariants where relevant, and audit.
+
+## ReBAC v1
 
 Only one relationship hop is supported. Deep traversal is rejected.
 
-`relation.objectSide` determines which side of the relationship points to the
-protected object:
+`relation.object_side` identifies the protected-object endpoint and
+`subject_side` must be the opposite endpoint. `subject` is exactly `actor.id` or
+`actor.human_user_id`; null never matches. The relationship definition's subject
+endpoint must be built-in `system:principal`. Thus one-hop ReBAC is one indexed
+relationship existence check, not an arbitrary actor-supplied ID array.
+Team/company traversal would require two hops and must be denormalized to a
+direct protected-object/principal relationship for v1.
 
-- `from`: protected object id is in relationship `from_id`.
-- `to`: protected object id is in relationship `to_id`.
+## Assignment and evaluation
 
-`subjectIdsFromActor` names an actor array field containing directly authorized
-related object ids.
+A policy definition grants nothing until an active policy assignment selects it
+for one explicit boundary.
 
-## Evaluation
+- Query/list compiles applicable allow rules to SQL and pushes them down before
+  sorting/pagination.
+- Single-object, semantic action, changeset stage, and commit use targeted SQL
+  evaluation.
+- Commit re-evaluates all operation/project boundaries in one SQL statement
+  snapshot under [Commit Revalidation](commit-revalidation.md).
+- If no active assigned rule allows the exact action/resource/boundary, deny.
+- Conditional rules remain labeled conditional in role capability summaries.
 
-- Query/list: compile policy to SQL predicate and push it down before
-  pagination.
-- Single-object/action/changeset: evaluate rules at runtime and/or with targeted
-  SQL checks.
-- If no rule allows the operation, deny.
-- Return explanations with matched/skipped rule names where practical.
+## Explanation and denial
 
-## Denial response shape
+Authenticated denial uses the shared error envelope and references the immutable
+auth context. It reports current principal, boundary, exact failed action and
+resource, and safe matched/checked policy identities/rules. It does not recommend
+roles, auth requests, grant commands, or escalation steps.
 
 ```json
 {
   "ok": false,
   "error": {
     "code": "policy_denied",
-    "message": "actor is not allowed to update default.lead",
+    "message": "current authority does not allow update on operant/crm:lead",
     "details": {
-      "actor_id": "user_123",
-      "resource": "default.lead",
+      "auth_context_id": "019b...",
+      "principal_id": "019a...",
+      "boundary": {"project_id": "019c..."},
+      "resource": "operant/crm:lead",
       "action": "update",
+      "checked_policies": ["operant/crm:sales_access"],
       "checked_rules": ["sales_rep_own_leads"]
     }
   }
 }
 ```
+
+Policy-definition/assignment identities and the decision summary are retained as
+audit/stage evidence without duplicating object snapshots.

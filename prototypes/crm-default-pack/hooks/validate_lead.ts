@@ -5,7 +5,7 @@ const errors = [];
 const warnings = [];
 if (!fields.name || String(fields.name).trim() === "") {
   errors.push({
-    path: "/fields/name",
+    path: "/name",
     code: "required",
     message: "Lead name is required.",
   });
@@ -19,14 +19,14 @@ if (!fields.email && !fields.phone) {
 }
 if (fields.email && !String(fields.email).includes("@")) {
   errors.push({
-    path: "/fields/email",
+    path: "/email",
     code: "format",
     message: "Lead email must contain @.",
   });
 }
 if (!fields.company_name) {
   warnings.push({
-    path: "/fields/company_name",
+    path: "/company_name",
     code: "missing_company",
     message: "Company name improves conversion quality.",
   });

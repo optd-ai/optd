@@ -1,4 +1,7 @@
-# CRM Prototype Flow
+# Historical CRM Prototype Flow
+
+> **Status:** prototype walkthrough retained as evidence. Its preview commands,
+> hook packaging questions, and identity examples are not normative.
 
 ## Decision
 
@@ -392,7 +395,7 @@ For the prototype, prefer table-per-resource storage plus universal platform
 tables for changesets, audit, hooks, events, comments, attachments, and generic
 relationships.
 
-## Open Questions
+## Questions recorded during the historical prototype
 
 - Should hooks patch the proposed object directly or emit additional changeset
   operations only?

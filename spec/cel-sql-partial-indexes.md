@@ -1,4 +1,7 @@
-# CEL-to-SQL Prototype for Partial Indexes
+# CEL-to-SQL Partial-Index Prototype Evidence
+
+> **Status:** supporting design/prototype evidence. `expression-language.md` and
+> `pack-definition-schemas.md` are normative where wording differs.
 
 ## Purpose
 

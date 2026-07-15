@@ -1,4 +1,8 @@
-# MVP Planning Requirements
+# Historical MVP Planning Requirements
+
+> **Status:** requirements used for the completed pre-auth MVP planning pass.
+> Current frozen specs and acceptance criteria supersede conflicting commands,
+> identity terms, and subsystem contracts.
 
 ## Product target
 

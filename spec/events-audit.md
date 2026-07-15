@@ -7,7 +7,9 @@ and outbox work. These concepts are related but intentionally separate.
 
 ## Core Boundary
 
-A committed changeset can create four kinds of records:
+Stage/commit persistence is frozen in
+[Immutable Staged Changeset Storage](staged-changeset-storage.md). A committed
+changeset can additionally create four kinds of evidence/delivery records:
 
 1. `object_versions`: immutable committed object states, including the current
    state.
@@ -17,6 +19,72 @@ A committed changeset can create four kinds of records:
 
 Only `object_versions` stores full object snapshots. Other tables point to
 object versions and store purpose-specific metadata.
+
+## Authentication contexts
+
+Every successfully authenticated HTTP request creates one immutable
+`auth_contexts` row:
+
+```sql
+auth_contexts
+- id                       uuid primary key
+- request_id               uuid not null
+- principal_type           text not null
+  -- human_user | agent_user | system
+- principal_id             uuid not null
+- human_user_id            uuid null
+- agent_user_id            uuid null
+- auth_session_id          uuid null
+- authorization_id         uuid null
+- root_authorization_id    uuid null
+- credential_kind          text not null
+  -- human_session | agent_authorization | authorization_request | password_login | internal
+- auth_method              text not null
+  -- bearer | password | internal
+- created_at               timestamptz not null default now()
+```
+
+Bounded roles used by the credential are snapshotted separately:
+
+```sql
+auth_context_role_assignments
+- auth_context_id          uuid references auth_contexts(id)
+- role_id                  uuid not null
+- boundary_type            text not null
+  -- project | all_projects | system
+- project_id               uuid null
+```
+
+These are server-derived query dimensions, not client assertions. An auth
+context describes the authenticated credential, not one target boundary. Login,
+status, and authorization-request operations therefore need no artificial
+boundary, while one multi-project changeset can use the same context. The
+changeset/audit `policy_summary_json` records per-operation project, action,
+matched bounded roles, policies/rules, and allow/deny result. The changeset is
+committed or denied atomically; no separate per-boundary authorization-decision
+resource is required.
+
+An authorization-request bearer is represented as the associated `human_user`
+principal with `credential_kind = authorization_request` and no effective role
+assignments. Its narrow endpoint allowlist is enforced before normal policy
+evaluation.
+
+The server does not receive or persist local process evidence, cwd, OS user,
+hostname, command summary, local binding id, or model/harness metadata.
+
+`principal_id` identifies who authenticated. `human_user_id` identifies the
+human authority anchoring an agent. Effective-actor display is derived from
+structured principal and bounded roles rather than a flattened string.
+
+Auth contexts are immutable. Core identity, role, boundary, decision, executor,
+and causation provenance cannot be rewritten. There is no special provenance
+redaction workflow for MVP; intentionally supplied auth-request reason/friendly
+name live on auth workflow records rather than auth contexts.
+
+Pre-auth databases may be invalidated when this schema is introduced. Operant
+has no deployed auth users requiring `actor_id` backfill or compatibility. New
+code moves directly to `auth_context_id`; legacy `actor_id` is not a second
+authoritative identity source.
 
 ## Current Objects and Object Versions
 
@@ -29,8 +97,12 @@ Generated resource tables are mutable, query-optimized current projections.
 Generated resource tables should include:
 
 ```sql
-current_object_version_id text references object_versions(id)
+project_id uuid not null references projects(id)
+current_object_version_id uuid references object_versions(id)
 ```
+
+Object UUIDv7 values are globally unique, but `project_id` remains explicit on
+current rows, versions, policies, queries, events, and audit evidence.
 
 After every committed changeset:
 
@@ -53,21 +125,25 @@ Proposed fields:
 
 ```sql
 object_versions
-- id                    text primary key
-- resource              text not null
-- object_id             text not null
+- id                    uuid primary key
+- project_id            uuid not null references projects(id)
+- definition_kind       text not null       # resource | relationship
+- resource_identity     text not null
+- object_id             uuid not null        # object or relationship UUID
 - version               integer not null
-- previous_version_id   text null references object_versions(id)
-- changeset_id          text not null references changesets(id)
+- previous_version_id   uuid null references object_versions(id)
+- changeset_commit_id   uuid not null references changeset_commits(id)
 - operation             text not null
-  -- create | update | archive | transition | link | unlink | comment
-- resource_revision     text not null
+  -- create | update | archive | transition | link | unlink
+- resource_revision     uuid not null
 - snapshot_json         jsonb not null
+  -- resource: {"data": {...}, "archived_at": ...}
+  -- relationship: {"from": uuid, "to": uuid, "fields": {...}, "archived_at": ...}
 - changed_fields        text[] not null default '{}'
-- actor_id              text not null
+- auth_context_id       uuid not null references auth_contexts(id)
 - created_at            timestamptz not null default now()
 
-unique(resource, object_id, version)
+unique(project_id, resource_identity, object_id, version)
 ```
 
 `id` is the globally unique object-version identifier used by foreign keys.
@@ -103,38 +179,80 @@ Proposed fields:
 
 ```sql
 audit_events
-- id                       text primary key
-- changeset_id             text null references changesets(id)
-- object_version_id        text null references object_versions(id)
-- actor_id                 text not null
+- id                       uuid primary key
+- stage_id                 uuid null references staged_changesets(id)
+- changeset_commit_id      uuid null references changeset_commits(id)
+- object_version_id        uuid null references object_versions(id)
+- auth_context_id          uuid null references auth_contexts(id)
+- executor_type             text null
+  -- human_user | agent_user | system
+- executor_id               uuid null
+- causation_audit_event_id  uuid null references audit_events(id)
+- authentication_failure_code text null
 - event_type               text not null
-  -- changeset.previewed
+  -- changeset.staged
   -- changeset.committed
-  -- changeset.denied
+  -- changeset.denied | cancelled
   -- object.created
   -- object.updated
   -- object.archived
   -- hook.executed
   -- policy.denied
-- resource                 text null
-- object_id                text null
-- action                   text null
-  -- read | create | update | archive | transition | action.convert_lead
+  -- auth.recovery.initiated | completed | cancelled | expired
+  -- secret.created | rotated | disabled | rotated_and_enabled
+  -- hook_secret_grant.created | carried_forward | replaced | revoked
+  -- hook_secret_resolution.failed
+- project_id              uuid null references projects(id)
+- resource_identity       text null
+- object_id               uuid null
+- action                  text null
+  -- read | create | update | archive | transition | action:operant/crm:convert_lead
 - decision                 text null
   -- allowed | denied | warning | committed | failed
 - policy_summary_json      jsonb null
 - validation_summary_json  jsonb null
-- hook_execution_ids       text[] not null default '{}'
+- hook_execution_ids       uuid[] not null default '{}'
 - request_metadata_json    jsonb not null default '{}'
+  -- evolving server/protocol metadata only; no local process evidence
 - created_at               timestamptz not null default now()
 ```
 
+Comments are append-only records with their own UUIDv7, project/target identity,
+body, target object-version provenance, commit/auth context, and timestamp. They
+do not create or increment a target `object_versions` row.
+
 Why audit is separate from object versions:
 
-- denied changesets have no object version but need audit records.
-- hook/policy validation may happen during preview before any object version
+- denied staging/commit attempts have no object version but need audit records.
+- hook/policy validation may happen during staging before any object version
   exists.
 - audit records explain decisions; object versions store committed state.
+
+An authenticated authorization denial has an auth context. A failure before
+authentication completes uses the same audit table with `auth_context_id = null`
+and an `authentication_failure_code` such as `credential_missing`,
+`credential_invalid`, `session_revoked`, or `authorization_ancestor_invalid`. No
+principal is invented when authentication did not establish one. The server does
+not store IP, user-agent, or client fingerprinting for these failures.
+
+This is one audit provenance model with an optional context for pre-auth
+failures, not two competing lookup systems. Rejected operations never create
+committed `events`; successful committed events reach provenance through their
+changeset's committed auth context.
+
+## Execution and causation
+
+The initiating auth context and actual executor are separate. For synchronous
+work, executor normally equals the authenticated principal. For background hook
+work, `auth_context_id` preserves the initiating request while `executor_type`
+and `executor_id` identify a system actor such as `system:outbox_worker`.
+`causation_audit_event_id` links derived work to the audit event that caused it.
+
+`staged_changesets.created_auth_context_id` and
+`changeset_commits.committed_auth_context_id` are separate because stage and
+commit are different requests. Object versions and comments reference the committing auth context.
+Hook executions reference the initiating auth context plus their system executor
+and causation record.
 
 ## `events`
 
@@ -151,10 +269,12 @@ Proposed fields:
 
 ```sql
 events
-- id                 text primary key
-- changeset_id       text not null references changesets(id)
-- object_version_id  text null references object_versions(id)
-- event_type         text not null
+- id                    uuid primary key
+- changeset_commit_id   uuid not null references changeset_commits(id)
+- project_id            uuid null references projects(id)
+- object_version_id     uuid null references object_versions(id)
+- schema_version        integer not null default 1
+- event_type            text not null
   -- object.created
   -- object.updated
   -- object.archived
@@ -162,8 +282,8 @@ events
   -- comment.added
   -- relationship.created
   -- changeset.committed
-- resource           text null
-- object_id          text null
+- resource_identity  text null
+- object_id           uuid null
 - occurred_at        timestamptz not null default now()
 - payload_json       jsonb not null default '{}'
 ```
@@ -201,30 +321,25 @@ Examples powered by outbox hook work:
 - cache/materialized-view refresh hooks
 - external sync hooks
 
-Proposed fields:
+The normative schema and lifecycle are frozen in
+[Durable Outbox Delivery](outbox-delivery.md). One mutable delivery aggregate
+owns status, pinned execution identity, stable idempotency key, retry generation,
+availability, and fixed lease. Append-only attempt rows own each claim's timing,
+worker identity, outcome, and redacted error. Hook executions own logs/digests
+and secret-version evidence.
 
-```sql
-outbox
-- id             text primary key
-- event_id       text not null references events(id)
-- hook_name      text not null
-- hook_revision  text not null
-- script_digest  text not null
-- envelope_json  jsonb not null
-- status         text not null
-  -- pending | running | succeeded | failed | dead
-- attempts       integer not null default 0
-- available_at   timestamptz not null default now()
-- locked_by      text null
-- locked_at      timestamptz null
-- last_error     text null
-- created_at     timestamptz not null default now()
-- updated_at     timestamptz not null default now()
-```
+The main server runs one in-process polling loop and claims ready rows using
+`FOR UPDATE SKIP LOCKED`; no Redis/Kafka, daemon, LISTEN/NOTIFY dependency, or
+second container is required. Delivery is durable at-least-once and deliberately
+unordered in MVP. A stable delivery UUID is supplied as the external provider
+idempotency key across retries, lease recovery, and manual retry generations.
 
-Workers claim outbox rows with Postgres locking, run the hook, write
-`hook_executions`, and update outbox status. No Redis/Kafka/external coordinator
-is required for correctness.
+Queued work pins immutable hook revision/script/security/attachment/grant
+context. New events select the active revision; old queued work runs old code
+with the secret's current value version. Configuration/security failures dead
+letter immediately; transient structured outcomes use configurable full-jitter
+backoff. Cancellation is allowed only before claim. All operational rows are
+retained in MVP.
 
 ## Commit Transaction Flow
 
@@ -234,11 +349,12 @@ For an object update:
 begin
 
 update res_lead ... version = version + 1
-insert object_versions ov_123 snapshot_json = current row after update
-update res_lead set current_object_version_id = ov_123
-insert audit_events ... object_version_id = ov_123
-insert events ... object_version_id = ov_123
-insert outbox rows for after_commit hooks subscribed to the event
+insert object_versions 019b7a2e-7c10-7000-8000-000000000201 snapshot_json = current row after update
+update res_lead set current_object_version_id = 019b7a2e-7c10-7000-8000-000000000201
+insert changeset_commits ... stage_id = 019b7a2e-7c10-7000-8000-000000000202
+insert audit_events ... changeset_commit_id + object_version_id = 019b7a2e-7c10-7000-8000-000000000201
+insert events ... changeset_commit_id + object_version_id = 019b7a2e-7c10-7000-8000-000000000201
+insert outbox delivery rows for event.after_commit hooks subscribed to the event
 
 commit
 ```
@@ -251,14 +367,19 @@ current resource rows.
 
 | Table             | Job                               | Full snapshot? | Used for                                   |
 | ----------------- | --------------------------------- | -------------- | ------------------------------------------ |
+| `auth_contexts`   | immutable request auth provenance | no             | principal/roles/boundary/session lookup    |
 | `object_versions` | immutable committed object states | yes            | history, diff, agent-driven restore/revert |
 | `audit_events`    | accountability/explanation        | no             | who/why/decision trail                     |
 | `events`          | committed facts                   | no             | automation/subscriptions                   |
 | `outbox`          | async after-commit hook queue     | no             | retryable side effects                     |
 
-## Open Questions
+## Frozen v1 retention/versioning
 
-- Event schema versioning strategy.
-- Webhook/after-commit hook ordering guarantees per object/resource.
-- Retention period for audit records and event payloads.
-- Exact purge semantics for object + history deletion.
+- Every event stores `schema_version: 1`; event type plus schema version defines
+  its minimal payload contract. Outbox rows pin their envelope schema separately.
+  Incompatible future event payloads use a new integer version.
+- MVP retains audit events, committed events, and object versions indefinitely.
+  Operational outbox detail follows its own retain-all MVP contract.
+- Object/history hard purge is not exposed in MVP. Archive plus compensating
+  changesets are the supported lifecycle. A future purge design must preserve or
+  tombstone referential audit/event provenance explicitly.

@@ -111,8 +111,9 @@ Examples:
 - Drop relationship table or foreign key target.
 - Change semantic meaning of a field without migration/versioning.
 
-Default behavior: never auto-apply. Stage/deprecate by default and require
-explicit destructive confirmation tied to plan digest.
+Default behavior: never auto-apply. Block until live facts are safe, require an
+explicit intermediate pack revision when cleanup needs transitional schema, and
+require destructive confirmation tied to the final whole-plan digest.
 
 ### Operational Hazard
 
@@ -234,12 +235,17 @@ See [CRM Migration Prototype](crm-migration-prototype.md) for a concrete
 CRM-based walkthrough of detection rules, hazards, staged deprecations, data
 cleanup, confirmation tokens, and destructive cleanup.
 
-## Open Questions
+## Frozen MVP decisions
 
-- Should we embed/use `pg-schema-diff` directly for Postgres plans, or only
-  borrow its hazard model?
-- Should `optctl` expose hazard codes exactly like our internal migration
-  planner?
-- What table size thresholds move an operation from safe to risky?
-- Do we require temporary database validation for every migration plan or only
-  risky/destructive ones?
+- Operant owns a semantic pack-definition diff/planner and borrows established
+  hazard concepts; it does not embed `pg-schema-diff` as a runtime dependency.
+- Stable internal hazard codes are the exact codes exposed through HTTP and
+  `optctl`; presentation may add explanations but never rename them.
+- MVP has no table-size threshold that changes safety class. Any operation that
+  scans/rewrites data or requests a blocking/strong lock is intrinsically risky;
+  preview additionally reports live row/byte estimates so operators can judge
+  duration. This is conservative and avoids environment-dependent classes.
+- Every generated DDL plan receives structural execution validation against
+  temporary real Postgres before it becomes applicable. Risky/destructive plans
+  also revalidate live blockers/facts immediately before locked transactional
+  activation. Temporary validation never substitutes for live-data checks.

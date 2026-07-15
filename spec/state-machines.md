@@ -1,47 +1,38 @@
 # State Machines
 
-## Summary
+## Decision
 
-Object types may define lifecycle rules. The platform enforces allowed
-transitions, required fields, permissions, and approvals automatically.
+A pack resource may have at most one separate `Lifecycle` definition using the
+strict shape in `pack-definition-schemas.md`. Lifecycles are optional; packs use
+ordinary validated fields for orthogonal status dimensions.
 
-## Example
+A lifecycle names one required string field, initial state, states/terminal
+flags/required fields, and allowed named transitions with optional CEL condition
+and constant `set`/`unset`. Unsupported inline policy, approval, hook, event, or
+undo subdocuments are rejected.
 
-`todo -> doing -> blocked -> done`
+## Enforcement
 
-A transition can require:
+A `transition` changeset operation is staged/committed like every other write:
 
-- Actor permissions.
-- Object ownership.
-- Required fields.
-- Approval.
-- Validation predicates.
-- Side-effect events.
-- Validation or transition scripts.
+1. current state and expected object version are dependencies;
+2. transition edge/CEL condition and final required fields are validated;
+3. exact `transition` policy is evaluated;
+4. matching `changeset.before_stage`/`changeset.validate` Hook attachments may
+   normalize, reject, warn, or require approval through their standard schemas;
+5. commit revalidates current version/lifecycle revision/authorization/approval
+   without rerunning hooks; and
+6. the committed engine event describes the transition.
 
-## State Machine Definition
+Lifecycle configuration does not directly name hooks; hooks attach themselves
+to resource/phase and inspect the curated operation/current/proposed context.
+There is no generic undo flag. Reversal requires an explicitly allowed reverse
+transition or a compensating changeset.
 
-A lifecycle spec should include:
+## Frozen v1 boundaries
 
-- State keys and display names.
-- Initial state.
-- Terminal states.
-- Allowed transitions.
-- Required fields per state or transition.
-- Transition-specific policy requirements.
-- Approval requirements.
-- Whether transition can be undone or superseded.
-- Hook bindings for validation, derived changes, and after-commit behavior.
-
-## Changeset Integration
-
-State transitions are intentions inside changesets. They should be previewable
-and revalidated at commit time. Transition hooks should receive the same
-structured context used by changeset validation hooks.
-
-## Open Questions
-
-- Can objects have multiple independent state machines?
-- Are state machines required for all object types? Assumed no.
-- How are cross-object transitions represented, e.g. closing a project closes
-  tasks?
+- Multiple independent machines per resource are deferred.
+- A lifecycle transition mutates only its target object.
+- Cross-object workflows are semantic actions whose `action.stage` hook emits
+  the complete multi-object graph.
+- State aliases and inferred transitions are forbidden.

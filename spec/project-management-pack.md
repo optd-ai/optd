@@ -1,4 +1,8 @@
-# Project Management Pack
+# Project Management Proof-Pack Requirements
+
+> **Status:** normative proof-pack domain requirements. Runtime platform projects
+> remain separate from the pack resource `operant/projects:project`; every pack
+> object also carries an explicit platform project ID.
 
 ## Purpose
 
@@ -15,48 +19,54 @@ special cases.
 kind: Pack
 apiVersion: operant.dev/v1
 metadata:
-  namespace: default
-  name: project_management
+  publisher: operant
+  name: projects
   version: 0.1.0
 spec:
   purpose: Project and task management resources for agent-operated work tracking.
+  axi:
+    home:
+      resources: [operant/projects:project, operant/projects:task]
+      help: ["optctl --project ${project} list operant/projects:task"]
 ```
 
-Dotted IDs use the `default` namespace, e.g. `default.task`.
+The global pack identity is `operant/projects`; child definitions use canonical
+identities such as `operant/projects:task`.
 
 ## Minimum resources
 
-### `default.project`
+### `operant/projects:project`
 
 Fields:
 
 - `name`: string, required
-- `description`: text/string, optional
+- `description`: string, optional
 - `status`: string enum, e.g. `active|on_hold|done|archived`
-- `owner_id`: string, required
+- `owner_id`: string with UUID format, required
 - `visibility`: string enum, e.g. `private|members|internal`
-- `start_date`: date/datetime, optional
-- `target_date`: date/datetime, optional
+- `start_date`: date, optional
+- `target_date`: date, optional
 
 AXI guidance should explain how agents create projects, find active work, and
 inspect project health.
 
-### `default.task`
+### `operant/projects:task`
 
 Fields:
 
 - `title`: string, required
-- `description`: text/string, optional
-- `project_id`: reference to `default.project`, required
-- `stage_id`: reference to `default.task_stage`, required
-- `assignee_id`: string, optional
+- `description`: string, optional
+- `work_project_id`: reference to `operant/projects:project`, required
+- `stage_id`: reference to `operant/projects:task_stage`, required
+- `state`: required string enum `todo|in_progress|blocked|done`; lifecycle field
+- `assignee_id`: string with UUID format, optional
 - `priority`: string enum, e.g. `low|normal|high|urgent`
-- `deadline`: date/datetime, optional
-- `blocked_reason`: text/string, optional
-- `estimated_hours`: number, optional
-- `spent_hours`: number, optional or derived later
+- `deadline`: date, optional
+- `blocked_reason`: string, optional
+- `estimated_hours`: decimal, optional
+- `spent_hours`: decimal, optional or derived later
 
-### `default.task_stage`
+### `operant/projects:task_stage`
 
 Seeded reference resource.
 
@@ -74,16 +84,16 @@ Required seed records:
 - Blocked
 - Done
 
-### `default.project_milestone`
+### `operant/projects:project_milestone`
 
 Fields:
 
 - `name`: string, required
-- `project_id`: reference to `default.project`, required
-- `deadline`: date/datetime, optional
+- `work_project_id`: reference to `operant/projects:project`, required
+- `deadline`: date, optional
 - `status`: string enum, e.g. `planned|at_risk|done`
 
-### `default.task_tag`
+### `operant/projects:task_tag`
 
 Seedable reference resource.
 
@@ -92,63 +102,78 @@ Fields:
 - `name`: string, required
 - `color`: string, optional
 
-### `default.timesheet_entry`
+### `operant/projects:project_member`
 
 Fields:
 
-- `task_id`: reference to `default.task`, required
-- `actor_id`: string, required
-- `hours`: number, required
-- `description`: text/string, optional
-- `entry_date`: date/datetime, required
+- `work_project_id`: reference to `operant/projects:project`, required
+- `principal_id`: string with UUID format, required
+- `member_role`: string enum `manager|member|viewer`, required
+
+A project-scoped composite unique constraint covers
+`work_project_id + principal_id`.
+
+### `operant/projects:timesheet_entry`
+
+Fields:
+
+- `task_id`: reference to `operant/projects:task`, required
+- `principal_id`: UUID string, required; references an authenticated platform
+  principal identity by value (not a pack-object `ref`)
+- `hours`: decimal, required and positive
+- `description`: string, optional
+- `entry_date`: date, required
 
 ## Relationships
 
 Minimum relationships:
 
-- `default.project_task`: project to task if not represented only by
-  `task.project_id`.
-- `default.task_milestone`: task to milestone.
-- `default.task_tag_assignment`: task to tag.
-- `default.project_member`: project to actor/user id or actor-like member object
-  if an actor resource exists later.
+- `operant/projects:task_milestone`: task to milestone.
+- `operant/projects:task_tag_assignment`: task to tag.
+
+Project-to-task uses the required direct `task.work_project_id`; it is not also
+duplicated as a relationship row. Membership is the explicit
+`operant/projects:project_member` resource because relationship endpoints cannot
+target undeclared platform principals.
 
 Use direct reference fields for required ownership links. Use relationship
 tables when the link needs metadata, history, or policy.
 
 ## Lifecycle
 
-`default.task` must have a lifecycle with states:
+`operant/projects:task` must have a lifecycle with states:
 
 ```text
 todo -> in_progress -> blocked -> in_progress -> done
 todo -> blocked
-blocked -> done only if validation permits or manager override exists
+blocked -> done only when `blocked_reason` has been cleared; otherwise the
+stage is rejected (a manager may first stage the corrective update)
 ```
 
-The initial stage is Todo. Done tasks require either no blocking reason or a
-validation hook that confirms the block was resolved.
+The lifecycle field is `state` and initial state is `todo`. `stage_id` selects a
+board column whose seeded `state` must match; action hooks set both atomically.
+Done requires an absent `blocked_reason`, enforced by validation.
 
 ## Actions
 
 Minimum one action is required; preferred set:
 
-- `default.start_task`: moves a task from Todo/Blocked to In Progress.
-- `default.block_task`: moves a task to Blocked and requires `blocked_reason`.
-- `default.complete_task`: moves a task to Done and can optionally write
+- `operant/projects:start_task`: moves a task from Todo/Blocked to In Progress.
+- `operant/projects:block_task`: moves a task to Blocked and requires `blocked_reason`.
+- `operant/projects:complete_task`: moves a task to Done and can optionally write
   spent-hours summary.
 
-Actions should use the same action/hook contract as CRM actions: previewable,
-policy-checked, hook-validated, and commit through changesets.
+Actions use `action.stage`, are policy-checked/hook-validated, and commit only
+through the returned immutable stage.
 
 ## Hooks
 
 Minimum hooks:
 
-- `validate_task`: before changeset/action validation. Rejects invalid stage
+- `validate_task`: `changeset.validate`. Rejects invalid state
   transitions, missing block reasons, or impossible timesheet hours.
-- `notify_project_change`: after commit. Demonstrates outbox execution without
-  requiring an external network call in tests.
+- `notify_project_change`: `event.after_commit`. It returns `delivery.v1`
+  success without network in deterministic tests, proving outbox execution.
 
 Hooks must be Deno/TypeScript scripts with paired Hook YAML.
 
@@ -156,9 +181,10 @@ Hooks must be Deno/TypeScript scripts with paired Hook YAML.
 
 Minimum policy rules:
 
-- `super_admin`/admin can do everything.
-- Project managers can create/update/archive projects and tasks in projects they
-  manage.
+- Built-in `system:super_admin` remains the platform bypass and is not a pack
+  policy wildcard.
+- `operant/projects:project_manager` can create/update/archive project-domain
+  objects and tasks in platform projects where assigned.
 - Project members can read project tasks and update tasks assigned to them.
 - Assignees can start/block/complete their assigned tasks.
 - Viewers can read visible projects/tasks.
@@ -172,15 +198,15 @@ Seed at least:
 - task stages
 - common task tags, e.g. Bug, Feature, Chore, Research
 
-Seeds must be applied through ordinary auditable changesets or the
-implementation's changeset-backed seed path.
+Seeds use the exact changeset-backed reconcile route and
+`seed:operant/projects:<seed>` authorization contract.
 
 ## Acceptance
 
 The project-management pack is accepted when:
 
 1. It applies on a fresh MVP server without special-case code.
-2. `optctl metadata resource default.task` exposes fields, lifecycle, policy
+2. `optctl metadata resource operant/projects:task` exposes fields, lifecycle, policy
    hints, and AXI guidance.
 3. A test creates a project, creates a task, starts it, blocks it, unblocks it,
    completes it, logs a timesheet entry, and reads history.

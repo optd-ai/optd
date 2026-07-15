@@ -1,6 +1,10 @@
-# Design Proposals
+# Historical Design Proposals
 
-This file captures current proposals for questions that emerged while designing
+> **Status:** supporting design history only. Frozen topic-specific specs and
+> `spec/README.md` take precedence. Implementers must not treat examples or open
+> wording here as the current contract.
+
+This file captures proposals that emerged while designing
 packs, hooks, resources, changesets, and `optctl`.
 
 ## 1. Pack Authoring Format
@@ -60,6 +64,9 @@ Rules:
 
 ### `patch.v1`
 
+> Superseded: the normative schema is the RFC 6902 subset in
+> [Changeset Operation Schemas](changeset-operation-schema.md).
+
 Used by normalization hooks.
 
 ```json
@@ -81,7 +88,10 @@ Rules:
 
 ### `changeset.operations.v1`
 
-Used by action commit/preview hooks.
+> Superseded: the normative staged-operation schema is
+> [Changeset Operation Schemas](changeset-operation-schema.md).
+
+Used by action hooks.
 
 ```json
 {
@@ -150,6 +160,9 @@ execute/retry where possible.
 ```
 
 ## 4. Changeset Operation Schema Proposal
+
+> Historical proposal retained for prototype context. The frozen v1 contract is
+> [Changeset Operation Schemas](changeset-operation-schema.md).
 
 Prototype evidence: `prototypes/changesets/` runs this operation model through a
 Deno HTTP server backed by PGlite.

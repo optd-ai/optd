@@ -12,7 +12,7 @@
     "axi": {
       "purpose": "Convert a qualified lead into company, contact, and opportunity records.",
       "help": [
-        "optctl action preview default.convert_lead --input ...",
+        "optctl action stage default.convert_lead --input ...",
       ],
     },
   },

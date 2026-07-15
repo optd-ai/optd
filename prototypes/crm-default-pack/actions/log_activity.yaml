@@ -16,7 +16,7 @@
     "axi": {
       "purpose": "Log an activity and optional note against a CRM object.",
       "help": [
-        "optctl action preview default.log_activity --input ...",
+        "optctl action stage default.log_activity --input ...",
       ],
     },
   },

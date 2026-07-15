@@ -2,46 +2,32 @@
 
 ## Summary
 
-The system should have a Kubernetes-like configuration model: built-in defaults
-that work, plus user-defined resources and behaviors. Default CRM/Odoo-inspired
-resources are configuration that users can inspect, fork, edit, and replace.
+The system has a Kubernetes-like strict pack configuration model. Bundled proof
+packs are ordinary inspectable source. Forks use a publisher identity controlled
+by the operator; they do not silently replace another publisher's pack.
 
 ## Resource Definition
 
-A resource definition should describe:
+A resource definition describes its lowercase snake-case name, display metadata,
+fields/schema, supported database constraints/index/search configuration, and
+AXI/CLI guidance. Relationship, lifecycle, action, policy, hook, and seed
+children are separate strict pack definitions that reference the resource; they
+are not arbitrary inline resource subdocuments. Storage mappings and revision
+IDs are server-generated normalized metadata, not author-selected table names.
 
-- Kind/type name. Resource kind names are always lowercase, using snake case for
-  multi-word kinds.
-- Version.
-- Display metadata.
-- Storage/table mapping.
-- Fields and schema.
-- Relationships.
-- Database constraints.
-- Lifecycle/state machine.
-- Named actions/intentions.
-- Policy rules.
-- Hooks/scripts.
-- Indexes and search participation.
-- AXI/CLI guidance for agents (`axi`).
-- Seed/reference data when packaged.
-- Default views/CLI hints, if desired.
-
-See [CRM Pack Definition](crm-pack-definition.md) for a concrete pack-level
-prototype.
+See [Pack Definition Schemas](pack-definition-schemas.md) for the normative v1
+vocabulary; the CRM fixture is the concrete executable example.
 
 ## Declarative Apply
 
 Executable prototype evidence for pack upload and resource-to-SQL compilation
 lives in `prototypes/pack-sql/`.
 
-Users should be able to apply configuration files through CLI/API:
-
-- Create/update resource definitions.
-- Preview schema/config changes.
-- Validate whether existing data violates new constraints.
-- Apply changes atomically where possible.
-- Record config revisions.
+Operators preview and apply complete publisher-qualified pack revisions through
+the CLI/API. Preview validates schema/config changes and live-data constraints;
+apply activates the exact reviewed migration plan transactionally and records
+immutable definition revisions. There is no independent mutable-resource apply
+endpoint.
 
 ## Database-Level Constraints
 
@@ -114,14 +100,10 @@ Guideline:
 - Use relationship resources for collaborative/domain links that need metadata,
   history, or policy.
 
-## Default Packs
+## Proof and future packs
 
-Default packs should be ordinary resources and scripts:
-
-- CRM pack.
-- Project-management pack inspired by Odoo Project.
-- Helpdesk pack.
-- Odoo research pack, if useful.
+The MVP bundled proof packs are CRM and project management. Helpdesk and other
+Odoo-inspired packs are future examples, not MVP acceptance requirements.
 
 Users should be able to copy and modify them. No pack should require hidden
 special-case code.
@@ -155,11 +137,12 @@ hashed at apply time, stored in the database as part of an immutable config
 revision, and recorded by digest for auditability. Multiline script strings in
 JSON are not the primary upload format.
 
-Pack upload should ultimately use the same HTTP multipart API whether initiated
-by CLI, UI, or agent. The CLI can package a local directory/archive and submit
-it to the API, allowing the server to validate that every hook references an
-uploaded script file.
+Pack preview uses the same HTTP multipart API whether initiated by CLI, a future
+UI, or another client. MVP CLI packages a local directory (archive input is
+deferred) and submits it to the API, allowing the server to validate every
+referenced script/file.
 
-## Open Questions
+## Deferred beyond MVP
 
-- Should config support templating?
+Configuration templating is not supported. Strict explicit pack YAML remains the
+single authoring contract.

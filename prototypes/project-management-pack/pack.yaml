@@ -25,7 +25,7 @@
       "help": [
         "optctl metadata resource default.task",
         "optctl query default.task --where 'project_id == \"PROJECT_ID\"'",
-        "optctl action preview default.start_task --input '{\"task_id\":\"TASK_ID\"}'",
+        "optctl action stage default.start_task --input '{\"task_id\":\"TASK_ID\"}'",
       ],
     },
   },

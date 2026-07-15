@@ -1,48 +1,23 @@
 # Extensions
 
-## Summary
+## MVP decision
 
-Extensions let agents and integrations add metadata without requiring database
-migrations for every new field.
+A separate extension namespace/payload/schema composition system is not in MVP.
+Runtime objects accept only fields declared by their exact active pack resource
+revision; undeclared metadata is rejected and cannot bypass schema, policy,
+history, query, or migration behavior.
 
-Example for `task`:
+Operators extend a domain by authoring/applying a normal publisher-qualified pack
+revision. Added fields and relationships use ordinary strict definitions,
+changesets, policy, generated Postgres schema, and pack migration classification.
+For file-like data in MVP, a pack declares ordinary URI/object-key/checksum/
+content-type fields that point to S3 or another object store; Operant does not
+store the binary or hide metadata in an extension bag.
+Cross-pack semantic field equivalence/conflict resolution is not inferred.
 
-- `github`
-- `forecasting`
-- `sales-agent`
-- `jira-sync`
+## Future research only
 
-## Principles
-
-- Extension fields live in namespaces.
-- Only declared fields are queryable/indexed.
-- Undeclared metadata may be stored if allowed, but should not participate in
-  policy/index/search without declaration.
-- Extension fields must still obey audit, changeset, policy, and resource
-  constraint rules.
-
-## Extension Definition
-
-An extension field declaration should include:
-
-- Namespace.
-- Field key.
-- Type.
-- Validation.
-- Default behavior.
-- Indexing/queryability.
-- Search/summarization participation.
-- Permission/policy visibility.
-- Version/deprecation metadata.
-
-## Storage Direction
-
-Initial storage can use JSONB for extension payloads plus generated columns or
-side indexes for declared queryable fields.
-
-## Open Questions
-
-- Should extension schemas be pack-scoped, app-scoped, user-local, or globally
-  published?
-- How are extension field migrations/version changes handled?
-- Can two extensions define fields with the same semantic purpose?
+A later extension system could consider declared namespaced JSONB fields,
+generated indexes, independent versioning, and composition conflicts. None of
+those storage/API terms are reserved, and implementation work must not create a
+generic `extensions` bag for compatibility.

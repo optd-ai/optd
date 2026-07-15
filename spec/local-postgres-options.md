@@ -1,6 +1,10 @@
-# Local Postgres Options: PGlite vs Bundled Postgres
+# Historical Local Postgres Options Research
 
-## Question
+> **Status:** supporting research only. The frozen target is real external or
+> app-managed Postgres in `deployment.md`/`storage-postgres.md`; PGlite is
+> prototype-only.
+
+## Historical question
 
 Can we get SQLite-like deployment ergonomics while keeping Postgres semantics,
 so the app can decide at boot whether to start a local database instead of

@@ -1,4 +1,7 @@
-# CRM Migration Prototype
+# CRM Migration Prototype Evidence
+
+> **Status:** supporting prototype evidence. Open questions and old CLI examples
+> here do not override the frozen migration, staging, and pack identity specs.
 
 ## Status
 
@@ -757,7 +760,7 @@ Audit records include:
 8. Data cleanup should happen through normal changesets where possible,
    preserving audit and policy behavior.
 
-## Open Questions
+## Questions recorded during the prototype
 
 - How do we define table-size thresholds for operational hazards?
 - Should destructive cleanup always require export artifact generation first?

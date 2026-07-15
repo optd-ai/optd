@@ -1,4 +1,7 @@
-# MVP Roadmap and Prototype Gaps
+# Historical MVP Roadmap
+
+> **Status:** implementation history for the completed pre-auth MVP. It contains
+> old preview/action/namespace terminology and must not drive the next plan. and Prototype Gaps
 
 ## Current prototype status
 

@@ -88,6 +88,14 @@ Example rules:
 - Activities are assigned to a user/agent.
 - Overdue activities drive reminders and stale-deal detection.
 
+## Relationships and authorization proof
+
+Use first-class relationships for domain links needing metadata/history. The
+proof pack also includes `operant/crm:opportunity_viewer` from opportunity to
+built-in `system:principal`, unique by active `(from,to)`, so one-hop ReBAC can
+be exercised without actor-supplied arrays or deep team traversal. Ownership
+ABAC uses UUID-formatted `owner_id == actor.id`.
+
 ## Automations via Scripts
 
 CRM behavior should be built as hooks/scripts attached to resources and
@@ -111,7 +119,7 @@ A headless CRM should be operable via:
 - CLI commands to apply resources.
 - API/MCP actions for agents.
 - Query/search commands.
-- Changeset preview/commit commands.
+- Changeset stage/commit commands.
 
 Example flow:
 
@@ -123,10 +131,12 @@ Example flow:
 6. Hooks assign owners and schedule activities.
 7. Sales agent transitions opportunities through pipeline with preview/approval.
 
-## Open Questions
+## Frozen proof-pack boundaries
 
-- Should `lead` and `contact` be separate defaults, or should lead be a
-  lifecycle state of contact/account interest?
-- Should `deal` and `opportunity` both exist, or should one be an alias?
-- How much sales quoting/order functionality belongs in CRM defaults vs a sales
-  pack?
+- `lead` and `contact` are separate default resources. Conversion preserves lead
+  provenance while creating/linking contact/company/opportunity records.
+- `opportunity` is the only deal-pipeline resource identity; there is no `deal`
+  alias in v1.
+- The CRM proof pack owns lead/contact/company/opportunity/activity workflows.
+  Quote, order, invoice, and fulfillment resources belong in a future sales pack
+  and are not required for the platform MVP.

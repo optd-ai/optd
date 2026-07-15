@@ -21,7 +21,7 @@
         ],
         "help": [
           "optctl query default.lead --where 'active()'",
-          "optctl action preview default.convert_lead --input lead_123",
+          "optctl action stage default.convert_lead --input lead_123",
           "optctl metadata resource default.opportunity",
         ],
       },

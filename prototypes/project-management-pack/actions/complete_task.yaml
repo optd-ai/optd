@@ -9,7 +9,7 @@
     "axi": {
       "purpose": "Complete assigned project work and optionally write a spent_hours summary.",
       "help": [
-        "optctl action preview default.complete_task --input '{\"task_id\":\"TASK_ID\",\"stage_id\":\"done\"}'",
+        "optctl action stage default.complete_task --input '{\"task_id\":\"TASK_ID\",\"stage_id\":\"done\"}'",
       ],
     },
   },

@@ -1,5 +1,14 @@
 # Policies and Authorization
 
+## Definition and assignment model
+
+Role and policy definitions are globally registered, while explicit assignments
+control where they apply. Role assignments, policy assignments, and agent
+authorizations must select exactly one `project`, `all_projects`, or `system`
+boundary. Missing boundary never implies global authority. See
+[Authorization Definitions and Assignments](authorization-assignments.md) for
+the normative model.
+
 ## Deployment Constraint
 
 The policy system must preserve simple horizontal scaling:
@@ -11,6 +20,34 @@ The policy system must preserve simple horizontal scaling:
 - No correctness-critical coordination between app nodes.
 - Any distributed cache or queue is optional, not required for authorization
   correctness.
+
+## Capability explanations
+
+The server computes role capability explanations for one explicit target
+boundary from globally registered role/policy definitions and active policy
+assignments. Role `axi` describes authored intent; policy structure remains
+authoritative. Policy rules may provide explanatory `axi.summary` text.
+
+Structured explanations classify each resource/action capability as
+unconditional, ABAC-conditional, or ReBAC-conditional and retain policy/rule ids
+and versions. Conditional access must never be flattened into unconditional
+claims. `optctl` formats this server response and does not independently
+interpret policy. See [Authentication](authentication.md) for role-listing and
+approval UX.
+
+## Semantic operations and hook effects
+
+Policy authorizes the user-visible operation/action. Reviewed hook/action effect
+declarations are enforced through invocation-bound internal capabilities; the
+initiator does not separately need raw permissions for every implementation
+effect. Stage validates all synchronous effects and returns non-committable on
+undeclared/unavailable capability. System hook executors never imply
+super-admin. Authorization denials explain current roles/boundary/failed
+capability without recommending escalation.
+
+For multi-project changesets, the server resolves one token and computes the
+actor's effective bounded roles plus active policies independently for every
+operation/project. The whole changeset remains atomic.
 
 ## Authorization Questions
 
@@ -103,106 +140,53 @@ directly so policy can use a one-hop relationship.
 Start with one-level relationship checks in Postgres. Defer dedicated graph
 authorization infrastructure unless scale or sharing complexity demands it.
 
-## Ory
+## Frozen implementation direction
 
-Ory is an ecosystem rather than one thing:
+Operant does not require Ory, OAuth/OIDC/JWT validation, an identity proxy, or a
+separate graph/policy service in MVP. All environments use the same built-in
+opaque-token authentication contract. Future identity-provider integration must
+exchange into server-issued Operant sessions rather than creating a second route
+auth mode.
 
-- Ory Kratos: identity and user management.
-- Ory Hydra: OAuth2/OpenID Connect provider.
-- Ory Keto: relationship-based permissions inspired by Zanzibar.
-- Ory Oathkeeper: identity-aware proxy.
+RBAC, ABAC, and one-hop ReBAC are complementary inputs to one deterministic
+internal policy evaluator:
 
-### Pros
+- RBAC selects exact role/action/resource candidates from active definitions and
+  assignments in the target boundary.
+- ABAC constrains candidates through the frozen CEL subset over object fields and
+  immutable `actor.id|principal_type|human_user_id`.
+- ReBAC adds at most one direct typed relationship from the protected object to
+  built-in `system:principal` matched by actor/human ID.
 
-- Strong identity/auth ecosystem.
-- Can avoid building login, OAuth/OIDC, session, and relationship permission
-  systems from scratch.
-- Keto is relevant for ReBAC.
+Policy definitions are strict pack YAML and grant nothing until an active policy
+assignment selects a boundary. Caller roles/actor attributes are never input.
+Approval requirements come from trusted validation-hook output and use their
+separate contract; policy controls who may decide.
 
-### Cons
+## Enforcement points
 
-- Adds multiple services and operational concepts.
-- May conflict with “simple deployment” if all components are required.
-- Keto/relationship checks can become another coordination dependency unless
-  carefully backed and deployed.
-- The platform still needs domain-specific policy decisions beyond identity.
+- Protected system API admission uses exact dotted system capabilities.
+- Direct stage evaluates each operation/project; action/seed stage evaluates its
+  exact semantic permission and reviewed effect manifest.
+- Commit rechecks current authorization in one SQL-statement snapshot under the
+  canonical locks.
+- Query/search/history lower policy predicates into SQL before keyset sorting,
+  limiting, and counting.
+- Outbox execution uses pinned internal capability plus current global hook
+  runtime policy; initiating roles are not re-evaluated.
 
-### Fit
+Postgres constraints preserve structural/race invariants, while application
+services own action/context policy. Postgres RLS is not required for MVP and no
+application post-filter pagination is permitted.
 
-Use OIDC/JWT compatibility so Ory, Auth0, Clerk, WorkOS, Cognito, or enterprise
-IdPs can integrate. Do not require Ory for the core deployment. Ory may be a
-supported integration or optional deployment profile, not a mandatory
-dependency.
+## Frozen v1 schema/evidence
 
-## Recommended Initial Direction
-
-Use a small internal expression model intentionally designed for SQL lowering.
-
-RBAC, ABAC, and ReBAC are not separate engines. They are complementary inputs to
-one authorization decision:
-
-- RBAC: actor roles grant broad capabilities.
-- ABAC: actor/object/action attributes constrain those capabilities.
-- ReBAC: shallow relationships connect actors to objects.
-
-Read/query policies must compile to SQL predicates so filtering happens before
-pagination. The same rule should also be runtime-evaluable for changeset
-preview/commit on known objects. Pagination should never page first and
-post-filter afterward, because that creates unstable page sizes and unreliable
-cursors for agents.
-
-Executable prototype evidence lives in `prototypes/policies/`. It validates 20
-RBAC-style, 20 ABAC-style, and 20 one-level ReBAC-style policy combinations
-against PGlite, checking SQL-pushdown results against runtime evaluation.
-
-1. **Authentication:** Support a simple local auth mode plus external OIDC/JWT
-   identity. Do not require a heavyweight identity provider.
-2. **Membership:** Store users, service-agent identities, roles, groups, and
-   ownership relationships in the selected database.
-3. **Policy engine:** Build an internal deterministic policy evaluator
-   combining:
-   - RBAC grants,
-   - ownership checks,
-   - one-level relationship checks,
-   - ABAC-style predicates over object/action/state attributes,
-   - approval requirements.
-4. **Decision logs:** Persist policy decision summaries with changeset
-   previews/commits for auditability.
-5. **Optional integrations:** Support external identity providers such as
-   Ory/Auth0/Clerk/WorkOS/Cognito through OIDC/JWT compatibility, not as core
-   requirements.
-
-## Enforcement Points
-
-- API request admission.
-- Changeset preview.
-- Changeset commit recheck inside the transaction or immediately before write
-  with lock/version checks.
-- Query/search filtering through SQL-lowerable policy predicates before
-  pagination.
-- Semantic search retrieval filtering.
-- Event/webhook subscription authorization.
-
-## Database Role
-
-Postgres should enforce invariants that must survive app bugs/races where it
-can. Runtime enforcement remains necessary for action-level, changeset-level,
-hook-level, and policy-specific decisions that are not naturally expressible as
-SQL constraints.
-
-- Resource constraints.
-- Unique idempotency keys.
-- Object version checks.
-- Optional row-level security for defense-in-depth, if it does not make the app
-  too complex.
-
-Application policy remains necessary because decisions are action- and
-changeset-level, not just row-level.
-
-## Open Questions
-
-- Should policy rules be user-authored through a safe DSL, configured through
-  structured resource files, or only app-defined at first?
-- How much of ABAC should be exposed publicly in v1?
-- Should Postgres RLS be mandatory or optional defense-in-depth?
-- What policy explanation format should previews return?
+- [MVP Policy Schema](mvp-policy-schema.md) owns exact structured YAML, action
+  vocabulary, actor/boundary context, assignment, and safe denial format.
+- [Expression Language](expression-language.md) owns the non-extensible CEL
+  subset and typed SQL lowering.
+- [Authorization Definitions and Assignments](authorization-assignments.md) owns
+  global definition and explicit boundary assignment semantics.
+- Existing PGlite policy prototypes remain expression/evaluator evidence only;
+  real-Postgres integration tests are authoritative for SQL/pagination/commit
+  behavior.

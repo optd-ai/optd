@@ -30,37 +30,26 @@ correctness in the default deployment.
 
 Initial MVP table families:
 
-- generated resource tables such as `res_lead`, `res_contact`, `res_company`,
-  each with `current_object_version_id`
-- generated relationship tables such as `rel_contact_company`
-- `platform_schema_migrations`
-- `pack_revisions`
-- `pack_files`
-- `resource_definitions`
-- `field_definitions`
-- `relationship_definitions`
-- `lifecycle_definitions`
-- `action_definitions`
-- `hook_definitions`
-- `policy_definitions`
-- `seed_definitions`
-- `changesets`
-- `changeset_operations`
-- `changeset_previews`
-- `object_versions`
-- `approvals`
-- `idempotency_keys`
-- `audit_events`
-- `events`
-- `outbox`
-- `hook_executions`
-- `object_comments`
-- `artifacts`
-- `attachments`
-- `migration_plans`
-- `migration_steps`
-- `resource_health_checks`
-- `platform_secrets`
+- platform migrations and built-in `projects`
+- immutable `pack_revisions`/source files plus one active-pack pointer
+- immutable resource/relationship/lifecycle/action/hook/role/policy/seed
+  definition revisions and hook attachments
+- generated project-scoped current resource/relationship tables
+- immutable stage evidence, lifecycle coordination, approval requirements/
+  decisions, and exactly-once `changeset_commits` exactly as named in
+  `staged-changeset-storage.md`
+- `object_versions`, append-only comments, `auth_contexts`, `audit_events`, and
+  committed `events` from `events-audit.md`
+- normalized users/credentials/sessions/requests/authorizations/assignments from
+  `authentication.md` and `authorization-assignments.md`
+- durable outbox deliveries/attempts/retry generations from
+  `outbox-delivery.md`
+- global encrypted secrets and revision-specific hook-secret grants
+- immutable migration plans, append-only validations/apply attempts, and one
+  atomic active-revision application record per successful plan
+
+There are no generic mutable `changesets`, `changeset_previews`, stage
+idempotency-key, artifact, attachment, or undeclared-extension tables in MVP.
 
 ## Constraints
 
@@ -103,9 +92,13 @@ Remove tenant isolation as a default design center. If multi-tenant support
 appears later, it should be layered rather than infecting the core open-source
 model.
 
-## Open questions
+## Planning status
 
-- Should resource definitions compile directly to migration plans or through an
-  intermediate storage model?
-- Full-text and semantic index storage choices.
-- Exact connection pool and backpressure defaults for Deno/Postgres.
+- Resource definitions normalize to immutable definition revisions and semantic
+  migration plans before generated SQL; pack activation never compiles and
+  applies unreviewed source directly.
+- MVP full-text uses Postgres-native indexing only where a resource explicitly
+  configures it. Semantic/vector indexing is deferred.
+- Connection-pool, queue, and backpressure numbers are deployment configuration
+  to benchmark during implementation; they do not change storage semantics and
+  are not a design blocker.
