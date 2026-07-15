@@ -569,7 +569,7 @@ export const platformMigrations: PlatformMigration[] = [
         'auth.role_assignment.created','auth.session.created','auth.session.revoked','auth.sessions.revoked_all',
         'auth.login.succeeded','auth.password.changed','auth.password_reset.approved','auth.password_reset.denied',
         'auth.password_reset.completed','auth.recovery.initiated','auth.recovery.completed','auth.recovery.cancelled','auth.recovery.expired',
-        'auth.authorization_request.created','auth.authorization_request.approved','auth.authorization_request.denied',
+        'auth.authorization_request.created','auth.authorization_request.approved','auth.authorization_request.denied','auth.authorization_request.cancelled',
         'auth.authorization.redeemed','auth.authorization.revoked'
       ));
     `,

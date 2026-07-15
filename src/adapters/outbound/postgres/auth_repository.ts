@@ -1,4 +1,7 @@
-import type { AuthRepository } from "../../../application/ports/authentication.ts";
+import type {
+  AgentAuthorizationGrantability,
+  AuthRepository,
+} from "../../../application/ports/authentication.ts";
 import type {
   AgentAuthorization,
   AgentAuthorizationRequest,
@@ -46,6 +49,8 @@ export class PostgresAuthRepository implements AuthRepository {
     private readonly sql: Sql,
     private readonly configuredBootstrapToken?: string,
     maxConcurrentHashes = 4,
+    private readonly grantability: AgentAuthorizationGrantability =
+      new SuperAdminGrantability(),
   ) {
     this.hashes = new ImmediateSemaphore(maxConcurrentHashes);
   }
@@ -1669,10 +1674,12 @@ export class PostgresAuthRepository implements AuthRepository {
           ),
         );
       }
-      // Until policy assignments are installed, only the built-in super-admin
-      // bypass has auth.request.decide. Agent super-admins still exercise the
-      // same-human delegation and lineage path.
-      if (!isSuperAdmin(auth)) return authorizationDenied();
+      const grantable = await this.grantability.canDecide({
+        auth,
+        roles: row.roles,
+        boundary: boundaryFromRow(row),
+      });
+      if (!grantable.ok) return grantable;
       let authorizationId: string | null = null;
       if (input.decision === "approved") {
         const prior = row.requester_authorization_id
@@ -1835,10 +1842,31 @@ export class PostgresAuthRepository implements AuthRepository {
       }
       const updated = (await query<AgentRequestRow>(
         tx,
-        `update agent_authorization_requests set status='cancelled',version=version+1 where id=$1 returning *`,
-        [id],
+        `update agent_authorization_requests set status='cancelled',version=version+1,decided_by_auth_context_id=$2,decision_snapshot=$3::jsonb,decided_at=now() where id=$1 returning *`,
+        [
+          id,
+          auth.id,
+          JSON.stringify({
+            schema: "auth.authorization_decision.v1",
+            request_id: id,
+            outcome: "cancelled",
+          }),
+        ],
       )).rows[0]!;
       await signalAgentRequest(tx, id);
+      await audit(
+        tx,
+        "auth.authorization_request.cancelled",
+        auth.principalId,
+        auth.humanUserId,
+        auth.sessionId,
+        auth.id,
+        {
+          schema: "auth.authorization_decision.v1",
+          request_id: id,
+          outcome: "cancelled",
+        },
+      );
       return ok(agentRequest(updated));
     }) as Result<AgentAuthorizationRequest>;
   }
@@ -1972,7 +2000,14 @@ export class PostgresAuthRepository implements AuthRepository {
           ),
         );
       }
-      const authorization = await authorizationRow(tx, row.authorization_id);
+      const lockedAuthorization = (await query<{ revoked_at: Date | null }>(
+        tx,
+        `select revoked_at from agent_authorizations where id=$1 for update`,
+        [row.authorization_id],
+      )).rows[0];
+      const authorization = lockedAuthorization?.revoked_at
+        ? undefined
+        : await authorizationRow(tx, row.authorization_id);
       if (!authorization) {
         return err(
           authError(
@@ -2210,6 +2245,20 @@ async function signalPasswordReset(sql: Queryable, id: string): Promise<void> {
 
 const DUMMY_PASSWORD_HASH =
   "$argon2id$v=19$m=19456,t=2,p=1$hVNuIMcQVCGTBSGnJ6Bg8A$IA2Q5Wevful1bg2s1x2mfuyqmNlXMfR/M+jIUD4U85w";
+
+export class SuperAdminGrantability implements AgentAuthorizationGrantability {
+  canDecide(input: {
+    auth: AuthContext;
+    roles: readonly string[];
+    boundary: AuthorizationBoundary;
+  }): Promise<Result<{ allowed: true }>> {
+    return Promise.resolve(
+      isSuperAdmin(input.auth)
+        ? ok({ allowed: true as const })
+        : authorizationDenied(),
+    );
+  }
+}
 
 export class ImmediateSemaphore {
   private active = 0;

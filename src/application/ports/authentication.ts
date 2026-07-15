@@ -166,6 +166,14 @@ export interface AuthRepository extends BootstrapRepository {
   ): Promise<Result<{ revoked: true }>>;
 }
 
+export interface AgentAuthorizationGrantability {
+  canDecide(input: {
+    auth: AuthContext;
+    roles: readonly string[];
+    boundary: AuthorizationBoundary;
+  }): Promise<Result<{ allowed: true }>>;
+}
+
 export interface RequestAuthenticator {
   authenticate(token: string): Promise<Result<AuthContext>>;
 }
