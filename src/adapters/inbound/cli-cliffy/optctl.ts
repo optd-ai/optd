@@ -6,6 +6,7 @@ import {
   type ErrorEnvelope,
   errorEnvelope,
 } from "../../../schemas/api/contracts.ts";
+import { readOrigin, writeOrigin } from "./auth_store.ts";
 
 export type OptctlRunResult = { stdout: string; stderr: string; code: number };
 type Parsed = {
@@ -27,14 +28,23 @@ async function decodeJsonResponse(response: Response): Promise<unknown> {
   }
   return body;
 }
+async function credentialHeaders(url: string): Promise<Record<string, string>> {
+  const token = (await readOrigin(new URL(url).origin)).token;
+  return token ? { authorization: `Bearer ${token}` } : {};
+}
 async function getJson(url: string): Promise<unknown> {
-  return await decodeJsonResponse(await fetch(url));
+  return await decodeJsonResponse(
+    await fetch(url, { headers: await credentialHeaders(url) }),
+  );
 }
 async function postJson(url: string, payload: unknown): Promise<unknown> {
   return await decodeJsonResponse(
     await fetch(url, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        ...await credentialHeaders(url),
+      },
       body: JSON.stringify(payload),
     }),
   );
@@ -50,7 +60,11 @@ async function postMultipart(url: string, packDir: string): Promise<unknown> {
     form.append(rel, new File([await Deno.readFile(entry.path)], rel));
   }
   return await decodeJsonResponse(
-    await fetch(url, { method: "POST", body: form }),
+    await fetch(url, {
+      method: "POST",
+      body: form,
+      headers: await credentialHeaders(url),
+    }),
   );
 }
 function render(value: unknown, asJson?: boolean): string {
@@ -117,10 +131,7 @@ function parseQueryPayload(
     else if (arg.startsWith("--cursor=")) {
       payload.cursor = arg.slice("--cursor=".length);
     } else if (arg === "--include-archived") payload.include_archived = true;
-    else if (arg === "--actor") payload.actor = parseActorArg(next());
-    else if (arg.startsWith("--actor=")) {
-      payload.actor = parseActorArg(arg.slice("--actor=".length));
-    } else throw usageError(`unknown query option ${arg}`);
+    else throw usageError(`unknown query option ${arg}`);
   }
   if (fields.length) payload.fields = fields;
   if (sort.length) payload.sort = sort;
@@ -171,15 +182,6 @@ function isErrorEnvelope(value: unknown): value is ErrorEnvelope {
     !Array.isArray(error.details) && typeof meta.request_id === "string";
 }
 
-function parseActorArg(value: string): unknown {
-  const trimmed = value.trim();
-  if (trimmed.startsWith("{")) return JSON.parse(trimmed);
-  if (trimmed.includes(":")) {
-    const [id, roles = ""] = trimmed.split(":");
-    return { id, roles: roles.split(",").filter(Boolean) };
-  }
-  return value;
-}
 function parseActionPayload(args: string[]): Record<string, unknown> {
   const payload: Record<string, unknown> = { input: {} };
   for (let i = 0; i < args.length; i++) {
@@ -191,9 +193,6 @@ function parseActionPayload(args: string[]): Record<string, unknown> {
     } else if (arg === "--input-file") payload.input_file = next();
     else if (arg.startsWith("--input-file=")) {
       payload.input_file = arg.slice("--input-file=".length);
-    } else if (arg === "--actor") payload.actor = parseActorArg(next());
-    else if (arg.startsWith("--actor=")) {
-      payload.actor = parseActorArg(arg.slice("--actor=".length));
     } else if (arg === "--idempotency-key") payload.idempotency_key = next();
     else if (arg.startsWith("--idempotency-key=")) {
       payload.idempotency_key = arg.slice("--idempotency-key=".length);
@@ -210,19 +209,6 @@ async function resolveActionPayload(
     delete payload.input_file;
   }
   return payload;
-}
-
-function appendActorQuery(base: string, args: string[]): string {
-  const index = args.findIndex((arg) =>
-    arg === "--actor" || arg.startsWith("--actor=")
-  );
-  if (index < 0) return base;
-  const raw = args[index] === "--actor"
-    ? args[index + 1]
-    : args[index].slice("--actor=".length);
-  const parsed = parseActorArg(raw ?? "");
-  const value = typeof parsed === "string" ? parsed : JSON.stringify(parsed);
-  return `${base}?actor=${encodeURIComponent(value)}`;
 }
 
 async function parseSecretSetPayload(
@@ -244,25 +230,10 @@ async function parseSecretSetPayload(
     } else if (arg === "--description") payload.description = next();
     else if (arg.startsWith("--description=")) {
       payload.description = arg.slice("--description=".length);
-    } else if (arg === "--actor") payload.actor = parseActorArg(next());
-    else if (arg.startsWith("--actor=")) {
-      payload.actor = parseActorArg(arg.slice("--actor=".length));
     } else throw usageError(`unknown secret option ${arg}`);
   }
   return payload;
 }
-function parseSecretActorPayload(args: string[]): Record<string, unknown> {
-  const payload: Record<string, unknown> = {};
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-    if (arg === "--actor") payload.actor = parseActorArg(args[++i] ?? "");
-    else if (arg.startsWith("--actor=")) {
-      payload.actor = parseActorArg(arg.slice("--actor=".length));
-    } else throw usageError(`unknown secret option ${arg}`);
-  }
-  return payload;
-}
-
 async function readChangesetInput(args: string[]): Promise<unknown> {
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -279,17 +250,54 @@ async function readChangesetInput(args: string[]): Promise<unknown> {
     if (arg.startsWith("--json-input=")) {
       return JSON.parse(arg.slice("--json-input=".length));
     }
-    if (arg === "--actor" || arg === "--idempotency-key") i++;
-    else if (
-      arg.startsWith("--actor=") || arg.startsWith("--idempotency-key=")
-    ) {
-      continue;
-    } else if (!arg.startsWith("--")) return await readJsonFile(arg);
+    if (arg === "--idempotency-key") i++;
+    else if (arg.startsWith("--idempotency-key=")) continue;
+    else if (!arg.startsWith("--")) return await readJsonFile(arg);
     else throw usageError(`unknown changeset option ${arg}`);
   }
   throw usageError(
     "changeset preview/commit requires <json-file>, --file, or --input JSON",
   );
+}
+
+function option(args: string[], name: string): string | undefined {
+  const index = args.findIndex((arg) =>
+    arg === name || arg.startsWith(`${name}=`)
+  );
+  if (index < 0) return undefined;
+  return args[index] === name
+    ? args[index + 1]
+    : args[index].slice(name.length + 1);
+}
+function envelopeData(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || !("data" in value)) {
+    throw new Error("server returned an invalid success envelope");
+  }
+  return (value as { data: Record<string, unknown> }).data;
+}
+async function resolveProject(
+  server: string,
+  value: string,
+): Promise<Record<string, unknown>> {
+  if (/^[0-9a-f-]{36}$/.test(value)) {
+    return envelopeData(await getJson(`${server}/api/v1/projects/${value}`));
+  }
+  const list = envelopeData(
+    await getJson(
+      `${server}/api/v1/projects?status=all&slug=${encodeURIComponent(value)}`,
+    ),
+  );
+  const items = list.items;
+  if (!Array.isArray(items) || items.length !== 1) {
+    throw new OptctlError(
+      errorEnvelope({
+        code: "project_not_found",
+        message: "project was not found",
+        details: { project: value },
+      }),
+    );
+  }
+  return items[0] as Record<string, unknown>;
 }
 
 function helpText(): string {
@@ -313,6 +321,97 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       result = await getJson(`${parsed.server}/ready`);
     } else if (cmd === "status" && sub === "bootstrap") {
       result = await getJson(`${parsed.server}/api/v1/auth/bootstrap/status`);
+    } else if (cmd === "bootstrap" && sub === "init") {
+      const username = option(parsed.positional.slice(2), "--username");
+      const password = option(parsed.positional.slice(2), "--password");
+      const displayName =
+        option(parsed.positional.slice(2), "--display-name") ?? username;
+      const bootstrapToken = Deno.env.get("OPERANT_BOOTSTRAP_TOKEN");
+      if (!username || password === undefined || !bootstrapToken) {
+        throw usageError(
+          "bootstrap init requires --username and --password with OPERANT_BOOTSTRAP_TOKEN configured",
+        );
+      }
+      result = await decodeJsonResponse(
+        await fetch(`${parsed.server}/api/v1/auth/bootstrap`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Operant-Bootstrap ${bootstrapToken}`,
+          },
+          body: JSON.stringify({
+            username,
+            display_name: displayName,
+            password,
+          }),
+        }),
+      );
+      const credentials = envelopeData(result).credentials as Record<
+        string,
+        unknown
+      >;
+      await writeOrigin(parsed.server, {
+        token: String(credentials.token),
+        requestToken: String(credentials.authorization_request_token),
+      });
+    } else if (cmd === "project" && sub === "list") {
+      const status = option(parsed.positional.slice(2), "--status") ?? "active";
+      result = await getJson(
+        `${parsed.server}/api/v1/projects?status=${encodeURIComponent(status)}`,
+      );
+    } else if (cmd === "project" && sub === "create" && value) {
+      const displayName = option(parsed.positional.slice(3), "--display-name");
+      if (!displayName) {
+        throw usageError("project create requires --display-name");
+      }
+      const description = option(parsed.positional.slice(3), "--description");
+      result = await postJson(`${parsed.server}/api/v1/projects`, {
+        slug: value,
+        display_name: displayName,
+        ...description === undefined ? {} : { description },
+      });
+    } else if (cmd === "project" && sub === "view" && value) {
+      const project = await resolveProject(parsed.server, value);
+      result = { ok: true, data: project };
+    } else if (cmd === "project" && sub === "update" && value) {
+      const project = await resolveProject(parsed.server, value);
+      const expected = option(parsed.positional.slice(3), "--expected-version");
+      if (!expected) {
+        throw usageError("project update requires --expected-version");
+      }
+      const displayName = option(parsed.positional.slice(3), "--display-name");
+      const description = option(parsed.positional.slice(3), "--description");
+      result = await postJson(
+        `${parsed.server}/api/v1/projects/${project.id}/update`,
+        {
+          expected_version: Number(expected),
+          ...displayName === undefined ? {} : { display_name: displayName },
+          ...description === undefined ? {} : { description },
+        },
+      );
+    } else if (cmd === "project" && sub === "archive" && value) {
+      const project = await resolveProject(parsed.server, value);
+      const expected = option(parsed.positional.slice(3), "--expected-version");
+      if (!expected) {
+        throw usageError("project archive requires --expected-version");
+      }
+      result = await postJson(
+        `${parsed.server}/api/v1/projects/${project.id}/archive`,
+        { expected_version: Number(expected) },
+      );
+    } else if (
+      (cmd === "project" && sub === "select" && value) ||
+      (cmd === "context" && sub === "set-project" && value)
+    ) {
+      const project = await resolveProject(parsed.server, value);
+      await writeOrigin(parsed.server, {
+        projectId: String(project.id),
+        projectSlug: String(project.slug),
+      });
+      result = {
+        ok: true,
+        data: { project_id: project.id, slug: project.slug },
+      };
     } else if (cmd === "home") {
       result = await getJson(`${parsed.server}/metadata/home`);
     } else if (cmd === "pack" && sub === "preview" && value) {
@@ -328,12 +427,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
         await resolveActionPayload(parsed.positional.slice(3)),
       );
     } else if (cmd === "secret" && sub === "list") {
-      result = await getJson(
-        appendActorQuery(
-          `${parsed.server}/secrets`,
-          parsed.positional.slice(2),
-        ),
-      );
+      result = await getJson(`${parsed.server}/secrets`);
     } else if (cmd === "secret" && sub === "set" && value) {
       result = await postJson(`${parsed.server}/secrets`, {
         name: value,
@@ -345,10 +439,11 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
           `${parsed.server}/secrets/${encodeURIComponent(value)}`,
           {
             method: "DELETE",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify(
-              parseSecretActorPayload(parsed.positional.slice(3)),
-            ),
+            headers: {
+              "content-type": "application/json",
+              ...await credentialHeaders(parsed.server),
+            },
+            body: JSON.stringify({}),
           },
         ),
       );
@@ -403,10 +498,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
     } else if (cmd === "view" && sub && value) {
       const [namespace, name] = splitDotted(sub);
       result = await getJson(
-        appendActorQuery(
-          `${parsed.server}/objects/${namespace}/${name}/${value}`,
-          parsed.positional.slice(3),
-        ),
+        `${parsed.server}/objects/${namespace}/${name}/${value}`,
       );
     } else if (cmd === "history" && sub && value) {
       const [namespace, name] = splitDotted(sub);
@@ -436,7 +528,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       );
     } else {
       throw usageError(
-        "usage: optctl status live/ready/bootstrap | home | pack preview/apply <dir> | metadata [packs] | metadata pack/resource/action/hook/policy <namespace.name> | secret list/set/delete | action preview/commit <namespace.action> --input '{...}' | outbox status/drain/retry | migration inspect/apply/confirm <id> | query <namespace.resource> [--where expr] [--fields a,b] [--sort field:desc] [--limit n] [--cursor c] | changeset preview/commit (--file <json-file>|--input '{...}') | view <namespace.resource> <id> | history <namespace.resource> <id>",
+        "usage: optctl status live/ready/bootstrap | bootstrap init | home | project list/create/view/update/archive/select | context set-project | pack preview/apply <dir> | metadata [packs] | metadata pack/resource/action/hook/policy <namespace.name> | secret list/set/delete | action preview/commit <namespace.action> --input '{...}' | outbox status/drain/retry | migration inspect/apply/confirm <id> | query <namespace.resource> [--where expr] [--fields a,b] [--sort field:desc] [--limit n] [--cursor c] | changeset preview/commit (--file <json-file>|--input '{...}') | view <namespace.resource> <id> | history <namespace.resource> <id>",
       );
     }
     const output = parsed.verbose

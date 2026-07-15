@@ -287,6 +287,89 @@ export const platformMigrations: PlatformMigration[] = [
       create index if not exists platform_secrets_updated_at_idx on platform_secrets(updated_at desc)
     `,
   },
+  {
+    id: "1008_authentication_projects",
+    sql: `
+      create table principals (
+        id uuid primary key,
+        type text not null check (type in ('human_user', 'agent_user', 'system')),
+        active boolean not null,
+        created_at timestamptz not null default now()
+      );
+      create table human_users (
+        id uuid primary key,
+        principal_id uuid not null unique references principals(id),
+        username text not null unique,
+        display_name text not null,
+        status text not null check (status in ('active', 'disabled')),
+        created_at timestamptz not null default now()
+      );
+      create table password_credentials (
+        human_user_id uuid primary key references human_users(id),
+        profile text not null,
+        phc_hash text not null,
+        password_changed_at timestamptz not null default now()
+      );
+      create table system_roles (
+        id text primary key,
+        display_name text not null,
+        active boolean not null
+      );
+      insert into system_roles(id, display_name, active) values
+        ('system:super_admin', 'Super Administrator', true),
+        ('system:admin', 'Administrator', true);
+      create table role_assignments (
+        id uuid primary key,
+        principal_id uuid not null references principals(id),
+        role_id text not null references system_roles(id),
+        boundary_type text not null check (boundary_type in ('system', 'all_projects', 'project')),
+        project_id uuid,
+        active boolean not null,
+        created_at timestamptz not null default now(),
+        check ((boundary_type = 'project') = (project_id is not null))
+      );
+      create table auth_sessions (
+        id uuid primary key,
+        principal_id uuid not null references principals(id),
+        human_user_id uuid not null references human_users(id),
+        credential_kind text not null check (credential_kind in ('human_full', 'authorization_request')),
+        token_digest text not null unique,
+        created_at timestamptz not null default now(),
+        revoked_at timestamptz
+      );
+      create table auth_contexts (
+        id uuid primary key,
+        principal_id uuid not null references principals(id),
+        human_user_id uuid not null references human_users(id),
+        session_id uuid not null references auth_sessions(id),
+        credential_kind text not null,
+        roles text[] not null,
+        created_at timestamptz not null
+      );
+      create table bootstrap_state (
+        singleton boolean primary key check (singleton),
+        token_digest text,
+        completed boolean not null,
+        completed_at timestamptz
+      );
+      create table projects (
+        id uuid primary key,
+        slug text not null unique check (slug ~ '^[a-z][a-z0-9-]{0,62}$'),
+        display_name text not null,
+        description text,
+        status text not null default 'active' check (status in ('active', 'archived')),
+        version bigint not null default 1,
+        created_by_auth_context_id uuid not null references auth_contexts(id),
+        updated_by_auth_context_id uuid not null references auth_contexts(id),
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now(),
+        archived_at timestamptz
+      );
+      alter table role_assignments add constraint role_assignments_project_fk foreign key(project_id) references projects(id);
+      create index auth_sessions_token_digest_idx on auth_sessions(token_digest) where revoked_at is null;
+      create index projects_status_slug_idx on projects(status, slug)
+    `,
+  },
 ];
 
 export async function applyPlatformMigrations(

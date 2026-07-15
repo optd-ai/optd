@@ -11,8 +11,15 @@ import { makeSecretService } from "./services/manage_secret.ts";
 import { OPERANT_VERSION } from "../config/runtime.ts";
 import type { Queryable, Sql } from "../adapters/outbound/postgres/client.ts";
 import { PostgresTransactionManager } from "../adapters/outbound/postgres/transaction_manager.ts";
+import { PostgresAuthRepository } from "../adapters/outbound/postgres/auth_repository.ts";
+import { PostgresProjectRepository } from "../adapters/outbound/postgres/project_repository.ts";
+import { makeBootstrapService } from "./services/auth/bootstrap.ts";
+import { makeProjectService } from "./services/projects/manage_projects.ts";
 
-export function makeApplication(sql: Sql) {
+export function makeApplication(
+  sql: Sql,
+  options: { bootstrapToken?: string } = {},
+) {
   const clock = new SystemClock();
   const tx = new PostgresTransactionManager(sql);
   const secrets = makeSecretService({ sql: sql as Queryable, tx });
@@ -24,7 +31,14 @@ export function makeApplication(sql: Sql) {
     tx,
     hookRunner,
   });
+  const authentication = new PostgresAuthRepository(
+    sql,
+    options.bootstrapToken,
+  );
   return {
+    authentication,
+    bootstrap: makeBootstrapService(authentication),
+    projects: makeProjectService(new PostgresProjectRepository(sql)),
     metadata: makeInspectMetadataService({
       sql,
       clock,

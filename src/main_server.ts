@@ -39,8 +39,13 @@ export async function createFetchHandler() {
     await postgresRuntime.stop().catch(() => undefined);
     throw error;
   }
-  const application = makeApplication(sql);
+  const application = makeApplication(sql, {
+    bootstrapToken: Deno.env.get("OPERANT_BOOTSTRAP_TOKEN"),
+  });
   const app = makeHttpApp({
+    authentication: application.authentication,
+    bootstrap: application.bootstrap,
+    projects: application.projects,
     metadata: application.metadata,
     packs: application.packs,
     migrations: application.migrations,

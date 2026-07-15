@@ -23,8 +23,22 @@ import type {
   QueryObjectsRequest,
 } from "../../../application/services/query_objects.ts";
 import type { UploadedPackFile } from "../../outbound/yaml/pack_loader.ts";
+import type { RequestAuthenticator } from "../../../application/ports/authentication.ts";
+import type { AuthVariables } from "./auth_middleware.ts";
+import { requireBearer } from "./auth_middleware.ts";
+import {
+  type BootstrapHttpService,
+  registerAuthRoutes,
+} from "./auth_routes.ts";
+import {
+  type ProjectHttpService,
+  registerProjectRoutes,
+} from "./project_routes.ts";
 
 export type HttpDependencies = {
+  authentication: RequestAuthenticator;
+  bootstrap: BootstrapHttpService;
+  projects: ProjectHttpService;
   metadata: {
     home(): Promise<Result<HomeDto>>;
     packs(): Promise<Result<unknown>>;
@@ -85,9 +99,6 @@ export type HttpDependencies = {
   health: {
     inspect(): Promise<Record<string, unknown>>;
   };
-  bootstrap?: {
-    required(): Promise<boolean>;
-  };
   version: string;
 };
 
@@ -99,8 +110,22 @@ function resultJson<T>(
   return c.json(errorEnvelope(result.error), toHttpStatus(result.error));
 }
 
-export function makeHttpApp(deps: HttpDependencies): Hono {
-  const app = new Hono();
+export function makeHttpApp(
+  deps: HttpDependencies,
+): Hono<{ Variables: AuthVariables }> {
+  const app = new Hono<{ Variables: AuthVariables }>();
+
+  app.use("*", async (c, next) => {
+    if (
+      c.req.path === "/live" || c.req.path === "/ready" ||
+      c.req.path === "/api/v1/auth/bootstrap/status" ||
+      c.req.path === "/api/v1/auth/bootstrap"
+    ) {
+      await next();
+      return;
+    }
+    return await requireBearer(deps.authentication, c, next);
+  });
 
   app.get(
     "/live",
@@ -127,12 +152,8 @@ export function makeHttpApp(deps: HttpDependencies): Hono {
     );
   });
 
-  app.get("/api/v1/auth/bootstrap/status", async (c) =>
-    c.json(successEnvelope({
-      status: await (deps.bootstrap?.required() ?? Promise.resolve(true))
-        ? "bootstrap_required"
-        : "ready",
-    })));
+  registerAuthRoutes(app, deps.bootstrap);
+  registerProjectRoutes(app, deps.projects);
 
   app.get(
     "/metadata/home",
@@ -289,7 +310,6 @@ export function makeHttpApp(deps: HttpDependencies): Hono {
           `${c.req.param("namespace")}.${c.req.param("resource")}`,
           c.req.param("id"),
           c.req.query("include_archived") === "true",
-          parseActorQuery(c.req.query("actor")),
         ),
       ),
   );
@@ -325,13 +345,7 @@ export function makeHttpApp(deps: HttpDependencies): Hono {
 
   app.get(
     "/secrets",
-    async (c) =>
-      resultJson(
-        c,
-        await deps.secrets.list({
-          actor: parseActorQuery(c.req.query("actor")),
-        }),
-      ),
+    async (c) => resultJson(c, await deps.secrets.list()),
   );
   app.post(
     "/secrets",
@@ -353,6 +367,7 @@ export function makeHttpApp(deps: HttpDependencies): Hono {
     )
   );
   app.onError((error, c) => {
+    console.error(error);
     const invalidJson = error instanceof SyntaxError;
     return c.json(
       errorEnvelope({
@@ -367,19 +382,6 @@ export function makeHttpApp(deps: HttpDependencies): Hono {
   });
 
   return app;
-}
-
-function parseActorQuery(value: string | undefined): unknown {
-  if (!value) return undefined;
-  const trimmed = value.trim();
-  if (trimmed.startsWith("{")) {
-    try {
-      return JSON.parse(trimmed);
-    } catch {
-      return value;
-    }
-  }
-  return value;
 }
 
 async function multipartFiles(request: Request): Promise<UploadedPackFile[]> {
