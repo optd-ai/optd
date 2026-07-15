@@ -1,17 +1,43 @@
-import { assertEquals } from "jsr:@std/assert";
+import { assertEquals, assertExists } from "jsr:@std/assert";
 import { join } from "jsr:@std/path";
 import { query } from "../../../src/adapters/outbound/postgres/client.ts";
-import { startLiveHarness } from "../../support/live_harness.ts";
+import {
+  type CliLauncher,
+  type LiveHarness,
+  startLiveHarness,
+} from "../../support/live_harness.ts";
 
-Deno.test("compiled auth wait reconnects after interruption without polling and redeems requester-bound authority", async () => {
+Deno.test("distinct compiled process trees reconnect wait, delegate, replace, and revoke", async () => {
   const harness = await startLiveHarness();
+  const launchers: CliLauncher[] = [];
   try {
-    const boot = await harness.bootstrap({
-      username: "wait-admin",
-      password: "interrupted websocket password",
-    });
+    const human = await launcher(harness, launchers, "human");
+    const requestOnly = await launcher(harness, launchers, "request_only");
+    const waitingAgent = await launcher(harness, launchers, "agent");
+    const delegatedAgent = await launcher(harness, launchers, "agent");
+    const replacementAgent = await launcher(harness, launchers, "agent");
+    const revocationAgent = await launcher(harness, launchers, "agent");
+    assertEquals([
+      human.kind,
+      requestOnly.kind,
+      waitingAgent.kind,
+      delegatedAgent.kind,
+      replacementAgent.kind,
+      revocationAgent.kind,
+    ], ["human", "request_only", "agent", "agent", "agent", "agent"]);
+
+    const boot = await human.runOptctl([
+      "--json",
+      "bootstrap",
+      "init",
+      "--username",
+      "wait-admin",
+      "--password-stdin",
+    ], "interrupted websocket password\n");
     assertEquals(boot.code, 0, boot.stderr);
-    const request = await harness.runOptctl([
+    const initial = await storedState(harness);
+
+    const request = await requestOnly.runOptctl([
       "--json",
       "auth",
       "request",
@@ -20,133 +46,304 @@ Deno.test("compiled auth wait reconnects after interruption without polling and 
       "--boundary",
       "system",
       "--reason",
-      "interrupted wait",
+      "in-flight interrupted wait",
     ]);
     assertEquals(request.code, 0, request.stderr);
     const requestId = JSON.parse(request.stdout).data.id as string;
-    const state = await storedState(harness.rootDir, harness.baseUrl);
-
-    const ticketResponse = await post(
-      harness.baseUrl,
-      state.requestToken,
-      `/api/v1/auth/requests/${requestId}/watch-ticket`,
-      {},
-    );
-    assertEquals(ticketResponse.status, 200);
-    const ticket = (await ticketResponse.json()).data.ticket as string;
-    const socketUrl = new URL(
-      `${harness.baseUrl}/api/v1/auth/requests/${requestId}/watch`,
-    );
-    socketUrl.protocol = "ws:";
-    socketUrl.searchParams.set("ticket", ticket);
-    const pending = await openUntilMessage(socketUrl);
-    assertEquals(pending.status, "pending");
-
-    await harness.restart();
-    const approval = await post(
-      harness.baseUrl,
-      state.token,
-      `/api/v1/auth/requests/${requestId}/decision`,
-      { decision: "approved" },
-    );
-    assertEquals(approval.status, 200);
-    assertEquals(
-      JSON.stringify(await approval.json()).includes("token"),
-      false,
-    );
+    const requestState = await storedState(harness);
     const contextsBefore = await requestContextCount(
-      harness.server.sql,
-      state.requestSessionId,
+      harness,
+      initial.requestSessionId,
     );
 
-    const waited = await harness.runOptctl([
+    const waitResult = waitingAgent.runOptctl([
       "--json",
       "auth",
       "wait",
       requestId,
     ]);
+    await waitForUsedTickets(harness, requestId, 1);
+    await harness.restart();
+    await waitForUsedTickets(harness, requestId, 2);
+
+    const approval = await human.runOptctl([
+      "--json",
+      "auth",
+      "approve",
+      requestId,
+      "--yes",
+      "--agent-name",
+      "top-agent",
+    ]);
+    assertEquals(approval.code, 0, approval.stderr);
+    assertEquals(approval.stdout.includes("token"), false);
+    const waited = await waitResult;
     assertEquals(waited.code, 0, waited.stderr);
-    const agentToken =
-      (await storedState(harness.rootDir, harness.baseUrl)).token;
-    assertEquals(
-      (await get(harness.baseUrl, agentToken, "/api/v1/auth/me")).status,
-      200,
-    );
+    const topState = await storedState(harness);
+    const topToken = topState.token;
+    assertExists(topToken);
+    const topAuthorizationId = await requestAuthorizationId(harness, requestId);
     const contextsAfter = await requestContextCount(
-      harness.server.sql,
-      state.requestSessionId,
+      harness,
+      initial.requestSessionId,
     );
     assertEquals(
       contextsAfter - contextsBefore,
-      2,
-      "wait performs one ticket exchange and one redemption; no authenticated polling",
+      3,
+      "two ticket exchanges plus redemption; no authenticated polling",
     );
-    const tickets = (await query<{ count: number }>(
-      harness.server.sql,
-      `select count(*)::int count from agent_authorization_watch_tickets where request_id=$1`,
-      [requestId],
-    )).rows[0]!.count;
-    assertEquals(tickets, 2);
 
-    const nonce = state.authorizationNonces[requestId];
-    const wrongRequester = await post(
+    const topIdentity = await inspectJson(
       harness.baseUrl,
-      state.token,
+      topToken,
+      "/api/v1/auth/me",
+    );
+    assertEquals(topIdentity.status, 200);
+    const replay = await postJson(
+      harness.baseUrl,
+      initial.requestToken,
       `/api/v1/auth/requests/${requestId}/redeem`,
-      { redemption_nonce: nonce },
+      { redemption_nonce: requestState.authorizationNonces[requestId] },
+    );
+    assertEquals(replay.status, 409);
+    assertEquals(replay.body.error.code, "redemption_already_used");
+    const wrongRequester = await postJson(
+      harness.baseUrl,
+      initial.token,
+      `/api/v1/auth/requests/${requestId}/redeem`,
+      { redemption_nonce: requestState.authorizationNonces[requestId] },
     );
     assertEquals(wrongRequester.status, 401);
+    assertEquals(wrongRequester.body.error.code, "redemption_invalid");
+
+    await selectCredential(harness, {
+      token: undefined,
+      requestToken: initial.requestToken,
+    });
+    const delegatedRequest = await requestOnly.runOptctl([
+      "--json",
+      "auth",
+      "request",
+      "--role",
+      "system:super_admin",
+      "--boundary",
+      "system",
+      "--reason",
+      "delegated subagent",
+    ]);
+    assertEquals(delegatedRequest.code, 0, delegatedRequest.stderr);
+    const delegatedRequestId = JSON.parse(delegatedRequest.stdout).data
+      .id as string;
+    await selectCredential(harness, {
+      token: topToken,
+      requestToken: undefined,
+    });
+    const delegatedApproval = await waitingAgent.runOptctl([
+      "--json",
+      "auth",
+      "approve",
+      delegatedRequestId,
+      "--yes",
+      "--agent-name",
+      "delegated-agent",
+    ]);
+    assertEquals(delegatedApproval.code, 0, delegatedApproval.stderr);
+    assertEquals(delegatedApproval.stdout.includes("token"), false);
+    await selectCredential(harness, {
+      token: undefined,
+      requestToken: initial.requestToken,
+    });
+    const delegatedWait = await delegatedAgent.runOptctl([
+      "--json",
+      "auth",
+      "wait",
+      delegatedRequestId,
+    ]);
+    assertEquals(delegatedWait.code, 0, delegatedWait.stderr);
+    const delegatedToken = (await storedState(harness)).token;
+    const delegatedAuthorizationId = await requestAuthorizationId(
+      harness,
+      delegatedRequestId,
+    );
+    const delegatedLineage = await lineage(harness, delegatedAuthorizationId);
+    assertEquals(delegatedLineage.parent_authorization_id, topAuthorizationId);
+    assertEquals(delegatedLineage.root_authorization_id, topAuthorizationId);
+
+    await selectCredential(harness, {
+      token: delegatedToken,
+      requestToken: undefined,
+    });
+    const replacementRequest = await replacementAgent.runOptctl([
+      "--json",
+      "auth",
+      "request",
+      "--role",
+      "system:admin",
+      "--boundary",
+      "system",
+      "--reason",
+      "replace delegated authority",
+    ]);
+    assertEquals(replacementRequest.code, 0, replacementRequest.stderr);
+    const replacementRequestId = JSON.parse(replacementRequest.stdout).data
+      .id as string;
+    const replacementApproval = await delegatedAgent.runOptctl([
+      "--json",
+      "auth",
+      "approve",
+      replacementRequestId,
+      "--yes",
+    ]);
+    assertEquals(replacementApproval.code, 0, replacementApproval.stderr);
+    const replacementWait = await replacementAgent.runOptctl([
+      "--json",
+      "auth",
+      "wait",
+      replacementRequestId,
+    ]);
+    assertEquals(replacementWait.code, 0, replacementWait.stderr);
+    const replacementToken = (await storedState(harness)).token;
+    const replacementAuthorizationId = await requestAuthorizationId(
+      harness,
+      replacementRequestId,
+    );
+    const replacementLineage = await lineage(
+      harness,
+      replacementAuthorizationId,
+    );
     assertEquals(
-      (await wrongRequester.json()).error.code,
-      "redemption_invalid",
+      replacementLineage,
+      delegatedLineage,
+      "replacement preserves parent/root instead of parenting to superseded authorization",
     );
-    const replay = await post(
-      harness.baseUrl,
-      state.requestToken,
-      `/api/v1/auth/requests/${requestId}/redeem`,
-      { redemption_nonce: nonce },
-    );
-    assertEquals(replay.status, 200);
-    const remintedToken = (await replay.json()).data.token as string;
-    assertEquals(
-      (await get(harness.baseUrl, agentToken, "/api/v1/auth/me")).status,
-      401,
-      "replayed delivery cannot reuse the prior bearer",
-    );
-    assertEquals(
-      (await get(harness.baseUrl, remintedToken, "/api/v1/auth/me")).status,
-      200,
-    );
-    const active = (await query<{ count: number }>(
+
+    await selectCredential(harness, {
+      token: replacementToken,
+      requestToken: undefined,
+    });
+    const revoked = await revocationAgent.runOptctl([
+      "--json",
+      "auth",
+      "revoke",
+      replacementAuthorizationId,
+    ]);
+    assertEquals(revoked.code, 0, revoked.stderr);
+    const rejected = await revocationAgent.runOptctl([
+      "--json",
+      "auth",
+      "whoami",
+    ]);
+    assertEquals(rejected.code, 1);
+    assertEquals(JSON.parse(rejected.stderr).error.code, "credential_invalid");
+
+    const provenance = (await query<
+      {
+        agent_user_id: string;
+        parent_authorization_id: string | null;
+        root_authorization_id: string;
+        approved_by_auth_context_id: string;
+      }
+    >(
       harness.server.sql,
-      `select count(*)::int count from auth_sessions where authorization_id=(select authorization_id from agent_authorization_requests where id=$1) and revoked_at is null`,
-      [requestId],
-    )).rows[0]!.count;
-    assertEquals(active, 1);
+      `select agent_user_id,parent_authorization_id,root_authorization_id,approved_by_auth_context_id from agent_authorizations where id=$1`,
+      [replacementAuthorizationId],
+    )).rows[0]!;
+    assertExists(provenance.agent_user_id);
+    assertExists(provenance.approved_by_auth_context_id);
+    assertEquals(provenance.parent_authorization_id, topAuthorizationId);
+    assertEquals(provenance.root_authorization_id, topAuthorizationId);
   } finally {
+    for (const value of launchers.reverse()) {
+      await value.close().catch(() => undefined);
+    }
     await harness.close();
   }
 });
 
+async function launcher(
+  harness: LiveHarness,
+  values: CliLauncher[],
+  kind: "human" | "request_only" | "agent",
+) {
+  const value = await harness.createProcessTreeLauncher(kind);
+  values.push(value);
+  return value;
+}
 type State = {
   token: string;
   requestToken: string;
   requestSessionId: string;
   authorizationNonces: Record<string, string>;
 };
-async function storedState(root: string, origin: string): Promise<State> {
+async function storedState(harness: LiveHarness): Promise<State> {
   const store = JSON.parse(
-    await Deno.readTextFile(join(root, "xdg-config", "operant", "auth.json")),
+    await Deno.readTextFile(
+      join(harness.rootDir, "xdg-config", "operant", "auth.json"),
+    ),
   );
-  return store.origins[new URL(origin).origin];
+  return store.origins[new URL(harness.baseUrl).origin];
 }
-function post(
+async function selectCredential(
+  harness: LiveHarness,
+  update: { token?: string; requestToken?: string },
+) {
+  const path = join(harness.rootDir, "xdg-config", "operant", "auth.json");
+  const store = JSON.parse(await Deno.readTextFile(path));
+  const origin = new URL(harness.baseUrl).origin;
+  store.origins[origin] = { ...store.origins[origin], ...update };
+  if (update.token === undefined) delete store.origins[origin].token;
+  if (update.requestToken === undefined) {
+    delete store.origins[origin].requestToken;
+  }
+  await Deno.writeTextFile(path, JSON.stringify(store));
+}
+async function waitForUsedTickets(
+  harness: LiveHarness,
+  requestId: string,
+  minimum: number,
+) {
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    const count = (await query<{ count: number }>(
+      harness.server.sql,
+      `select count(*)::int count from agent_authorization_watch_tickets where request_id=$1 and used_at is not null`,
+      [requestId],
+    )).rows[0]!.count;
+    if (count >= minimum) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`compiled wait did not consume watch ticket ${minimum}`);
+}
+async function requestContextCount(harness: LiveHarness, sessionId: string) {
+  return (await query<{ count: number }>(
+    harness.server.sql,
+    `select count(*)::int count from auth_contexts where session_id=$1`,
+    [sessionId],
+  )).rows[0]!.count;
+}
+async function requestAuthorizationId(harness: LiveHarness, requestId: string) {
+  return (await query<{ authorization_id: string }>(
+    harness.server.sql,
+    `select authorization_id from agent_authorization_requests where id=$1`,
+    [requestId],
+  )).rows[0]!.authorization_id;
+}
+async function lineage(harness: LiveHarness, authorizationId: string) {
+  return (await query<
+    { parent_authorization_id: string | null; root_authorization_id: string }
+  >(
+    harness.server.sql,
+    `select parent_authorization_id,root_authorization_id from agent_authorizations where id=$1`,
+    [authorizationId],
+  )).rows[0]!;
+}
+async function postJson(
   origin: string,
   token: string,
   path: string,
   body: unknown,
-): Promise<Response> {
-  return fetch(`${origin}${path}`, {
+) {
+  const response = await fetch(`${origin}${path}`, {
     method: "POST",
     headers: {
       authorization: `Bearer ${token}`,
@@ -154,38 +351,11 @@ function post(
     },
     body: JSON.stringify(body),
   });
+  return { status: response.status, body: await response.json() };
 }
-function get(origin: string, token: string, path: string): Promise<Response> {
-  return fetch(`${origin}${path}`, {
+async function inspectJson(origin: string, token: string, path: string) {
+  const response = await fetch(`${origin}${path}`, {
     headers: { authorization: `Bearer ${token}` },
   });
-}
-async function openUntilMessage(url: URL): Promise<{ status: string }> {
-  return await new Promise((resolve, reject) => {
-    const socket = new WebSocket(url);
-    const timeout = setTimeout(() => {
-      socket.close();
-      reject(new Error("websocket did not emit pending state"));
-    }, 5_000);
-    socket.onmessage = (event) => {
-      clearTimeout(timeout);
-      const message = JSON.parse(String(event.data));
-      socket.close(1000, "intentional interruption");
-      resolve(message);
-    };
-    socket.onerror = () => {
-      clearTimeout(timeout);
-      reject(new Error("websocket connection failed"));
-    };
-  });
-}
-async function requestContextCount(
-  sql: Parameters<typeof query>[0],
-  sessionId: string,
-): Promise<number> {
-  return (await query<{ count: number }>(
-    sql,
-    `select count(*)::int count from auth_contexts where session_id=$1`,
-    [sessionId],
-  )).rows[0]!.count;
+  return { status: response.status, body: await response.json() };
 }

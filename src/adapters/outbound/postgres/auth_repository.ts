@@ -2017,6 +2017,24 @@ export class PostgresAuthRepository implements AuthRepository {
           ),
         );
       }
+      if (row.redeemed_at) {
+        const used = (await query<{ used: boolean }>(
+          tx,
+          `select exists(
+             select 1 from auth_sessions s
+             join auth_contexts c on c.session_id=s.id
+             where s.authorization_id=$1 and s.revoked_at is null
+           ) used`,
+          [authorization.id],
+        )).rows[0]?.used;
+        if (used) {
+          return err(authError(
+            "redemption_already_used",
+            "authorization redemption was already used",
+            "conflict",
+          ));
+        }
+      }
       await query(
         tx,
         `update auth_sessions set revoked_at=now() where authorization_id=$1 and revoked_at is null`,
@@ -2119,6 +2137,7 @@ type AgentRequestRow = {
   authorization_id: string | null;
   denial_reason: string | null;
   created_at: Date;
+  redeemed_at: Date | null;
 };
 
 function boundaryParams(

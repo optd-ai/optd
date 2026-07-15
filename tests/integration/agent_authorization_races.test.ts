@@ -58,6 +58,7 @@ Deno.test("authorization decisions serialize approve, deny, cancel, and duplicat
       ],
     );
     assertEquals(cancelled.status, 200);
+    await cancelled.body?.cancel();
     assertEquals(lateApprove.status, 409);
     assertEquals(
       (await lateApprove.json()).error.code,
@@ -89,8 +90,8 @@ Deno.test("concurrent replacement preserves parent/root and upstream role filter
     await bootstrap(harness, "lineage-race");
     const human = await storedAuth(harness);
     const parentRequest = await createRequest(harness, "parent authorization");
-    assertEquals(
-      (await decide(harness, human.token!, parentRequest, "approved")).status,
+    await expectAndCancel(
+      decide(harness, human.token!, parentRequest, "approved"),
       200,
     );
     const parentNonce =
@@ -116,8 +117,8 @@ Deno.test("concurrent replacement preserves parent/root and upstream role filter
       childNonce,
     );
     const childId = (await childCreated.json()).data.id as string;
-    assertEquals(
-      (await decide(harness, parentToken, childId, "approved")).status,
+    await expectAndCancel(
+      decide(harness, parentToken, childId, "approved"),
       200,
     );
     const childRedemption = await post(
@@ -158,6 +159,8 @@ Deno.test("concurrent replacement preserves parent/root and upstream role filter
       ],
     );
     assertEquals([firstApproval.status, duplicateApproval.status], [200, 200]);
+    await firstApproval.body?.cancel();
+    await duplicateApproval.body?.cancel();
     const replacementId = (await query<{ authorization_id: string }>(
       harness.server.sql,
       `select authorization_id from agent_authorization_requests where id=$1`,
@@ -190,9 +193,10 @@ Deno.test("concurrent replacement preserves parent/root and upstream role filter
       { redemption_nonce: replacementNonce },
     );
     assertEquals(replacementRedeemed.status, 200);
+    await replacementRedeemed.body?.cancel();
 
-    assertEquals(
-      (await get(harness, childToken, "/api/v1/projects")).status,
+    await expectAndCancel(
+      get(harness, childToken, "/api/v1/projects"),
       200,
     );
     await query(
@@ -223,8 +227,8 @@ Deno.test("redemption serializes with revoke and remint leaves one active sessio
     await bootstrap(harness, "redemption-race");
     const credentials = await storedAuth(harness);
     const requestId = await createRequest(harness, "redemption race");
-    assertEquals(
-      (await decide(harness, credentials.token!, requestId, "approved")).status,
+    await expectAndCancel(
+      decide(harness, credentials.token!, requestId, "approved"),
       200,
     );
     const authorizationId = (await query<{ authorization_id: string }>(
@@ -257,8 +261,9 @@ Deno.test("redemption serializes with revoke and remint leaves one active sessio
     assertEquals(redeemed.status, 200);
     const firstToken = (await redeemed.json()).data.token as string;
     assertEquals(revoked.status, 200);
-    assertEquals(
-      (await bearerGet(harness, firstToken, "/api/v1/auth/me")).status,
+    await revoked.body?.cancel();
+    await expectAndCancel(
+      bearerGet(harness, firstToken, "/api/v1/auth/me"),
       401,
     );
     await assertNoActiveAuthority(harness, authorizationId);
@@ -267,13 +272,13 @@ Deno.test("redemption serializes with revoke and remint leaves one active sessio
       harness,
       "revoke beats redemption",
     );
-    assertEquals(
-      (await decide(
+    await expectAndCancel(
+      decide(
         harness,
         credentials.token!,
         revokeFirstRequest,
         "approved",
-      )).status,
+      ),
       200,
     );
     const revokeFirstAuthorization = (await query<{ authorization_id: string }>(
@@ -304,6 +309,7 @@ Deno.test("redemption serializes with revoke and remint leaves one active sessio
       ],
     );
     assertEquals(earlyRevoke.status, 200);
+    await earlyRevoke.body?.cancel();
     assertEquals(lateRedemption.status, 409);
     assertEquals(
       (await lateRedemption.json()).error.code,
@@ -315,9 +321,8 @@ Deno.test("redemption serializes with revoke and remint leaves one active sessio
       harness,
       "single active redemption",
     );
-    assertEquals(
-      (await decide(harness, credentials.token!, replayRequest, "approved"))
-        .status,
+    await expectAndCancel(
+      decide(harness, credentials.token!, replayRequest, "approved"),
       200,
     );
     const replayNonce =
@@ -349,12 +354,12 @@ Deno.test("redemption serializes with revoke and remint leaves one active sessio
     );
     assertEquals(reminted.status, 200);
     const secondBearer = (await reminted.json()).data.token as string;
-    assertEquals(
-      (await bearerGet(harness, firstBearer, "/api/v1/auth/me")).status,
+    await expectAndCancel(
+      bearerGet(harness, firstBearer, "/api/v1/auth/me"),
       401,
     );
-    assertEquals(
-      (await bearerGet(harness, secondBearer, "/api/v1/auth/me")).status,
+    await expectAndCancel(
+      bearerGet(harness, secondBearer, "/api/v1/auth/me"),
       200,
     );
     const active = (await query<{ count: number }>(
@@ -465,6 +470,14 @@ async function postRequest(
       redemption_nonce_hash: await tokenDigest(nonce),
     }),
   });
+}
+async function expectAndCancel(
+  response: Promise<Response>,
+  expected: number,
+): Promise<void> {
+  const value = await response;
+  assertEquals(value.status, expected);
+  await value.body?.cancel();
 }
 async function raceRequestRow(
   sql: Sql,
