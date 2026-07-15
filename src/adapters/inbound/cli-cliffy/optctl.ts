@@ -417,10 +417,21 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
         requestToken: String(credentials.authorization_request_token),
       });
     } else if (cmd === "project" && sub === "list") {
-      const status = option(parsed.positional.slice(2), "--status") ?? "active";
-      result = await getJson(
-        `${parsed.server}/api/v1/projects?status=${encodeURIComponent(status)}`,
-      );
+      const listArgs = parsed.positional.slice(2);
+      const parameters = new URLSearchParams();
+      for (
+        const [flag, query] of [
+          ["--status", "status"],
+          ["--slug", "slug"],
+          ["--limit", "limit"],
+          ["--cursor", "cursor"],
+        ] as const
+      ) {
+        const value = option(listArgs, flag);
+        if (value !== undefined) parameters.set(query, value);
+      }
+      const query = parameters.size ? `?${parameters}` : "";
+      result = await getJson(`${parsed.server}/api/v1/projects${query}`);
     } else if (cmd === "project" && sub === "create" && value) {
       const displayName = option(parsed.positional.slice(3), "--display-name");
       if (!displayName) {

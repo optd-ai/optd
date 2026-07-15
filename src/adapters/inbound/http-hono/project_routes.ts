@@ -17,9 +17,18 @@ export type ProjectHttpService = {
   ): Promise<Result<Project>>;
   list(
     auth: AuthContext,
-    status: string,
-    slug?: string,
-  ): Promise<Result<Project[]>>;
+    input: {
+      status?: unknown;
+      slug?: unknown;
+      limit?: unknown;
+      cursor?: unknown;
+    },
+  ): Promise<
+    Result<{
+      items: Project[];
+      page: { limit: number; nextCursor: string | null };
+    }>
+  >;
   get(auth: AuthContext, id: string): Promise<Result<Project>>;
   update(
     auth: AuthContext,
@@ -61,18 +70,11 @@ export function registerProjectRoutes(
       201,
     );
   });
-  app.get(
-    "/api/v1/projects",
-    async (c) =>
-      respond(
-        c,
-        await service.list(
-          c.get("auth"),
-          c.req.query("status") ?? "active",
-          c.req.query("slug"),
-        ),
-      ),
-  );
+  app.get("/api/v1/projects", async (c) => {
+    const parsed = parseListQuery(c.req.url);
+    if (!parsed.ok) return invalidQuery(c, parsed.code, parsed.message);
+    return respondPage(c, await service.list(c.get("auth"), parsed.value));
+  });
   app.get(
     "/api/v1/projects/:project_id",
     async (c) =>
@@ -144,6 +146,65 @@ function respond(
     status,
   );
 }
+function respondPage(
+  c: { json(data: unknown, status?: number): Response },
+  result: Result<{
+    items: Project[];
+    page: { limit: number; nextCursor: string | null };
+  }>,
+) {
+  if (!result.ok) {
+    return c.json(errorEnvelope(result.error), toHttpStatus(result.error));
+  }
+  return c.json(successEnvelope({
+    items: result.value.items.map(dto),
+    page: {
+      limit: result.value.page.limit,
+      next_cursor: result.value.page.nextCursor,
+    },
+  }));
+}
+
+type ParsedListQuery =
+  | {
+    ok: true;
+    value: { status?: string; slug?: string; limit?: string; cursor?: string };
+  }
+  | { ok: false; code: string; message: string };
+
+function parseListQuery(urlValue: string): ParsedListQuery {
+  const url = new URL(urlValue);
+  const allowed = new Set(["status", "slug", "limit", "cursor"]);
+  for (const key of url.searchParams.keys()) {
+    if (!allowed.has(key)) {
+      return {
+        ok: false,
+        code: "validation_failed",
+        message: `unknown Project list query field: ${key}`,
+      };
+    }
+    if (url.searchParams.getAll(key).length !== 1) {
+      return {
+        ok: false,
+        code: "validation_failed",
+        message: `Project list query field must occur once: ${key}`,
+      };
+    }
+  }
+  return {
+    ok: true,
+    value: Object.fromEntries(url.searchParams.entries()),
+  };
+}
+
+function invalidQuery(
+  c: { json(data: unknown, status?: number): Response },
+  code: string,
+  message: string,
+) {
+  return c.json(errorEnvelope({ code, message, details: {} }), 400);
+}
+
 function invalid(c: { json(data: unknown, status?: number): Response }) {
   return c.json(
     errorEnvelope({

@@ -6,6 +6,10 @@ import {
   validateProjectSlug,
 } from "../../../src/domain/projects/model.ts";
 import { makeProjectService } from "../../../src/application/services/projects/manage_projects.ts";
+import {
+  decodeProjectCursor,
+  encodeProjectCursor,
+} from "../../../src/domain/projects/pagination.ts";
 import type { ProjectRepository } from "../../../src/application/ports/project_repository.ts";
 
 Deno.test("Project IDs and fields enforce the frozen validation contract", () => {
@@ -19,6 +23,22 @@ Deno.test("Project IDs and fields enforce the frozen validation contract", () =>
   assert(!validateProjectName(" ").ok);
   assert(validateDescription(null).ok);
   assert(!validateDescription("x".repeat(16_385)).ok);
+});
+
+Deno.test("Project cursors bind stable positions to exact filters", () => {
+  const cursor = encodeProjectCursor(
+    { status: "active" },
+    { slug: "bravo", id: uuidV7() },
+  );
+  const decoded = decodeProjectCursor(cursor, { status: "active" });
+  assert(decoded.ok);
+  assertEquals(decoded.value.slug, "bravo");
+  const mismatch = decodeProjectCursor(cursor, { status: "archived" });
+  assert(!mismatch.ok);
+  assertEquals(mismatch.error.code, "project_cursor_mismatch");
+  const malformed = decodeProjectCursor("not-a-cursor", { status: "active" });
+  assert(!malformed.ok);
+  assertEquals(malformed.error.code, "project_cursor_invalid");
 });
 
 Deno.test("Project service reports stable UUID and authorization errors", async () => {

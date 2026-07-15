@@ -25,7 +25,11 @@ import type {
 import type { UploadedPackFile } from "../../outbound/yaml/pack_loader.ts";
 import type { RequestAuthenticator } from "../../../application/ports/authentication.ts";
 import type { AuthVariables } from "./auth_middleware.ts";
-import { requireBearer, serverActor } from "./auth_middleware.ts";
+import {
+  isAuthorityKey,
+  requireBearer,
+  serverActor,
+} from "./auth_middleware.ts";
 import {
   type BootstrapHttpService,
   registerAuthRoutes,
@@ -395,7 +399,7 @@ export function makeHttpApp(
   return app;
 }
 
-async function authenticatedJson<T extends Record<string, unknown>>(c: {
+export async function authenticatedJson<T extends Record<string, unknown>>(c: {
   req: { json(): Promise<unknown> };
   get(key: "auth"): AuthVariables["auth"];
 }): Promise<T> {
@@ -403,10 +407,25 @@ async function authenticatedJson<T extends Record<string, unknown>>(c: {
   if (!body || typeof body !== "object" || Array.isArray(body)) {
     throw new SyntaxError("request body must be a JSON object");
   }
+  const derived = serverActor(c.get("auth"));
   return {
-    ...(body as Record<string, unknown>),
-    actor_context: serverActor(c.get("auth")),
+    ...(stripAuthority(body as Record<string, unknown>) as Record<
+      string,
+      unknown
+    >),
+    actor: derived,
+    actor_context: derived,
   } as unknown as T;
+}
+
+function stripAuthority(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripAuthority);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([key]) => !isAuthorityKey(key))
+      .map(([key, child]) => [key, stripAuthority(child)]),
+  );
 }
 
 async function multipartFiles(request: Request): Promise<UploadedPackFile[]> {

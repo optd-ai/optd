@@ -11,9 +11,16 @@ export async function requireBearer(
   c: Context<{ Variables: AuthVariables }>,
   next: Next,
 ) {
-  const authorityInput = c.req.query("actor") ?? c.req.query("role") ??
-    c.req.header("x-operant-actor") ?? c.req.header("x-operant-role");
-  if (authorityInput !== undefined) {
+  const url = new URL(c.req.url);
+  const authorityInput = [...url.searchParams.keys()].some(isAuthorityKey) ||
+    [
+      "x-operant-actor",
+      "x-operant-role",
+      "x-actor",
+      "x-role",
+      "x-roles",
+    ].some((name) => c.req.header(name) !== undefined);
+  if (authorityInput) {
     return c.json(
       errorEnvelope({
         code: "validation_failed",
@@ -23,17 +30,50 @@ export async function requireBearer(
       422,
     );
   }
-  if ((c.req.header("content-type") ?? "").startsWith("application/json")) {
-    const body = await c.req.raw.clone().json().catch(() => undefined);
-    if (containsAuthority(body)) {
+  if (!["GET", "HEAD"].includes(c.req.method)) {
+    const contentType = c.req.header("content-type") ?? "";
+    const multipart = contentType.toLowerCase().startsWith(
+      "multipart/form-data",
+    );
+    const multipartRoute = [
+      "/packs/preview",
+      "/packs/apply",
+      "/migrations/preview",
+    ].includes(c.req.path);
+    if (multipartRoute !== multipart) {
       return c.json(
         errorEnvelope({
-          code: "validation_failed",
-          message: "caller-supplied actor or role authority is not accepted",
+          code: "unsupported_media_type",
+          message: multipartRoute
+            ? "route requires Content-Type multipart/form-data"
+            : "JSON routes require Content-Type application/json",
           details: {},
         }),
-        422,
+        415,
       );
+    }
+    if (!multipartRoute) {
+      if (!isJsonContentType(contentType)) {
+        return c.json(
+          errorEnvelope({
+            code: "unsupported_media_type",
+            message: "JSON routes require Content-Type application/json",
+            details: {},
+          }),
+          415,
+        );
+      }
+      const body = await c.req.raw.clone().json().catch(() => undefined);
+      if (containsAuthority(body)) {
+        return c.json(
+          errorEnvelope({
+            code: "validation_failed",
+            message: "caller-supplied actor or role authority is not accepted",
+            details: {},
+          }),
+          422,
+        );
+      }
     }
   }
   const authorization = c.req.header("authorization") ?? "";
@@ -85,13 +125,28 @@ export function serverActor(auth: AuthContext) {
   };
 }
 
-function containsAuthority(value: unknown): boolean {
+export function isJsonContentType(value: string): boolean {
+  return /^application\/json(?:\s*;|$)/i.test(value.trim());
+}
+
+export function isAuthorityKey(key: string): boolean {
+  return [
+    "actor",
+    "actor_id",
+    "actor_context",
+    "role",
+    "roles",
+    "effective_roles",
+    "principal",
+    "principal_id",
+  ].includes(key.toLowerCase().replaceAll("-", "_"));
+}
+
+export function containsAuthority(value: unknown): boolean {
   if (!value || typeof value !== "object") return false;
   if (Array.isArray(value)) return value.some(containsAuthority);
   for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
-    if (
-      key === "actor" || key === "actor_id" || key === "role" || key === "roles"
-    ) return true;
+    if (isAuthorityKey(key)) return true;
     if (containsAuthority(child)) return true;
   }
   return false;

@@ -6,7 +6,7 @@ import {
   successEnvelope,
 } from "../../../schemas/api/contracts.ts";
 import { toHttpStatus } from "../../../domain/errors/result.ts";
-import type { AuthVariables } from "./auth_middleware.ts";
+import { type AuthVariables, isJsonContentType } from "./auth_middleware.ts";
 
 export type BootstrapHttpService = {
   required(): Promise<boolean>;
@@ -34,6 +34,16 @@ export function registerAuthRoutes(
       ),
   );
   app.post("/api/v1/auth/bootstrap", async (c) => {
+    if (!isJsonContentType(c.req.header("content-type") ?? "")) {
+      return c.json(
+        errorEnvelope({
+          code: "unsupported_media_type",
+          message: "JSON routes require Content-Type application/json",
+          details: {},
+        }),
+        415,
+      );
+    }
     const authorization = c.req.header("authorization") ?? "";
     const match = /^Operant-Bootstrap (.+)$/.exec(authorization);
     const body = await c.req.json().catch(() => undefined);

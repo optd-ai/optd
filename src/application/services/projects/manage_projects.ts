@@ -7,6 +7,11 @@ import {
 } from "../../../domain/errors/result.ts";
 import type { Project, ProjectStatus } from "../../../domain/projects/model.ts";
 import {
+  decodeProjectCursor,
+  encodeProjectCursor,
+  type ProjectListFilter,
+} from "../../../domain/projects/pagination.ts";
+import {
   validateDescription,
   validateProjectName,
   validateProjectSlug,
@@ -56,28 +61,76 @@ export function makeProjectService(repository: ProjectRepository) {
     },
     async list(
       auth: AuthContext,
-      status: string,
-      slug?: string,
-    ): Promise<Result<Project[]>> {
+      input: {
+        status?: unknown;
+        slug?: unknown;
+        limit?: unknown;
+        cursor?: unknown;
+      },
+    ): Promise<
+      Result<{
+        items: Project[];
+        page: { limit: number; nextCursor: string | null };
+      }>
+    > {
       const permit = authorized(auth, "project.read");
       if (!permit.ok) return permit;
-      if (!(["active", "archived", "all"] as string[]).includes(status)) {
-        return err(
-          validationError(
-            "validation_failed",
-            "status must be active, archived, or all",
-            { field: "status" },
-          ),
-        );
+      const status = input.status ?? "active";
+      if (
+        typeof status !== "string" ||
+        !(["active", "archived", "all"] as string[]).includes(status)
+      ) {
+        return err(validationError(
+          "validation_failed",
+          "status must be active, archived, or all",
+          { field: "status" },
+        ));
       }
-      if (slug !== undefined) {
-        const valid = validateProjectSlug(slug);
+      let slug: string | undefined;
+      if (input.slug !== undefined) {
+        const valid = validateProjectSlug(input.slug);
         if (!valid.ok) return valid;
+        slug = valid.value;
       }
-      return await repository.list(auth, {
+      const limit = input.limit === undefined ? 50 : Number(input.limit);
+      if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+        return err(validationError(
+          "validation_failed",
+          "limit must be an integer from 1 to 100",
+          { field: "limit", minimum: 1, maximum: 100 },
+        ));
+      }
+      const filter: ProjectListFilter = {
         status: status as ProjectStatus | "all",
-        slug,
-      });
+        ...(slug === undefined ? {} : { slug }),
+      };
+      let after;
+      if (input.cursor !== undefined) {
+        if (typeof input.cursor !== "string" || !input.cursor) {
+          return err(validationError(
+            "project_cursor_invalid",
+            "project cursor is malformed",
+            {},
+          ));
+        }
+        const decoded = decodeProjectCursor(input.cursor, filter);
+        if (!decoded.ok) return decoded;
+        after = decoded.value;
+      }
+      const result = await repository.list(auth, { filter, limit, after });
+      if (!result.ok) return result;
+      return {
+        ok: true,
+        value: {
+          items: result.value.items,
+          page: {
+            limit,
+            nextCursor: result.value.nextPosition
+              ? encodeProjectCursor(filter, result.value.nextPosition)
+              : null,
+          },
+        },
+      };
     },
     async get(auth: AuthContext, id: string) {
       const permit = authorized(auth, "project.read");

@@ -1,11 +1,16 @@
 import type {
   CreateProject,
+  ProjectPage,
   ProjectRepository,
   UpdateProject,
 } from "../../../application/ports/project_repository.ts";
 import type { AuthContext } from "../../../domain/auth/model.ts";
 import { err, ok, type Result } from "../../../domain/errors/result.ts";
 import type { Project, ProjectStatus } from "../../../domain/projects/model.ts";
+import type {
+  ProjectCursorPosition,
+  ProjectListFilter,
+} from "../../../domain/projects/pagination.ts";
 import { uuidV7 } from "../../../domain/ids/uuid_v7.ts";
 import { query, type Queryable, type Sql } from "./client.ts";
 
@@ -57,17 +62,39 @@ export class PostgresProjectRepository implements ProjectRepository {
 
   async list(
     _auth: AuthContext,
-    filter: { status: ProjectStatus | "all"; slug?: string },
-  ): Promise<Result<Project[]>> {
+    input: {
+      filter: ProjectListFilter;
+      limit: number;
+      after?: ProjectCursorPosition;
+    },
+  ): Promise<Result<ProjectPage>> {
     return await this.sql.begin(async (tx) => {
       const rows = await query<ProjectRow>(
         tx,
-        `select ${COLUMNS} from projects where ($1 = 'all' or status = $1) and ($2::text is null or slug = $2) order by slug`,
-        [filter.status, filter.slug ?? null],
+        `select ${COLUMNS}
+           from projects
+          where ($1 = 'all' or status = $1)
+            and ($2::text is null or slug = $2)
+            and ($3::text is null or (slug, id) > ($3, $4::uuid))
+          order by slug, id
+          limit $5`,
+        [
+          input.filter.status,
+          input.filter.slug ?? null,
+          input.after?.slug ?? null,
+          input.after?.id ?? null,
+          input.limit + 1,
+        ],
       );
-      await audit(tx, _auth, "project.read", null, { filter });
-      return ok(rows.rows.map(mapProject));
-    }) as Result<Project[]>;
+      const hasMore = rows.rows.length > input.limit;
+      const visible = rows.rows.slice(0, input.limit);
+      const last = hasMore ? visible.at(-1) : undefined;
+      await audit(tx, _auth, "project.read", null, { input });
+      return ok({
+        items: visible.map(mapProject),
+        nextPosition: last ? { slug: last.slug, id: last.id } : null,
+      });
+    }) as Result<ProjectPage>;
   }
 
   async get(_auth: AuthContext, id: string): Promise<Result<Project>> {

@@ -201,6 +201,89 @@ Deno.test({
       );
       assertEquals(project.version, 1);
       assertEquals((await harness.selectProject("sales")).code, 0);
+      for (const slug of ["alpha", "bravo", "charlie"]) {
+        const extra = await harness.runOptctl([
+          "--json",
+          "project",
+          "create",
+          slug,
+          "--display-name",
+          slug,
+        ]);
+        assertEquals(extra.code, 0, extra.stderr);
+      }
+      const firstPage = await harness.runOptctl([
+        "--json",
+        "project",
+        "list",
+        "--status",
+        "active",
+        "--limit",
+        "2",
+      ]);
+      assertEquals(firstPage.code, 0, firstPage.stderr);
+      const firstPageData = JSON.parse(firstPage.stdout).data;
+      assertEquals(
+        firstPageData.items.map((item: { slug: string }) => item.slug),
+        ["alpha", "bravo"],
+      );
+      assertEquals(firstPageData.page.limit, 2);
+      assert(typeof firstPageData.page.next_cursor === "string");
+      const secondPage = await harness.runOptctl([
+        "--json",
+        "project",
+        "list",
+        "--status",
+        "active",
+        "--limit",
+        "2",
+        "--cursor",
+        firstPageData.page.next_cursor,
+      ]);
+      const secondPageData = JSON.parse(secondPage.stdout).data;
+      assertEquals(
+        secondPageData.items.map((item: { slug: string }) => item.slug),
+        ["charlie", "sales"],
+      );
+      assertEquals(secondPageData.page.next_cursor, null);
+      const cursorMismatch = await harness.runOptctl([
+        "--json",
+        "project",
+        "list",
+        "--status",
+        "archived",
+        "--limit",
+        "2",
+        "--cursor",
+        firstPageData.page.next_cursor,
+      ]);
+      assertEquals(cursorMismatch.code, 1);
+      assertEquals(
+        JSON.parse(cursorMismatch.stderr).error.code,
+        "project_cursor_mismatch",
+      );
+      const malformedCursor = await harness.runOptctl([
+        "--json",
+        "project",
+        "list",
+        "--cursor",
+        "not-a-cursor",
+      ]);
+      assertEquals(malformedCursor.code, 1);
+      assertEquals(
+        JSON.parse(malformedCursor.stderr).error.code,
+        "project_cursor_invalid",
+      );
+      const exactSlug = await harness.runOptctl([
+        "--json",
+        "project",
+        "list",
+        "--slug",
+        "sales",
+        "--limit",
+        "1",
+      ]);
+      assertEquals(JSON.parse(exactSlug.stdout).data.items.length, 1);
 
       const updates = await harness.runConcurrent([
         {
