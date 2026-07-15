@@ -342,7 +342,13 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
     const parsed = parse(args);
     const [cmd, sub, value] = parsed.positional;
     let result: unknown;
-    if (cmd === "home") {
+    if (cmd === "status" && sub === "live") {
+      result = await getJson(`${parsed.server}/live`);
+    } else if (cmd === "status" && sub === "ready") {
+      result = await getJson(`${parsed.server}/ready`);
+    } else if (cmd === "status" && sub === "bootstrap") {
+      result = await getJson(`${parsed.server}/api/v1/auth/bootstrap/status`);
+    } else if (cmd === "home") {
       result = await getJson(`${parsed.server}/metadata/home`);
     } else if (cmd === "pack" && sub === "preview" && value) {
       result = await postMultipart(`${parsed.server}/packs/preview`, value);
@@ -465,7 +471,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       );
     } else {
       throw usageError(
-        "usage: optctl home | pack preview/apply <dir> | metadata [packs] | metadata pack/resource/action/hook/policy <namespace.name> | secret list/set/delete | action preview/commit <namespace.action> --input '{...}' | outbox status/drain/retry | migration inspect/apply/confirm <id> | query <namespace.resource> [--where expr] [--fields a,b] [--sort field:desc] [--limit n] [--cursor c] | changeset preview/commit (--file <json-file>|--input '{...}') | view <namespace.resource> <id> | history <namespace.resource> <id>",
+        "usage: optctl status live/ready/bootstrap | home | pack preview/apply <dir> | metadata [packs] | metadata pack/resource/action/hook/policy <namespace.name> | secret list/set/delete | action preview/commit <namespace.action> --input '{...}' | outbox status/drain/retry | migration inspect/apply/confirm <id> | query <namespace.resource> [--where expr] [--fields a,b] [--sort field:desc] [--limit n] [--cursor c] | changeset preview/commit (--file <json-file>|--input '{...}') | view <namespace.resource> <id> | history <namespace.resource> <id>",
       );
     }
     const output = parsed.verbose
@@ -484,14 +490,27 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
         code: error.exitCode,
       };
     }
+    if (error instanceof SyntaxError) {
+      const malformed = usageError("input is not valid JSON");
+      return {
+        stdout: "",
+        stderr: render(malformed.envelope, parse(args).json),
+        code: malformed.exitCode,
+      };
+    }
+    const unavailable = error instanceof TypeError;
     const envelope: StableErrorEnvelope = {
       ok: false,
       error: {
-        code: "internal_error",
-        message: error instanceof Error ? error.message : String(error),
-        severity: "internal",
+        code: unavailable ? "unavailable" : "internal_error",
+        message: unavailable
+          ? "server is unavailable"
+          : error instanceof Error
+          ? error.message
+          : String(error),
+        severity: unavailable ? "unavailable" : "internal",
       },
-      help: ["optctl --help", "optctl home"],
+      help: ["optctl --help", "optctl status ready"],
     };
     return { stdout: "", stderr: render(envelope, parse(args).json), code: 1 };
   }

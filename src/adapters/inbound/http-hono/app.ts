@@ -1,5 +1,9 @@
 import { Hono } from "npm:hono";
 import { type Result, toHttpStatus } from "../../../domain/errors/result.ts";
+import {
+  errorEnvelope,
+  successEnvelope,
+} from "../../../schemas/api/contracts.ts";
 import type { HomeDto } from "../../../application/services/inspect_metadata.ts";
 import type {
   ChangesetCommitDto,
@@ -81,6 +85,9 @@ export type HttpDependencies = {
   health: {
     inspect(): Promise<Record<string, unknown>>;
   };
+  bootstrap?: {
+    required(): Promise<boolean>;
+  };
   version: string;
 };
 
@@ -88,26 +95,44 @@ function resultJson<T>(
   c: { json: (data: unknown, status?: number) => Response },
   result: Result<T>,
 ) {
-  if (result.ok) return c.json({ ok: true, data: result.value });
-  return c.json({ ok: false, error: result.error }, toHttpStatus(result.error));
+  if (result.ok) return c.json(successEnvelope(result.value));
+  return c.json(errorEnvelope(result.error), toHttpStatus(result.error));
 }
 
 export function makeHttpApp(deps: HttpDependencies): Hono {
   const app = new Hono();
 
+  app.get(
+    "/live",
+    (c) => c.json(successEnvelope({ status: "live", version: deps.version })),
+  );
+
+  // Kept temporarily for legacy diagnostics; readiness is the dependency check.
   app.get("/health", async (c) => {
     const health = await deps.health.inspect();
-    return c.json({ ok: true, data: { version: deps.version, ...health } });
+    return c.json(successEnvelope({ version: deps.version, ...health }));
   });
 
   app.get("/ready", async (c) => {
     const health = await deps.health.inspect();
     const ready = health.status === "ready";
-    return c.json(
-      { ok: ready, data: { version: deps.version, ...health } },
-      ready ? 200 : 503,
+    const data = { version: deps.version, ...health };
+    return ready ? c.json(successEnvelope(data), 200) : c.json(
+      errorEnvelope({
+        code: "unavailable",
+        message: "server dependencies are not ready",
+        details: data,
+      }),
+      503,
     );
   });
+
+  app.get("/api/v1/auth/bootstrap/status", async (c) =>
+    c.json(successEnvelope({
+      status: await (deps.bootstrap?.required() ?? Promise.resolve(true))
+        ? "bootstrap_required"
+        : "ready",
+    })));
 
   app.get(
     "/metadata/home",
@@ -315,6 +340,30 @@ export function makeHttpApp(deps: HttpDependencies): Hono {
   app.delete("/secrets/:name", async (c) => {
     const body = await c.req.json().catch(() => ({}));
     return resultJson(c, await deps.secrets.delete(c.req.param("name"), body));
+  });
+
+  app.notFound((c) =>
+    c.json(
+      errorEnvelope({
+        code: "not_found",
+        message: "route not found",
+        details: {},
+      }),
+      404,
+    )
+  );
+  app.onError((error, c) => {
+    const invalidJson = error instanceof SyntaxError;
+    return c.json(
+      errorEnvelope({
+        code: invalidJson ? "invalid_json" : "internal_error",
+        message: invalidJson
+          ? "request body is not valid JSON"
+          : "unexpected server error",
+        details: {},
+      }),
+      invalidJson ? 400 : 500,
+    );
   });
 
   return app;

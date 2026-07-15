@@ -1,7 +1,13 @@
 export type ErrorSeverity =
   | "validation"
+  | "authentication"
+  | "authorization"
   | "not_found"
   | "conflict"
+  | "expired"
+  | "locked"
+  | "rate_limited"
+  | "unavailable"
   | "internal";
 
 export type StableError = {
@@ -40,14 +46,47 @@ export function internalError(message: string, details?: unknown): StableError {
   };
 }
 
+const CODE_STATUS = new Map<string, number>([
+  ["bad_request", 400],
+  ["invalid_json", 400],
+  ["invalid_cursor", 400],
+  ["authentication_required", 401],
+  ["credential_invalid", 401],
+  ["session_revoked", 401],
+  ["policy_denied", 403],
+  ["authorization_insufficient", 403],
+  ["not_found", 404],
+  ["validation_failed", 422],
+  ["hook_rejected", 422],
+  ["commit_lock_timeout", 423],
+  ["rate_limited", 429],
+  ["internal_error", 500],
+  ["unavailable", 503],
+]);
+
+/** Stable transport classification. Codes are never inferred from message text. */
 export function toHttpStatus(error: StableError): number {
+  const registered = CODE_STATUS.get(error.code);
+  if (registered !== undefined) return registered;
   switch (error.severity) {
     case "validation":
       return 400;
+    case "authentication":
+      return 401;
+    case "authorization":
+      return 403;
     case "not_found":
       return 404;
     case "conflict":
       return 409;
+    case "expired":
+      return 410;
+    case "locked":
+      return 423;
+    case "rate_limited":
+      return 429;
+    case "unavailable":
+      return 503;
     case "internal":
       return 500;
   }

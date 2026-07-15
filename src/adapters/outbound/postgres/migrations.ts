@@ -17,7 +17,7 @@ export type MigrationStatus = {
 
 export const platformMigrations: PlatformMigration[] = [
   {
-    id: "0001_platform_core",
+    id: "1000_platform_core",
     sql: `
       create table if not exists platform_kv (
         key text primary key,
@@ -27,7 +27,7 @@ export const platformMigrations: PlatformMigration[] = [
     `,
   },
   {
-    id: "0002_pack_registry",
+    id: "1001_pack_registry",
     sql: `
       create table if not exists pack_revisions (
         revision text primary key,
@@ -111,7 +111,7 @@ export const platformMigrations: PlatformMigration[] = [
     `,
   },
   {
-    id: "0003_generated_sql_objects",
+    id: "1002_generated_sql_objects",
     sql: `
       create table if not exists generated_sql_objects (
         revision text not null references pack_revisions(revision) on delete cascade,
@@ -127,7 +127,7 @@ export const platformMigrations: PlatformMigration[] = [
     `,
   },
   {
-    id: "0004_changesets_history_events_comments",
+    id: "1003_changesets_history_events_comments",
     sql: `
       create table if not exists changesets (
         id text primary key,
@@ -199,7 +199,7 @@ export const platformMigrations: PlatformMigration[] = [
     `,
   },
   {
-    id: "0005_hooks_outbox",
+    id: "1004_hooks_outbox",
     sql: `
       create table if not exists hook_executions (
         id text primary key,
@@ -234,7 +234,7 @@ export const platformMigrations: PlatformMigration[] = [
     `,
   },
   {
-    id: "0006_pack_migration_plans",
+    id: "1005_pack_migration_plans",
     sql: `
       create table if not exists pack_migration_plans (
         id text primary key,
@@ -257,7 +257,7 @@ export const platformMigrations: PlatformMigration[] = [
     `,
   },
   {
-    id: "0007_durable_outbox_lifecycle",
+    id: "1006_durable_outbox_lifecycle",
     sql: `
       alter table outbox add column if not exists event_id text null references events(id);
       alter table outbox add column if not exists hook_revision text null;
@@ -270,7 +270,7 @@ export const platformMigrations: PlatformMigration[] = [
     `,
   },
   {
-    id: "0008_platform_secrets",
+    id: "1007_platform_secrets",
     sql: `
       create table if not exists platform_secrets(
         name text primary key,
@@ -309,6 +309,20 @@ export async function applyPlatformMigrations(
     "select pg_advisory_xact_lock(hashtext('operant.platform_schema_migrations'))",
   );
 
+  const knownIds = migrations.map((migration) => migration.id);
+  const incompatible = await query<{ id: string }>(
+    sql,
+    "select id from platform_schema_migrations where not (id = any($1::text[])) order by id",
+    [knownIds],
+  );
+  if (incompatible.rows.length) {
+    throw new Error(
+      `incompatible development database schema: ${
+        incompatible.rows.map((row) => row.id).join(", ")
+      }; create a fresh OPERANT_DATA_DIR`,
+    );
+  }
+
   const applied: string[] = [];
   for (const migration of migrations) {
     const checksum = await digest(migration.sql);
@@ -345,16 +359,23 @@ export async function inspectMigrationStatus(
   if (!table.rows[0]?.exists) {
     return { ok: false, appliedCount: 0, latestId: null };
   }
+  const expectedIds = platformMigrations.map((migration) => migration.id);
   const status = await query<
-    { applied_count: string; latest_id: string | null }
+    { applied_count: string; known_count: string; latest_id: string | null }
   >(
     sql,
-    "select count(*)::text as applied_count, max(id) as latest_id from platform_schema_migrations",
+    `select count(*)::text as applied_count,
+            count(*) filter (where id = any($1::text[]))::text as known_count,
+            max(id) as latest_id
+       from platform_schema_migrations`,
+    [expectedIds],
   );
   const row = status.rows[0];
   const appliedCount = Number(row?.applied_count ?? 0);
+  const knownCount = Number(row?.known_count ?? 0);
   return {
-    ok: appliedCount >= platformMigrations.length,
+    ok: appliedCount === expectedIds.length &&
+      knownCount === expectedIds.length,
     appliedCount,
     latestId: row?.latest_id ?? null,
   };

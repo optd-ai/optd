@@ -129,7 +129,7 @@ function makeHealthService(
 
 if (import.meta.main) {
   const config = loadRuntimeConfig();
-  await startServer({
+  const server = await startServer({
     hostname: config.host,
     port: config.port,
     onListen: (url) => {
@@ -138,4 +138,14 @@ if (import.meta.main) {
       );
     },
   });
+  let stopping = false;
+  const stop = async () => {
+    if (stopping) return;
+    stopping = true;
+    Deno.removeSignalListener("SIGTERM", stop);
+    Deno.removeSignalListener("SIGINT", stop);
+    await server.shutdown();
+  };
+  Deno.addSignalListener("SIGTERM", stop);
+  Deno.addSignalListener("SIGINT", stop);
 }
