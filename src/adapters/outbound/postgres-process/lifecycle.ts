@@ -145,8 +145,10 @@ export async function startManagedPostgres(
       "-c",
       "listen_addresses=127.0.0.1",
     ],
-    stdout: "null",
-    stderr: "null",
+    // Inherit into the server process so lifecycle owners can capture bounded
+    // startup/runtime diagnostics instead of losing Postgres failures.
+    stdout: "inherit",
+    stderr: "inherit",
   }).spawn();
 
   const managed: ManagedPostgres = {

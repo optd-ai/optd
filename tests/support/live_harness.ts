@@ -6,6 +6,7 @@ import { sha256Hex } from "../../src/domain/ids/canonical_json.ts";
 import {
   closePostgresClient,
   createPostgresClient,
+  query,
   type Sql,
 } from "../../src/adapters/outbound/postgres/client.ts";
 
@@ -18,6 +19,32 @@ export type CliResult = {
   durationMs: number;
 };
 
+export type BootstrapInput = {
+  username: string;
+  password: string;
+  displayName?: string;
+};
+export type LoginInput = { username: string; password: string };
+export type ProcessTreeKind = "human" | "request_only" | "agent";
+export type CliLauncher = {
+  kind: ProcessTreeKind;
+  runOptctl(args: string[]): Promise<CliResult>;
+  close(): Promise<void>;
+};
+export type ConcurrentCliRequest = {
+  args: string[];
+  launcher?: CliLauncher;
+};
+export type ProcessLaunchResult = {
+  result: CliResult;
+  launcher: CliLauncher;
+};
+export type HarnessDiagnostics = {
+  server: string;
+  postgres: string;
+  hooks: string;
+};
+
 export type LiveHarness = {
   rootDir: string;
   dataDir: string;
@@ -27,16 +54,42 @@ export type LiveHarness = {
   /** Test-support SQL is only for focused setup/assertions, never acceptance actions. */
   server: { sql: Sql };
   runOptctl(args: string[]): Promise<CliResult>;
+  bootstrap(input: BootstrapInput): Promise<CliResult>;
+  login(input: LoginInput): Promise<CliResult>;
+  bootstrapProcess(input: BootstrapInput): Promise<ProcessLaunchResult>;
+  loginProcess(input: LoginInput): Promise<ProcessLaunchResult>;
+  selectProject(projectId: string, launcher?: CliLauncher): Promise<CliResult>;
+  runJson(
+    args: string[],
+    input: unknown,
+    launcher?: CliLauncher,
+  ): Promise<CliResult>;
+  runMultipart(
+    args: string[],
+    directory: string,
+    launcher?: CliLauncher,
+  ): Promise<CliResult>;
+  createProcessTreeLauncher(kind: ProcessTreeKind): Promise<CliLauncher>;
+  createAgentLauncher(): Promise<CliLauncher>;
+  runConcurrent(requests: ConcurrentCliRequest[]): Promise<CliResult[]>;
   restart(): Promise<void>;
-  diagnostics(): Promise<{ server: string }>;
+  diagnostics(): Promise<HarnessDiagnostics>;
   close(options?: { retain?: boolean }): Promise<void>;
 };
 
+type LogSink = {
+  write(bytes: Uint8Array): Promise<void>;
+  text(): string;
+  close(): Promise<void>;
+};
 type RunningServer = {
   process: Deno.ChildProcess;
   url: string;
-  log: WritableStreamDefaultWriter<Uint8Array>;
+  log: LogSink;
+  pumps: Promise<void>[];
 };
+
+const MAX_DIAGNOSTIC_BYTES = 1024 * 1024;
 
 export async function startLiveHarness(
   options: { externalDatabaseUrl?: string } = {},
@@ -77,6 +130,18 @@ export async function startLiveHarness(
   const databaseUrl = options.externalDatabaseUrl ??
     `postgres://operant@127.0.0.1:${env.OPERANT_PG_PORT}/postgres`;
   const sql = createPostgresClient(databaseUrl);
+  const launchers = new Set<CliLauncher>();
+  const runBinary = async (args: string[]): Promise<CliResult> => {
+    const argv = ["--server", running.url, ...args];
+    const startedAt = Date.now();
+    const output = await new Deno.Command(binaryPath, {
+      args: argv,
+      env,
+      stdout: "piped",
+      stderr: "piped",
+    }).output();
+    return cliResult(argv, startedAt, output);
+  };
   const harness: LiveHarness = {
     rootDir,
     dataDir,
@@ -84,23 +149,111 @@ export async function startLiveHarness(
     baseUrl: running.url,
     binaryPath,
     server: { sql },
-    async runOptctl(args) {
-      const argv = ["--server", running.url, ...args];
-      const startedAt = Date.now();
-      const output = await new Deno.Command(binaryPath, {
-        args: argv,
+    runOptctl: runBinary,
+    async bootstrap(input) {
+      return await runBinary([
+        "bootstrap",
+        "init",
+        "--username",
+        input.username,
+        "--password",
+        input.password,
+        ...input.displayName ? ["--display-name", input.displayName] : [],
+      ]);
+    },
+    async login(input) {
+      return await runBinary([
+        "auth",
+        "login",
+        "--username",
+        input.username,
+        "--password",
+        input.password,
+      ]);
+    },
+    async bootstrapProcess(input) {
+      const launcher = await harness.createProcessTreeLauncher("human");
+      try {
+        const result = await launcher.runOptctl([
+          "bootstrap",
+          "init",
+          "--username",
+          input.username,
+          "--password",
+          input.password,
+          ...input.displayName ? ["--display-name", input.displayName] : [],
+        ]);
+        return { result, launcher };
+      } catch (error) {
+        await launcher.close();
+        throw error;
+      }
+    },
+    async loginProcess(input) {
+      const launcher = await harness.createProcessTreeLauncher("human");
+      try {
+        const result = await launcher.runOptctl([
+          "auth",
+          "login",
+          "--username",
+          input.username,
+          "--password",
+          input.password,
+        ]);
+        return { result, launcher };
+      } catch (error) {
+        await launcher.close();
+        throw error;
+      }
+    },
+    async selectProject(projectId, launcher) {
+      const run = launcher?.runOptctl ?? runBinary;
+      return await run(["project", "select", projectId]);
+    },
+    async runJson(args, input, launcher) {
+      const inputDir = join(rootDir, "inputs");
+      await Deno.mkdir(inputDir, { recursive: true, mode: 0o700 });
+      const path = join(inputDir, `${crypto.randomUUID()}.json`);
+      await Deno.writeTextFile(path, JSON.stringify(input), {
+        createNew: true,
+        mode: 0o600,
+      });
+      const run = launcher?.runOptctl ?? runBinary;
+      return await run([...args, "--file", path]);
+    },
+    async runMultipart(args, directory, launcher) {
+      const stat = await Deno.stat(directory);
+      if (!stat.isDirectory) {
+        throw new TypeError("multipart input must be a directory");
+      }
+      const run = launcher?.runOptctl ?? runBinary;
+      return await run([...args, directory]);
+    },
+    async createProcessTreeLauncher(kind) {
+      const launcher = await makeProcessTreeLauncher(
+        kind,
+        binaryPath,
         env,
-        stdout: "piped",
-        stderr: "piped",
-      }).output();
+        () => running.url,
+      );
+      launchers.add(launcher);
       return {
-        argv,
-        code: output.code,
-        stdout: new TextDecoder().decode(output.stdout).trimEnd(),
-        stderr: new TextDecoder().decode(output.stderr).trimEnd(),
-        startedAt,
-        durationMs: Date.now() - startedAt,
+        ...launcher,
+        async close() {
+          launchers.delete(launcher);
+          await launcher.close();
+        },
       };
+    },
+    async createAgentLauncher() {
+      return await harness.createProcessTreeLauncher("agent");
+    },
+    async runConcurrent(requests) {
+      return await Promise.all(
+        requests.map(({ args, launcher }) =>
+          launcher ? launcher.runOptctl(args) : runBinary(args)
+        ),
+      );
     },
     async restart() {
       await stopServer(running);
@@ -108,13 +261,21 @@ export async function startLiveHarness(
       harness.baseUrl = running.url;
     },
     async diagnostics() {
+      const serverLog = running.log.text();
+      const hookRows = await queryHookDiagnostics(sql);
       return {
-        server: await Deno.readTextFile(join(rootDir, "server.log")).catch(() =>
-          ""
-        ),
+        server: serverLog,
+        postgres: postgresLines(serverLog),
+        hooks: hookRows,
       };
     },
     async close(closeOptions = {}) {
+      await Promise.all(
+        [...launchers].map((launcher) =>
+          launcher.close().catch(() => undefined)
+        ),
+      );
+      launchers.clear();
       await closePostgresClient(sql).catch(() => undefined);
       await stopServer(running);
       if (!closeOptions.retain) {
@@ -211,13 +372,7 @@ async function launchServer(
   rootDir: string,
   env: Record<string, string>,
 ): Promise<RunningServer> {
-  const logFile = await Deno.open(join(rootDir, "server.log"), {
-    create: true,
-    append: true,
-    write: true,
-    mode: 0o600,
-  });
-  const log = logFile.writable.getWriter();
+  const log = boundedLog(join(rootDir, "server.log"));
   const process = new Deno.Command(Deno.execPath(), {
     args: [
       "run",
@@ -233,49 +388,63 @@ async function launchServer(
     stderr: "piped",
   }).spawn();
   const reader = process.stdout.getReader();
+  const stderrPump = pipeToLog(process.stderr, log);
   const decoder = new TextDecoder();
   let buffered = "";
   const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline) {
-    const next = await Promise.race([
-      reader.read(),
-      new Promise<never>((_, reject) =>
-        setTimeout(
-          () => reject(new Error("server startup timed out")),
-          Math.max(1, deadline - Date.now()),
-        )
-      ),
-    ]);
-    if (next.done) {
-      throw new Error(
-        `server exited during startup: ${await process.status.then((status) =>
-          status.code
-        )}`,
+  try {
+    while (Date.now() < deadline) {
+      const next = await raceWithTimeout(
+        reader.read(),
+        Math.max(1, deadline - Date.now()),
+        "server startup timed out",
       );
-    }
-    await log.write(next.value);
-    buffered += decoder.decode(next.value, { stream: true });
-    const lines = buffered.split("\n");
-    buffered = lines.pop() ?? "";
-    for (const line of lines) {
-      try {
-        const message = JSON.parse(line);
-        if (message.ok === true && typeof message.listening === "string") {
-          void pump(reader, log);
-          void pipeToLog(process.stderr, log);
-          return { process, url: message.listening, log };
+      if (next.done) {
+        throw new Error(
+          `server exited during startup: ${await process.status.then((status) =>
+            status.code
+          )}`,
+        );
+      }
+      await log.write(next.value);
+      buffered += decoder.decode(next.value, { stream: true });
+      const lines = buffered.split("\n");
+      buffered = lines.pop() ?? "";
+      for (const line of lines) {
+        try {
+          const message = JSON.parse(line);
+          if (message.ok === true && typeof message.listening === "string") {
+            const stdoutPump = pump(reader, log);
+            return {
+              process,
+              url: message.listening,
+              log,
+              pumps: [stdoutPump, stderrPump],
+            };
+          }
+        } catch {
+          // Non-JSON startup diagnostics remain in the bounded log.
         }
-      } catch {
-        // Non-JSON startup diagnostics remain in the log.
       }
     }
+    throw new Error("server startup timed out");
+  } catch (error) {
+    await reader.cancel().catch(() => undefined);
+    try {
+      process.kill("SIGKILL");
+    } catch {
+      // Already exited.
+    }
+    await process.status.catch(() => undefined);
+    await stderrPump.catch(() => undefined);
+    await log.close();
+    throw error;
   }
-  throw new Error("server startup timed out");
 }
 
 async function pump(
   reader: ReadableStreamDefaultReader<Uint8Array>,
-  writer: WritableStreamDefaultWriter<Uint8Array>,
+  writer: Pick<LogSink, "write">,
 ) {
   try {
     while (true) {
@@ -290,7 +459,7 @@ async function pump(
 
 async function pipeToLog(
   stream: ReadableStream<Uint8Array>,
-  writer: WritableStreamDefaultWriter<Uint8Array>,
+  writer: Pick<LogSink, "write">,
 ) {
   const reader = stream.getReader();
   await pump(reader, writer);
@@ -302,16 +471,20 @@ async function stopServer(server: RunningServer): Promise<void> {
   } catch {
     // Already exited.
   }
-  await Promise.race([
-    server.process.status,
-    new Promise<void>((resolve) => setTimeout(resolve, 10_000)),
-  ]);
-  try {
-    server.process.kill("SIGKILL");
-  } catch {
-    // Already exited.
+  const stopped = await raceWithTimeout(
+    server.process.status.then(() => true),
+    10_000,
+    "server stop timed out",
+  ).catch(() => false);
+  if (!stopped) {
+    try {
+      server.process.kill("SIGKILL");
+    } catch {
+      // Already exited.
+    }
   }
   await server.process.status.catch(() => undefined);
+  await Promise.all(server.pumps.map((pump) => pump.catch(() => undefined)));
   await server.log.close().catch(() => undefined);
 }
 
@@ -325,4 +498,201 @@ function freePort(): number {
   const port = (listener.addr as Deno.NetAddr).port;
   listener.close();
   return port;
+}
+
+function cliResult(
+  argv: string[],
+  startedAt: number,
+  output: Deno.CommandOutput,
+): CliResult {
+  return {
+    argv,
+    code: output.code,
+    stdout: new TextDecoder().decode(output.stdout).trimEnd(),
+    stderr: new TextDecoder().decode(output.stderr).trimEnd(),
+    startedAt,
+    durationMs: Date.now() - startedAt,
+  };
+}
+
+async function raceWithTimeout<T>(
+  operation: Promise<T>,
+  timeoutMs: number,
+  message: string,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+function boundedLog(path: string): LogSink {
+  let bytes = new Uint8Array();
+  let writes = Promise.resolve();
+  return {
+    async write(chunk) {
+      writes = writes.then(() => {
+        const combined = new Uint8Array(bytes.length + chunk.length);
+        combined.set(bytes);
+        combined.set(chunk, bytes.length);
+        bytes = combined.length <= MAX_DIAGNOSTIC_BYTES
+          ? combined
+          : combined.slice(combined.length - MAX_DIAGNOSTIC_BYTES);
+      });
+      await writes;
+    },
+    text() {
+      return new TextDecoder().decode(bytes);
+    },
+    async close() {
+      await writes;
+      await Deno.writeFile(path, bytes, { create: true, mode: 0o600 });
+    },
+  };
+}
+
+function postgresLines(log: string): string {
+  return log.split("\n").filter((line) =>
+    /postgres|database system|\b(?:LOG|FATAL|PANIC|WARNING):/i.test(line)
+  ).join("\n").slice(-MAX_DIAGNOSTIC_BYTES);
+}
+
+async function queryHookDiagnostics(sql: Sql): Promise<string> {
+  try {
+    const rows = await query<Record<string, unknown>>(
+      sql,
+      `select id, hook, phase, status, duration_ms, exit_code,
+              left(logs, 8192) as logs, error_json
+         from hook_executions order by created_at desc limit 50`,
+    );
+    return JSON.stringify(rows.rows).slice(-MAX_DIAGNOSTIC_BYTES);
+  } catch (error) {
+    return `hook diagnostics unavailable: ${
+      error instanceof Error ? error.message : String(error)
+    }`;
+  }
+}
+
+async function makeProcessTreeLauncher(
+  kind: ProcessTreeKind,
+  binaryPath: string,
+  env: Record<string, string>,
+  serverUrl: () => string,
+): Promise<CliLauncher> {
+  const worker = `
+    const binary = Deno.args[0];
+    let buffered = "";
+    for await (const chunk of Deno.stdin.readable.pipeThrough(new TextDecoderStream())) {
+      buffered += chunk;
+      while (true) {
+        const end = buffered.indexOf("\\n");
+        if (end < 0) break;
+        const line = buffered.slice(0, end);
+        buffered = buffered.slice(end + 1);
+        if (!line) continue;
+        const message = JSON.parse(line);
+        if (message.close) Deno.exit(0);
+        const output = await new Deno.Command(binary, {
+          args: message.argv,
+          stdout: "piped",
+          stderr: "piped",
+        }).output();
+        console.log(JSON.stringify({
+          code: output.code,
+          stdout: new TextDecoder().decode(output.stdout),
+          stderr: new TextDecoder().decode(output.stderr),
+        }));
+      }
+    }
+  `;
+  const child = new Deno.Command(Deno.execPath(), {
+    args: ["eval", worker, binaryPath],
+    env,
+    stdin: "piped",
+    stdout: "piped",
+    stderr: "piped",
+  }).spawn();
+  const input = child.stdin.getWriter();
+  const output = child.stdout.getReader();
+  const decoder = new TextDecoder();
+  let buffered = "";
+  let queue = Promise.resolve<unknown>(undefined);
+  let closed = false;
+
+  async function readLine(): Promise<string> {
+    while (true) {
+      const end = buffered.indexOf("\n");
+      if (end >= 0) {
+        const line = buffered.slice(0, end);
+        buffered = buffered.slice(end + 1);
+        return line;
+      }
+      const next = await output.read();
+      if (next.done) {
+        const stderr = await new Response(child.stderr).text().catch(() => "");
+        throw new Error(`process-tree launcher exited: ${stderr}`);
+      }
+      buffered += decoder.decode(next.value, { stream: true });
+    }
+  }
+
+  return {
+    kind,
+    async runOptctl(args) {
+      if (closed) throw new Error("process-tree launcher is closed");
+      const argv = ["--server", serverUrl(), ...args];
+      const startedAt = Date.now();
+      const operation = queue.then(async () => {
+        await input.write(
+          new TextEncoder().encode(`${JSON.stringify({ argv })}\n`),
+        );
+        return JSON.parse(await readLine()) as {
+          code: number;
+          stdout: string;
+          stderr: string;
+        };
+      });
+      queue = operation.then(() => undefined, () => undefined);
+      const result = await operation;
+      return {
+        argv,
+        code: result.code,
+        stdout: result.stdout.trimEnd(),
+        stderr: result.stderr.trimEnd(),
+        startedAt,
+        durationMs: Date.now() - startedAt,
+      };
+    },
+    async close() {
+      if (closed) return;
+      closed = true;
+      await queue;
+      await input.write(new TextEncoder().encode('{"close":true}\n')).catch(
+        () => undefined,
+      );
+      await input.close().catch(() => undefined);
+      const exited = await raceWithTimeout(
+        child.status,
+        5_000,
+        "launcher stop timed out",
+      )
+        .then(() => true, () => false);
+      if (!exited) {
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          // Already exited.
+        }
+      }
+      await child.status.catch(() => undefined);
+      await output.cancel().catch(() => undefined);
+    },
+  };
 }

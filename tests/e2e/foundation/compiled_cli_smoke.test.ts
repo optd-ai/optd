@@ -60,6 +60,10 @@ Deno.test("fresh real server supports compiled CLI TOON/JSON, restart, and stabl
     assertEquals(readyEnvelope.ok, true);
     assertEquals(readyEnvelope.data.status, "ready");
     assert(typeof readyEnvelope.meta.request_id === "string");
+    const diagnostics = await harness.diagnostics();
+    assertStringIncludes(diagnostics.postgres, "PostgreSQL");
+    assert(diagnostics.server.length <= 1024 * 1024);
+    assert(typeof diagnostics.hooks === "string");
 
     const bootstrap = await harness.runOptctl([
       "--json",
@@ -79,6 +83,44 @@ Deno.test("fresh real server supports compiled CLI TOON/JSON, restart, and stabl
     ]);
     assertEquals(serverError.code, 1);
     assertFrozenErrorEnvelope(serverError.stderr, "not_found");
+
+    const processTree = await harness.createAgentLauncher();
+    const inherited = await processTree.runOptctl(["--json", "status", "live"]);
+    assertEquals(inherited.code, 0);
+    await processTree.close();
+
+    const concurrent = await harness.runConcurrent([
+      { args: ["--json", "status", "live"] },
+      { args: ["--json", "status", "ready"] },
+    ]);
+    assertEquals(concurrent.map((result) => result.code), [0, 0]);
+    assert(concurrent.every((result) => result.durationMs >= 0));
+
+    const bootstrapFuture = await harness.bootstrapProcess({
+      username: "future-admin",
+      password: "not-a-real-credential",
+    });
+    assertEquals(bootstrapFuture.result.code, 2);
+    await bootstrapFuture.launcher.close();
+    const loginFuture = await harness.loginProcess({
+      username: "future-admin",
+      password: "not-a-real-credential",
+    });
+    assertEquals(loginFuture.result.code, 2);
+    await loginFuture.launcher.close();
+    assertEquals((await harness.selectProject(crypto.randomUUID())).code, 2);
+
+    const jsonInput = await harness.runJson(
+      ["--json", "changeset", "preview"],
+      {},
+    );
+    assert(jsonInput.argv.includes("--file"));
+    const multipartDir = await Deno.makeTempDir({ dir: harness.rootDir });
+    const multipartInput = await harness.runMultipart(
+      ["--json", "pack", "preview"],
+      multipartDir,
+    );
+    assertEquals(multipartInput.argv.at(-1), multipartDir);
 
     const malformed = await harness.runOptctl([
       "--json",
