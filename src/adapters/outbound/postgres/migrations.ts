@@ -346,6 +346,14 @@ export const platformMigrations: PlatformMigration[] = [
         roles text[] not null,
         created_at timestamptz not null
       );
+      create function reject_auth_context_mutation() returns trigger language plpgsql as $$
+      begin
+        raise exception 'auth contexts are immutable';
+      end
+      $$;
+      create trigger auth_contexts_immutable
+        before update or delete on auth_contexts
+        for each row execute function reject_auth_context_mutation();
       create table bootstrap_state (
         singleton boolean primary key check (singleton),
         token_digest text,

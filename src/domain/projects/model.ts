@@ -13,10 +13,13 @@ export type Project = {
   archivedAt: string | null;
 };
 
-const SLUG = /^[a-z][a-z0-9-]{0,62}$/;
+const SLUG = /^[a-z][a-z0-9-]*$/;
 
 export function validateProjectSlug(value: unknown): Result<string> {
-  if (typeof value !== "string" || !SLUG.test(value)) {
+  if (
+    typeof value !== "string" || unicodeLength(value) < 1 ||
+    unicodeLength(value) > 63 || !SLUG.test(value)
+  ) {
     return err(
       validationError(
         "validation_failed",
@@ -37,7 +40,7 @@ export function validateProjectName(value: unknown): Result<string> {
     );
   }
   const trimmed = value.trim();
-  if (trimmed.length < 1 || trimmed.length > 120) {
+  if (unicodeLength(trimmed) < 1 || unicodeLength(trimmed) > 120) {
     return err(
       validationError(
         "validation_failed",
@@ -47,6 +50,10 @@ export function validateProjectName(value: unknown): Result<string> {
     );
   }
   return ok(trimmed);
+}
+
+function unicodeLength(value: string): number {
+  return Array.from(value).length;
 }
 
 export function validateDescription(value: unknown): Result<string | null> {

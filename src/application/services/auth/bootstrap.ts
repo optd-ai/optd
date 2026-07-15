@@ -9,7 +9,7 @@ import {
 
 export function makeBootstrapService(repository: AuthRepository) {
   return {
-    required: () => repository.bootstrapRequired(),
+    status: () => repository.bootstrapStatus(),
     async initialize(
       input: {
         bootstrapToken: string;

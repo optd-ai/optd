@@ -73,7 +73,7 @@ export type LiveHarness = {
   createProcessTreeLauncher(kind: ProcessTreeKind): Promise<CliLauncher>;
   createAgentLauncher(): Promise<CliLauncher>;
   runConcurrent(requests: ConcurrentCliRequest[]): Promise<CliResult[]>;
-  restart(): Promise<void>;
+  restart(options?: { bootstrapToken?: string | null }): Promise<void>;
   diagnostics(): Promise<HarnessDiagnostics>;
   close(options?: { retain?: boolean }): Promise<void>;
 };
@@ -93,7 +93,10 @@ type RunningServer = {
 const MAX_DIAGNOSTIC_BYTES = 1024 * 1024;
 
 export async function startLiveHarness(
-  options: { externalDatabaseUrl?: string } = {},
+  options: {
+    externalDatabaseUrl?: string;
+    bootstrapToken?: string | null;
+  } = {},
 ): Promise<LiveHarness> {
   if (!options.externalDatabaseUrl && !await findPostgresBins()) {
     throw new Error(
@@ -121,7 +124,8 @@ export async function startLiveHarness(
   env.HOME = homeDir;
   env.XDG_CONFIG_HOME = xdgConfig;
   env.XDG_STATE_HOME = xdgState;
-  env.OPERANT_BOOTSTRAP_TOKEN = randomSecret(32);
+  if (options.bootstrapToken === null) delete env.OPERANT_BOOTSTRAP_TOKEN;
+  else env.OPERANT_BOOTSTRAP_TOKEN = options.bootstrapToken ?? randomSecret(32);
   env.OPERANT_MASTER_KEY = randomSecret(32);
   if (options.externalDatabaseUrl) {
     env.OPERANT_DATABASE_URL = options.externalDatabaseUrl;
@@ -261,7 +265,12 @@ export async function startLiveHarness(
         ),
       );
     },
-    async restart() {
+    async restart(restartOptions = {}) {
+      if (restartOptions.bootstrapToken === null) {
+        delete env.OPERANT_BOOTSTRAP_TOKEN;
+      } else if (restartOptions.bootstrapToken !== undefined) {
+        env.OPERANT_BOOTSTRAP_TOKEN = restartOptions.bootstrapToken;
+      }
       await stopServer(running);
       running = await launchServer(rootDir, env);
       harness.baseUrl = running.url;

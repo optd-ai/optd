@@ -21,6 +21,10 @@ Deno.test("Project IDs and fields enforce the frozen validation contract", () =>
   assertEquals(slug.error.code, "validation_failed");
   assert(validateProjectName(" Sales ").ok);
   assert(!validateProjectName(" ").ok);
+  assert(validateProjectName("😀".repeat(120)).ok);
+  assert(!validateProjectName("😀".repeat(121)).ok);
+  assert(validateProjectSlug(`a${"b".repeat(62)}`).ok);
+  assert(!validateProjectSlug(`a${"b".repeat(63)}`).ok);
   assert(validateDescription(null).ok);
   assert(!validateDescription("x".repeat(16_385)).ok);
 });

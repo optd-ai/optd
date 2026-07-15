@@ -1,6 +1,38 @@
-import { assert, assertEquals, assertMatch } from "jsr:@std/assert";
+import {
+  assert,
+  assertEquals,
+  assertMatch,
+  assertRejects,
+} from "jsr:@std/assert";
 import { query } from "../../../src/adapters/outbound/postgres/client.ts";
 import { startLiveHarness } from "../../support/live_harness.ts";
+
+Deno.test({
+  name: "compiled optctl reports an unconfigured fresh bootstrap state",
+  sanitizeOps: false,
+  sanitizeResources: false,
+  async fn() {
+    const harness = await startLiveHarness({ bootstrapToken: null });
+    try {
+      const response = await fetch(
+        `${harness.baseUrl}/api/v1/auth/bootstrap/status`,
+      );
+      assertEquals(response.status, 503);
+      assertEquals(
+        (await response.json()).error.code,
+        "bootstrap_token_not_configured",
+      );
+      const status = await harness.runOptctl(["--json", "status", "bootstrap"]);
+      assertEquals(status.code, 1);
+      assertEquals(
+        JSON.parse(status.stderr).error.code,
+        "bootstrap_token_not_configured",
+      );
+    } finally {
+      await harness.close();
+    }
+  },
+});
 
 Deno.test({
   name:
@@ -10,6 +42,16 @@ Deno.test({
   async fn() {
     const harness = await startLiveHarness();
     try {
+      const configuredStatus = await harness.runOptctl([
+        "--json",
+        "status",
+        "bootstrap",
+      ]);
+      assertEquals(configuredStatus.code, 0, configuredStatus.stderr);
+      assertEquals(
+        JSON.parse(configuredStatus.stdout).data.status,
+        "bootstrap_required",
+      );
       const unauthenticated = await fetch(`${harness.baseUrl}/metadata/home`);
       assertEquals(unauthenticated.status, 401);
       assertEquals(
@@ -182,6 +224,42 @@ Deno.test({
         (await requestOnly.json()).error.code,
         "authorization_insufficient",
       );
+      const requestContext = await query<{
+        id: string;
+        roles: string[];
+      }>(
+        harness.server.sql,
+        `select id::text, roles from auth_contexts
+          where credential_kind='authorization_request'
+          order by created_at desc limit 1`,
+      );
+      assertEquals(requestContext.rows[0].roles, []);
+      await assertRejects(
+        () =>
+          query(
+            harness.server.sql,
+            "update auth_contexts set roles=array['system:super_admin'] where id=$1",
+            [requestContext.rows[0].id],
+          ),
+        Error,
+        "auth contexts are immutable",
+      );
+      await assertRejects(
+        () =>
+          query(
+            harness.server.sql,
+            "delete from auth_contexts where id=$1",
+            [requestContext.rows[0].id],
+          ),
+        Error,
+        "auth contexts are immutable",
+      );
+      const retainedContext = await query<{ roles: string[] }>(
+        harness.server.sql,
+        "select roles from auth_contexts where id=$1",
+        [requestContext.rows[0].id],
+      );
+      assertEquals(retainedContext.rows[0].roles, []);
 
       const created = await harness.runOptctl([
         "--json",
@@ -350,8 +428,15 @@ Deno.test({
       );
 
       const origin = harness.baseUrl;
-      await harness.restart();
+      await harness.restart({ bootstrapToken: null });
       assertEquals(harness.baseUrl, origin);
+      const completedStatus = await harness.runOptctl([
+        "--json",
+        "status",
+        "bootstrap",
+      ]);
+      assertEquals(completedStatus.code, 0, completedStatus.stderr);
+      assertEquals(JSON.parse(completedStatus.stdout).data.status, "ready");
       const persisted = await harness.runOptctl([
         "--json",
         "project",

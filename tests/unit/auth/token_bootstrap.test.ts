@@ -15,6 +15,11 @@ import {
 } from "../../../src/domain/auth/token.ts";
 import { strictObject } from "../../../src/adapters/inbound/http-hono/auth_routes.ts";
 import { makeBootstrapService } from "../../../src/application/services/auth/bootstrap.ts";
+import {
+  normalizeUsername,
+  validateDisplayName,
+  validatePassword,
+} from "../../../src/domain/auth/validation.ts";
 import type { AuthRepository } from "../../../src/application/ports/authentication.ts";
 
 Deno.test("opaque credentials hash deterministically without retaining plaintext", async () => {
@@ -26,6 +31,15 @@ Deno.test("opaque credentials hash deterministically without retaining plaintext
   assert(!digest.includes(token));
   assert(constantTimeDigestEqual(digest, await tokenDigest(token)));
   assert(!constantTimeDigestEqual(digest, await tokenDigest(`${token}x`)));
+});
+
+Deno.test("auth character bounds count Unicode code points", () => {
+  assert(!validatePassword("😀".repeat(4)).ok);
+  assert(validatePassword("😀".repeat(8)).ok);
+  assert(validateDisplayName("😀".repeat(120)).ok);
+  assert(!validateDisplayName("😀".repeat(121)).ok);
+  assert(normalizeUsername(`a${"b".repeat(62)}`).ok);
+  assert(!normalizeUsername(`a${"b".repeat(63)}`).ok);
 });
 
 Deno.test("bootstrap transition is one-way with stable errors", () => {
@@ -64,7 +78,8 @@ Deno.test("bootstrap DTO and service reject unknown and invalid input strictly",
   );
   let called = false;
   const repository: AuthRepository = {
-    bootstrapRequired: () => Promise.resolve(true),
+    bootstrapStatus: () =>
+      Promise.resolve({ ok: true, value: "bootstrap_required" }),
     authenticate: () =>
       Promise.resolve({
         ok: false,

@@ -26,12 +26,20 @@ export class PostgresAuthRepository implements AuthRepository {
     private readonly configuredBootstrapToken?: string,
   ) {}
 
-  async bootstrapRequired(): Promise<boolean> {
+  async bootstrapStatus() {
     const result = await query<{ completed: boolean }>(
       this.sql,
       "select completed from bootstrap_state where singleton = true",
     );
-    return result.rows[0]?.completed !== true;
+    if (result.rows[0]?.completed === true) return ok("ready" as const);
+    if (!this.configuredBootstrapToken) {
+      return err(authError(
+        "bootstrap_token_not_configured",
+        "bootstrap token is not configured",
+        "unavailable",
+      ));
+    }
+    return ok("bootstrap_required" as const);
   }
 
   async bootstrap(input: BootstrapInput): Promise<Result<BootstrapResult>> {
@@ -150,7 +158,10 @@ export class PostgresAuthRepository implements AuthRepository {
       `
       select s.id as session_id, s.principal_id, s.human_user_id, s.credential_kind,
              now() as created_at,
-             array_remove(array_agg(ra.role_id order by ra.role_id), null) as roles
+             case when s.credential_kind = 'authorization_request'
+               then '{}'::text[]
+               else array_remove(array_agg(ra.role_id order by ra.role_id), null)
+             end as roles
         from auth_sessions s
         join principals p on p.id = s.principal_id and p.active
         join human_users u on u.id = s.human_user_id and u.status = 'active'

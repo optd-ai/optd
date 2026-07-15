@@ -1,4 +1,4 @@
-import { assertEquals } from "jsr:@std/assert";
+import { assertEquals, assertRejects } from "jsr:@std/assert";
 import { query } from "../../src/adapters/outbound/postgres/client.ts";
 import { startLiveHarness } from "../support/live_harness.ts";
 
@@ -31,6 +31,27 @@ Deno.test({
         ),
       );
       const token = store.origins[harness.baseUrl].token;
+      const requestToken = store.origins[harness.baseUrl].requestToken;
+      const denied = await fetch(`${harness.baseUrl}/metadata/home`, {
+        headers: { authorization: `Bearer ${requestToken}` },
+      });
+      assertEquals(denied.status, 403);
+      const requestContext = await query<{ id: string; roles: string[] }>(
+        harness.server.sql,
+        `select id::text, roles from auth_contexts
+          where credential_kind='authorization_request' limit 1`,
+      );
+      assertEquals(requestContext.rows[0].roles, []);
+      await assertRejects(
+        () =>
+          query(
+            harness.server.sql,
+            "update auth_contexts set roles=array['system:super_admin'] where id=$1",
+            [requestContext.rows[0].id],
+          ),
+        Error,
+        "auth contexts are immutable",
+      );
       const mutate = (name: string) =>
         fetch(`${harness.baseUrl}/api/v1/projects/${project.id}/update`, {
           method: "POST",

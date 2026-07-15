@@ -1,16 +1,22 @@
 import { err, ok, type Result, validationError } from "../errors/result.ts";
 
-const USERNAME = /^[a-z][a-z0-9._-]{0,62}$/;
+const USERNAME = /^[a-z][a-z0-9._-]*$/;
 
 export function normalizeUsername(value: unknown): Result<string> {
-  if (typeof value !== "string" || !USERNAME.test(value.trim().toLowerCase())) {
+  const normalized = typeof value === "string"
+    ? value.trim().toLowerCase()
+    : "";
+  if (
+    typeof value !== "string" || unicodeLength(normalized) < 1 ||
+    unicodeLength(normalized) > 63 || !USERNAME.test(normalized)
+  ) {
     return err(validationError(
       "validation_failed",
       "username must be 1-63 lowercase letters, digits, dot, underscore, or hyphen",
       { field: "username" },
     ));
   }
-  return ok(value.trim().toLowerCase());
+  return ok(normalized);
 }
 
 export function validatePassword(value: unknown): Result<string> {
@@ -24,7 +30,8 @@ export function validatePassword(value: unknown): Result<string> {
   const normalized = value.normalize("NFC");
   const bytes = new TextEncoder().encode(normalized).length;
   if (
-    normalized.length < 8 || bytes > 1024 || normalized.trim().length === 0 ||
+    unicodeLength(normalized) < 8 || bytes > 1024 ||
+    unicodeLength(normalized.trim()) === 0 ||
     /[\n\r\0]/.test(normalized)
   ) {
     return err(validationError(
@@ -45,7 +52,7 @@ export function validateDisplayName(value: unknown): Result<string> {
     );
   }
   const trimmed = value.trim();
-  if (trimmed.length < 1 || trimmed.length > 120) {
+  if (unicodeLength(trimmed) < 1 || unicodeLength(trimmed) > 120) {
     return err(
       validationError(
         "validation_failed",
@@ -55,4 +62,8 @@ export function validateDisplayName(value: unknown): Result<string> {
     );
   }
   return ok(trimmed);
+}
+
+function unicodeLength(value: string): number {
+  return Array.from(value).length;
 }

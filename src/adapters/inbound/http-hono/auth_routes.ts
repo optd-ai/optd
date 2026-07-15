@@ -1,6 +1,7 @@
 import type { Hono } from "npm:hono";
 import type { Result } from "../../../domain/errors/result.ts";
 import type { BootstrapResult } from "../../../domain/auth/model.ts";
+import type { BootstrapStatus } from "../../../application/ports/authentication.ts";
 import {
   errorEnvelope,
   successEnvelope,
@@ -9,7 +10,7 @@ import { toHttpStatus } from "../../../domain/errors/result.ts";
 import { type AuthVariables, isJsonContentType } from "./auth_middleware.ts";
 
 export type BootstrapHttpService = {
-  required(): Promise<boolean>;
+  status(): Promise<Result<BootstrapStatus>>;
   initialize(
     input: {
       bootstrapToken: string;
@@ -24,15 +25,16 @@ export function registerAuthRoutes(
   app: Hono<{ Variables: AuthVariables }>,
   service: BootstrapHttpService,
 ) {
-  app.get(
-    "/api/v1/auth/bootstrap/status",
-    async (c) =>
-      c.json(
-        successEnvelope({
-          status: await service.required() ? "bootstrap_required" : "ready",
-        }),
-      ),
-  );
+  app.get("/api/v1/auth/bootstrap/status", async (c) => {
+    const result = await service.status();
+    if (!result.ok) {
+      return c.json(
+        errorEnvelope(result.error),
+        toHttpStatus(result.error) as 503,
+      );
+    }
+    return c.json(successEnvelope({ status: result.value }));
+  });
   app.post("/api/v1/auth/bootstrap", async (c) => {
     if (!isJsonContentType(c.req.header("content-type") ?? "")) {
       return c.json(
