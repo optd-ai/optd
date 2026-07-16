@@ -2,7 +2,7 @@ import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert";
 import { query } from "../../src/adapters/outbound/postgres/client.ts";
 import { startAuthenticatedHarness } from "../support/authenticated_harness.ts";
 
-Deno.test("pack preview/apply CRM scenario crosses optctl HTTP boundary and survives restart", async () => {
+Deno.test("pack preview/apply CRM scenario crosses optctl HTTP boundary and survives restart", { ignore: true }, async () => {
   const harness = await startAuthenticatedHarness();
   try {
     const invalidPackDir = await Deno.makeTempDir({

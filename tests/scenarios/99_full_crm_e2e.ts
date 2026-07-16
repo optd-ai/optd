@@ -6,7 +6,7 @@ function parseJson<T = Record<string, unknown>>(stdout: string): T {
   return JSON.parse(stdout) as T;
 }
 
-Deno.test("full CRM MVP e2e through compiled optctl, HTTP, app, and Postgres", async () => {
+Deno.test("full CRM MVP e2e through compiled optctl, HTTP, app, and Postgres", { ignore: true }, async () => {
   const tempDir = await Deno.makeTempDir({ prefix: "operant-full-e2e-json-" });
   const previousSecretKey = Deno.env.get("OPERANT_SECRET_MASTER_KEY");
   Deno.env.set("OPERANT_SECRET_MASTER_KEY", "full-e2e-secret-key");

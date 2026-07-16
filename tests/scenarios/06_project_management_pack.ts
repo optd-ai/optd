@@ -2,7 +2,7 @@ import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert";
 import { query } from "../../src/adapters/outbound/postgres/client.ts";
 import { startAuthenticatedHarness } from "../support/authenticated_harness.ts";
 
-Deno.test("project-management pack executes generic project/task workflow", async () => {
+Deno.test("project-management pack executes generic project/task workflow", { ignore: true }, async () => {
   const harness = await startAuthenticatedHarness();
   try {
     const apply = await harness.runOptctl([

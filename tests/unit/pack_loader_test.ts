@@ -110,6 +110,150 @@ Deno.test("strict pack loader rejects numeric decimal seed values", async () => 
   );
 });
 
+Deno.test("strict pack loader broadly rejects superseded schema and unsafe source forms", async () => {
+  const cases: Array<{
+    name: string;
+    files: UploadedPackFile[];
+    message: string;
+  }> = [
+    {
+      name: "missing apiVersion",
+      files: [{
+        path: "pack.yaml",
+        text: root.replace("apiVersion: operant.dev/v1\n", ""),
+      }],
+      message: "apiVersion",
+    },
+    {
+      name: "child namespace alias",
+      files: [{ path: "pack.yaml", text: root }, {
+        path: "resources/lead.yaml",
+        text: resource.replace(
+          "metadata: { name: lead }",
+          "metadata: { name: lead, namespace: default }",
+        ),
+      }],
+      message: "additional properties",
+    },
+    {
+      name: "field defaults",
+      files: [{ path: "pack.yaml", text: root }, {
+        path: "resources/lead.yaml",
+        text: resource.replace(
+          "required: true",
+          "required: true, default: legacy",
+        ),
+      }],
+      message: "additional properties",
+    },
+    {
+      name: "extension bags",
+      files: [{ path: "pack.yaml", text: root }, {
+        path: "resources/lead.yaml",
+        text: resource.replace("axi: {}", "extensions: {}\n  axi: {}"),
+      }],
+      message: "additional properties",
+    },
+    {
+      name: "inline action hook and array input",
+      files: [{ path: "pack.yaml", text: root }, {
+        path: "actions/run.yaml",
+        text:
+          `kind: Action\napiVersion: operant.dev/v1\nmetadata: {name: run}\nspec: {hook: run, input: [id], axi: {}}\n`,
+      }],
+      message: "additional properties",
+    },
+    {
+      name: "policy allow alias",
+      files: [{ path: "pack.yaml", text: root }, {
+        path: "policies/access.yaml",
+        text:
+          `kind: Policy\napiVersion: operant.dev/v1\nmetadata: {name: access}\nspec: {rules: [{role: admin, allow: ['*']}], axi: {}}\n`,
+      }],
+      message: "default_assignment",
+    },
+    {
+      name: "relationship endpoint fields",
+      files: [{ path: "pack.yaml", text: root }, {
+        path: "relationships/link.yaml",
+        text:
+          `kind: Relationship\napiVersion: operant.dev/v1\nmetadata: {name: link}\nspec: {from: {resource: lead, field: id}, to: {resource: lead}, axi: {}}\n`,
+      }],
+      message: "additional properties",
+    },
+    {
+      name: "binary fields",
+      files: [{ path: "pack.yaml", text: root }, {
+        path: "resources/lead.yaml",
+        text: resource.replace("type: string", "type: binary"),
+      }],
+      message: "schema",
+    },
+    {
+      name: "reserved platform fields",
+      files: [{ path: "pack.yaml", text: root }, {
+        path: "resources/lead.yaml",
+        text: resource.replace("name: {", "project_id: {"),
+      }],
+      message: "reserved platform field",
+    },
+    {
+      name: "unknown layout",
+      files: [{ path: "pack.yaml", text: root }, {
+        path: "docs/readme.yaml",
+        text: "kind: Docs",
+      }],
+      message: "unexpected pack path",
+    },
+    {
+      name: "hook imports",
+      files: [{ path: "pack.yaml", text: root }, {
+        path: "hooks/run.ts",
+        kind: "script",
+        text: `await import("npm:x");\n`,
+      }],
+      message: "imports are not supported",
+    },
+    {
+      name: "duplicate mapping keys",
+      files: [{
+        path: "pack.yaml",
+        text: root.replace("kind: Pack", "kind: Pack\nkind: Pack"),
+      }],
+      message: "Map keys must be unique",
+    },
+    {
+      name: "non-finite YAML numbers",
+      files: [{
+        path: "pack.yaml",
+        text: root.replace("version: 0.1.0", "version: .inf"),
+      }],
+      message: "only JSON safe integers",
+    },
+    {
+      name: "duplicate uploaded paths",
+      files: [{ path: "pack.yaml", text: root }, {
+        path: "pack.yaml",
+        text: root,
+      }],
+      message: "duplicate pack path",
+    },
+    {
+      name: "backslash paths",
+      files: [{ path: "resources\\lead.yaml", text: resource }],
+      message: "invalid pack path",
+    },
+  ];
+  for (const testCase of cases) {
+    await assertRejects(
+      () => loadPackFromFiles(testCase.files),
+      Error,
+      testCase.message,
+      testCase.name,
+    );
+  }
+});
+
 Deno.test("strict pack loader canonicalizes bounded YAML aliases", async () => {
   const merged = resource.replace(
     "name: { type: string, required: true }",

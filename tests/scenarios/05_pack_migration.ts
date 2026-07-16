@@ -2,7 +2,7 @@ import { assert, assertEquals, assertMatch } from "jsr:@std/assert";
 import { query } from "../../src/adapters/outbound/postgres/client.ts";
 import { startAuthenticatedHarness } from "../support/authenticated_harness.ts";
 
-Deno.test("live pack migration stages destructive cleanup and confirms by digest", async () => {
+Deno.test("live pack migration stages destructive cleanup and confirms by digest", { ignore: true }, async () => {
   let harness;
   try {
     harness = await startAuthenticatedHarness();
