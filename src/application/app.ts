@@ -22,6 +22,8 @@ import {
 import { makeProjectService } from "./services/projects/manage_projects.ts";
 import { PostgresAuthorizationRepository } from "../adapters/outbound/postgres/authorization_repository.ts";
 import { makeAuthorizationService } from "./services/authorization/manage_assignments.ts";
+import { PostgresObjectReader } from "../adapters/outbound/postgres/object_reader.ts";
+import { makeObjectReadService } from "./services/objects/read_objects.ts";
 
 export function makeApplication(
   sql: Sql,
@@ -60,6 +62,11 @@ export function makeApplication(
       sql,
       clock,
       version: OPERANT_VERSION,
+      authorization: authorizationRepository,
+    }),
+    objectReads: makeObjectReadService({
+      reader: new PostgresObjectReader(sql),
+      authorization: authorizationRepository,
     }),
     packs: makePackServices({
       sql: sql as Queryable,

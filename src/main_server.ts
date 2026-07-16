@@ -50,6 +50,7 @@ export async function createFetchHandler() {
     projects: application.projects,
     authorization: application.authorization,
     metadata: application.metadata,
+    objectReads: application.objectReads,
     packs: application.packs,
     migrations: application.migrations,
     queries: application.queries,

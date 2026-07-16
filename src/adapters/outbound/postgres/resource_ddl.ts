@@ -356,15 +356,28 @@ function compileResourceTable(
   const fields = record(definition.spec.fields);
   const columns = [
     `${qi("id")} uuid primary key`,
-    `${qi("project_id")} uuid not null`,
+    `${qi("project_id")} uuid not null references ${qi("projects")}(${
+      qi("id")
+    }) deferrable initially deferred`,
     `${qi("version")} bigint not null default 1`,
     `${qi("created_at")} timestamptz not null default now()`,
-    `${qi("created_by")} uuid not null`,
+    `${qi("created_by")} uuid not null references ${qi("auth_contexts")}(${
+      qi("id")
+    }) deferrable initially deferred`,
     `${qi("updated_at")} timestamptz not null default now()`,
-    `${qi("updated_by")} uuid not null`,
+    `${qi("updated_by")} uuid not null references ${qi("auth_contexts")}(${
+      qi("id")
+    }) deferrable initially deferred`,
     `${qi("archived_at")} timestamptz`,
-    `${qi("archived_by")} uuid`,
+    `${qi("archived_by")} uuid references ${qi("auth_contexts")}(${
+      qi("id")
+    }) deferrable initially deferred`,
     `${qi("current_object_version_id")} uuid`,
+    `foreign key (${qi("project_id")},${qi("id")},${
+      qi("current_object_version_id")
+    }) references ${qi("object_versions")}(${qi("project_id")},${
+      qi("object_id")
+    },${qi("id")}) deferrable initially deferred`,
     ...compileFields(definition, platformColumns, tableName),
     ...Object.entries(fields).filter(([, descriptor]) =>
       record(descriptor).unique === true
@@ -385,33 +398,48 @@ function compileRelationshipTable(
   assertRelationshipEndpoint(definition, "to");
   const columns = [
     `${qi("id")} uuid primary key`,
-    `${qi("project_id")} uuid not null`,
+    `${qi("project_id")} uuid not null references ${qi("projects")}(${
+      qi("id")
+    }) deferrable initially deferred`,
     `${qi("from_object_id")} uuid not null`,
     `${qi("to_object_id")} uuid not null`,
     `${qi("version")} bigint not null default 1`,
     `${qi("created_at")} timestamptz not null default now()`,
-    `${qi("created_by")} uuid not null`,
+    `${qi("created_by")} uuid not null references ${qi("auth_contexts")}(${
+      qi("id")
+    }) deferrable initially deferred`,
     `${qi("updated_at")} timestamptz not null default now()`,
-    `${qi("updated_by")} uuid not null`,
+    `${qi("updated_by")} uuid not null references ${qi("auth_contexts")}(${
+      qi("id")
+    }) deferrable initially deferred`,
     `${qi("archived_at")} timestamptz`,
-    `${qi("archived_by")} uuid`,
+    `${qi("archived_by")} uuid references ${qi("auth_contexts")}(${
+      qi("id")
+    }) deferrable initially deferred`,
     `${qi("current_object_version_id")} uuid`,
+    `foreign key (${qi("project_id")},${qi("id")},${
+      qi("current_object_version_id")
+    }) references ${qi("object_versions")}(${qi("project_id")},${
+      qi("object_id")
+    },${qi("id")}) deferrable initially deferred`,
     ...compileFields(definition, relationshipColumns, tableName),
   ];
   const unique = Array.isArray(definition.spec.unique)
     ? definition.spec.unique.map(String)
     : [];
-  if (unique.length) {
-    const mapped = unique.map((field) =>
-      field === "from"
-        ? "from_object_id"
-        : field === "to"
-        ? "to_object_id"
-        : field
-    );
-    columns.push(`unique (${["project_id", ...mapped].map(qi).join(", ")})`);
-  }
-  return createTableSql(tableName, columns);
+  const create = createTableSql(tableName, columns);
+  if (!unique.length) return create;
+  const mapped = unique.map((field) =>
+    field === "from"
+      ? "from_object_id"
+      : field === "to"
+      ? "to_object_id"
+      : field
+  );
+  const name = constraintName("uq", tableName, mapped.join("_"));
+  return `${create}; create unique index ${qi(name)} on ${qi(tableName)} (${
+    ["project_id", ...mapped].map(qi).join(", ")
+  }) where ${qi("archived_at")} is null`;
 }
 
 function compileFields(

@@ -837,6 +837,123 @@ export const platformMigrations: PlatformMigration[] = [
       create index pack_migration_audit_plan_idx on pack_migration_audit_events(plan_id,created_at,id);
     `,
   },
+  {
+    id: "1016_project_object_history",
+    sql: `
+      -- Pre-Project history was never a supported deployed baseline. Invalidate it
+      -- rather than retaining ambiguous text identifiers or actor provenance.
+      drop table if exists comments cascade;
+      drop table if exists audit_events cascade;
+      drop table if exists events cascade;
+      drop table if exists object_versions cascade;
+
+      create table changeset_commits (
+        id uuid primary key,
+        committed_auth_context_id uuid not null references auth_contexts(id),
+        committed_at timestamptz not null default now()
+      );
+
+      create table object_versions (
+        id uuid primary key,
+        project_id uuid not null references projects(id),
+        definition_kind text not null check (definition_kind in ('resource','relationship')),
+        resource_identity text not null check (resource_identity ~ '^[a-z][a-z0-9-]{0,62}/[a-z][a-z0-9_]{0,62}:[a-z][a-z0-9_]{0,62}$'),
+        object_id uuid not null,
+        version integer not null check (version > 0),
+        previous_version_id uuid references object_versions(id) deferrable initially deferred,
+        changeset_commit_id uuid not null references changeset_commits(id),
+        operation text not null check (operation in ('create','update','archive','transition','link','unlink')),
+        resource_revision uuid not null references pack_candidate_revisions(id),
+        snapshot_json jsonb not null check (jsonb_typeof(snapshot_json) = 'object'),
+        changed_fields text[] not null default '{}',
+        auth_context_id uuid not null references auth_contexts(id),
+        created_at timestamptz not null default now(),
+        unique(project_id, definition_kind, resource_identity, object_id, version),
+        unique(project_id, definition_kind, resource_identity, object_id, id),
+        unique(project_id, object_id, id),
+        check ((version = 1 and previous_version_id is null) or (version > 1 and previous_version_id is not null))
+      );
+      create index object_versions_timeline_idx on object_versions(project_id,definition_kind,resource_identity,object_id,created_at desc,id desc);
+
+      create table comments (
+        id uuid primary key,
+        project_id uuid not null references projects(id),
+        definition_kind text not null check (definition_kind in ('resource','relationship')),
+        resource_identity text not null check (resource_identity ~ '^[a-z][a-z0-9-]{0,62}/[a-z][a-z0-9_]{0,62}:[a-z][a-z0-9_]{0,62}$'),
+        object_id uuid not null,
+        target_object_version_id uuid not null,
+        changeset_commit_id uuid not null references changeset_commits(id),
+        auth_context_id uuid not null references auth_contexts(id),
+        body text not null check (body ~ '\\S'),
+        created_at timestamptz not null default now(),
+        foreign key(project_id,definition_kind,resource_identity,object_id,target_object_version_id)
+          references object_versions(project_id,definition_kind,resource_identity,object_id,id) deferrable initially deferred
+      );
+      create index comments_timeline_idx on comments(project_id,definition_kind,resource_identity,object_id,created_at desc,id desc);
+
+      create table audit_events (
+        id uuid primary key,
+        changeset_commit_id uuid references changeset_commits(id),
+        object_version_id uuid references object_versions(id),
+        auth_context_id uuid references auth_contexts(id),
+        executor_type text check(executor_type in ('human_user','agent_user','system')),
+        executor_id uuid,
+        causation_audit_event_id uuid references audit_events(id) deferrable initially deferred,
+        authentication_failure_code text,
+        event_type text not null,
+        project_id uuid references projects(id),
+        resource_identity text,
+        object_id uuid,
+        action text,
+        decision text,
+        policy_summary_json jsonb,
+        validation_summary_json jsonb,
+        hook_execution_ids uuid[] not null default '{}',
+        request_metadata_json jsonb not null default '{}',
+        created_at timestamptz not null default now()
+      );
+      create index audit_events_object_idx on audit_events(project_id,resource_identity,object_id,created_at desc,id desc);
+
+      create table events (
+        id uuid primary key,
+        changeset_commit_id uuid not null references changeset_commits(id),
+        project_id uuid references projects(id),
+        object_version_id uuid references object_versions(id),
+        schema_version integer not null default 1 check(schema_version=1),
+        event_type text not null,
+        resource_identity text,
+        object_id uuid,
+        occurred_at timestamptz not null default now(),
+        payload_json jsonb not null default '{}'
+      );
+      create index events_object_idx on events(project_id,resource_identity,object_id,occurred_at desc,id desc);
+      alter table outbox alter column event_id type uuid using event_id::uuid;
+      alter table outbox add constraint outbox_event_id_fkey foreign key(event_id) references events(id);
+
+      create function operant_reject_history_mutation() returns trigger language plpgsql as $$
+      begin raise exception 'object history and comments are append-only'; end $$;
+      create trigger object_versions_immutable before update or delete on object_versions for each row execute function operant_reject_history_mutation();
+      create trigger comments_immutable before update or delete on comments for each row execute function operant_reject_history_mutation();
+      create trigger changeset_commits_immutable before update or delete on changeset_commits for each row execute function operant_reject_history_mutation();
+      create trigger audit_events_immutable before update or delete on audit_events for each row execute function operant_reject_history_mutation();
+      create trigger events_immutable before update or delete on events for each row execute function operant_reject_history_mutation();
+
+      create function operant_validate_version_chain() returns trigger language plpgsql as $$
+      declare prior object_versions%rowtype;
+      begin
+        if new.previous_version_id is not null then
+          select * into prior from object_versions where id=new.previous_version_id;
+          if prior.id is null or prior.project_id<>new.project_id or prior.definition_kind<>new.definition_kind
+             or prior.resource_identity<>new.resource_identity or prior.object_id<>new.object_id or prior.version<>new.version-1 then
+            raise exception 'invalid object version chain';
+          end if;
+        end if;
+        return new;
+      end $$;
+      create constraint trigger object_versions_chain after insert on object_versions
+        deferrable initially deferred for each row execute function operant_validate_version_chain();
+    `,
+  },
 ];
 
 export async function applyPlatformMigrations(

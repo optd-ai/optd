@@ -15,12 +15,14 @@ import {
   writeOrigin,
 } from "./auth_store.ts";
 import { opaqueToken, tokenDigest } from "../../../domain/auth/token.ts";
+import { isUuidV7 } from "../../../domain/ids/uuid_v7.ts";
 
 export type OptctlRunResult = { stdout: string; stderr: string; code: number };
 type Parsed = {
   server: string;
   json: boolean;
   verbose: boolean;
+  project?: string;
   positional: string[];
 };
 class OptctlError extends Error {
@@ -151,6 +153,7 @@ function parse(args: string[]): Parsed {
     verbose: false,
     positional: [],
   };
+  let commandSeen = false;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === "--") {
@@ -162,7 +165,20 @@ function parse(args: string[]): Parsed {
     else if (arg === "--server") parsed.server = args[++i] ?? parsed.server;
     else if (arg.startsWith("--server=")) {
       parsed.server = arg.slice("--server=".length);
-    } else parsed.positional.push(arg);
+    } else if (!commandSeen && arg === "--project") {
+      parsed.project = args[++i];
+      if (!parsed.project) {
+        throw usageError("--project requires a UUID or slug");
+      }
+    } else if (!commandSeen && arg.startsWith("--project=")) {
+      parsed.project = arg.slice("--project=".length);
+      if (!parsed.project) {
+        throw usageError("--project requires a UUID or slug");
+      }
+    } else {
+      parsed.positional.push(arg);
+      commandSeen = true;
+    }
   }
   parsed.server = parsed.server.replace(/\/$/, "");
   return parsed;
@@ -502,6 +518,67 @@ async function resolveProject(
     );
   }
   return items[0] as Record<string, unknown>;
+}
+
+async function resolveReadProject(parsed: Parsed): Promise<string> {
+  const selected = await readOrigin(new URL(parsed.server).origin);
+  const selector = parsed.project ?? Deno.env.get("OPERANT_PROJECT") ??
+    selected.projectId ?? selected.projectSlug;
+  if (!selector) {
+    throw usageError(
+      "view and history require global --project <uuid-or-slug> or an active local Project selection",
+    );
+  }
+  const project = await resolveProject(parsed.server, selector);
+  if (parsed.project && (selected.projectId || selected.projectSlug)) {
+    const active = await resolveProject(
+      parsed.server,
+      selected.projectId ?? selected.projectSlug!,
+    );
+    if (String(active.id) !== String(project.id)) {
+      throw new OptctlError(errorEnvelope({
+        code: "project_conflict",
+        message: "explicit and active selected Projects disagree",
+        details: {},
+      }));
+    }
+  }
+  return String(project.id);
+}
+
+async function metadataQuery(parsed: Parsed, args: string[]): Promise<string> {
+  const params = new URLSearchParams();
+  for (const arg of args) {
+    if (arg === "--include-security") params.set("include_security", "true");
+    else throw usageError(`unknown metadata option ${arg}`);
+  }
+  const selected = await readOrigin(new URL(parsed.server).origin);
+  const selector = parsed.project ?? Deno.env.get("OPERANT_PROJECT") ??
+    selected.projectId ?? selected.projectSlug;
+  if (selector) {
+    const project = await resolveProject(parsed.server, selector);
+    params.set("project_id", String(project.id));
+  }
+  const query = params.toString();
+  return query ? `?${query}` : "";
+}
+
+function historyQuery(args: string[]): string {
+  const url = new URL("http://local/");
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index];
+    if (arg === "--limit" || arg === "--cursor") {
+      const value = args[++index];
+      if (!value) throw usageError(`${arg} requires a value`);
+      url.searchParams.set(arg.slice(2), value);
+    } else if (arg.startsWith("--limit=") || arg.startsWith("--cursor=")) {
+      const [key, value] = arg.slice(2).split("=", 2);
+      if (!value) throw usageError(`--${key} requires a value`);
+      url.searchParams.set(key, value);
+    } else throw usageError(`unknown history option ${arg}`);
+  }
+  const query = url.searchParams.toString();
+  return query ? `?${query}` : "";
 }
 
 async function waitForPasswordReset(
@@ -1586,24 +1663,52 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
         `${parsed.server}/changesets/commit`,
         await readChangesetInput(parsed.positional.slice(2)),
       );
-    } else if (cmd === "view" && sub && value) {
-      const [publisher, pack, name] = splitDefinitionIdentity(sub);
+    } else if ((cmd === "view" || cmd === "history") && sub && value) {
+      const relationship = sub === "relationship";
+      const identity = relationship ? value : sub;
+      const objectId = relationship ? parsed.positional[3] : value;
+      if (!objectId) {
+        throw usageError(
+          `${cmd} relationship requires publisher/pack:name and UUID`,
+        );
+      }
+      if (!isUuidV7(objectId)) {
+        throw usageError("object id must be a lowercase UUIDv7");
+      }
+      const [publisher, pack, name] = splitDefinitionIdentity(identity);
+      const projectId = await resolveReadProject(parsed);
+      const options = cmd === "history"
+        ? historyQuery(parsed.positional.slice(relationship ? 4 : 3))
+        : (parsed.positional.length > (relationship ? 4 : 3)
+          ? (() => {
+            throw usageError("view does not accept additional options");
+          })()
+          : "");
       result = await getJson(
-        `${parsed.server}/objects/${publisher}/${pack}/${name}/${value}`,
-      );
-    } else if (cmd === "history" && sub && value) {
-      const [publisher, pack, name] = splitDefinitionIdentity(sub);
-      result = await getJson(
-        `${parsed.server}/history/${publisher}/${pack}/${name}/${value}`,
+        `${parsed.server}/api/v1/projects/${projectId}/${
+          relationship ? "relationships" : "objects"
+        }/${publisher}/${pack}/${name}/${objectId}${
+          cmd === "history" ? "/history" : ""
+        }${options}`,
       );
     } else if (cmd === "metadata" && !sub) {
-      result = await getJson(`${parsed.server}/metadata/packs`);
+      result = await getJson(
+        `${parsed.server}/metadata/packs${await metadataQuery(parsed, [])}`,
+      );
     } else if (cmd === "metadata" && sub === "packs") {
-      result = await getJson(`${parsed.server}/metadata/packs`);
+      result = await getJson(
+        `${parsed.server}/metadata/packs${await metadataQuery(
+          parsed,
+          parsed.positional.slice(2),
+        )}`,
+      );
     } else if (cmd === "metadata" && sub === "pack" && value) {
       const [publisher, pack] = splitPackIdentity(value);
       result = await getJson(
-        `${parsed.server}/metadata/packs/${publisher}/${pack}`,
+        `${parsed.server}/metadata/packs/${publisher}/${pack}${await metadataQuery(
+          parsed,
+          parsed.positional.slice(3),
+        )}`,
       );
     } else if (cmd === "metadata" && sub && value) {
       const [publisher, pack, name] = splitDefinitionIdentity(value);
@@ -1619,11 +1724,14 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       } as Record<string, string>)[sub];
       if (!routeKind) throw usageError(`unknown metadata kind ${sub}`);
       result = await getJson(
-        `${parsed.server}/metadata/packs/${publisher}/${pack}/${routeKind}/${name}`,
+        `${parsed.server}/metadata/packs/${publisher}/${pack}/${routeKind}/${name}${await metadataQuery(
+          parsed,
+          parsed.positional.slice(3),
+        )}`,
       );
     } else {
       throw usageError(
-        "usage: optctl status live/ready/bootstrap | bootstrap init | home | project list/create/view/update/archive/select | context set-project | pack preview <dir> | pack apply <dir> [--safe|--reviewed] [--timeout duration] | metadata [packs] | metadata pack <publisher/pack> | metadata resource/relationship/lifecycle/action/hook/role/policy/seed <publisher/pack:name> | secret list/set/delete | action preview/commit <namespace.action> --input '{...}' | outbox status/drain/retry | migration inspect <id> [--sql|--violations] | migration validate <id> | migration apply <id> (--safe|--reviewed|--confirm-token <token>) [--timeout duration] | query <namespace.resource> [--where expr] [--fields a,b] [--sort field:desc] [--limit n] [--cursor c] | changeset preview/commit (--file <json-file>|--input '{...}') | view <namespace.resource> <id> | history <namespace.resource> <id>",
+        "usage: optctl status live/ready/bootstrap | bootstrap init | home | project list/create/view/update/archive/select | context set-project | pack preview <dir> | pack apply <dir> [--safe|--reviewed] [--timeout duration] | metadata [packs] | metadata pack <publisher/pack> | metadata resource/relationship/lifecycle/action/hook/role/policy/seed <publisher/pack:name> | secret list/set/delete | action preview/commit <namespace.action> --input '{...}' | outbox status/drain/retry | migration inspect <id> [--sql|--violations] | migration validate <id> | migration apply <id> (--safe|--reviewed|--confirm-token <token>) [--timeout duration] | query <namespace.resource> [--where expr] [--fields a,b] [--sort field:desc] [--limit n] [--cursor c] | changeset preview/commit (--file <json-file>|--input '{...}') | --project <selector> view publisher/pack:name <uuid> | --project <selector> history publisher/pack:name <uuid> [--limit n] [--cursor c] | --project <selector> view relationship publisher/pack:name <uuid> | --project <selector> history relationship publisher/pack:name <uuid> [--limit n] [--cursor c]",
       );
     }
     const output = parsed.verbose

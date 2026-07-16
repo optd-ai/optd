@@ -9,7 +9,11 @@ import {
   errorEnvelope,
   successEnvelope,
 } from "../../../schemas/api/contracts.ts";
-import type { HomeDto } from "../../../application/services/inspect_metadata.ts";
+import type {
+  HomeDto,
+  MetadataOptions,
+} from "../../../application/services/inspect_metadata.ts";
+import type { ReadAddress } from "../../../application/ports/object_reader.ts";
 import type {
   ChangesetCommitDto,
   ChangesetPreviewDto,
@@ -57,47 +61,70 @@ export type HttpDependencies = {
   authorization: AuthorizationHttpService;
   metadata: {
     home(): Promise<Result<HomeDto>>;
-    packs(): Promise<Result<unknown>>;
-    pack(publisher: string, pack: string): Promise<Result<unknown>>;
+    packs(options: MetadataOptions): Promise<Result<unknown>>;
+    pack(
+      publisher: string,
+      pack: string,
+      options: MetadataOptions,
+    ): Promise<Result<unknown>>;
     resource(
       publisher: string,
       pack: string,
       name: string,
+      options: MetadataOptions,
     ): Promise<Result<unknown>>;
     relationship(
       publisher: string,
       pack: string,
       name: string,
+      options: MetadataOptions,
     ): Promise<Result<unknown>>;
     lifecycle(
       publisher: string,
       pack: string,
       name: string,
+      options: MetadataOptions,
     ): Promise<Result<unknown>>;
     action(
       publisher: string,
       pack: string,
       name: string,
+      options: MetadataOptions,
     ): Promise<Result<unknown>>;
     hook(
       publisher: string,
       pack: string,
       name: string,
+      options: MetadataOptions,
     ): Promise<Result<unknown>>;
     role(
       publisher: string,
       pack: string,
       name: string,
+      options: MetadataOptions,
     ): Promise<Result<unknown>>;
     policy(
       publisher: string,
       pack: string,
       name: string,
+      options: MetadataOptions,
     ): Promise<Result<unknown>>;
     seed(
       publisher: string,
       pack: string,
       name: string,
+      options: MetadataOptions,
+    ): Promise<Result<unknown>>;
+  };
+  objectReads: {
+    read(
+      address: ReadAddress,
+      auth: AuthVariables["auth"],
+    ): Promise<Result<unknown>>;
+    history(
+      address: ReadAddress,
+      auth: AuthVariables["auth"],
+      input: { limit?: string; cursor?: string },
     ): Promise<Result<unknown>>;
   };
   packs: {
@@ -243,20 +270,38 @@ export function makeHttpApp(
 
   app.get(
     "/metadata/home",
-    async (c) => resultJson(c, await deps.metadata.home()),
-  );
-  app.get(
-    "/metadata/packs",
-    async (c) => resultJson(c, await deps.metadata.packs()),
-  );
-  app.get(
-    "/metadata/packs/:publisher/:pack",
     async (c) =>
-      resultJson(
-        c,
-        await deps.metadata.pack(c.req.param("publisher"), c.req.param("pack")),
-      ),
+      Object.keys(c.req.queries()).length
+        ? resultJson(
+          c,
+          err(
+            validationError(
+              "bad_request",
+              "metadata home does not accept query parameters",
+            ),
+          ),
+        )
+        : resultJson(c, await deps.metadata.home()),
   );
+  app.get("/metadata/packs", async (c) => {
+    const options = metadataOptions(c);
+    return options.ok
+      ? resultJson(c, await deps.metadata.packs(options.value))
+      : resultJson(c, options);
+  });
+  app.get("/metadata/packs/:publisher/:pack", async (c) => {
+    const options = metadataOptions(c);
+    return options.ok
+      ? resultJson(
+        c,
+        await deps.metadata.pack(
+          c.req.param("publisher"),
+          c.req.param("pack"),
+          options.value,
+        ),
+      )
+      : resultJson(c, options);
+  });
   const metadataChildren = {
     resources: deps.metadata.resource,
     relationships: deps.metadata.relationship,
@@ -270,15 +315,20 @@ export function makeHttpApp(
   for (const [plural, inspect] of Object.entries(metadataChildren)) {
     app.get(
       `/metadata/packs/:publisher/:pack/${plural}/:name`,
-      async (c) =>
-        resultJson(
-          c,
-          await inspect(
-            c.req.param("publisher"),
-            c.req.param("pack"),
-            c.req.param("name"),
-          ),
-        ),
+      async (c) => {
+        const options = metadataOptions(c);
+        return options.ok
+          ? resultJson(
+            c,
+            await inspect(
+              c.req.param("publisher"),
+              c.req.param("pack"),
+              c.req.param("name"),
+              options.value,
+            ),
+          )
+          : resultJson(c, options);
+      },
     );
   }
 
@@ -436,30 +486,70 @@ export function makeHttpApp(
     async (c) =>
       resultJson(c, await deps.changesets.commit(await authenticatedJson(c))),
   );
-  app.get(
-    "/objects/:namespace/:resource/:id",
-    async (c) =>
-      resultJson(
+  const registerObjectReads = (
+    kind: "resource" | "relationship",
+    plural: "objects" | "relationships",
+  ) => {
+    const path =
+      `/api/v1/projects/:project_id/${plural}/:publisher/:pack/:name/:object_id`;
+    const address = (
+      c: { req: { param(name: string): string } },
+    ): ReadAddress => ({
+      projectId: c.req.param("project_id"),
+      objectId: c.req.param("object_id"),
+      definition: {
+        kind,
+        publisher: c.req.param("publisher"),
+        pack: c.req.param("pack"),
+        name: c.req.param("name"),
+      },
+    });
+    app.get(path, async (c) => {
+      if (Object.keys(c.req.queries()).length) {
+        return resultJson(
+          c,
+          err(
+            validationError(
+              "bad_request",
+              "current object reads do not accept query parameters",
+            ),
+          ),
+        );
+      }
+      return resultJson(
         c,
-        await deps.changesets.view(
-          `${c.req.param("namespace")}.${c.req.param("resource")}`,
-          c.req.param("id"),
-          c.req.query("include_archived") === "true",
-          serverActor(c.get("auth")),
-        ),
-      ),
-  );
-  app.get(
-    "/history/:namespace/:resource/:id",
-    async (c) =>
-      resultJson(
-        c,
-        await deps.changesets.history(
-          `${c.req.param("namespace")}.${c.req.param("resource")}`,
-          c.req.param("id"),
-        ),
-      ),
-  );
+        await deps.objectReads.read(address(c), c.get("auth")),
+      );
+    });
+    app.get(`${path}/history`, async (c) => {
+      const unknown = Object.keys(c.req.queries()).filter((key) =>
+        key !== "limit" && key !== "cursor"
+      );
+      if (unknown.length) {
+        return resultJson(
+          c,
+          err(
+            validationError(
+              "bad_request",
+              `unknown history query parameter ${unknown[0]}`,
+            ),
+          ),
+        );
+      }
+      const result = await deps.objectReads.history(address(c), c.get("auth"), {
+        limit: c.req.query("limit"),
+        cursor: c.req.query("cursor"),
+      });
+      if (!result.ok) return resultJson(c, result);
+      const value = result.value as {
+        items: unknown[];
+        meta: Record<string, unknown>;
+      };
+      return c.json(successEnvelope({ items: value.items }, value.meta));
+    });
+  };
+  registerObjectReads("resource", "objects");
+  registerObjectReads("relationship", "relationships");
 
   app.get("/outbox", async (c) => resultJson(c, await deps.outbox.list()));
   app.post("/outbox/drain", async (c) => {
@@ -556,6 +646,53 @@ function stripAuthority(value: unknown): unknown {
       .filter(([key]) => !isAuthorityKey(key))
       .map(([key, child]) => [key, stripAuthority(child)]),
   );
+}
+
+function metadataOptions(c: {
+  req: {
+    queries(): Record<string, string[]>;
+    query(name: string): string | undefined;
+  };
+  get(name: "auth"): AuthVariables["auth"];
+}): Result<MetadataOptions> {
+  const unknown = Object.keys(c.req.queries()).filter((key) =>
+    key !== "project_id" && key !== "include_security"
+  );
+  if (unknown.length) {
+    return err(
+      validationError(
+        "bad_request",
+        `unknown metadata query parameter ${unknown[0]}`,
+      ),
+    );
+  }
+  const include = c.req.query("include_security");
+  if (include !== undefined && include !== "true") {
+    return err(
+      validationError(
+        "bad_request",
+        "include_security accepts only the exact value true",
+      ),
+    );
+  }
+  const projects = c.req.queries().project_id ?? [];
+  const includes = c.req.queries().include_security ?? [];
+  if (projects.length > 1 || includes.length > 1) {
+    return err(
+      validationError(
+        "bad_request",
+        "metadata query parameters may appear only once",
+      ),
+    );
+  }
+  return {
+    ok: true,
+    value: {
+      auth: c.get("auth"),
+      projectId: c.req.query("project_id"),
+      includeSecurity: include === "true",
+    },
+  };
 }
 
 async function multipartFiles(request: Request): Promise<UploadedPackFile[]> {
