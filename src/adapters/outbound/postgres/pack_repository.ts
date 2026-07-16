@@ -140,32 +140,30 @@ export async function getPack(sql: Queryable, publisher: string, name: string) {
 
 export async function getDefinition(
   sql: Queryable,
-  table: string,
+  section: string,
   publisher: string,
+  pack: string,
   name: string,
 ) {
   const allowed = new Set([
-    "resource_definitions",
-    "relationship_definitions",
-    "lifecycle_definitions",
-    "action_definitions",
-    "hook_definitions",
-    "role_definitions",
-    "policy_definitions",
-    "seed_definitions",
+    "resources",
+    "relationships",
+    "lifecycles",
+    "actions",
+    "hooks",
+    "roles",
+    "policies",
+    "seeds",
   ]);
-  if (!allowed.has(table)) throw new Error("unknown definition table");
-  const section = table === "policy_definitions"
-    ? "policies"
-    : table.replace("_definitions", "s");
+  if (!allowed.has(section)) throw new Error("unknown definition kind");
   const result = await query<{ document: Record<string, unknown> | string }>(
     sql,
-    `select cr.normalized->$3->$2 as document
+    `select cr.normalized->$4->$3 as document
        from pack_active_revisions ar
        join pack_candidate_revisions cr on cr.id=ar.candidate_revision_id
-      where ar.publisher=$1 and cr.normalized->$3 ? $2
+      where ar.publisher=$1 and ar.pack_name=$2 and cr.normalized->$4 ? $3
       order by ar.activated_at desc limit 1`,
-    [publisher, name, section],
+    [publisher, pack, name, section],
   );
   const value = result.rows[0]?.document;
   if (!value) return null;
@@ -173,7 +171,7 @@ export async function getDefinition(
   return {
     document,
     spec: document.spec ?? {},
-    script_digest: table === "hook_definitions"
+    script_digest: section === "hooks"
       ? (document.spec as Record<string, unknown> | undefined)?.script_digest
       : undefined,
   };

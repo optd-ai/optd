@@ -109,6 +109,24 @@ Deno.test("compiled pack preview persists inactive reusable candidates and disti
     const metadata = await harness.runOptctl(["--json", "metadata", "packs"]);
     assertEquals(metadata.code, 0, metadata.stderr);
     assertEquals(JSON.parse(metadata.stdout).data.packs, []);
+    const canonicalMetadata = await harness.runOptctl([
+      "--json",
+      "metadata",
+      "resource",
+      "operant/crm:lead",
+    ]);
+    assertEquals(canonicalMetadata.code, 1);
+    assertEquals(JSON.parse(canonicalMetadata.stderr).error.code, "not_found");
+    for (
+      const legacy of [
+        ["metadata", "resource", "default.lead"],
+        ["metadata", "pack", "default.crm"],
+      ]
+    ) {
+      const rejected = await harness.runOptctl(["--json", ...legacy]);
+      assertEquals(rejected.code, 2);
+      assertEquals(JSON.parse(rejected.stderr).error.code, "usage_error");
+    }
     assertEquals(
       (await query<{ count: string }>(
         harness.server.sql,

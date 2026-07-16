@@ -1,6 +1,5 @@
 import type { Clock } from "../ports/clock.ts";
 import type { Queryable } from "../../adapters/outbound/postgres/client.ts";
-import { query } from "../../adapters/outbound/postgres/client.ts";
 import {
   getActivePack,
   getDefinition,
@@ -28,129 +27,86 @@ export type HomeDto = {
 export function makeInspectMetadataService(
   deps: { sql: Queryable; clock: Clock; version: string },
 ) {
+  const child = (section: string, kind: string) =>
+  async (
+    publisher: string,
+    pack: string,
+    name: string,
+  ): Promise<Result<unknown>> => {
+    const row = await getDefinition(deps.sql, section, publisher, pack, name);
+    if (!row) {
+      return err(notFound(`${kind} ${publisher}/${pack}:${name} not found`));
+    }
+    const spec = jsonRecord(row.spec);
+    return ok({
+      kind,
+      identity: `${publisher}/${pack}:${name}`,
+      publisher,
+      pack,
+      name,
+      schema: section === "resources"
+        ? { fields: spec.fields ?? {} }
+        : undefined,
+      axi: spec.axi ?? {},
+      script_digest: section === "hooks" ? row.script_digest : undefined,
+      spec,
+    });
+  };
   return {
     async home(): Promise<Result<HomeDto>> {
-      const pack = await getActivePack(deps.sql) as
-        | Record<string, unknown>
-        | null;
-      const manifest = jsonRecord(pack?.manifest);
-      const spec = isRecord(manifest.spec) ? manifest.spec : {};
-      const axi = isRecord(spec.axi) ? spec.axi : {};
-      const home = isRecord(axi.home) ? axi.home : {};
-      const revision = typeof pack?.revision === "string"
-        ? pack.revision
+      const active = await getActivePack(deps.sql);
+      const manifest = jsonRecord(active?.manifest);
+      const normalized = jsonRecord(active?.normalized);
+      const spec = jsonRecord(manifest.spec);
+      const axi = jsonRecord(spec.axi);
+      const home = jsonRecord(axi.home);
+      const publisher = typeof active?.publisher === "string"
+        ? active.publisher
         : null;
-      const resources = revision
-        ? (await query<{ namespace: string; name: string }>(
-          deps.sql,
-          "select namespace,name from resource_definitions where revision=$1 order by name",
-          [revision],
-        )).rows.map((r) => `${r.namespace}.${r.name}`)
-        : [];
-      const actions = revision
-        ? (await query<{ namespace: string; name: string }>(
-          deps.sql,
-          "select namespace,name from action_definitions where revision=$1 order by name",
-          [revision],
-        )).rows.map((r) => `${r.namespace}.${r.name}`)
-        : [];
+      const pack = typeof active?.name === "string" ? active.name : null;
+      const qualify = (section: string) =>
+        publisher && pack
+          ? Object.keys(jsonRecord(normalized[section])).sort().map((name) =>
+            `${publisher}/${pack}:${name}`
+          )
+          : [];
       return ok({
         version: deps.version,
         generated_at: deps.clock.now().toISOString(),
         system: {
-          active_pack: pack
-            ? `${pack.namespace}.${pack.name}@${pack.version}`
+          active_pack: publisher && pack
+            ? `${publisher}/${pack}@${active?.version}`
             : null,
         },
-        resources: preferred(home.resources, resources),
-        actions: preferred(home.actions, actions),
+        resources: preferred(home.resources, qualify("resources")),
+        actions: preferred(home.actions, qualify("actions")),
         status: "ready",
-        capabilities: [
-          "health",
-          "metadata.home",
-          "packs.preview",
-          "packs.apply",
-        ],
+        capabilities: ["health", "metadata.home", "pack.preview"],
         help: preferred(home.help, [
           "optctl pack preview <pack-dir> --json",
-          "optctl metadata resource <namespace.resource>",
+          "optctl metadata resource <publisher>/<pack>:<name>",
         ]),
       });
     },
     async packs(): Promise<Result<unknown>> {
       return ok({ packs: await listPacks(deps.sql) });
     },
-    async pack(namespace: string, name: string): Promise<Result<unknown>> {
-      const pack = await getPack(deps.sql, namespace, name);
-      if (!pack) return err(notFound(`pack ${namespace}.${name} not found`));
-      return ok(pack);
+    async pack(publisher: string, pack: string): Promise<Result<unknown>> {
+      const value = await getPack(deps.sql, publisher, pack);
+      return value
+        ? ok(value)
+        : err(notFound(`pack ${publisher}/${pack} not found`));
     },
-    async resource(namespace: string, name: string): Promise<Result<unknown>> {
-      return await metadataObject(
-        deps.sql,
-        "resources",
-        "resource",
-        "resource_definitions",
-        namespace,
-        name,
-      );
-    },
-    async action(namespace: string, name: string): Promise<Result<unknown>> {
-      return await metadataObject(
-        deps.sql,
-        "actions",
-        "action",
-        "action_definitions",
-        namespace,
-        name,
-      );
-    },
-    async hook(namespace: string, name: string): Promise<Result<unknown>> {
-      return await metadataObject(
-        deps.sql,
-        "hooks",
-        "hook",
-        "hook_definitions",
-        namespace,
-        name,
-      );
-    },
-    async policy(namespace: string, name: string): Promise<Result<unknown>> {
-      return await metadataObject(
-        deps.sql,
-        "policies",
-        "policy",
-        "policy_definitions",
-        namespace,
-        name,
-      );
-    },
+    resource: child("resources", "resource"),
+    relationship: child("relationships", "relationship"),
+    lifecycle: child("lifecycles", "lifecycle"),
+    action: child("actions", "action"),
+    hook: child("hooks", "hook"),
+    role: child("roles", "role"),
+    policy: child("policies", "policy"),
+    seed: child("seeds", "seed"),
   };
 }
-
-async function metadataObject(
-  sql: Queryable,
-  plural: string,
-  kind: string,
-  table: string,
-  namespace: string,
-  name: string,
-): Promise<Result<unknown>> {
-  const row = await getDefinition(sql, table, namespace, name) as
-    | Record<string, unknown>
-    | null;
-  if (!row) return err(notFound(`${kind} ${namespace}.${name} not found`));
-  const spec = jsonRecord(row.spec);
-  return ok({
-    kind,
-    name: `${namespace}.${name}`,
-    schema: plural === "resources" ? { fields: spec.fields ?? {} } : undefined,
-    axi: spec.axi ?? {},
-    script_digest: plural === "hooks" ? row.script_digest : undefined,
-    spec,
-  });
-}
-
 function notFound(message: string): StableError {
   return { code: "not_found", message, severity: "not_found" };
 }

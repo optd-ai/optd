@@ -18,7 +18,10 @@ import {
   loadPackFromFiles,
   type UploadedPackFile,
 } from "../../src/adapters/outbound/yaml/pack_loader.ts";
-import { createPackMigrationPlan } from "../../src/adapters/outbound/postgres/pack_migration_repository.ts";
+import {
+  createPackMigrationPlan,
+  validateMigrationPlan,
+} from "../../src/adapters/outbound/postgres/pack_migration_repository.ts";
 import { uuidV7 } from "../../src/domain/ids/uuid_v7.ts";
 
 Deno.test("immutable candidates are reused while every preview persists a distinct inactive plan", async () => {
@@ -103,6 +106,50 @@ Deno.test("immutable candidates are reused while every preview persists a distin
       statements.every((statement) => !statement.trimStart().startsWith("--")),
     );
     assert(statements.every((statement) => !/\$[0-9]+/.test(statement)));
+    class ExpectedRollback extends Error {}
+    await assertRejects(
+      () =>
+        sql!.begin(async (tx) => {
+          const byId = new Map(first.plan.steps.map((step) => [step.id, step]));
+          for (const stepId of first.plan.dependency_graph.topological_order) {
+            const step = byId.get(stepId)!;
+            for (const index of step.statement_indexes) {
+              await query(tx, statements[index]);
+            }
+          }
+          const tables = await query<
+            { definition_kind: string; table_name: string }
+          >(
+            tx,
+            "select definition_kind,table_name from pack_runtime_tables where publisher='operant' and pack_name='crm' order by definition_kind,definition_name",
+          );
+          assert(tables.rows.some((row) => row.definition_kind === "resource"));
+          assert(
+            tables.rows.some((row) => row.definition_kind === "relationship"),
+          );
+          for (const row of tables.rows) {
+            assert(
+              /^(?:res|rel)_operant_crm_.*_[0-9a-f]{16}$/.test(row.table_name),
+            );
+            assertEquals(
+              (await query<{ exists: boolean }>(
+                tx,
+                "select to_regclass($1) is not null as exists",
+                [`public.${row.table_name}`],
+              )).rows[0].exists,
+              true,
+            );
+          }
+          const constraints = await query<{ count: string }>(
+            tx,
+            "select count(*)::text as count from pg_constraint where connamespace='public'::regnamespace and (conname like 'ck_%' or conname like 'uq_%')",
+          );
+          assert(Number(constraints.rows[0].count) > 0);
+          throw new ExpectedRollback("rollback executable preview");
+        }),
+      ExpectedRollback,
+      "rollback executable preview",
+    );
     assertEquals(
       (await query<{ count: string }>(
         sql,
@@ -127,6 +174,81 @@ Deno.test("immutable candidates are reused while every preview persists a distin
       Error,
       "immutable",
     );
+
+    await sql.begin(async (tx) => {
+      const byId = new Map(first.plan.steps.map((step) => [step.id, step]));
+      for (const stepId of first.plan.dependency_graph.topological_order) {
+        for (const index of byId.get(stepId)!.statement_indexes) {
+          await query(tx, statements[index]);
+        }
+      }
+    });
+    const leadTable = (await query<{ table_name: string }>(
+      sql,
+      "select table_name from pack_runtime_tables where publisher='operant' and pack_name='crm' and definition_kind='resource' and definition_name='lead'",
+    )).rows[0].table_name;
+    const candidateV2 = structuredClone(candidate);
+    candidateV2.version = "0.2.0";
+    candidateV2.sourceDigest = `sha256:${"a".repeat(64)}`;
+    candidateV2.revision = `operant/crm@0.2.0:sha256:${"b".repeat(64)}`;
+    delete (candidateV2.resources.lead.spec.fields as Record<string, unknown>)
+      .phone;
+    delete ((candidateV2.resources.lead.document.spec as Record<
+      string,
+      unknown
+    >).fields as Record<string, unknown>).phone;
+    delete ((((candidateV2.normalized.resources as Record<string, any>).lead
+      .spec as Record<string, unknown>).fields) as Record<string, unknown>)
+      .phone;
+    const removal = await createPackMigrationPlan(sql, candidateV2, auth);
+    const removeChange = removal.plan.changes.find((change) =>
+      change.kind === "remove_field" && change.target.field === "phone"
+    )!;
+    assertEquals(removeChange.status, "ready");
+    const rowId = uuidV7(), projectId = uuidV7();
+    await query(
+      sql,
+      `insert into "${leadTable}"(id,project_id,created_by,updated_by,name,status,phone) values ($1,$2,$3,$3,'Lead','new','555')`,
+      [rowId, projectId, principal],
+    );
+    const blocked = await sql.begin((tx) =>
+      validateMigrationPlan(tx, removal.plan.id, auth)
+    ) as any;
+    assertEquals(blocked.status, "blocked");
+    assertEquals(blocked.confirmation_token, null);
+    assertEquals(blocked.blockers, [{
+      change_id: removeChange.id,
+      code: "PRESENT_VALUES",
+      count: 1,
+      message: "remove_field cannot be applied against current live facts",
+    }]);
+    await query(sql, `delete from "${leadTable}" where id=$1`, [rowId]);
+    const ready = await sql.begin((tx) =>
+      validateMigrationPlan(tx, removal.plan.id, auth)
+    ) as any;
+    assertEquals(ready.status, "ready");
+    assert(typeof ready.confirmation_token === "string");
+    let concurrentInsert: Promise<unknown> | undefined;
+    await sql.begin(async (tx) => {
+      await query(tx, `lock table "${leadTable}" in share mode`);
+      concurrentInsert = query(
+        sql!,
+        `insert into "${leadTable}"(id,project_id,created_by,updated_by,name,status,phone) values ($1,$2,$3,$3,'Concurrent','new','777')`,
+        [uuidV7(), projectId, principal],
+      );
+      const validation = await validateMigrationPlan(
+        tx,
+        removal.plan.id,
+        auth,
+      ) as any;
+      assertEquals(validation.status, "ready");
+    });
+    await concurrentInsert;
+    const stale = await sql.begin((tx) =>
+      validateMigrationPlan(tx, removal.plan.id, auth)
+    ) as any;
+    assertEquals(stale.status, "blocked");
+    assertEquals(stale.confirmation_token, null);
   } finally {
     if (sql) await closePostgresClient(sql).catch(() => undefined);
     if (runtime) await runtime.stop().catch(() => undefined);

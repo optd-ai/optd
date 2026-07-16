@@ -91,7 +91,7 @@ Deno.test("fresh real server supports compiled CLI TOON/JSON, restart, and stabl
       "--json",
       "metadata",
       "pack",
-      "missing.missing",
+      "missing/missing",
     ]);
     assertEquals(serverError.code, 1);
     assertFrozenErrorEnvelope(serverError.stderr, "not_found");

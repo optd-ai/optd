@@ -58,11 +58,47 @@ export type HttpDependencies = {
   metadata: {
     home(): Promise<Result<HomeDto>>;
     packs(): Promise<Result<unknown>>;
-    pack(namespace: string, name: string): Promise<Result<unknown>>;
-    resource(namespace: string, name: string): Promise<Result<unknown>>;
-    action(namespace: string, name: string): Promise<Result<unknown>>;
-    hook(namespace: string, name: string): Promise<Result<unknown>>;
-    policy(namespace: string, name: string): Promise<Result<unknown>>;
+    pack(publisher: string, pack: string): Promise<Result<unknown>>;
+    resource(
+      publisher: string,
+      pack: string,
+      name: string,
+    ): Promise<Result<unknown>>;
+    relationship(
+      publisher: string,
+      pack: string,
+      name: string,
+    ): Promise<Result<unknown>>;
+    lifecycle(
+      publisher: string,
+      pack: string,
+      name: string,
+    ): Promise<Result<unknown>>;
+    action(
+      publisher: string,
+      pack: string,
+      name: string,
+    ): Promise<Result<unknown>>;
+    hook(
+      publisher: string,
+      pack: string,
+      name: string,
+    ): Promise<Result<unknown>>;
+    role(
+      publisher: string,
+      pack: string,
+      name: string,
+    ): Promise<Result<unknown>>;
+    policy(
+      publisher: string,
+      pack: string,
+      name: string,
+    ): Promise<Result<unknown>>;
+    seed(
+      publisher: string,
+      pack: string,
+      name: string,
+    ): Promise<Result<unknown>>;
   };
   packs: {
     preview(
@@ -205,54 +241,37 @@ export function makeHttpApp(
     async (c) => resultJson(c, await deps.metadata.packs()),
   );
   app.get(
-    "/metadata/packs/:namespace/:name",
+    "/metadata/packs/:publisher/:pack",
     async (c) =>
       resultJson(
         c,
-        await deps.metadata.pack(c.req.param("namespace"), c.req.param("name")),
+        await deps.metadata.pack(c.req.param("publisher"), c.req.param("pack")),
       ),
   );
-  app.get(
-    "/metadata/resources/:namespace/:resource",
-    async (c) =>
-      resultJson(
-        c,
-        await deps.metadata.resource(
-          c.req.param("namespace"),
-          c.req.param("resource"),
+  const metadataChildren = {
+    resources: deps.metadata.resource,
+    relationships: deps.metadata.relationship,
+    lifecycles: deps.metadata.lifecycle,
+    actions: deps.metadata.action,
+    hooks: deps.metadata.hook,
+    roles: deps.metadata.role,
+    policies: deps.metadata.policy,
+    seeds: deps.metadata.seed,
+  } as const;
+  for (const [plural, inspect] of Object.entries(metadataChildren)) {
+    app.get(
+      `/metadata/packs/:publisher/:pack/${plural}/:name`,
+      async (c) =>
+        resultJson(
+          c,
+          await inspect(
+            c.req.param("publisher"),
+            c.req.param("pack"),
+            c.req.param("name"),
+          ),
         ),
-      ),
-  );
-  app.get(
-    "/metadata/actions/:namespace/:action",
-    async (c) =>
-      resultJson(
-        c,
-        await deps.metadata.action(
-          c.req.param("namespace"),
-          c.req.param("action"),
-        ),
-      ),
-  );
-  app.get(
-    "/metadata/hooks/:namespace/:hook",
-    async (c) =>
-      resultJson(
-        c,
-        await deps.metadata.hook(c.req.param("namespace"), c.req.param("hook")),
-      ),
-  );
-  app.get(
-    "/metadata/policies/:namespace/:policy",
-    async (c) =>
-      resultJson(
-        c,
-        await deps.metadata.policy(
-          c.req.param("namespace"),
-          c.req.param("policy"),
-        ),
-      ),
-  );
+    );
+  }
 
   app.post("/packs/preview", async (c) => {
     try {

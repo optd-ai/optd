@@ -171,12 +171,12 @@ export async function compileMigrationPreview(
       );
       const fieldSql = [
         `alter table ${qi(table)} add column ${
-          compileColumn(change.target.field, descriptor)
+          compileColumn(change.target.field, descriptor, table)
         }`,
         ...descriptor.unique === true
           ? [
             `alter table ${qi(table)} add constraint ${
-              qi(constraintName("uq", change.target.field))
+              qi(constraintName("uq", table, change.target.field))
             } unique (${qi("project_id")}, ${qi(change.target.field)})`,
           ]
           : [],
@@ -214,8 +214,8 @@ export async function compileMigrationPreview(
       const requiredSql = descriptor.required === true
         ? "set not null"
         : "drop not null";
-      const checkName = constraintName("ck", change.target.field);
-      const uniqueName = constraintName("uq", change.target.field);
+      const checkName = constraintName("ck", table, change.target.field);
+      const uniqueName = constraintName("uq", table, change.target.field);
       const checks = compileChecks(change.target.field, descriptor);
       const fieldSql = [
         `alter table ${qi(table)} alter column ${
@@ -365,11 +365,11 @@ function compileResourceTable(
     `${qi("archived_at")} timestamptz`,
     `${qi("archived_by")} uuid`,
     `${qi("current_object_version_id")} uuid`,
-    ...compileFields(definition, platformColumns),
+    ...compileFields(definition, platformColumns, tableName),
     ...Object.entries(fields).filter(([, descriptor]) =>
       record(descriptor).unique === true
     ).map(([field]) =>
-      `constraint ${qi(constraintName("uq", field))} unique (${
+      `constraint ${qi(constraintName("uq", tableName, field))} unique (${
         qi("project_id")
       }, ${qi(field)})`
     ),
@@ -396,7 +396,7 @@ function compileRelationshipTable(
     `${qi("archived_at")} timestamptz`,
     `${qi("archived_by")} uuid`,
     `${qi("current_object_version_id")} uuid`,
-    ...compileFields(definition, relationshipColumns),
+    ...compileFields(definition, relationshipColumns, tableName),
   ];
   const unique = Array.isArray(definition.spec.unique)
     ? definition.spec.unique.map(String)
@@ -417,6 +417,7 @@ function compileRelationshipTable(
 function compileFields(
   definition: NormalizedDefinition,
   reservedColumns: Set<string>,
+  tableName: string,
 ): string[] {
   const rawFields = definition.spec.fields;
   if (rawFields === undefined) return [];
@@ -431,7 +432,7 @@ function compileFields(
           `${definition.path}: field '${name}' conflicts with generated column`,
         );
       }
-      return compileColumn(name, record(descriptor));
+      return compileColumn(name, record(descriptor), tableName);
     },
   );
 }
@@ -439,6 +440,7 @@ function compileFields(
 function compileColumn(
   name: string,
   descriptor: Record<string, unknown>,
+  tableName: string,
 ): string {
   const type = String(descriptor.type ?? "");
   const sqlType = type === "string" && descriptor.ref
@@ -449,7 +451,7 @@ function compileColumn(
     descriptor.required === true ? " not null" : ""
   }${
     checks.length
-      ? ` constraint ${qi(constraintName("ck", name))} check (${
+      ? ` constraint ${qi(constraintName("ck", tableName, name))} check (${
         checks.join(" and ")
       })`
       : ""
@@ -490,10 +492,14 @@ function compileChecks(
   return checks;
 }
 
-function constraintName(prefix: "ck" | "uq", field: string): string {
-  const readable = field.slice(0, 48);
+function constraintName(
+  prefix: "ck" | "uq",
+  table: string,
+  field: string,
+): string {
+  const readable = `${table}_${field}`.slice(0, 48);
   let hash = 2166136261;
-  for (const byte of new TextEncoder().encode(field)) {
+  for (const byte of new TextEncoder().encode(`${table}:${field}`)) {
     hash ^= byte;
     hash = Math.imul(hash, 16777619) >>> 0;
   }

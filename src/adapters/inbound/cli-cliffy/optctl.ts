@@ -126,12 +126,23 @@ function render(value: unknown, asJson?: boolean): string {
 async function readJsonFile(path: string): Promise<unknown> {
   return JSON.parse(await Deno.readTextFile(path));
 }
-function splitDotted(id: string): [string, string] {
-  const parts = id.split(".");
-  if (parts.length !== 2 || !parts[0] || !parts[1]) {
-    throw usageError(`expected dotted identifier namespace.name, got ${id}`);
+function splitPackIdentity(id: string): [string, string] {
+  const match = /^([a-z][a-z0-9-]{0,62})\/([a-z][a-z0-9_]{0,62})$/.exec(id);
+  if (!match) {
+    throw usageError(`expected pack identity publisher/pack, got ${id}`);
   }
-  return [parts[0], parts[1]];
+  return [match[1], match[2]];
+}
+function splitDefinitionIdentity(id: string): [string, string, string] {
+  const match =
+    /^([a-z][a-z0-9-]{0,62})\/([a-z][a-z0-9_]{0,62}):([a-z][a-z0-9_]{0,62})$/
+      .exec(id);
+  if (!match) {
+    throw usageError(
+      `expected publisher-qualified identity publisher/pack:name, got ${id}`,
+    );
+  }
+  return [match[1], match[2], match[3]];
 }
 function parse(args: string[]): Parsed {
   const parsed: Parsed = {
@@ -219,7 +230,7 @@ function usageError(message: string): OptctlError {
         help: [
           "optctl --help",
           "optctl home",
-          "optctl metadata resource <namespace.resource>",
+          "optctl metadata resource <publisher/pack:name>",
         ],
       },
     }),
@@ -1388,9 +1399,9 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
     } else if (
       cmd === "action" && (sub === "preview" || sub === "commit") && value
     ) {
-      const [namespace, name] = splitDotted(value);
+      const [publisher, pack, name] = splitDefinitionIdentity(value);
       result = await postJson(
-        `${parsed.server}/actions/${namespace}/${name}/${sub}`,
+        `${parsed.server}/actions/${publisher}/${pack}/${name}/${sub}`,
         await resolveActionPayload(parsed.positional.slice(3)),
       );
     } else if (cmd === "secret" && sub === "list") {
@@ -1462,39 +1473,43 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
         await readChangesetInput(parsed.positional.slice(2)),
       );
     } else if (cmd === "view" && sub && value) {
-      const [namespace, name] = splitDotted(sub);
+      const [publisher, pack, name] = splitDefinitionIdentity(sub);
       result = await getJson(
-        `${parsed.server}/objects/${namespace}/${name}/${value}`,
+        `${parsed.server}/objects/${publisher}/${pack}/${name}/${value}`,
       );
     } else if (cmd === "history" && sub && value) {
-      const [namespace, name] = splitDotted(sub);
+      const [publisher, pack, name] = splitDefinitionIdentity(sub);
       result = await getJson(
-        `${parsed.server}/history/${namespace}/${name}/${value}`,
+        `${parsed.server}/history/${publisher}/${pack}/${name}/${value}`,
       );
     } else if (cmd === "metadata" && !sub) {
       result = await getJson(`${parsed.server}/metadata/packs`);
     } else if (cmd === "metadata" && sub === "packs") {
       result = await getJson(`${parsed.server}/metadata/packs`);
     } else if (cmd === "metadata" && sub === "pack" && value) {
-      const [namespace, name] = splitDotted(value);
+      const [publisher, pack] = splitPackIdentity(value);
       result = await getJson(
-        `${parsed.server}/metadata/packs/${namespace}/${name}`,
+        `${parsed.server}/metadata/packs/${publisher}/${pack}`,
       );
     } else if (cmd === "metadata" && sub && value) {
-      const [namespace, name] = splitDotted(value);
+      const [publisher, pack, name] = splitDefinitionIdentity(value);
       const routeKind = ({
         resource: "resources",
+        relationship: "relationships",
+        lifecycle: "lifecycles",
         action: "actions",
         hook: "hooks",
+        role: "roles",
         policy: "policies",
+        seed: "seeds",
       } as Record<string, string>)[sub];
       if (!routeKind) throw usageError(`unknown metadata kind ${sub}`);
       result = await getJson(
-        `${parsed.server}/metadata/${routeKind}/${namespace}/${name}`,
+        `${parsed.server}/metadata/packs/${publisher}/${pack}/${routeKind}/${name}`,
       );
     } else {
       throw usageError(
-        "usage: optctl status live/ready/bootstrap | bootstrap init | home | project list/create/view/update/archive/select | context set-project | pack preview <dir> | metadata [packs] | metadata pack/resource/action/hook/policy <namespace.name> | secret list/set/delete | action preview/commit <namespace.action> --input '{...}' | outbox status/drain/retry | migration inspect <id> [--sql|--violations] | migration validate <id> | query <namespace.resource> [--where expr] [--fields a,b] [--sort field:desc] [--limit n] [--cursor c] | changeset preview/commit (--file <json-file>|--input '{...}') | view <namespace.resource> <id> | history <namespace.resource> <id>",
+        "usage: optctl status live/ready/bootstrap | bootstrap init | home | project list/create/view/update/archive/select | context set-project | pack preview <dir> | metadata [packs] | metadata pack <publisher/pack> | metadata resource/relationship/lifecycle/action/hook/role/policy/seed <publisher/pack:name> | secret list/set/delete | action preview/commit <namespace.action> --input '{...}' | outbox status/drain/retry | migration inspect <id> [--sql|--violations] | migration validate <id> | query <namespace.resource> [--where expr] [--fields a,b] [--sort field:desc] [--limit n] [--cursor c] | changeset preview/commit (--file <json-file>|--input '{...}') | view <namespace.resource> <id> | history <namespace.resource> <id>",
       );
     }
     const output = parsed.verbose
