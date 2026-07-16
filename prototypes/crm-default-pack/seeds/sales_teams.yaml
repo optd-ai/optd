@@ -5,7 +5,7 @@
     "name": "sales_teams",
   },
   "spec": {
-    "resource": "sales_team",
+    "resource": "operant/crm:sales_team",
     "key": "name",
     "mode": "changeset",
     "rows": [

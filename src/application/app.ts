@@ -47,9 +47,8 @@ export function makeApplication(
     maximumHashes,
   );
   const passwordPolicy = loadPasswordPolicy();
-  const authorization = makeAuthorizationService(
-    new PostgresAuthorizationRepository(sql),
-  );
+  const authorizationRepository = new PostgresAuthorizationRepository(sql);
+  const authorization = makeAuthorizationService(authorizationRepository);
   return {
     authentication,
     bootstrap: makeBootstrapService(authentication, passwordPolicy),
@@ -62,9 +61,17 @@ export function makeApplication(
       clock,
       version: OPERANT_VERSION,
     }),
-    packs: makePackServices({ sql: sql as Queryable, tx }),
+    packs: makePackServices({
+      sql: sql as Queryable,
+      authorization: authorizationRepository,
+      tx,
+    }),
     changesets,
-    migrations: makeMigrationServices({ sql: sql as Queryable, tx }),
+    migrations: makeMigrationServices({
+      sql: sql as Queryable,
+      authorization: authorizationRepository,
+      tx,
+    }),
     queries: makeQueryObjectsService({ sql: sql as Queryable }),
     outbox: makeProcessOutboxService({
       sql: sql as Queryable,

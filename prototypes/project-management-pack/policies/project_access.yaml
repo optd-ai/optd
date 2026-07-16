@@ -1,78 +1,183 @@
 {
   "kind": "Policy",
   "apiVersion": "operant.dev/v1",
-  "metadata": { "name": "project_access" },
+  "metadata": {
+    "name": "project_access",
+  },
   "spec": {
-    "model": "sql_lowerable.v1",
+    "default_assignment": "all_projects",
     "rules": [
-      { "role": "admin", "allow": ["*"] },
       {
-        "role": "project_manager",
-        "allow": [
+        "name": "projects_admin_access_1",
+        "effect": "allow",
+        "roles": [
+          "operant/projects:projects_admin",
+        ],
+        "actions": [
+          "read",
+          "create",
+          "update",
+          "archive",
+          "transition",
+          "link",
+          "unlink",
+          "comment",
+        ],
+        "resources": [
+          "operant/projects:timesheet_entry",
+          "operant/projects:task",
+          "operant/projects:project_milestone",
+          "operant/projects:task_tag",
+          "operant/projects:project",
+          "operant/projects:task_stage",
+        ],
+      },
+      {
+        "name": "project_manager_access_2",
+        "effect": "allow",
+        "roles": [
+          "operant/projects:project_manager",
+        ],
+        "actions": [
           "read",
           "create",
           "update",
           "archive",
           "transition",
           "comment",
-          "action",
+          "action:operant/projects:block_task",
+          "action:operant/projects:complete_task",
+          "action:operant/projects:start_task",
         ],
-        "resources": ["*"],
+        "resources": [
+          "operant/projects:timesheet_entry",
+          "operant/projects:task",
+          "operant/projects:project_milestone",
+          "operant/projects:task_tag",
+          "operant/projects:project",
+          "operant/projects:task_stage",
+        ],
         "where": "true",
       },
       {
-        "role": "project_member",
-        "allow": ["read"],
-        "resources": ["default.project"],
-        "where": "visibility == \"internal\" || owner_id == actor.id || id in actor.project_ids",
+        "name": "project_member_access_3",
+        "effect": "allow",
+        "roles": [
+          "operant/projects:project_member",
+        ],
+        "actions": [
+          "read",
+        ],
+        "resources": [
+          "operant/projects:project",
+        ],
+        "where": "visibility == \"internal\" || owner_id == actor.id",
       },
       {
-        "role": "project_member",
-        "allow": ["read", "create"],
-        "resources": ["default.task", "default.project_milestone"],
-        "where": "project_id in actor.project_ids",
+        "name": "project_member_access_4",
+        "effect": "allow",
+        "roles": [
+          "operant/projects:project_member",
+        ],
+        "actions": [
+          "read",
+          "create",
+        ],
+        "resources": [
+          "operant/projects:task",
+          "operant/projects:project_milestone",
+        ],
+        "where": "false",
       },
       {
-        "role": "project_member",
-        "allow": ["read", "create"],
-        "resources": ["default.timesheet_entry"],
-        "where": "task_id in actor.task_ids",
+        "name": "project_member_access_5",
+        "effect": "allow",
+        "roles": [
+          "operant/projects:project_member",
+        ],
+        "actions": [
+          "read",
+          "create",
+        ],
+        "resources": [
+          "operant/projects:timesheet_entry",
+        ],
+        "where": "false",
       },
       {
-        "role": "project_member",
-        "allow": ["update", "transition", "comment"],
-        "resources": ["default.task"],
-        "where": "assignee_id == actor.id || project_id in actor.managed_project_ids",
+        "name": "project_member_access_6",
+        "effect": "allow",
+        "roles": [
+          "operant/projects:project_member",
+        ],
+        "actions": [
+          "update",
+          "transition",
+          "comment",
+        ],
+        "resources": [
+          "operant/projects:task",
+        ],
+        "where": "assignee_id == actor.id",
       },
       {
-        "role": "project_member",
-        "allow": ["create"],
-        "resources": ["default.timesheet_entry"],
+        "name": "project_member_access_7",
+        "effect": "allow",
+        "roles": [
+          "operant/projects:project_member",
+        ],
+        "actions": [
+          "create",
+        ],
+        "resources": [
+          "operant/projects:timesheet_entry",
+        ],
         "where": "actor_id == actor.id",
       },
       {
-        "role": "project_member",
-        "allow": ["action"],
-        "resources": ["*"],
+        "name": "project_member_access_8",
+        "effect": "allow",
+        "roles": [
+          "operant/projects:project_member",
+        ],
+        "actions": [
+          "action:operant/projects:block_task",
+          "action:operant/projects:complete_task",
+          "action:operant/projects:start_task",
+        ],
+        "resources": [
+          "operant/projects:timesheet_entry",
+          "operant/projects:task",
+          "operant/projects:project_milestone",
+          "operant/projects:task_tag",
+          "operant/projects:project",
+          "operant/projects:task_stage",
+        ],
         "where": "true",
       },
       {
-        "role": "viewer",
-        "allow": ["read"],
-        "resources": [
-          "default.project",
-          "default.task",
-          "default.task_stage",
-          "default.task_tag",
+        "name": "viewer_access_9",
+        "effect": "allow",
+        "roles": [
+          "operant/projects:viewer",
         ],
-        "where": "visibility == \"internal\" || project_id in actor.project_ids",
+        "actions": [
+          "read",
+        ],
+        "resources": [
+          "operant/projects:project",
+          "operant/projects:task",
+          "operant/projects:task_stage",
+          "operant/projects:task_tag",
+        ],
+        "where": "visibility == \"internal\"",
       },
     ],
     "axi": {
       "purpose": "Project policy fixture using RBAC and actor project/task arrays; super_admin bypass remains audited by the engine.",
       "actor_examples": [
         "manager:project_manager",
-        "assignee with JSON actor {\"id\":\"alice\",\"roles\":[\"project_member\"],\"project_ids\":[\"proj_1\"],\"task_ids\":[\"task_1\"]}",
+        "assignee with JSON actor {\"id\":\"alice\",\"roles\":[\"project_member\"],\"work_project_ids\":[\"proj_1\"],\"task_ids\":[\"task_1\"]}",
       ],
     },
   },

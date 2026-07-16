@@ -1,0 +1,14 @@
+{
+  "kind": "Role",
+  "apiVersion": "operant.dev/v1",
+  "metadata": {
+    "name": "viewer",
+  },
+  "spec": {
+    "display_name": "Viewer",
+    "description": "viewer responsibility for the projects proof pack.",
+    "axi": {
+      "summary": "Use for viewer responsibilities.",
+    },
+  },
+}

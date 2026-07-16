@@ -1,15 +1,30 @@
 {
   "kind": "Action",
   "apiVersion": "operant.dev/v1",
-  "metadata": { "name": "complete_task" },
+  "metadata": {
+    "name": "complete_task",
+  },
   "spec": {
-    "description": "Move a task to Done after blocking reasons are cleared.",
-    "hook": "complete_task",
-    "input": ["task_id", "stage_id", "spent_hours"],
+    "input": {
+      "task_id": {
+        "type": "string",
+        "required": true,
+        "format": "uuid",
+      },
+      "stage_id": {
+        "type": "string",
+        "required": true,
+        "format": "uuid",
+      },
+      "spent_hours": {
+        "type": "string",
+        "required": true,
+      },
+    },
     "axi": {
       "purpose": "Complete assigned project work and optionally write a spent_hours summary.",
       "help": [
-        "optctl action stage default.complete_task --input '{\"task_id\":\"TASK_ID\",\"stage_id\":\"done\"}'",
+        "optctl action stage operant/projects:complete_task --input '{\"task_id\":\"TASK_ID\",\"stage_id\":\"done\"}'",
       ],
     },
   },

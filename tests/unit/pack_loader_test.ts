@@ -6,8 +6,8 @@ import {
 
 const root = `kind: Pack
 apiVersion: operant.dev/v1
-metadata: { namespace: default, name: test, version: 0.1.0 }
-spec: {}
+metadata: { publisher: operant, name: test, version: 0.1.0 }
+spec: { purpose: Strict test pack., axi: {} }
 `;
 const resource = `kind: Resource
 apiVersion: operant.dev/v1
@@ -15,43 +15,57 @@ metadata: { name: lead }
 spec:
   fields:
     name: { type: string, required: true }
+  axi: {}
 `;
 
-Deno.test("pack loader rejects filename/name mismatches", async () => {
+Deno.test("strict pack loader rejects legacy identities and unknown fields", async () => {
   await assertRejects(
     () =>
-      loadPackFromFiles([
-        { path: "pack.yaml", text: root },
-        { path: "resources/contact.yaml", text: resource },
-      ]),
+      loadPackFromFiles([{
+        path: "pack.yaml",
+        text: root.replace("publisher: operant", "namespace: default"),
+      }]),
     Error,
-    "metadata.name 'lead' must match basename 'contact'",
+    "additional properties",
+  );
+  await assertRejects(
+    () =>
+      loadPackFromFiles([{ path: "pack.yaml", text: root }, {
+        path: "resources/lead.yaml",
+        text: resource.replace("axi: {}", "lifecycle: {}\n  axi: {}"),
+      }]),
+    Error,
+    "additional properties",
+  );
+  await assertRejects(
+    () =>
+      loadPackFromFiles([{ path: "pack.yaml", text: root }, {
+        path: "resources/lead.yaml",
+        text: resource.replace(
+          "type: string",
+          "type: string, ref: default.company",
+        ),
+      }]),
+    Error,
+    "must match pattern",
   );
 });
 
-Deno.test("pack loader rejects invalid hook script refs and unpaired scripts", async () => {
-  const badHook = `kind: Hook
-apiVersion: operant.dev/v1
-metadata: { name: validate_lead }
-spec: { script: ../validate_lead.ts }
-`;
-  await assertRejects(() =>
-    loadPackFromFiles([
-      { path: "pack.yaml", text: root },
-      { path: "hooks/validate_lead.yaml", text: badHook },
-    ]), Error);
+Deno.test("strict pack loader rejects paths, filenames, YAML tags and documents", async () => {
   await assertRejects(
     () =>
-      loadPackFromFiles([
-        { path: "pack.yaml", text: root },
-        { path: "hooks/validate_lead.ts", text: "console.log('{}')" },
-      ]),
+      loadPackFromFiles([{ path: "pack.yaml", text: root }, {
+        path: "resources/contact.yaml",
+        text: resource,
+      }]),
     Error,
-    "requires paired",
+    "must match basename",
   );
-});
-
-Deno.test("pack loader rejects advanced YAML features", async () => {
+  await assertRejects(
+    () => loadPackFromFiles([{ path: "../pack.yaml", text: root }]),
+    Error,
+    "invalid pack path",
+  );
   await assertRejects(
     () =>
       loadPackFromFiles([{
@@ -70,44 +84,74 @@ Deno.test("pack loader rejects advanced YAML features", async () => {
     Error,
     "custom YAML tags",
   );
+  await assertRejects(
+    () => loadPackFromFiles([{ path: "pack.yaml", text: "1: value" }]),
+    Error,
+    "mapping keys must be strings",
+  );
 });
 
-Deno.test("pack loader canonicalizes YAML merge keys", async () => {
-  const merged = `kind: Resource
-apiVersion: operant.dev/v1
-metadata: { name: lead }
-spec:
-  common: &field { type: string, required: true }
-  fields:
-    name:
-      <<: *field
-`;
-  const pack = await loadPackFromFiles([
-    { path: "pack.yaml", text: root },
-    { path: "resources/lead.yaml", text: merged },
-  ]);
+Deno.test("strict pack loader rejects numeric decimal seed values", async () => {
+  const decimalResource = resource.replace(
+    "name: { type: string, required: true }",
+    "name: { type: string, required: true, unique: true }\n    amount: { type: decimal, required: true }",
+  );
+  const seed =
+    `kind: Seed\napiVersion: operant.dev/v1\nmetadata: {name: leads}\nspec:\n  resource: lead\n  key: name\n  mode: changeset\n  rows: [{name: first, amount: 1.25}]\n  axi: {}\n`;
+  await assertRejects(
+    () =>
+      loadPackFromFiles([
+        { path: "pack.yaml", text: root },
+        { path: "resources/lead.yaml", text: decimalResource },
+        { path: "seeds/leads.yaml", text: seed },
+      ]),
+    Error,
+    "only JSON safe integers",
+  );
+});
+
+Deno.test("strict pack loader canonicalizes bounded YAML aliases", async () => {
+  const merged = resource.replace(
+    "name: { type: string, required: true }",
+    "name: &field { type: string, required: true }\n    code:\n      <<: *field",
+  );
+  const pack = await loadPackFromFiles([{ path: "pack.yaml", text: root }, {
+    path: "resources/lead.yaml",
+    text: merged,
+  }]);
   assertEquals(pack.resources.lead.spec.fields, {
+    code: { required: true, type: "string" },
     name: { required: true, type: "string" },
   });
-  assert(pack.revision.startsWith("default.test@0.1.0:"));
+  assert(pack.revision.startsWith("operant/test@0.1.0:sha256:"));
 });
 
-Deno.test("pack loader accepts canonical CRM fixture", async () => {
-  const files: UploadedPackFile[] = [];
-  async function collect(dir: string, prefix = "") {
-    for await (const entry of Deno.readDir(dir)) {
-      const path = `${dir}/${entry.name}`;
-      const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
-      if (entry.isDirectory) await collect(path, rel);
-      else if (rel.endsWith(".yaml") || rel.endsWith(".ts")) {
-        files.push({ path: rel, text: await Deno.readTextFile(path) });
+Deno.test("strict pack loader accepts both publisher-qualified proof packs", async () => {
+  for (
+    const [dir, expected] of [["prototypes/crm-default-pack", "operant/crm"], [
+      "prototypes/project-management-pack",
+      "operant/projects",
+    ]] as const
+  ) {
+    const files: UploadedPackFile[] = [];
+    async function collect(path: string, prefix = "") {
+      for await (const entry of Deno.readDir(path)) {
+        const child = `${path}/${entry.name}`;
+        const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+        if (entry.isDirectory) await collect(child, relative);
+        else if (/\.(?:yaml|ts)$/.test(relative)) {
+          files.push({ path: relative, text: await Deno.readTextFile(child) });
+        }
       }
     }
+    await collect(dir);
+    const pack = await loadPackFromFiles(files);
+    assertEquals(`${pack.publisher}/${pack.name}`, expected);
+    assert(Object.keys(pack.roles).length > 0);
+    assert(
+      Object.values(pack.resources).every((definition) =>
+        definition.identity.startsWith(`${expected}:`)
+      ),
+    );
   }
-  await collect("tests/fixtures/packs/crm-default-pack");
-  const pack = await loadPackFromFiles(files);
-  assertEquals(pack.namespace, "default");
-  assertEquals(Object.keys(pack.resources).length, 12);
-  assertEquals(Object.keys(pack.actions).length, 4);
-  assertEquals(Object.keys(pack.hooks).length, 7);
 });

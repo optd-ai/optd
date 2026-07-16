@@ -1,0 +1,14 @@
+{
+  "kind": "Role",
+  "apiVersion": "operant.dev/v1",
+  "metadata": {
+    "name": "crm_admin",
+  },
+  "spec": {
+    "display_name": "Crm Admin",
+    "description": "crm_admin responsibility for the crm proof pack.",
+    "axi": {
+      "summary": "Use for crm_admin responsibilities.",
+    },
+  },
+}

@@ -2,25 +2,26 @@
   "kind": "Resource",
   "apiVersion": "operant.dev/v1",
   "metadata": {
-    "name": "lead_status",
+    "name": "lead_status"
   },
   "spec": {
     "fields": {
       "name": {
         "type": "string",
         "required": true,
+        "unique": true
       },
       "label": {
         "type": "string",
-        "required": true,
+        "required": true
       },
       "sort_order": {
         "type": "integer",
-        "required": true,
+        "required": true
       },
       "terminal": {
-        "type": "boolean",
-      },
+        "type": "boolean"
+      }
     },
     "axi": {
       "list": {
@@ -28,13 +29,13 @@
           "id",
           "name",
           "label",
-          "sort_order",
-        ],
+          "sort_order"
+        ]
       },
       "help": [
-        "optctl query default.lead_status",
-        "optctl metadata resource default.lead_status",
-      ],
-    },
-  },
+        "optctl query operant/crm:lead_status",
+        "optctl metadata resource operant/crm:lead_status"
+      ]
+    }
+  }
 }

@@ -20,7 +20,7 @@
     "attachments": [
       {
         "phase": "changeset.before_stage",
-        "resource": "default.lead",
+        "resource": "operant/crm:lead",
         "order": 100,
         "input": {
           "operation": "$operation",
@@ -31,6 +31,10 @@
     "axi": {
       "purpose": "normalize_lead hook for CRM prototype.",
       "whenToUse": "Runs from metadata-driven attachment points; agents normally invoke actions instead.",
+    },
+    "secrets": [],
+    "effects": {
+      "operations": [],
     },
   },
 }

@@ -1,16 +1,26 @@
 {
   "kind": "Relationship",
   "apiVersion": "operant.dev/v1",
-  "metadata": { "name": "project_task" },
+  "metadata": {
+    "name": "project_task",
+  },
   "spec": {
-    "from": { "resource": "project", "field": "id" },
-    "to": { "resource": "task", "field": "id" },
-    "cardinality": "one_to_many",
+    "from": {
+      "resource": "operant/projects:project",
+    },
+    "to": {
+      "resource": "operant/projects:task",
+    },
     "fields": {
-      "role": { "type": "string" },
+      "role": {
+        "type": "string",
+      },
     },
     "axi": {
       "purpose": "Optional explicit project-to-task link for history and navigation.",
     },
+    "unique": [
+      "to",
+    ],
   },
 }

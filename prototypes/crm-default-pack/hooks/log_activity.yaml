@@ -20,11 +20,30 @@
     "attachments": [
       {
         "phase": "action.stage",
+        "input": {},
+        "action": "operant/crm:log_activity",
       },
     ],
     "axi": {
       "purpose": "log_activity hook for CRM prototype.",
       "whenToUse": "Runs from metadata-driven attachment points; agents normally invoke actions instead.",
+    },
+    "secrets": [],
+    "effects": {
+      "operations": [
+        {
+          "resource": "operant/crm:activity",
+          "ops": [
+            "create",
+          ],
+        },
+        {
+          "resource": "operant/crm:note",
+          "ops": [
+            "create",
+          ],
+        },
+      ],
     },
   },
 }

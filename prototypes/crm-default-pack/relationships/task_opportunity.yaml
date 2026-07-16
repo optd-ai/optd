@@ -6,18 +6,20 @@
   },
   "spec": {
     "from": {
-      "resource": "task",
-      "field": "id",
+      "resource": "operant/crm:task",
     },
     "to": {
-      "resource": "opportunity",
-      "field": "id",
+      "resource": "operant/crm:opportunity",
     },
     "fields": {},
     "axi": {
       "help": [
-        "optctl metadata relationship default.task_opportunity",
+        "optctl metadata relationship operant/crm:task_opportunity",
       ],
     },
+    "unique": [
+      "from",
+      "to",
+    ],
   },
 }

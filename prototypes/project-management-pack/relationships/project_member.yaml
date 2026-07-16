@@ -1,17 +1,31 @@
 {
   "kind": "Relationship",
   "apiVersion": "operant.dev/v1",
-  "metadata": { "name": "project_member" },
+  "metadata": {
+    "name": "project_member",
+  },
   "spec": {
-    "from": { "resource": "project", "field": "id" },
-    "to": { "resource": "project", "field": "id" },
-    "cardinality": "many_to_many",
+    "from": {
+      "resource": "operant/projects:project",
+    },
+    "to": {
+      "resource": "operant/projects:project",
+    },
     "fields": {
-      "member_id": { "type": "string", "required": true },
-      "role": { "type": "string" },
+      "member_id": {
+        "type": "string",
+        "required": true,
+      },
+      "role": {
+        "type": "string",
+      },
     },
     "axi": {
       "purpose": "Membership edge storing actor ids in fields until a first-class actor resource exists.",
     },
+    "unique": [
+      "from",
+      "to",
+    ],
   },
 }

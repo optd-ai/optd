@@ -6,18 +6,20 @@
   },
   "spec": {
     "from": {
-      "resource": "note",
-      "field": "id",
+      "resource": "operant/crm:note",
     },
     "to": {
-      "resource": "lead",
-      "field": "id",
+      "resource": "operant/crm:lead",
     },
     "fields": {},
     "axi": {
       "help": [
-        "optctl metadata relationship default.note_lead",
+        "optctl metadata relationship operant/crm:note_lead",
       ],
     },
+    "unique": [
+      "from",
+      "to",
+    ],
   },
 }

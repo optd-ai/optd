@@ -2,29 +2,29 @@
   "kind": "Resource",
   "apiVersion": "operant.dev/v1",
   "metadata": {
-    "name": "company",
+    "name": "company"
   },
   "spec": {
     "fields": {
       "name": {
         "type": "string",
-        "required": true,
+        "required": true
       },
       "website": {
-        "type": "string",
+        "type": "string"
       },
       "email": {
-        "type": "string",
+        "type": "string"
       },
       "phone": {
-        "type": "string",
+        "type": "string"
       },
       "industry": {
-        "type": "string",
+        "type": "string"
       },
       "owner_id": {
-        "type": "string",
-      },
+        "type": "string"
+      }
     },
     "axi": {
       "list": {
@@ -32,13 +32,13 @@
           "id",
           "name",
           "website",
-          "email",
-        ],
+          "email"
+        ]
       },
       "help": [
-        "optctl query default.company",
-        "optctl metadata resource default.company",
-      ],
-    },
-  },
+        "optctl query operant/crm:company",
+        "optctl metadata resource operant/crm:company"
+      ]
+    }
+  }
 }

@@ -1,36 +1,62 @@
 {
   "kind": "Resource",
   "apiVersion": "operant.dev/v1",
-  "metadata": { "name": "task" },
+  "metadata": {
+    "name": "task",
+  },
   "spec": {
-    "label": "Task",
     "fields": {
-      "title": { "type": "string", "required": true },
-      "description": { "type": "string" },
-      "project_id": { "type": "string", "required": true, "ref": "project" },
-      "stage_id": { "type": "string", "required": true, "ref": "task_stage" },
+      "title": {
+        "type": "string",
+        "required": true,
+      },
+      "description": {
+        "type": "string",
+      },
+      "work_project_id": {
+        "type": "string",
+        "required": true,
+        "ref": "operant/projects:project",
+      },
+      "stage_id": {
+        "type": "string",
+        "required": true,
+        "ref": "operant/projects:task_stage",
+      },
       "state": {
         "type": "string",
         "required": true,
-        "enum": ["todo", "in_progress", "blocked", "done"],
+        "enum": [
+          "todo",
+          "in_progress",
+          "blocked",
+          "done",
+        ],
       },
-      "assignee_id": { "type": "string" },
+      "assignee_id": {
+        "type": "string",
+      },
       "priority": {
         "type": "string",
-        "enum": ["low", "normal", "high", "urgent"],
+        "enum": [
+          "low",
+          "normal",
+          "high",
+          "urgent",
+        ],
       },
-      "deadline": { "type": "date" },
-      "blocked_reason": { "type": "string" },
-      "estimated_hours": { "type": "decimal" },
-      "spent_hours": { "type": "decimal" },
-    },
-    "lifecycle": {
-      "field": "state",
-      "states": ["todo", "in_progress", "blocked", "done"],
-    },
-    "hooks": {
-      "validate": ["validate_task"],
-      "after_commit": ["notify_project_change"],
+      "deadline": {
+        "type": "date",
+      },
+      "blocked_reason": {
+        "type": "string",
+      },
+      "estimated_hours": {
+        "type": "decimal",
+      },
+      "spent_hours": {
+        "type": "decimal",
+      },
     },
     "axi": {
       "purpose": "Manage assigned work within projects; use actions for task state changes.",
@@ -39,16 +65,16 @@
         "fields": [
           "id",
           "title",
-          "project_id",
+          "work_project_id",
           "state",
           "assignee_id",
           "priority",
         ],
       },
       "help": [
-        "optctl action stage default.start_task --input '{\"task_id\":\"TASK_ID\",\"stage_id\":\"in_progress\"}'",
-        "optctl action commit default.block_task --input '{\"task_id\":\"TASK_ID\",\"stage_id\":\"blocked\",\"blocked_reason\":\"Waiting on review\"}'",
-        "optctl history default.task TASK_ID",
+        "optctl action stage operant/projects:start_task --input '{\"task_id\":\"TASK_ID\",\"stage_id\":\"in_progress\"}'",
+        "optctl action commit operant/projects:block_task --input '{\"task_id\":\"TASK_ID\",\"stage_id\":\"blocked\",\"blocked_reason\":\"Waiting on review\"}'",
+        "optctl history operant/projects:task TASK_ID",
       ],
     },
   },

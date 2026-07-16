@@ -1,0 +1,14 @@
+{
+  "kind": "Role",
+  "apiVersion": "operant.dev/v1",
+  "metadata": {
+    "name": "project_manager",
+  },
+  "spec": {
+    "display_name": "Project Manager",
+    "description": "project_manager responsibility for the projects proof pack.",
+    "axi": {
+      "summary": "Use for project_manager responsibilities.",
+    },
+  },
+}

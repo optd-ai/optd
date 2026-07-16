@@ -2,43 +2,43 @@
   "kind": "Resource",
   "apiVersion": "operant.dev/v1",
   "metadata": {
-    "name": "activity",
+    "name": "activity"
   },
   "spec": {
     "fields": {
       "subject": {
         "type": "string",
-        "required": true,
+        "required": true
       },
       "type": {
         "type": "string",
-        "required": true,
+        "required": true
       },
       "status": {
         "type": "string",
-        "required": true,
+        "required": true
       },
       "due_at": {
-        "type": "timestamp",
+        "type": "timestamp"
       },
       "completed_at": {
-        "type": "timestamp",
+        "type": "timestamp"
       },
       "owner_id": {
-        "type": "string",
+        "type": "string"
       },
       "lead_id": {
         "type": "string",
-        "ref": "lead",
+        "ref": "operant/crm:lead"
       },
       "opportunity_id": {
         "type": "string",
-        "ref": "opportunity",
+        "ref": "operant/crm:opportunity"
       },
       "contact_id": {
         "type": "string",
-        "ref": "contact",
-      },
+        "ref": "operant/crm:contact"
+      }
     },
     "axi": {
       "list": {
@@ -46,13 +46,13 @@
           "id",
           "subject",
           "type",
-          "status",
-        ],
+          "status"
+        ]
       },
       "help": [
-        "optctl query default.activity",
-        "optctl metadata resource default.activity",
-      ],
-    },
-  },
+        "optctl query operant/crm:activity",
+        "optctl metadata resource operant/crm:activity"
+      ]
+    }
+  }
 }

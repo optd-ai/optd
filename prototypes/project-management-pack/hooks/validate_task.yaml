@@ -1,7 +1,9 @@
 {
   "kind": "Hook",
   "apiVersion": "operant.dev/v1",
-  "metadata": { "name": "validate_task" },
+  "metadata": {
+    "name": "validate_task",
+  },
   "spec": {
     "script": "validate_task.ts",
     "timeout": "2s",
@@ -12,21 +14,29 @@
       "env": false,
       "run": false,
     },
-    "output": { "schema": "validation.v1" },
+    "output": {
+      "schema": "validation.v1",
+    },
     "attachments": [
       {
         "phase": "changeset.validate",
-        "resource": "default.task",
+        "resource": "operant/projects:task",
         "order": 100,
+        "input": {},
       },
       {
         "phase": "changeset.validate",
-        "resource": "default.timesheet_entry",
+        "resource": "operant/projects:timesheet_entry",
         "order": 100,
+        "input": {},
       },
     ],
     "axi": {
       "purpose": "Validate task lifecycle invariants and timesheet hour ranges.",
+    },
+    "secrets": [],
+    "effects": {
+      "operations": [],
     },
   },
 }

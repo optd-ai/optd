@@ -2,26 +2,27 @@
   "kind": "Resource",
   "apiVersion": "operant.dev/v1",
   "metadata": {
-    "name": "sales_team",
+    "name": "sales_team"
   },
   "spec": {
     "fields": {
       "name": {
         "type": "string",
         "required": true,
+        "unique": true
       },
       "label": {
-        "type": "string",
+        "type": "string"
       },
       "leader_id": {
-        "type": "string",
+        "type": "string"
       },
       "email_alias": {
-        "type": "string",
+        "type": "string"
       },
       "monthly_target": {
-        "type": "decimal",
-      },
+        "type": "decimal"
+      }
     },
     "axi": {
       "list": {
@@ -29,13 +30,13 @@
           "id",
           "name",
           "leader_id",
-          "email_alias",
-        ],
+          "email_alias"
+        ]
       },
       "help": [
-        "optctl query default.sales_team",
-        "optctl metadata resource default.sales_team",
-      ],
-    },
-  },
+        "optctl query operant/crm:sales_team",
+        "optctl metadata resource operant/crm:sales_team"
+      ]
+    }
+  }
 }

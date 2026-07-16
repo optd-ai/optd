@@ -1,24 +1,41 @@
 {
   "kind": "Resource",
   "apiVersion": "operant.dev/v1",
-  "metadata": { "name": "timesheet_entry" },
+  "metadata": {
+    "name": "timesheet_entry",
+  },
   "spec": {
-    "label": "Timesheet Entry",
     "fields": {
-      "task_id": { "type": "string", "required": true, "ref": "task" },
-      "actor_id": { "type": "string", "required": true },
-      "hours": { "type": "decimal", "required": true },
-      "description": { "type": "string" },
-      "entry_date": { "type": "date", "required": true },
-    },
-    "hooks": {
-      "validate": ["validate_task"],
-      "after_commit": ["notify_project_change"],
+      "task_id": {
+        "type": "string",
+        "required": true,
+        "ref": "operant/projects:task",
+      },
+      "actor_id": {
+        "type": "string",
+        "required": true,
+      },
+      "hours": {
+        "type": "decimal",
+        "required": true,
+      },
+      "description": {
+        "type": "string",
+      },
+      "entry_date": {
+        "type": "date",
+        "required": true,
+      },
     },
     "axi": {
       "purpose": "Log auditable time spent against tasks.",
       "create": {
-        "required_fields": ["task_id", "actor_id", "hours", "entry_date"],
+        "required_fields": [
+          "task_id",
+          "actor_id",
+          "hours",
+          "entry_date",
+        ],
       },
     },
   },

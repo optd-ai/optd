@@ -20,11 +20,30 @@
     "attachments": [
       {
         "phase": "action.stage",
+        "input": {},
+        "action": "operant/crm:mark_lost",
       },
     ],
     "axi": {
       "purpose": "mark_lost hook for CRM prototype.",
       "whenToUse": "Runs from metadata-driven attachment points; agents normally invoke actions instead.",
+    },
+    "secrets": [],
+    "effects": {
+      "operations": [
+        {
+          "resource": "operant/crm:opportunity",
+          "ops": [
+            "transition",
+          ],
+        },
+        {
+          "resource": "operant/crm:note",
+          "ops": [
+            "create",
+          ],
+        },
+      ],
     },
   },
 }

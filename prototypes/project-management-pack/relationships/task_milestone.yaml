@@ -1,16 +1,26 @@
 {
   "kind": "Relationship",
   "apiVersion": "operant.dev/v1",
-  "metadata": { "name": "task_milestone" },
+  "metadata": {
+    "name": "task_milestone",
+  },
   "spec": {
-    "from": { "resource": "task", "field": "id" },
-    "to": { "resource": "project_milestone", "field": "id" },
-    "cardinality": "many_to_one",
+    "from": {
+      "resource": "operant/projects:task",
+    },
+    "to": {
+      "resource": "operant/projects:project_milestone",
+    },
     "fields": {
-      "note": { "type": "string" },
+      "note": {
+        "type": "string",
+      },
     },
     "axi": {
       "purpose": "Link tasks to milestones without embedding milestone state on the task.",
     },
+    "unique": [
+      "from",
+    ],
   },
 }

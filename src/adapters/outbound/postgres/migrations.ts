@@ -713,6 +713,82 @@ export const platformMigrations: PlatformMigration[] = [
         for each row execute function reject_authorization_audit_mutation();
     `,
   },
+  {
+    id: "1014_strict_global_pack_candidates",
+    sql: `
+      create table pack_candidate_revisions (
+        id uuid primary key,
+        publisher text not null check (publisher ~ '^[a-z][a-z0-9-]{0,62}$'),
+        pack_name text not null check (pack_name ~ '^[a-z][a-z0-9_]{0,62}$'),
+        version text not null,
+        source_digest text not null check (source_digest ~ '^sha256:[0-9a-f]{64}$'),
+        content_digest text not null check (content_digest ~ '^sha256:[0-9a-f]{64}$'),
+        manifest jsonb not null,
+        normalized jsonb not null,
+        source_files jsonb not null,
+        created_at timestamptz not null default now(),
+        unique (publisher, pack_name, source_digest)
+      );
+      create table pack_active_revisions (
+        publisher text not null,
+        pack_name text not null,
+        candidate_revision_id uuid not null references pack_candidate_revisions(id),
+        activated_at timestamptz not null,
+        primary key (publisher, pack_name)
+      );
+      create table pack_runtime_tables (
+        publisher text not null,
+        pack_name text not null,
+        definition_kind text not null,
+        definition_name text not null,
+        table_name text not null unique,
+        primary key (publisher, pack_name, definition_kind, definition_name)
+      );
+      create table pack_migration_plans_v1 (
+        id uuid primary key,
+        publisher text not null,
+        pack_name text not null,
+        from_pack_revision_id uuid null references pack_candidate_revisions(id),
+        to_pack_revision_id uuid not null references pack_candidate_revisions(id),
+        candidate_source_digest text not null,
+        plan_digest text not null check (plan_digest ~ '^sha256:[0-9a-f]{64}$'),
+        created_auth_context_id uuid not null references auth_contexts(id),
+        class text not null check (class in ('safe','risky','destructive')),
+        status text not null check (status in ('ready','blocked','applied')),
+        live_facts_digest text not null,
+        plan_json jsonb not null,
+        sql_preview jsonb not null,
+        created_at timestamptz not null default now()
+      );
+      create index pack_migration_plans_v1_pack_idx on pack_migration_plans_v1(publisher, pack_name, created_at desc);
+      create table pack_migration_validations (
+        id uuid primary key,
+        plan_id uuid not null references pack_migration_plans_v1(id),
+        status text not null check (status in ('ready','blocked')),
+        live_facts_digest text not null,
+        blockers jsonb not null,
+        auth_context_id uuid not null references auth_contexts(id),
+        created_at timestamptz not null default now()
+      );
+      create index pack_migration_validations_plan_idx on pack_migration_validations(plan_id, created_at desc, id desc);
+      create table pack_migration_confirmation_tokens (
+        id uuid primary key,
+        plan_id uuid not null references pack_migration_plans_v1(id),
+        validation_id uuid not null references pack_migration_validations(id),
+        token_digest text not null unique,
+        expires_at timestamptz not null,
+        auth_context_id uuid not null references auth_contexts(id),
+        consumed_at timestamptz null,
+        created_at timestamptz not null default now()
+      );
+      create function operant_immutable_pack_candidate() returns trigger language plpgsql as $$
+      begin raise exception 'pack candidate revisions are immutable'; end $$;
+      create trigger pack_candidate_revisions_immutable before update or delete on pack_candidate_revisions for each row execute function operant_immutable_pack_candidate();
+      create function operant_immutable_migration_plan() returns trigger language plpgsql as $$
+      begin raise exception 'migration plan content is immutable'; end $$;
+      create trigger pack_migration_plans_v1_immutable before update or delete on pack_migration_plans_v1 for each row execute function operant_immutable_migration_plan();
+    `,
+  },
 ];
 
 export async function applyPlatformMigrations(

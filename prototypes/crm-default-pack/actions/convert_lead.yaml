@@ -5,14 +5,17 @@
     "name": "convert_lead",
   },
   "spec": {
-    "hook": "convert_lead",
-    "input": [
-      "lead_id",
-    ],
+    "input": {
+      "lead_id": {
+        "type": "string",
+        "required": true,
+        "format": "uuid",
+      },
+    },
     "axi": {
       "purpose": "Convert a qualified lead into company, contact, and opportunity records.",
       "help": [
-        "optctl action stage default.convert_lead --input ...",
+        "optctl action stage operant/crm:convert_lead --input ...",
       ],
     },
   },

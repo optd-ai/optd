@@ -2,28 +2,29 @@
   "kind": "Resource",
   "apiVersion": "operant.dev/v1",
   "metadata": {
-    "name": "opportunity_stage",
+    "name": "opportunity_stage"
   },
   "spec": {
     "fields": {
       "name": {
         "type": "string",
         "required": true,
+        "unique": true
       },
       "label": {
         "type": "string",
-        "required": true,
+        "required": true
       },
       "probability": {
-        "type": "integer",
+        "type": "integer"
       },
       "sort_order": {
         "type": "integer",
-        "required": true,
+        "required": true
       },
       "terminal": {
-        "type": "boolean",
-      },
+        "type": "boolean"
+      }
     },
     "axi": {
       "list": {
@@ -31,13 +32,13 @@
           "id",
           "name",
           "label",
-          "probability",
-        ],
+          "probability"
+        ]
       },
       "help": [
-        "optctl query default.opportunity_stage",
-        "optctl metadata resource default.opportunity_stage",
-      ],
-    },
-  },
+        "optctl query operant/crm:opportunity_stage",
+        "optctl metadata resource operant/crm:opportunity_stage"
+      ]
+    }
+  }
 }

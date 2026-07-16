@@ -2,8 +2,8 @@
   "kind": "Pack",
   "apiVersion": "operant.dev/v1",
   "metadata": {
-    "namespace": "default",
-    "name": "project_management",
+    "publisher": "operant",
+    "name": "projects",
     "version": "0.1.0",
   },
   "spec": {
@@ -12,20 +12,20 @@
       "home": {
         "title": "Project management pack",
         "resources": [
-          "default.project",
-          "default.task",
-          "default.timesheet_entry",
+          "operant/projects:project",
+          "operant/projects:task",
+          "operant/projects:timesheet_entry",
         ],
         "actions": [
-          "default.start_task",
-          "default.block_task",
-          "default.complete_task",
+          "operant/projects:start_task",
+          "operant/projects:block_task",
+          "operant/projects:complete_task",
         ],
       },
       "help": [
-        "optctl metadata resource default.task",
-        "optctl query default.task --where 'project_id == \"PROJECT_ID\"'",
-        "optctl action stage default.start_task --input '{\"task_id\":\"TASK_ID\"}'",
+        "optctl metadata resource operant/projects:task",
+        "optctl query operant/projects:task --where 'work_project_id == \"PROJECT_ID\"'",
+        "optctl action stage operant/projects:start_task --input '{\"task_id\":\"TASK_ID\"}'",
       ],
     },
   },

@@ -5,7 +5,7 @@
     "name": "opportunity_stages",
   },
   "spec": {
-    "resource": "opportunity_stage",
+    "resource": "operant/crm:opportunity_stage",
     "key": "name",
     "mode": "changeset",
     "rows": [

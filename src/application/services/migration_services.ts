@@ -1,81 +1,73 @@
+import { err, ok, type Result } from "../../domain/errors/result.ts";
 import {
-  err,
-  ok,
-  type Result,
-  validationError,
-} from "../../domain/errors/result.ts";
-import {
-  loadPackFromFiles,
-  type UploadedPackFile,
-} from "../../adapters/outbound/yaml/pack_loader.ts";
-import {
-  applyMigrationSafe,
-  confirmMigration,
-  createPackMigrationPlan,
-  getActivePackSnapshot,
   getMigrationPlan,
-  stageMigrationDestructive,
+  getMigrationSql,
+  validateMigrationPlan,
 } from "../../adapters/outbound/postgres/pack_migration_repository.ts";
-import type { TransactionManager } from "../ports/transaction_manager.ts";
 import type { Queryable } from "../../adapters/outbound/postgres/client.ts";
+import type { AuthorizationRepository } from "../ports/authorization.ts";
+import type { AuthContext } from "../../domain/auth/model.ts";
+import type { TransactionManager } from "../ports/transaction_manager.ts";
 
 export function makeMigrationServices(
-  deps: { sql: Queryable; tx: TransactionManager<Queryable> },
+  deps: {
+    sql: Queryable;
+    authorization: AuthorizationRepository;
+    tx: TransactionManager<Queryable>;
+  },
 ) {
+  const missing = (id: string) =>
+    err({
+      code: "not_found",
+      message: `migration ${id} not found`,
+      severity: "not_found" as const,
+    });
+  const authorize = (auth: AuthContext, action: string) =>
+    deps.authorization.authorize({
+      auth,
+      boundary: { type: "system" },
+      action,
+      resource: "system:migration",
+    });
   return {
-    async preview(files: UploadedPackFile[]): Promise<Result<unknown>> {
-      try {
-        const pack = await loadPackFromFiles(files);
-        const active = await getActivePackSnapshot(
-          deps.sql,
-          pack.namespace,
-          pack.name,
-        );
-        if (!active) return ok({ migration: false });
-        const plan = await createPackMigrationPlan(deps.sql, pack);
-        return ok({ migration: true, plan });
-      } catch (error) {
-        return err(validationError("bad_migration", message(error)));
-      }
-    },
-    async inspect(id: string): Promise<Result<unknown>> {
+    async inspect(id: string, auth: AuthContext): Promise<Result<unknown>> {
+      const authorized = await authorize(auth, "migration.inspect");
+      if (!authorized.ok) return err(authorized.error);
       const plan = await getMigrationPlan(deps.sql, id);
-      if (!plan) {
-        return err({
-          code: "not_found",
-          message: `migration ${id} not found`,
-          severity: "not_found",
-        });
-      }
-      return ok(plan);
+      return plan ? ok(plan) : missing(id);
     },
-    async apply(
-      id: string,
-      mode: "safe" | "stage" = "safe",
-    ): Promise<Result<unknown>> {
-      try {
-        const plan = await deps.tx.transaction((tx) =>
-          mode === "stage"
-            ? stageMigrationDestructive(tx, id)
-            : applyMigrationSafe(tx, id)
-        );
-        return ok(plan);
-      } catch (error) {
-        return err(validationError("bad_migration_apply", message(error)));
-      }
+    async violations(id: string, auth: AuthContext): Promise<Result<unknown>> {
+      const authorized = await authorize(auth, "migration.inspect");
+      if (!authorized.ok) return err(authorized.error);
+      const plan = await getMigrationPlan(deps.sql, id);
+      return plan
+        ? ok({
+          migration_id: id,
+          blockers: plan.last_validation?.blockers ?? plan.blockers,
+          hazards: plan.hazards.filter((hazard) =>
+            hazard.severity === "blocking"
+          ),
+        })
+        : missing(id);
     },
-    async confirm(id: string, token: string): Promise<Result<unknown>> {
-      try {
-        const plan = await deps.tx.transaction((tx) =>
-          confirmMigration(tx, id, token)
-        );
-        return ok(plan);
-      } catch (error) {
-        return err(validationError("bad_migration_confirm", message(error)));
-      }
+    async validate(id: string, auth: AuthContext): Promise<Result<unknown>> {
+      const authorized = await deps.authorization.authorize({
+        auth,
+        boundary: { type: "system" },
+        action: "migration.validate",
+        resource: "system:migration",
+      });
+      if (!authorized.ok) return err(authorized.error);
+      const validation = await deps.tx.transaction((sql) =>
+        validateMigrationPlan(sql, id, auth.id)
+      );
+      return validation ? ok(validation) : missing(id);
+    },
+    async sql(id: string, auth: AuthContext): Promise<Result<unknown>> {
+      const authorized = await authorize(auth, "migration.inspect");
+      if (!authorized.ok) return err(authorized.error);
+      const statements = await getMigrationSql(deps.sql, id);
+      return statements ? ok({ migration_id: id, statements }) : missing(id);
     },
   };
-}
-function message(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

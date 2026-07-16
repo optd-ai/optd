@@ -1,366 +1,387 @@
-import type {
-  LoadedPack,
-  NormalizedDefinition,
-} from "../../adapters/outbound/yaml/pack_loader.ts";
+import type { LoadedPack } from "../../adapters/outbound/yaml/pack_loader.ts";
+import { canonicalJson } from "../../adapters/outbound/yaml/pack_loader.ts";
+import { uuidV7 } from "../ids/uuid_v7.ts";
 
-export type MigrationClass = "safe" | "risky" | "destructive" | "unsupported";
-export type MigrationIssueStatus = "ready" | "blocked" | "staged" | "applied";
-export type MigrationPlanStatus =
-  | "previewed"
-  | "ready"
-  | "blocked"
-  | "staged"
-  | "awaiting_confirmation"
-  | "applied"
-  | "failed";
-
+export type MigrationClass = "safe" | "risky" | "destructive";
+export type MigrationStatus = "ready" | "blocked" | "applied";
+export type MigrationChange = {
+  id: string;
+  kind: string;
+  class: MigrationClass;
+  status: "ready" | "blocked";
+  target: Record<string, string>;
+  reason: string;
+  facts: Record<string, unknown>;
+  hazard_codes: string[];
+  intermediate_revision_guidance: string | null;
+  cleanup_required: string | null;
+  destructive_action: string | null;
+};
+export type MigrationPlan = {
+  id: string;
+  schema_version: "migration.plan.v1";
+  publisher: string;
+  pack: string;
+  from_pack_revision_id: string | null;
+  to_pack_revision_id: string;
+  candidate_source_digest: string;
+  plan_digest: string;
+  created_auth_context_id: string;
+  created_at: string;
+  class: MigrationClass;
+  status: MigrationStatus;
+  summary: {
+    safe: number;
+    risky: number;
+    destructive: number;
+    blocked: number;
+    warnings: number;
+    blocking: number;
+  };
+  changes: MigrationChange[];
+  hazards: Array<
+    {
+      code: string;
+      severity: "warning" | "blocking";
+      change_id: string;
+      message: string;
+    }
+  >;
+  blockers: Array<
+    { change_id: string; code: string; count: number; message: string }
+  >;
+  steps: Array<{ id: string; kind: string; change_ids: string[] }>;
+  live_facts_digest: string;
+  last_validation: null | {
+    id: string;
+    status: "ready" | "blocked";
+    live_facts_digest: string;
+    blockers: Array<{
+      change_id: string;
+      code: string;
+      count: number;
+      message: string;
+    }>;
+    created_at: string;
+  };
+  application: null;
+};
+export type ActivePackSnapshot = {
+  revisionId: string;
+  normalized: Record<string, unknown>;
+};
 export type LiveFacts = {
   resourceRows: Record<string, number>;
   fieldPresentValues: Record<string, number>;
 };
 
-export type MigrationIssue = {
-  id: string;
-  class: MigrationClass;
-  status: MigrationIssueStatus;
-  kind: string;
-  target: Record<string, string>;
-  reason: string;
-  facts?: Record<string, unknown>;
-  sql?: string;
-  stage_action?: string;
-  cleanup_required?: string;
-  destructive_action?: string;
-};
-
-export type MigrationPlan = {
-  id: string;
-  from_revision: string;
-  to_revision: string;
-  plan_digest: string;
-  status: MigrationPlanStatus;
-  summary: Record<string, number>;
-  changes: MigrationIssue[];
-  hazards: Array<Record<string, unknown>>;
-  blockers: Array<Record<string, unknown>>;
-  sql_preview: string[];
-  confirmation_token: string;
-};
-
-export type ActivePackSnapshot = {
-  revision: string;
-  namespace: string;
-  name: string;
-  normalized: Record<string, unknown>;
-};
-
-type DefMap = Record<string, NormalizedDefinition>;
-
 export async function buildMigrationPlan(input: {
   id: string;
-  active: ActivePackSnapshot;
+  candidateRevisionId: string;
+  authContextId: string;
+  active: ActivePackSnapshot | null;
   candidate: LoadedPack;
   liveFacts: LiveFacts;
-}): Promise<Omit<MigrationPlan, "plan_digest" | "confirmation_token">> {
-  const changes: MigrationIssue[] = [];
-  let counter = 1;
-  const nextId = () => `chg_${counter++}`;
-  const activeResources = defMap(input.active.normalized, "resources");
-  const activeActions = defMap(input.active.normalized, "actions");
-  const activeHooks = defMap(input.active.normalized, "hooks");
-  const activeLifecycles = defMap(input.active.normalized, "lifecycles");
+  createdAt?: Date;
+}): Promise<{ plan: MigrationPlan; sql: string[] }> {
+  const changes: MigrationChange[] = [];
+  const activeResources = definitions(input.active?.normalized, "resources");
+  const candidateResources = Object.fromEntries(
+    Object.entries(input.candidate.resources).map((
+      [name, def],
+    ) => [name, def.document]),
+  );
+  const add = (change: Omit<MigrationChange, "id">) =>
+    changes.push({ id: uuidV7(), ...change });
 
-  for (
-    const resource of Object.values(input.candidate.resources).sort(byName)
-  ) {
-    const current = activeResources[resource.name];
+  for (const [name, document] of Object.entries(candidateResources).sort()) {
+    const current = activeResources[name];
     if (!current) {
-      changes.push({
-        id: nextId(),
+      add({
+        kind: "add_resource",
         class: "safe",
         status: "ready",
-        kind: "add_resource",
-        target: { resource: resource.name },
-        reason: "resource added in desired config",
-        sql: `create table if not exists ${qi(`res_${resource.name}`)} (...)`,
+        target: { resource: identity(input.candidate, name) },
+        reason: "resource added in desired revision",
+        facts: {},
+        hazard_codes: [],
+        intermediate_revision_guidance: null,
+        cleanup_required: null,
+        destructive_action: null,
       });
       continue;
     }
-    const currentFields = fields(current);
-    const desiredFields = fields(resource);
-    for (
-      const [fieldName, desiredField] of Object.entries(desiredFields).sort()
-    ) {
-      const currentField = currentFields[fieldName];
-      if (!currentField) {
-        const required = desiredField.required === true;
-        const rowCount = input.liveFacts.resourceRows[resource.name] ?? 0;
-        changes.push({
-          id: nextId(),
-          class: required && rowCount > 0 ? "risky" : "safe",
-          status: required && rowCount > 0 ? "blocked" : "ready",
+    const before = fields(current);
+    const after = fields(document);
+    for (const [field, descriptor] of Object.entries(after).sort()) {
+      if (!before[field]) {
+        const rows = input.liveFacts.resourceRows[name] ?? 0;
+        const blocked = record(descriptor).required === true && rows > 0;
+        add({
           kind: "add_field",
-          target: { resource: resource.name, field: fieldName },
-          reason: required
-            ? "required field added in desired config"
-            : "nullable field added in desired config",
-          facts: { row_count: rowCount },
-          sql: `alter table ${qi(`res_${resource.name}`)} add column ${
-            qi(fieldName)
-          } ${sqlType(String(desiredField.type))}${
-            required ? " not null" : ""
-          }`,
-          cleanup_required: required && rowCount > 0
-            ? "backfill values before adding not-null field"
-            : undefined,
+          class: blocked ? "risky" : "safe",
+          status: blocked ? "blocked" : "ready",
+          target: { resource: identity(input.candidate, name), field },
+          reason: "field added in desired revision",
+          facts: { row_count: rows },
+          hazard_codes: blocked ? ["VALIDATION_SCAN"] : [],
+          intermediate_revision_guidance: blocked
+            ? "apply an intermediate revision with an optional field, then backfill through ordinary changesets"
+            : null,
+          cleanup_required: blocked ? "backfill existing rows" : null,
+          destructive_action: null,
         });
-      } else if (String(currentField.type) !== String(desiredField.type)) {
-        const from = String(currentField.type);
-        const to = String(desiredField.type);
-        const supportedRisky = from === "integer" && to === "decimal";
-        changes.push({
-          id: nextId(),
-          class: supportedRisky ? "risky" : "unsupported",
-          status: supportedRisky ? "ready" : "blocked",
-          kind: "change_field_type",
-          target: { resource: resource.name, field: fieldName },
-          reason: `field type changed from ${from} to ${to}`,
+      } else if (canonicalJson(before[field]) !== canonicalJson(descriptor)) {
+        const typeChanged =
+          record(before[field]).type !== record(descriptor).type;
+        add({
+          kind: "change_field",
+          class: typeChanged ? "destructive" : "risky",
+          status: typeChanged ? "blocked" : "ready",
+          target: { resource: identity(input.candidate, name), field },
+          reason: typeChanged
+            ? "field type changes require an explicit intermediate revision"
+            : "field validation changed",
           facts: {
-            present_values: input.liveFacts
-              .fieldPresentValues[`${resource.name}.${fieldName}`] ?? 0,
+            present_values:
+              input.liveFacts.fieldPresentValues[`${name}.${field}`] ?? 0,
           },
-          sql: supportedRisky
-            ? `alter table ${qi(`res_${resource.name}`)} alter column ${
-              qi(fieldName)
-            } type ${sqlType(to)}`
-            : undefined,
-          cleanup_required: supportedRisky
-            ? undefined
-            : "add a replacement field and backfill through ordinary changesets",
+          hazard_codes: typeChanged
+            ? ["API_BREAK", "TABLE_REWRITE"]
+            : ["VALIDATION_SCAN"],
+          intermediate_revision_guidance: typeChanged
+            ? "add a replacement field and migrate values through ordinary changesets"
+            : null,
+          cleanup_required: typeChanged
+            ? "migrate values to a replacement field"
+            : null,
+          destructive_action: typeChanged ? "replace field type" : null,
         });
       }
     }
-    for (const fieldName of Object.keys(currentFields).sort()) {
-      if (!(fieldName in desiredFields)) {
-        const present =
-          input.liveFacts.fieldPresentValues[`${resource.name}.${fieldName}`] ??
-            0;
-        changes.push({
-          id: nextId(),
-          class: "destructive",
-          status: present > 0 ? "blocked" : "ready",
+    for (const field of Object.keys(before).sort()) {
+      if (!after[field]) {
+        const count = input.liveFacts.fieldPresentValues[`${name}.${field}`] ??
+          0;
+        add({
           kind: "remove_field",
-          target: { resource: resource.name, field: fieldName },
-          reason: "field removed from desired config",
-          facts: { present_values: present },
-          sql: `alter table ${qi(`res_${resource.name}`)} drop column ${
-            qi(fieldName)
-          }`,
-          stage_action: "mark field deprecated and block new writes",
-          cleanup_required: present > 0
-            ? "clear or export values through ordinary changesets"
-            : undefined,
+          class: "destructive",
+          status: count > 0 ? "blocked" : "ready",
+          target: { resource: identity(input.candidate, name), field },
+          reason: "field removed from desired revision",
+          facts: { present_values: count },
+          hazard_codes: ["DATA_LOSS", "API_BREAK"],
+          intermediate_revision_guidance:
+            "remove references and clean data under an explicit intermediate revision",
+          cleanup_required: count > 0
+            ? "export or clear values through ordinary changesets"
+            : null,
           destructive_action: "drop column",
         });
       }
     }
   }
-
-  for (const resource of Object.values(activeResources).sort(byName)) {
-    if (!input.candidate.resources[resource.name]) {
-      const rows = input.liveFacts.resourceRows[resource.name] ?? 0;
-      changes.push({
-        id: nextId(),
-        class: "destructive",
-        status: rows > 0 ? "blocked" : "ready",
+  for (const name of Object.keys(activeResources).sort()) {
+    if (!candidateResources[name]) {
+      const count = input.liveFacts.resourceRows[name] ?? 0;
+      add({
         kind: "remove_resource",
-        target: { resource: resource.name },
-        reason: "resource removed from desired config",
-        facts: { row_count: rows },
-        sql: `drop table ${qi(`res_${resource.name}`)}`,
-        stage_action: "mark resource deprecated and block new writes",
-        cleanup_required: rows > 0
-          ? "archive or migrate rows through ordinary changesets"
-          : undefined,
+        class: "destructive",
+        status: count > 0 ? "blocked" : "ready",
+        target: { resource: identity(input.candidate, name) },
+        reason: "resource removed from desired revision",
+        facts: { row_count: count },
+        hazard_codes: ["DATA_LOSS", "API_BREAK", "REFERENCE_BREAK"],
+        intermediate_revision_guidance:
+          "remove references and migrate objects under an explicit intermediate revision",
+        cleanup_required: count > 0
+          ? "export or migrate rows through ordinary changesets"
+          : null,
         destructive_action: "drop table",
       });
     }
   }
-
-  diffBehavior(
-    "actions",
-    activeActions,
-    input.candidate.actions,
-    changes,
-    nextId,
+  for (
+    const kind of [
+      "relationships",
+      "lifecycles",
+      "actions",
+      "hooks",
+      "roles",
+      "policies",
+      "seeds",
+    ] as const
+  ) diffDefinitions(input, kind, changes);
+  changes.sort((a, b) =>
+    canonicalJson(a.target).localeCompare(canonicalJson(b.target)) ||
+    a.kind.localeCompare(b.kind)
   );
-  diffBehavior("hooks", activeHooks, input.candidate.hooks, changes, nextId);
-  diffBehavior(
-    "lifecycles",
-    activeLifecycles,
-    input.candidate.lifecycles,
-    changes,
-    nextId,
+  const hazards = changes.flatMap((change) =>
+    change.hazard_codes.map((code) => ({
+      code,
+      severity: change.status === "blocked"
+        ? "blocking" as const
+        : "warning" as const,
+      change_id: change.id,
+      message: hazardMessage(code, change.target),
+    }))
+  ).sort((a, b) =>
+    a.code.localeCompare(b.code) || a.change_id.localeCompare(b.change_id)
   );
-
-  const summary = summarize(changes);
-  const blockers = changes.filter((c) => c.status === "blocked").map((c) => ({
-    change: c.id,
-    code: c.kind === "remove_field"
-      ? "PRESENT_VALUES"
-      : c.kind === "remove_resource"
-      ? "PRESENT_ROWS"
-      : "BLOCKED",
-    target: c.target,
-    facts: c.facts ?? {},
+  const blockers = changes.filter((change) => change.status === "blocked").map((
+    change,
+  ) => ({
+    change_id: change.id,
+    code: blockerCode(change),
+    count: Number(change.facts.present_values ?? change.facts.row_count ?? 0),
+    message: `${change.kind} cannot be applied against current live facts`,
   }));
-  const hazards = changes.filter((c) =>
-    c.class === "destructive" || c.class === "unsupported"
-  ).map((c) => ({
-    change: c.id,
-    code: c.class === "unsupported" ? "UNSUPPORTED_CHANGE" : "DATA_LOSS",
-    severity: c.status === "blocked" ? "blocking" : "review",
-    message: c.reason,
-  }));
-  const status: MigrationPlanStatus = blockers.length > 0
-    ? "blocked"
-    : summary.destructive > 0
-    ? "awaiting_confirmation"
-    : "ready";
-  return {
+  const sql = changes.filter((change) => change.status === "ready").map(
+    sqlForChange,
+  );
+  const steps = changes.filter((change) => change.status === "ready").map((
+    change,
+  ) => ({ id: uuidV7(), kind: change.kind, change_ids: [change.id] }));
+  const rank = (value: MigrationClass) =>
+    value === "destructive" ? 3 : value === "risky" ? 2 : 1;
+  const planClass = changes.reduce<MigrationClass>(
+    (highest, change) =>
+      rank(change.class) > rank(highest) ? change.class : highest,
+    "safe",
+  );
+  const liveFactsDigest = await migrationDigest(input.liveFacts);
+  const createdAt = input.createdAt ?? new Date();
+  const immutable = {
     id: input.id,
-    from_revision: input.active.revision,
-    to_revision: input.candidate.revision,
-    status,
-    summary,
+    schema_version: "migration.plan.v1" as const,
+    publisher: input.candidate.publisher,
+    pack: input.candidate.name,
+    from_pack_revision_id: input.active?.revisionId ?? null,
+    to_pack_revision_id: input.candidateRevisionId,
+    candidate_source_digest: input.candidate.sourceDigest,
+    created_auth_context_id: input.authContextId,
+    created_at: createdAt.toISOString(),
+    class: planClass,
+    status: blockers.length ? "blocked" as const : "ready" as const,
+    summary: {
+      safe: changes.filter((x) => x.class === "safe").length,
+      risky: changes.filter((x) => x.class === "risky").length,
+      destructive: changes.filter((x) => x.class === "destructive").length,
+      blocked: blockers.length,
+      warnings: hazards.filter((x) => x.severity === "warning").length,
+      blocking: hazards.filter((x) => x.severity === "blocking").length,
+    },
     changes,
     hazards,
     blockers,
-    sql_preview: changes.filter((c) => c.status === "ready" && c.sql).map((c) =>
-      c.sql!
-    ),
+    steps,
+    live_facts_digest: liveFactsDigest,
+    last_validation: null,
+    application: null,
   };
+  const planDigest = await migrationDigest(immutable);
+  return { plan: { ...immutable, plan_digest: planDigest }, sql };
 }
 
-export async function migrationDigest(value: unknown): Promise<string> {
-  const bytes = new TextEncoder().encode(stableJson(value));
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return "sha256:" +
-    Array.from(new Uint8Array(digest)).map((b) =>
-      b.toString(16).padStart(2, "0")
-    ).join("");
-}
-
-function defMap(normalized: Record<string, unknown>, key: string): DefMap {
-  const source = normalized[key];
-  if (!source || typeof source !== "object" || Array.isArray(source)) return {};
-  const out: DefMap = {};
-  for (
-    const [name, document] of Object.entries(source as Record<string, unknown>)
-  ) {
-    if (!document || typeof document !== "object" || Array.isArray(document)) {
-      continue;
-    }
-    const doc = document as Record<string, unknown>;
-    out[name] = {
-      kind: String(doc.kind ?? "Resource") as NormalizedDefinition["kind"],
-      path: `${key}/${name}.yaml`,
-      name,
-      namespace: "default",
-      document: doc as NormalizedDefinition["document"],
-      spec:
-        (doc.spec && typeof doc.spec === "object" && !Array.isArray(doc.spec)
-          ? doc.spec
-          : {}) as NormalizedDefinition["spec"],
-    };
+function diffDefinitions(
+  input: { active: ActivePackSnapshot | null; candidate: LoadedPack },
+  kind:
+    | "relationships"
+    | "lifecycles"
+    | "actions"
+    | "hooks"
+    | "roles"
+    | "policies"
+    | "seeds",
+  changes: MigrationChange[],
+) {
+  const before = definitions(input.active?.normalized, kind);
+  const after = Object.fromEntries(
+    Object.entries(input.candidate[kind]).map((
+      [name, def],
+    ) => [name, def.document]),
+  );
+  for (const name of new Set([...Object.keys(before), ...Object.keys(after)])) {
+    if (
+      before[name] && after[name] &&
+      canonicalJson(before[name]) === canonicalJson(after[name])
+    ) continue;
+    const removed = before[name] && !after[name];
+    const changed = before[name] && after[name];
+    const className: MigrationClass = removed
+      ? "destructive"
+      : changed
+      ? "risky"
+      : "safe";
+    changes.push({
+      id: uuidV7(),
+      kind: `${removed ? "remove" : changed ? "change" : "add"}_${
+        kind.slice(0, -1)
+      }`,
+      class: className,
+      status: removed ? "blocked" : "ready",
+      target: { [kind.slice(0, -1)]: identity(input.candidate, name) },
+      reason: `${kind.slice(0, -1)} ${
+        removed ? "removed" : changed ? "changed" : "added"
+      } in desired revision`,
+      facts: {},
+      hazard_codes: removed
+        ? ["REFERENCE_BREAK", "API_BREAK"]
+        : changed && (kind === "hooks" || kind === "actions")
+        ? [kind === "hooks" ? "HOOK_BEHAVIOR_CHANGE" : "ACTION_CONTRACT_CHANGE"]
+        : [],
+      intermediate_revision_guidance: removed
+        ? "remove dependent references in an explicit intermediate revision"
+        : null,
+      cleanup_required: removed ? "remove dependent references" : null,
+      destructive_action: removed ? `remove ${kind.slice(0, -1)}` : null,
+    });
   }
-  return out;
 }
-function fields(
-  def: NormalizedDefinition,
+function definitions(
+  normalized: Record<string, unknown> | undefined,
+  key: string,
 ): Record<string, Record<string, unknown>> {
-  const raw = def.spec.fields;
-  return raw && typeof raw === "object" && !Array.isArray(raw)
-    ? raw as Record<string, Record<string, unknown>>
+  const value = normalized?.[key];
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, Record<string, unknown>>
     : {};
 }
-function diffBehavior(
-  kind: string,
-  active: DefMap,
-  desired: DefMap,
-  changes: MigrationIssue[],
-  nextId: () => string,
-) {
-  for (const [name, current] of Object.entries(active).sort()) {
-    const next = desired[name];
-    if (!next) {
-      changes.push({
-        id: nextId(),
-        class: "risky",
-        status: "ready",
-        kind: `remove_${kind.slice(0, -1)}`,
-        target: { [kind.slice(0, -1)]: name },
-        reason: `${kind.slice(0, -1)} removed from desired config`,
-      });
-    } else if (stableJson(current.document) !== stableJson(next.document)) {
-      changes.push({
-        id: nextId(),
-        class: "risky",
-        status: "ready",
-        kind: `change_${kind.slice(0, -1)}`,
-        target: { [kind.slice(0, -1)]: name },
-        reason: `${kind.slice(0, -1)} changed in desired config`,
-      });
-    }
-  }
+function fields(document: Record<string, unknown>): Record<string, unknown> {
+  return record(record(document).spec).fields as Record<string, unknown> ?? {};
 }
-function summarize(changes: MigrationIssue[]): Record<string, number> {
-  const summary = {
-    safe: 0,
-    risky: 0,
-    destructive: 0,
-    unsupported: 0,
-    blocked: 0,
-  };
-  for (const change of changes) {
-    summary[change.class]++;
-    if (change.status === "blocked") summary.blocked++;
-  }
-  return summary;
+function record(value: unknown): Record<string, any> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, any>
+    : {};
 }
-function sqlType(type: string): string {
-  switch (type) {
-    case "integer":
-      return "integer";
-    case "decimal":
-      return "numeric";
-    case "boolean":
-      return "boolean";
-    case "timestamp":
-      return "timestamptz";
-    case "date":
-      return "date";
-    default:
-      return "text";
-  }
+function identity(pack: LoadedPack, name: string) {
+  return `${pack.publisher}/${pack.name}:${name}`;
 }
-function qi(value: string): string {
-  if (!/^[a-z_][a-z0-9_]*$/.test(value)) {
-    throw new Error(`invalid SQL identifier ${value}`);
-  }
-  return `"${value}"`;
+function blockerCode(change: MigrationChange) {
+  return change.kind === "remove_field"
+    ? "PRESENT_VALUES"
+    : change.kind === "remove_resource"
+    ? "PRESENT_ROWS"
+    : "INTERMEDIATE_REVISION_REQUIRED";
 }
-function byName(a: { name: string }, b: { name: string }) {
-  return a.name.localeCompare(b.name);
+function hazardMessage(code: string, target: Record<string, string>) {
+  return `${code} hazard for ${Object.values(target).join(":")}`;
 }
-function stableJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
-  if (value && typeof value === "object") {
-    return `{${
-      Object.entries(value as Record<string, unknown>).sort(([a], [b]) =>
-        a.localeCompare(b)
-      ).map(([k, v]) => `${JSON.stringify(k)}:${stableJson(v)}`).join(",")
-    }}`;
-  }
-  return JSON.stringify(value);
+function sqlForChange(change: MigrationChange) {
+  return `-- ${change.kind} ${
+    Object.entries(change.target).map(([key, value]) => `${key}=${value}`).join(
+      " ",
+    )
+  }`;
+}
+export async function migrationDigest(value: unknown): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(canonicalJson(value)),
+  );
+  return "sha256:" +
+    Array.from(new Uint8Array(digest)).map((byte) =>
+      byte.toString(16).padStart(2, "0")
+    ).join("");
 }

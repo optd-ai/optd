@@ -5,7 +5,7 @@
     "name": "lost_reasons",
   },
   "spec": {
-    "resource": "lost_reason",
+    "resource": "operant/crm:lost_reason",
     "key": "name",
     "mode": "changeset",
     "rows": [

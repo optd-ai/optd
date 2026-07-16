@@ -5,7 +5,7 @@
     "name": "activity_types",
   },
   "spec": {
-    "resource": "activity_type",
+    "resource": "operant/crm:activity_type",
     "key": "name",
     "mode": "changeset",
     "rows": [

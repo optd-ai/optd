@@ -2,57 +2,47 @@
   "kind": "Resource",
   "apiVersion": "operant.dev/v1",
   "metadata": {
-    "name": "lead",
+    "name": "lead"
   },
   "spec": {
     "fields": {
       "name": {
         "type": "string",
-        "required": true,
+        "required": true
       },
       "email": {
-        "type": "string",
+        "type": "string"
       },
       "phone": {
-        "type": "string",
+        "type": "string"
       },
       "company_name": {
-        "type": "string",
+        "type": "string"
       },
       "source": {
-        "type": "string",
+        "type": "string"
       },
       "score": {
-        "type": "integer",
+        "type": "integer"
       },
       "status": {
         "type": "string",
-        "required": true,
+        "required": true
       },
       "owner_id": {
-        "type": "string",
+        "type": "string"
       },
       "sales_team_id": {
         "type": "string",
-        "ref": "sales_team",
+        "ref": "operant/crm:sales_team"
       },
       "lost_reason_id": {
         "type": "string",
-        "ref": "lost_reason",
+        "ref": "operant/crm:lost_reason"
       },
       "next_activity_at": {
-        "type": "timestamp",
-      },
-    },
-    "lifecycle": {
-      "field": "status",
-      "states": [
-        "new",
-        "contacted",
-        "qualified",
-        "converted",
-        "disqualified",
-      ],
+        "type": "timestamp"
+      }
     },
     "axi": {
       "list": {
@@ -60,13 +50,13 @@
           "id",
           "name",
           "email",
-          "phone",
-        ],
+          "phone"
+        ]
       },
       "help": [
-        "optctl query default.lead",
-        "optctl metadata resource default.lead",
-      ],
-    },
-  },
+        "optctl query operant/crm:lead",
+        "optctl metadata resource operant/crm:lead"
+      ]
+    }
+  }
 }

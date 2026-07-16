@@ -20,7 +20,7 @@
     "attachments": [
       {
         "phase": "changeset.validate",
-        "resource": "default.lead",
+        "resource": "operant/crm:lead",
         "order": 100,
         "input": {
           "operation": "$operation",
@@ -32,6 +32,10 @@
     "axi": {
       "purpose": "validate_lead hook for CRM prototype.",
       "whenToUse": "Runs from metadata-driven attachment points; agents normally invoke actions instead.",
+    },
+    "secrets": [],
+    "effects": {
+      "operations": [],
     },
   },
 }

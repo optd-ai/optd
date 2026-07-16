@@ -5,18 +5,33 @@
     "name": "log_activity",
   },
   "spec": {
-    "hook": "log_activity",
-    "input": [
-      "resource",
-      "object_id",
-      "type",
-      "subject",
-      "note",
-    ],
+    "input": {
+      "resource": {
+        "type": "string",
+        "required": true,
+      },
+      "object_id": {
+        "type": "string",
+        "required": true,
+        "format": "uuid",
+      },
+      "type": {
+        "type": "string",
+        "required": true,
+      },
+      "subject": {
+        "type": "string",
+        "required": true,
+      },
+      "note": {
+        "type": "string",
+        "required": true,
+      },
+    },
     "axi": {
       "purpose": "Log an activity and optional note against a CRM object.",
       "help": [
-        "optctl action stage default.log_activity --input ...",
+        "optctl action stage operant/crm:log_activity --input ...",
       ],
     },
   },

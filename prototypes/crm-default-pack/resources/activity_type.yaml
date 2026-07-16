@@ -2,21 +2,22 @@
   "kind": "Resource",
   "apiVersion": "operant.dev/v1",
   "metadata": {
-    "name": "activity_type",
+    "name": "activity_type"
   },
   "spec": {
     "fields": {
       "name": {
         "type": "string",
         "required": true,
+        "unique": true
       },
       "label": {
         "type": "string",
-        "required": true,
+        "required": true
       },
       "default_deadline_days": {
-        "type": "integer",
-      },
+        "type": "integer"
+      }
     },
     "axi": {
       "list": {
@@ -24,13 +25,13 @@
           "id",
           "name",
           "label",
-          "default_deadline_days",
-        ],
+          "default_deadline_days"
+        ]
       },
       "help": [
-        "optctl query default.activity_type",
-        "optctl metadata resource default.activity_type",
-      ],
-    },
-  },
+        "optctl query operant/crm:activity_type",
+        "optctl metadata resource operant/crm:activity_type"
+      ]
+    }
+  }
 }

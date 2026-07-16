@@ -2,28 +2,28 @@
   "kind": "Resource",
   "apiVersion": "operant.dev/v1",
   "metadata": {
-    "name": "task",
+    "name": "task"
   },
   "spec": {
     "fields": {
       "title": {
         "type": "string",
-        "required": true,
+        "required": true
       },
       "status": {
         "type": "string",
-        "required": true,
+        "required": true
       },
       "due_at": {
-        "type": "timestamp",
+        "type": "timestamp"
       },
       "owner_id": {
-        "type": "string",
+        "type": "string"
       },
       "opportunity_id": {
         "type": "string",
-        "ref": "opportunity",
-      },
+        "ref": "operant/crm:opportunity"
+      }
     },
     "axi": {
       "list": {
@@ -31,13 +31,13 @@
           "id",
           "title",
           "status",
-          "due_at",
-        ],
+          "due_at"
+        ]
       },
       "help": [
-        "optctl query default.task",
-        "optctl metadata resource default.task",
-      ],
-    },
-  },
+        "optctl query operant/crm:task",
+        "optctl metadata resource operant/crm:task"
+      ]
+    }
+  }
 }

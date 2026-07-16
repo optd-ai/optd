@@ -20,11 +20,24 @@
     "attachments": [
       {
         "phase": "action.stage",
+        "input": {},
+        "action": "operant/crm:mark_won",
       },
     ],
     "axi": {
       "purpose": "mark_won hook for CRM prototype.",
       "whenToUse": "Runs from metadata-driven attachment points; agents normally invoke actions instead.",
+    },
+    "secrets": [],
+    "effects": {
+      "operations": [
+        {
+          "resource": "operant/crm:opportunity",
+          "ops": [
+            "transition",
+          ],
+        },
+      ],
     },
   },
 }

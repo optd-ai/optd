@@ -1,0 +1,14 @@
+{
+  "kind": "Role",
+  "apiVersion": "operant.dev/v1",
+  "metadata": {
+    "name": "sales_manager",
+  },
+  "spec": {
+    "display_name": "Sales Manager",
+    "description": "sales_manager responsibility for the crm proof pack.",
+    "axi": {
+      "summary": "Use for sales_manager responsibilities.",
+    },
+  },
+}

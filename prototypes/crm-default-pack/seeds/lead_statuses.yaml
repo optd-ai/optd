@@ -5,7 +5,7 @@
     "name": "lead_statuses",
   },
   "spec": {
-    "resource": "lead_status",
+    "resource": "operant/crm:lead_status",
     "key": "name",
     "mode": "changeset",
     "rows": [

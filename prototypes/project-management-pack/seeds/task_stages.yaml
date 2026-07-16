@@ -1,13 +1,20 @@
 {
   "kind": "Seed",
   "apiVersion": "operant.dev/v1",
-  "metadata": { "name": "task_stages" },
+  "metadata": {
+    "name": "task_stages",
+  },
   "spec": {
-    "resource": "task_stage",
+    "resource": "operant/projects:task_stage",
     "key": "name",
     "mode": "changeset",
     "rows": [
-      { "name": "todo", "state": "todo", "sequence": 10, "folded": false },
+      {
+        "name": "todo",
+        "state": "todo",
+        "sequence": 10,
+        "folded": false,
+      },
       {
         "name": "in_progress",
         "state": "in_progress",
@@ -20,7 +27,12 @@
         "sequence": 30,
         "folded": false,
       },
-      { "name": "done", "state": "done", "sequence": 90, "folded": true },
+      {
+        "name": "done",
+        "state": "done",
+        "sequence": 90,
+        "folded": true,
+      },
     ],
     "axi": {
       "purpose": "Seed task_stage reference data through audited changesets.",

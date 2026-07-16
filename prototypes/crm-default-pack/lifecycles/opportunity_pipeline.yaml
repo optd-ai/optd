@@ -5,38 +5,63 @@
     "name": "opportunity_pipeline",
   },
   "spec": {
-    "resource": "opportunity",
+    "resource": "operant/crm:opportunity",
     "field": "stage",
     "states": [
-      "new",
-      "qualified",
-      "proposal",
-      "won",
-      "lost",
+      {
+        "name": "new",
+      },
+      {
+        "name": "qualified",
+      },
+      {
+        "name": "proposal",
+      },
+      {
+        "name": "won",
+        "terminal": true,
+      },
+      {
+        "name": "lost",
+        "terminal": true,
+      },
     ],
     "transitions": [
       {
-        "from": "new",
+        "name": "new_to_qualified_1",
+        "from": [
+          "new",
+        ],
         "to": "qualified",
       },
       {
-        "from": "qualified",
+        "name": "qualified_to_proposal_2",
+        "from": [
+          "qualified",
+        ],
         "to": "proposal",
       },
       {
-        "from": "proposal",
+        "name": "proposal_to_won_3",
+        "from": [
+          "proposal",
+        ],
         "to": "won",
       },
       {
-        "from": "proposal",
+        "name": "proposal_to_lost_4",
+        "from": [
+          "proposal",
+        ],
         "to": "lost",
       },
     ],
     "axi": {
       "help": [
-        "optctl action stage default.mark_won --input ...",
-        "optctl action stage default.mark_lost --input ...",
+        "optctl action stage operant/crm:mark_won --input ...",
+        "optctl action stage operant/crm:mark_lost --input ...",
       ],
     },
+    "initial": "new",
   },
 }

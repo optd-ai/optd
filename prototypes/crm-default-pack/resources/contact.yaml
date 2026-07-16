@@ -2,26 +2,26 @@
   "kind": "Resource",
   "apiVersion": "operant.dev/v1",
   "metadata": {
-    "name": "contact",
+    "name": "contact"
   },
   "spec": {
     "fields": {
       "name": {
         "type": "string",
-        "required": true,
+        "required": true
       },
       "email": {
-        "type": "string",
+        "type": "string"
       },
       "phone": {
-        "type": "string",
+        "type": "string"
       },
       "title": {
-        "type": "string",
+        "type": "string"
       },
       "owner_id": {
-        "type": "string",
-      },
+        "type": "string"
+      }
     },
     "axi": {
       "list": {
@@ -29,13 +29,13 @@
           "id",
           "name",
           "email",
-          "phone",
-        ],
+          "phone"
+        ]
       },
       "help": [
-        "optctl query default.contact",
-        "optctl metadata resource default.contact",
-      ],
-    },
-  },
+        "optctl query operant/crm:contact",
+        "optctl metadata resource operant/crm:contact"
+      ]
+    }
+  }
 }

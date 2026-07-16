@@ -20,7 +20,7 @@
     "attachments": [
       {
         "phase": "action.stage",
-        "action": "default.convert_lead",
+        "action": "operant/crm:convert_lead",
         "order": 100,
         "input": {
           "lead": "$current",
@@ -31,6 +31,53 @@
     "axi": {
       "purpose": "convert_lead hook for CRM prototype.",
       "whenToUse": "Runs from metadata-driven attachment points; agents normally invoke actions instead.",
+    },
+    "secrets": [],
+    "effects": {
+      "operations": [
+        {
+          "resource": "operant/crm:company",
+          "ops": [
+            "create",
+          ],
+        },
+        {
+          "resource": "operant/crm:contact",
+          "ops": [
+            "create",
+          ],
+        },
+        {
+          "resource": "operant/crm:opportunity",
+          "ops": [
+            "create",
+          ],
+        },
+        {
+          "resource": "operant/crm:lead",
+          "ops": [
+            "transition",
+          ],
+        },
+        {
+          "resource": "operant/crm:contact_company",
+          "ops": [
+            "link",
+          ],
+        },
+        {
+          "resource": "operant/crm:opportunity_company",
+          "ops": [
+            "link",
+          ],
+        },
+        {
+          "resource": "operant/crm:opportunity_contact",
+          "ops": [
+            "link",
+          ],
+        },
+      ],
     },
   },
 }

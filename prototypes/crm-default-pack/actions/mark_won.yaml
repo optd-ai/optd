@@ -5,14 +5,17 @@
     "name": "mark_won",
   },
   "spec": {
-    "hook": "mark_won",
-    "input": [
-      "opportunity_id",
-    ],
+    "input": {
+      "opportunity_id": {
+        "type": "string",
+        "required": true,
+        "format": "uuid",
+      },
+    },
     "axi": {
       "purpose": "Mark an opportunity as won.",
       "help": [
-        "optctl action stage default.mark_won --input ...",
+        "optctl action stage operant/crm:mark_won --input ...",
       ],
     },
   },

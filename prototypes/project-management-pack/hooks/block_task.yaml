@@ -1,7 +1,9 @@
 {
   "kind": "Hook",
   "apiVersion": "operant.dev/v1",
-  "metadata": { "name": "block_task" },
+  "metadata": {
+    "name": "block_task",
+  },
   "spec": {
     "script": "block_task.ts",
     "timeout": "2s",
@@ -12,16 +14,30 @@
       "env": false,
       "run": false,
     },
-    "output": { "schema": "changeset.operations.v1" },
+    "output": {
+      "schema": "changeset.operations.v1",
+    },
     "attachments": [
       {
         "phase": "action.stage",
-        "action": "default.block_task",
+        "action": "operant/projects:block_task",
         "order": 100,
+        "input": {},
       },
     ],
     "axi": {
       "purpose": "Generate a task update to state=blocked and require blocked_reason.",
+    },
+    "secrets": [],
+    "effects": {
+      "operations": [
+        {
+          "resource": "operant/projects:task",
+          "ops": [
+            "update",
+          ],
+        },
+      ],
     },
   },
 }

@@ -71,12 +71,38 @@ async function postJson(url: string, payload: unknown): Promise<unknown> {
 async function postMultipart(url: string, packDir: string): Promise<unknown> {
   const form = new FormData();
   for await (
-    const entry of walk(packDir, { includeDirs: false, followSymlinks: false })
+    const entry of walk(packDir, { includeDirs: true, followSymlinks: false })
   ) {
     const rel = relative(packDir, entry.path).replaceAll("\\", "/");
-    if (rel.startsWith(".git/") || rel === ".DS_Store") continue;
-    if (!rel.endsWith(".yaml") && !rel.endsWith(".ts")) continue;
-    form.append(rel, new File([await Deno.readFile(entry.path)], rel));
+    if (!rel) continue;
+    if (rel === ".git" || rel.startsWith(".git/") || rel === ".DS_Store") {
+      continue;
+    }
+    const info = await Deno.lstat(entry.path);
+    if (info.isDirectory) {
+      if (
+        ![
+          "resources",
+          "relationships",
+          "lifecycles",
+          "actions",
+          "hooks",
+          "roles",
+          "policies",
+          "seeds",
+        ].includes(rel)
+      ) {
+        throw usageError(`pack contains unexpected directory ${rel}`);
+      }
+      continue;
+    }
+    if (info.isSymlink || !info.isFile || (info.nlink ?? 1) > 1) {
+      throw usageError(`pack contains unsupported file ${rel}`);
+    }
+    form.append(
+      "file",
+      new File([await Deno.readFile(entry.path)], rel),
+    );
   }
   return await decodeJsonResponse(
     await fetch(url, {
@@ -1355,9 +1381,10 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
     } else if (cmd === "home") {
       result = await getJson(`${parsed.server}/metadata/home`);
     } else if (cmd === "pack" && sub === "preview" && value) {
-      result = await postMultipart(`${parsed.server}/packs/preview`, value);
-    } else if (cmd === "pack" && sub === "apply" && value) {
-      result = await postMultipart(`${parsed.server}/packs/apply`, value);
+      result = await postMultipart(
+        `${parsed.server}/packs/preview`,
+        value,
+      );
     } else if (
       cmd === "action" && (sub === "preview" || sub === "commit") && value
     ) {
@@ -1403,23 +1430,22 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       result = await postJson(`${parsed.server}/outbox/drain`, { limit });
     } else if (cmd === "outbox" && sub === "retry" && value) {
       result = await postJson(`${parsed.server}/outbox/${value}/retry`, {});
-    } else if (cmd === "migration" && sub === "inspect" && value) {
-      result = await getJson(`${parsed.server}/migrations/${value}`);
-    } else if (cmd === "migration" && sub === "apply" && value) {
-      const mode = parsed.positional.includes("--stage") ? "stage" : "safe";
-      result = await postJson(`${parsed.server}/migrations/${value}/apply`, {
-        mode,
-      });
-    } else if (cmd === "migration" && sub === "confirm" && value) {
-      const tokenFlag = parsed.positional.findIndex((arg) =>
-        arg === "--token" || arg === "--confirm"
+    } else if (cmd === "migration" && sub === "validate" && value) {
+      result = await postJson(
+        `${parsed.server}/migrations/${value}/validate`,
+        {},
       );
-      const token = tokenFlag >= 0
-        ? parsed.positional[tokenFlag + 1]
-        : parsed.positional[3];
-      result = await postJson(`${parsed.server}/migrations/${value}/confirm`, {
-        token,
-      });
+    } else if (cmd === "migration" && sub === "inspect" && value) {
+      const projection = parsed.positional.includes("--sql")
+        ? "sql"
+        : parsed.positional.includes("--violations")
+        ? "violations"
+        : "";
+      result = await getJson(
+        `${parsed.server}/migrations/${value}${
+          projection ? `/${projection}` : ""
+        }`,
+      );
     } else if (cmd === "query" && sub) {
       result = await postJson(
         `${parsed.server}/queries`,
@@ -1468,7 +1494,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       );
     } else {
       throw usageError(
-        "usage: optctl status live/ready/bootstrap | bootstrap init | home | project list/create/view/update/archive/select | context set-project | pack preview/apply <dir> | metadata [packs] | metadata pack/resource/action/hook/policy <namespace.name> | secret list/set/delete | action preview/commit <namespace.action> --input '{...}' | outbox status/drain/retry | migration inspect/apply/confirm <id> | query <namespace.resource> [--where expr] [--fields a,b] [--sort field:desc] [--limit n] [--cursor c] | changeset preview/commit (--file <json-file>|--input '{...}') | view <namespace.resource> <id> | history <namespace.resource> <id>",
+        "usage: optctl status live/ready/bootstrap | bootstrap init | home | project list/create/view/update/archive/select | context set-project | pack preview <dir> | metadata [packs] | metadata pack/resource/action/hook/policy <namespace.name> | secret list/set/delete | action preview/commit <namespace.action> --input '{...}' | outbox status/drain/retry | migration inspect <id> [--sql|--violations] | migration validate <id> | query <namespace.resource> [--where expr] [--fields a,b] [--sort field:desc] [--limit n] [--cursor c] | changeset preview/commit (--file <json-file>|--input '{...}') | view <namespace.resource> <id> | history <namespace.resource> <id>",
       );
     }
     const output = parsed.verbose

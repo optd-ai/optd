@@ -2,33 +2,33 @@
   "kind": "Resource",
   "apiVersion": "operant.dev/v1",
   "metadata": {
-    "name": "note",
+    "name": "note"
   },
   "spec": {
     "fields": {
       "body": {
         "type": "string",
-        "required": true,
+        "required": true
       },
       "author_id": {
-        "type": "string",
+        "type": "string"
       },
       "lead_id": {
         "type": "string",
-        "ref": "lead",
+        "ref": "operant/crm:lead"
       },
       "opportunity_id": {
         "type": "string",
-        "ref": "opportunity",
+        "ref": "operant/crm:opportunity"
       },
       "contact_id": {
         "type": "string",
-        "ref": "contact",
+        "ref": "operant/crm:contact"
       },
       "company_id": {
         "type": "string",
-        "ref": "company",
-      },
+        "ref": "operant/crm:company"
+      }
     },
     "axi": {
       "list": {
@@ -36,13 +36,13 @@
           "id",
           "body",
           "author_id",
-          "lead_id",
-        ],
+          "lead_id"
+        ]
       },
       "help": [
-        "optctl query default.note",
-        "optctl metadata resource default.note",
-      ],
-    },
-  },
+        "optctl query operant/crm:note",
+        "optctl metadata resource operant/crm:note"
+      ]
+    }
+  }
 }

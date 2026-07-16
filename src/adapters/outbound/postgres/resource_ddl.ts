@@ -35,7 +35,7 @@ export function compilePackDdl(pack: LoadedPack): GeneratedSqlObject[] {
     const fields = compileFields(resource, platformColumns);
     objects.push({
       kind: "resource_table",
-      namespace: resource.namespace,
+      namespace: resource.publisher,
       name: resource.name,
       tableName,
       ddl: createTableSql(tableName, [
@@ -59,7 +59,7 @@ export function compilePackDdl(pack: LoadedPack): GeneratedSqlObject[] {
     const fields = compileFields(relationship, relationshipColumns);
     objects.push({
       kind: "relationship_table",
-      namespace: relationship.namespace,
+      namespace: relationship.publisher,
       name: relationship.name,
       tableName,
       ddl: createTableSql(tableName, [

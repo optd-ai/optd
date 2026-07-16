@@ -14,10 +14,7 @@ import type {
   ActionDto,
   ActionRequest,
 } from "../../../application/services/run_action.ts";
-import type {
-  PackApplyDto,
-  PackPreviewDto,
-} from "../../../application/services/pack_services.ts";
+import type { PackPreviewDto } from "../../../application/services/pack_services.ts";
 import type {
   QueryObjectsDto,
   QueryObjectsRequest,
@@ -63,14 +60,19 @@ export type HttpDependencies = {
     policy(namespace: string, name: string): Promise<Result<unknown>>;
   };
   packs: {
-    preview(files: UploadedPackFile[]): Promise<Result<PackPreviewDto>>;
-    apply(files: UploadedPackFile[]): Promise<Result<PackApplyDto>>;
+    preview(
+      files: UploadedPackFile[],
+      auth: AuthVariables["auth"],
+    ): Promise<Result<PackPreviewDto>>;
   };
   migrations: {
-    preview(files: UploadedPackFile[]): Promise<Result<unknown>>;
-    inspect(id: string): Promise<Result<unknown>>;
-    apply(id: string, mode?: "safe" | "stage"): Promise<Result<unknown>>;
-    confirm(id: string, token: string): Promise<Result<unknown>>;
+    inspect(id: string, auth: AuthVariables["auth"]): Promise<Result<unknown>>;
+    violations(
+      id: string,
+      auth: AuthVariables["auth"],
+    ): Promise<Result<unknown>>;
+    validate(id: string, auth: AuthVariables["auth"]): Promise<Result<unknown>>;
+    sql(id: string, auth: AuthVariables["auth"]): Promise<Result<unknown>>;
   };
   queries: {
     query(input: QueryObjectsRequest): Promise<Result<QueryObjectsDto>>;
@@ -250,49 +252,45 @@ export function makeHttpApp(
   app.post(
     "/packs/preview",
     async (c) =>
-      resultJson(c, await deps.packs.preview(await multipartFiles(c.req.raw))),
-  );
-  app.post(
-    "/packs/apply",
-    async (c) =>
-      resultJson(c, await deps.packs.apply(await multipartFiles(c.req.raw))),
-  );
-
-  app.post(
-    "/migrations/preview",
-    async (c) =>
       resultJson(
         c,
-        await deps.migrations.preview(await multipartFiles(c.req.raw)),
+        await deps.packs.preview(
+          await multipartFiles(c.req.raw),
+          c.get("auth"),
+        ),
       ),
   );
   app.get(
     "/migrations/:id",
     async (c) =>
-      resultJson(c, await deps.migrations.inspect(c.req.param("id"))),
+      resultJson(
+        c,
+        await deps.migrations.inspect(c.req.param("id"), c.get("auth")),
+      ),
+  );
+  app.get(
+    "/migrations/:id/violations",
+    async (c) =>
+      resultJson(
+        c,
+        await deps.migrations.violations(c.req.param("id"), c.get("auth")),
+      ),
+  );
+  app.get(
+    "/migrations/:id/sql",
+    async (c) =>
+      resultJson(
+        c,
+        await deps.migrations.sql(c.req.param("id"), c.get("auth")),
+      ),
   );
   app.post(
-    "/migrations/:id/apply",
-    async (c) => {
-      const body = await c.req.json().catch(() => ({}));
-      return resultJson(
+    "/migrations/:id/validate",
+    async (c) =>
+      resultJson(
         c,
-        await deps.migrations.apply(c.req.param("id"), body?.mode),
-      );
-    },
-  );
-  app.post(
-    "/migrations/:id/confirm",
-    async (c) => {
-      const body = await c.req.json().catch(() => ({}));
-      return resultJson(
-        c,
-        await deps.migrations.confirm(
-          c.req.param("id"),
-          String(body?.token ?? ""),
-        ),
-      );
-    },
+        await deps.migrations.validate(c.req.param("id"), c.get("auth")),
+      ),
   );
 
   app.post(
@@ -459,17 +457,24 @@ function stripAuthority(value: unknown): unknown {
 }
 
 async function multipartFiles(request: Request): Promise<UploadedPackFile[]> {
+  const contentType = request.headers.get("content-type") ?? "";
+  if (!contentType.toLowerCase().startsWith("multipart/form-data;")) {
+    throw new Error("pack preview requires multipart/form-data");
+  }
   const form = await request.formData();
   const files: UploadedPackFile[] = [];
   for (const [key, value] of form.entries()) {
-    if (value instanceof File) {
-      const path = key === "file" ? value.name : key;
-      files.push({
-        path,
-        text: await value.text(),
-        kind: path.endsWith(".ts") ? "script" : "config",
-      });
+    if (key !== "file" || !(value instanceof File)) {
+      throw new Error("multipart parts must be files named 'file'");
     }
+    if (!value.name || value.size === 0) {
+      throw new Error("multipart pack files must be non-empty and named");
+    }
+    files.push({
+      path: value.name,
+      text: await value.text(),
+      kind: value.name.endsWith(".ts") ? "script" : "config",
+    });
   }
   return files;
 }

@@ -6,12 +6,10 @@
   },
   "spec": {
     "from": {
-      "resource": "opportunity",
-      "field": "id",
+      "resource": "operant/crm:opportunity",
     },
     "to": {
-      "resource": "contact",
-      "field": "id",
+      "resource": "operant/crm:contact",
     },
     "fields": {
       "role": {
@@ -23,8 +21,12 @@
     },
     "axi": {
       "help": [
-        "optctl metadata relationship default.opportunity_contact",
+        "optctl metadata relationship operant/crm:opportunity_contact",
       ],
     },
+    "unique": [
+      "from",
+      "to",
+    ],
   },
 }

@@ -2,60 +2,50 @@
   "kind": "Resource",
   "apiVersion": "operant.dev/v1",
   "metadata": {
-    "name": "opportunity",
+    "name": "opportunity"
   },
   "spec": {
     "fields": {
       "name": {
         "type": "string",
-        "required": true,
+        "required": true
       },
       "stage": {
         "type": "string",
-        "required": true,
+        "required": true
       },
       "expected_revenue": {
-        "type": "decimal",
+        "type": "decimal"
       },
       "probability": {
-        "type": "integer",
+        "type": "integer"
       },
       "company_id": {
         "type": "string",
-        "ref": "company",
+        "ref": "operant/crm:company"
       },
       "contact_id": {
         "type": "string",
-        "ref": "contact",
+        "ref": "operant/crm:contact"
       },
       "lead_id": {
         "type": "string",
-        "ref": "lead",
+        "ref": "operant/crm:lead"
       },
       "sales_team_id": {
         "type": "string",
-        "ref": "sales_team",
+        "ref": "operant/crm:sales_team"
       },
       "owner_id": {
-        "type": "string",
+        "type": "string"
       },
       "lost_reason_id": {
         "type": "string",
-        "ref": "lost_reason",
+        "ref": "operant/crm:lost_reason"
       },
       "close_date": {
-        "type": "timestamp",
-      },
-    },
-    "lifecycle": {
-      "field": "stage",
-      "states": [
-        "new",
-        "qualified",
-        "proposal",
-        "won",
-        "lost",
-      ],
+        "type": "timestamp"
+      }
     },
     "axi": {
       "list": {
@@ -63,13 +53,13 @@
           "id",
           "name",
           "stage",
-          "expected_revenue",
-        ],
+          "expected_revenue"
+        ]
       },
       "help": [
-        "optctl query default.opportunity",
-        "optctl metadata resource default.opportunity",
-      ],
-    },
-  },
+        "optctl query operant/crm:opportunity",
+        "optctl metadata resource operant/crm:opportunity"
+      ]
+    }
+  }
 }

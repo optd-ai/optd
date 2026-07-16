@@ -9,129 +9,64 @@ import {
   type UploadedPackFile,
 } from "../../adapters/outbound/yaml/pack_loader.ts";
 import {
-  applyLoadedPack,
   countPackRevisions,
-  getPack,
-  type PackSummary,
   summarizePack,
 } from "../../adapters/outbound/postgres/pack_repository.ts";
 import { createPackMigrationPlan } from "../../adapters/outbound/postgres/pack_migration_repository.ts";
-import { compilePackDdl } from "../../adapters/outbound/postgres/resource_ddl.ts";
-import { applySeedDefinitionsThroughChangesets } from "./changeset_services.ts";
-import type { TransactionManager } from "../ports/transaction_manager.ts";
 import type { Queryable } from "../../adapters/outbound/postgres/client.ts";
+import type { MigrationPlan } from "../../domain/migrations/pack_migration.ts";
+import type { AuthContext } from "../../domain/auth/model.ts";
+import type { AuthorizationRepository } from "../ports/authorization.ts";
+import type { TransactionManager } from "../ports/transaction_manager.ts";
 
 export type PackPreviewDto = {
-  mutating: false;
-  before: { revision_count: number };
-  after: { revision_count: number };
-  plan: {
-    operation: "first_install" | "migration";
-    summary: PackSummary;
-    creates?: Record<string, number>;
-    ddl_deferred: false;
-    generated_tables?: Array<
-      { kind: string; name: string; table_name: string }
-    >;
-    migration?: unknown;
+  candidate: {
+    reused: boolean;
+    revision_count_before: number;
+    revision_count_after: number;
   };
+  pack: ReturnType<typeof summarizePack>;
+  plan: MigrationPlan;
+  active: false;
 };
 
-export type PackApplyDto =
-  | {
-    applied: true;
-    summary: PackSummary;
-    ddl_deferred: false;
-    seeds: { planned: number; committed: number; skipped: number };
-  }
-  | {
-    applied: false;
-    migration_required: true;
-    migration: unknown;
-  };
-
 export function makePackServices(
-  deps: { sql: Queryable; tx: TransactionManager<Queryable> },
+  deps: {
+    sql: Queryable;
+    authorization: AuthorizationRepository;
+    tx: TransactionManager<Queryable>;
+  },
 ) {
   return {
-    async preview(files: UploadedPackFile[]): Promise<Result<PackPreviewDto>> {
+    async preview(
+      files: UploadedPackFile[],
+      auth: AuthContext,
+    ): Promise<Result<PackPreviewDto>> {
       try {
-        const before = await countPackRevisions(deps.sql);
+        const authorized = await deps.authorization.authorize({
+          auth,
+          boundary: { type: "system" },
+          action: "pack.preview",
+          resource: "system:pack",
+        });
+        if (!authorized.ok) return err(authorized.error);
         const pack = await loadPackFromFiles(files);
-        const summary = summarizePack(pack);
-        const active = await getPack(deps.sql, pack.namespace, pack.name);
-        if (active) {
-          const migration = await createPackMigrationPlan(deps.sql, pack);
-          const after = await countPackRevisions(deps.sql);
-          return ok({
-            mutating: false,
-            before: { revision_count: before },
-            after: { revision_count: after },
-            plan: {
-              operation: "migration",
-              summary,
-              ddl_deferred: false,
-              migration,
-            },
+        const { before, after, plan, candidate_reused } = await deps.tx
+          .transaction(async (sql) => {
+            const before = await countPackRevisions(sql);
+            const created = await createPackMigrationPlan(sql, pack, auth.id);
+            const after = await countPackRevisions(sql);
+            return { before, after, ...created };
           });
-        }
-        const ddlObjects = compilePackDdl(pack);
-        const after = await countPackRevisions(deps.sql);
         return ok({
-          mutating: false,
-          before: { revision_count: before },
-          after: { revision_count: after },
-          plan: {
-            operation: "first_install",
-            summary,
-            creates: {
-              resources: summary.resources.length,
-              relationships: summary.relationships.length,
-              lifecycles: summary.lifecycles.length,
-              actions: summary.actions.length,
-              hooks: summary.hooks.length,
-              policies: summary.policies.length,
-              seeds: summary.seeds.length,
-            },
-            ddl_deferred: false,
-            generated_tables: ddlObjects.map((object) => ({
-              kind: object.kind,
-              name: `${object.namespace}.${object.name}`,
-              table_name: object.tableName,
-            })),
+          candidate: {
+            reused: candidate_reused,
+            revision_count_before: before,
+            revision_count_after: after,
           },
-        });
-      } catch (error) {
-        return err(
-          validationError(
-            "bad_pack",
-            error instanceof Error ? error.message : String(error),
-          ),
-        );
-      }
-    },
-    async apply(files: UploadedPackFile[]): Promise<Result<PackApplyDto>> {
-      try {
-        const pack = await loadPackFromFiles(files);
-        const active = await getPack(deps.sql, pack.namespace, pack.name);
-        if (active) {
-          const migration = await createPackMigrationPlan(deps.sql, pack);
-          return ok({
-            applied: false,
-            migration_required: true,
-            migration,
-          });
-        }
-        const result = await deps.tx.transaction(async (tx) => {
-          const summary = await applyLoadedPack(tx, pack);
-          const seeds = await applySeedDefinitionsThroughChangesets(tx);
-          return { summary, seeds };
-        });
-        return ok({
-          applied: true,
-          summary: result.summary,
-          ddl_deferred: false,
-          seeds: result.seeds,
+          pack: summarizePack(pack, plan.to_pack_revision_id),
+          plan,
+          active: false,
         });
       } catch (error) {
         return err(

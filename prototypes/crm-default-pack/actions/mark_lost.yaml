@@ -5,16 +5,26 @@
     "name": "mark_lost",
   },
   "spec": {
-    "hook": "mark_lost",
-    "input": [
-      "opportunity_id",
-      "lost_reason_id",
-      "note",
-    ],
+    "input": {
+      "opportunity_id": {
+        "type": "string",
+        "required": true,
+        "format": "uuid",
+      },
+      "lost_reason_id": {
+        "type": "string",
+        "required": true,
+        "format": "uuid",
+      },
+      "note": {
+        "type": "string",
+        "required": true,
+      },
+    },
     "axi": {
       "purpose": "Mark an opportunity as lost with a reason.",
       "help": [
-        "optctl action stage default.mark_lost --input ...",
+        "optctl action stage operant/crm:mark_lost --input ...",
       ],
     },
   },

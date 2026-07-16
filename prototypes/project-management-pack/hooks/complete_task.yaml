@@ -1,7 +1,9 @@
 {
   "kind": "Hook",
   "apiVersion": "operant.dev/v1",
-  "metadata": { "name": "complete_task" },
+  "metadata": {
+    "name": "complete_task",
+  },
   "spec": {
     "script": "complete_task.ts",
     "timeout": "2s",
@@ -12,16 +14,30 @@
       "env": false,
       "run": false,
     },
-    "output": { "schema": "changeset.operations.v1" },
+    "output": {
+      "schema": "changeset.operations.v1",
+    },
     "attachments": [
       {
         "phase": "action.stage",
-        "action": "default.complete_task",
+        "action": "operant/projects:complete_task",
         "order": 100,
+        "input": {},
       },
     ],
     "axi": {
       "purpose": "Generate a task update to state=done through the generic changeset path.",
+    },
+    "secrets": [],
+    "effects": {
+      "operations": [
+        {
+          "resource": "operant/projects:task",
+          "ops": [
+            "update",
+          ],
+        },
+      ],
     },
   },
 }
