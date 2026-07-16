@@ -499,6 +499,7 @@ async function resolveProject(
   server: string,
   value: string,
 ): Promise<Record<string, unknown>> {
+  if (isUuidV7(value)) return { id: value };
   if (/^[0-9a-f-]{36}$/.test(value)) {
     return envelopeData(await getJson(`${server}/api/v1/projects/${value}`));
   }

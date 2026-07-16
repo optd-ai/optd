@@ -22,8 +22,9 @@ import {
 import { makeProjectService } from "./services/projects/manage_projects.ts";
 import { PostgresAuthorizationRepository } from "../adapters/outbound/postgres/authorization_repository.ts";
 import { makeAuthorizationService } from "./services/authorization/manage_assignments.ts";
-import { PostgresObjectReader } from "../adapters/outbound/postgres/object_reader.ts";
+import { PostgresObjectReadBoundary } from "../adapters/outbound/postgres/object_read_boundary.ts";
 import { makeObjectReadService } from "./services/objects/read_objects.ts";
+import { HistoryCursorSigner } from "../domain/history/cursor.ts";
 
 export function makeApplication(
   sql: Sql,
@@ -50,6 +51,7 @@ export function makeApplication(
   );
   const passwordPolicy = loadPasswordPolicy();
   const authorizationRepository = new PostgresAuthorizationRepository(sql);
+  let historyCursors: HistoryCursorSigner | undefined;
   const authorization = makeAuthorizationService(authorizationRepository);
   return {
     authentication,
@@ -65,8 +67,8 @@ export function makeApplication(
       authorization: authorizationRepository,
     }),
     objectReads: makeObjectReadService({
-      reader: new PostgresObjectReader(sql),
-      authorization: authorizationRepository,
+      boundary: new PostgresObjectReadBoundary(sql),
+      cursors: () => historyCursors ??= HistoryCursorSigner.fromEnvironment(),
     }),
     packs: makePackServices({
       sql: sql as Queryable,

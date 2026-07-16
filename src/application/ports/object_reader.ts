@@ -1,4 +1,6 @@
 import type { DefinitionIdentity } from "../../domain/objects/read.ts";
+import type { AuthContext } from "../../domain/auth/model.ts";
+import type { AuthorizationRepository } from "./authorization.ts";
 import type {
   HistoryEntry,
   ObjectDto,
@@ -15,6 +17,17 @@ export type HistoryPage = Readonly<{
   hasMore: boolean;
   nextPosition: { createdAt: string; id: string } | null;
 }>;
+
+export interface ObjectReadBoundary {
+  execute<T>(
+    auth: AuthContext,
+    address: ReadAddress,
+    work: (
+      reader: ObjectReader,
+      authorization: AuthorizationRepository,
+    ) => Promise<T>,
+  ): Promise<T>;
+}
 
 export interface ObjectReader {
   read(address: ReadAddress): Promise<ObjectDto | RelationshipDto | null>;

@@ -842,8 +842,14 @@ export const platformMigrations: PlatformMigration[] = [
     sql: `
       -- Pre-Project history was never a supported deployed baseline. Invalidate it
       -- rather than retaining ambiguous text identifiers or actor provenance.
-      drop table if exists comments cascade;
-      drop table if exists object_versions cascade;
+      drop table if exists comments;
+      alter table audit_events drop constraint if exists audit_events_object_version_id_fkey;
+      alter table events drop constraint if exists events_object_version_id_fkey;
+      update audit_events set object_version_id=null where object_version_id is not null;
+      update events set object_version_id=null where object_version_id is not null;
+      alter table audit_events alter column object_version_id type uuid using object_version_id::uuid;
+      alter table events alter column object_version_id type uuid using object_version_id::uuid;
+      drop table if exists object_versions;
 
       create table changeset_commits (
         id uuid primary key,
@@ -872,6 +878,10 @@ export const platformMigrations: PlatformMigration[] = [
         check ((version = 1 and previous_version_id is null) or (version > 1 and previous_version_id is not null))
       );
       create index object_versions_timeline_idx on object_versions(project_id,definition_kind,resource_identity,object_id,created_at desc,id desc);
+      alter table audit_events add constraint audit_events_object_version_id_fkey
+        foreign key(object_version_id) references object_versions(id);
+      alter table events add constraint events_object_version_id_fkey
+        foreign key(object_version_id) references object_versions(id);
 
       create table comments (
         id uuid primary key,
@@ -933,7 +943,7 @@ export async function applyPlatformMigrations(
     "select pg_advisory_xact_lock(hashtext('operant.platform_schema_migrations'))",
   );
 
-  const knownIds = migrations.map((migration) => migration.id);
+  const knownIds = platformMigrations.map((migration) => migration.id);
   const incompatible = await query<{ id: string }>(
     sql,
     "select id from platform_schema_migrations where not (id = any($1::text[])) order by id",
