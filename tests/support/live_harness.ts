@@ -3,6 +3,8 @@ import { walk } from "jsr:@std/fs/walk";
 import { join } from "jsr:@std/path";
 import { findPostgresBins } from "../../src/adapters/outbound/postgres-process/lifecycle.ts";
 import { sha256Hex } from "../../src/domain/ids/canonical_json.ts";
+import { FilesystemLocalAuthStore } from "../../src/adapters/outbound/local-auth-store/filesystem.ts";
+import { LinuxProcessInspector } from "../../src/adapters/outbound/process-inspection/linux.ts";
 import {
   closePostgresClient,
   createPostgresClient,
@@ -132,6 +134,11 @@ export async function startLiveHarness(
   } else delete env.OPERANT_DATABASE_URL;
 
   let running = await launchServer(rootDir, env);
+  const legacyAuthBridge = testAuthStoreBridge(
+    homeDir,
+    xdgConfig,
+    () => running.url,
+  );
   const databaseUrl = options.externalDatabaseUrl ??
     `postgres://operant@127.0.0.1:${env.OPERANT_PG_PORT}/postgres`;
   const sql = createPostgresClient(databaseUrl);
@@ -142,6 +149,7 @@ export async function startLiveHarness(
   ): Promise<CliResult> => {
     const argv = ["--server", running.url, ...args];
     const startedAt = Date.now();
+    await legacyAuthBridge.before(Deno.pid);
     const child = new Deno.Command(binaryPath, {
       args: argv,
       env,
@@ -154,7 +162,9 @@ export async function startLiveHarness(
       await writer.write(new TextEncoder().encode(stdin));
       await writer.close();
     }
-    return cliResult(argv, startedAt, await child.output());
+    const result = cliResult(argv, startedAt, await child.output());
+    await legacyAuthBridge.after(Deno.pid);
+    return result;
   };
   const harness: LiveHarness = {
     rootDir,
@@ -247,6 +257,7 @@ export async function startLiveHarness(
         binaryPath,
         env,
         () => running.url,
+        legacyAuthBridge,
       );
       launchers.add(launcher);
       return {
@@ -331,10 +342,13 @@ async function compileOptctl(): Promise<string> {
   const output = await new Deno.Command(Deno.execPath(), {
     args: [
       "compile",
+      "--no-prompt",
       "--allow-read",
       "--allow-write",
       "--allow-env",
       "--allow-net",
+      "--allow-run",
+      "--allow-sys=uid",
       "--output",
       temporary,
       "src/main_optctl.ts",
@@ -598,11 +612,102 @@ async function queryHookDiagnostics(sql: Sql): Promise<string> {
   }
 }
 
+// Earlier auth tests deliberately inject credentials/nonces through the former
+// monolithic fixture file. Keep that capability test-only while production CLI
+// acceptance uses the partitioned store directly.
+function testAuthStoreBridge(
+  homeDir: string,
+  xdgConfig: string,
+  serverUrl: () => string,
+) {
+  const inspector = new LinuxProcessInspector();
+  const store = new FilesystemLocalAuthStore(
+    join(homeDir, ".local", "share", "operant", "auth"),
+    inspector,
+  );
+  const legacyPath = join(xdgConfig, "operant", "auth.json");
+  let lastProjection: string | undefined;
+  let lastProjectionMtime = 0;
+  let queue = Promise.resolve();
+
+  const serialized = <T>(operation: () => Promise<T>): Promise<T> => {
+    const result = queue.then(operation, operation);
+    queue = result.then(() => undefined, () => undefined);
+    return result;
+  };
+
+  return {
+    before: (pid: number) =>
+      serialized(async () => {
+        let text: string;
+        try {
+          text = await Deno.readTextFile(legacyPath);
+        } catch (error) {
+          if (error instanceof Deno.errors.NotFound) return;
+          throw error;
+        }
+        const mtime = (await Deno.stat(legacyPath)).mtime?.getTime() ?? 0;
+        if (text === lastProjection && mtime === lastProjectionMtime) return;
+        const origin = new URL(serverUrl()).origin;
+        const legacy = JSON.parse(text).origins?.[origin];
+        if (!legacy) return;
+        await store.updateState(origin, {
+          ...legacy,
+          token: typeof legacy.token === "string" ? legacy.token : undefined,
+          requestToken: typeof legacy.requestToken === "string"
+            ? legacy.requestToken
+            : undefined,
+        }, await inspector.inspect(pid));
+      }),
+    after: (pid: number) =>
+      serialized(async () => {
+        const origin = new URL(serverUrl()).origin;
+        const state = await store.readState(origin);
+        const selected = await store.select(origin, pid);
+        const request = await store.requestCredential(origin);
+        const prior = lastProjection
+          ? JSON.parse(lastProjection).origins?.[origin]
+          : undefined;
+        const legacyRevokedToken = typeof state.authorizationId === "string" &&
+            typeof prior?.token === "string"
+          ? prior.token
+          : undefined;
+        const projection = JSON.stringify({
+          origins: {
+            [origin]: {
+              ...state,
+              ...(selected
+                ? { token: selected.token }
+                : legacyRevokedToken
+                ? { token: legacyRevokedToken }
+                : {}),
+              ...(request ? { requestToken: request.token } : {}),
+            },
+          },
+        });
+        await Deno.mkdir(join(xdgConfig, "operant"), {
+          recursive: true,
+          mode: 0o700,
+        });
+        await Deno.writeTextFile(legacyPath, projection, { mode: 0o600 });
+        await Deno.chmod(legacyPath, 0o600);
+        lastProjection = projection;
+        lastProjectionMtime = legacyRevokedToken
+          ? 0
+          : (await Deno.stat(legacyPath)).mtime?.getTime() ?? 0;
+      }),
+  };
+}
+
 export async function makeProcessTreeLauncher(
   kind: ProcessTreeKind,
   binaryPath: string,
   env: Record<string, string>,
   serverUrl: () => string,
+  authBridge?: {
+    before(pid: number): Promise<void>;
+    after(pid: number): Promise<void>;
+  },
 ): Promise<CliLauncher> {
   const worker = `
     const binary = Deno.args[0];
@@ -724,14 +829,17 @@ export async function makeProcessTreeLauncher(
       const argv = ["--server", serverUrl(), ...args];
       const startedAt = Date.now();
       const operation = queue.then(async () => {
+        await authBridge?.before(child.pid);
         await input.write(
           new TextEncoder().encode(`${JSON.stringify({ argv, stdin })}\n`),
         );
-        return JSON.parse(await readLine()) as {
+        const result = JSON.parse(await readLine()) as {
           code: number;
           stdout: string;
           stderr: string;
         };
+        await authBridge?.after(child.pid);
+        return result;
       });
       queue = operation.then(() => undefined, () => undefined);
       try {

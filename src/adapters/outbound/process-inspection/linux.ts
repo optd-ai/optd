@@ -34,15 +34,38 @@ export function parseProcUid(text: string): number {
   return uid;
 }
 
+export type ProcFileReader = (path: string) => Promise<string>;
+
+async function readProcFile(path: string): Promise<string> {
+  // Deno's special-file guard intentionally requires --allow-all for direct
+  // procfs reads even when --allow-read=/proc is baked into a compiled binary.
+  // Keep the executable least-privileged by using the already-required
+  // subprocess capability (auth isolate launches arbitrary child commands)
+  // and a fixed argv, without a shell.
+  const output = await new Deno.Command("cat", {
+    args: [path],
+    stdin: "null",
+    stdout: "piped",
+    stderr: "null",
+  }).output();
+  if (!output.success) {
+    throw new Deno.errors.NotFound(`proc record is unavailable: ${path}`);
+  }
+  return new TextDecoder().decode(output.stdout);
+}
+
 export class LinuxProcessInspector implements ProcessInspector {
-  constructor(private readonly procRoot = "/proc") {}
+  constructor(
+    private readonly procRoot = "/proc",
+    private readonly readFile: ProcFileReader = readProcFile,
+  ) {}
 
   async inspect(pid: number): Promise<ProcessIdentity> {
     try {
       const [stat, status, bootId] = await Promise.all([
-        Deno.readTextFile(`${this.procRoot}/${pid}/stat`),
-        Deno.readTextFile(`${this.procRoot}/${pid}/status`),
-        Deno.readTextFile(`${this.procRoot}/sys/kernel/random/boot_id`),
+        this.readFile(`${this.procRoot}/${pid}/stat`),
+        this.readFile(`${this.procRoot}/${pid}/status`),
+        this.readFile(`${this.procRoot}/sys/kernel/random/boot_id`),
       ]);
       return {
         ...parseProcStat(stat),
@@ -98,12 +121,18 @@ export class LinuxProcessInspector implements ProcessInspector {
   }
 }
 
-export function platformProcessInspector(): ProcessInspector {
-  if (Deno.build.os !== "linux") {
+export function processInspectorFor(
+  os: typeof Deno.build.os,
+): ProcessInspector {
+  if (os !== "linux") {
     throw new ProcessInspectionError(
       "unsupported",
       "process_inspection_unsupported",
     );
   }
   return new LinuxProcessInspector();
+}
+
+export function platformProcessInspector(): ProcessInspector {
+  return processInspectorFor(Deno.build.os);
 }

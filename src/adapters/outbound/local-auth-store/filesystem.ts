@@ -122,11 +122,7 @@ async function readJson<T>(path: string): Promise<T> {
 
 function currentUid(): number | null {
   if (Deno.build.os === "windows") return null;
-  // lstat is covered by the CLI's filesystem permission and avoids requiring
-  // the broader --allow-sys permission solely to verify file ownership.
-  return Deno.statSync(
-    Deno.build.os === "linux" ? "/proc/self" : (Deno.env.get("HOME") ?? "."),
-  ).uid;
+  return Deno.uid();
 }
 
 function assertOwnerAndMode(
@@ -452,6 +448,7 @@ export class FilesystemLocalAuthStore {
           token,
           kind: metadata.credential_type,
           authorizationId: metadata.authorization_id,
+          anchor: binding.anchor,
         };
       } catch (error) {
         if (
@@ -469,18 +466,25 @@ export class FilesystemLocalAuthStore {
     const { origin, path } = await this.instance(originValue);
     const directory = join(path, "sessions", "authorization-request");
     if (!(await exists(directory))) return null;
-    const metadata = await readJson<SessionRecord>(
-      join(directory, "metadata.json"),
-    );
-    if (
-      metadata.origin !== origin ||
-      metadata.credential_type !== "authorization_request"
-    ) return null;
-    return {
-      sessionId: metadata.id,
-      token: await readPrivateText(join(directory, "token")),
-      kind: metadata.credential_type,
-    };
+    try {
+      const metadata = await readJson<SessionRecord>(
+        join(directory, "metadata.json"),
+      );
+      if (
+        metadata.origin !== origin ||
+        metadata.credential_type !== "authorization_request"
+      ) return null;
+      return {
+        sessionId: metadata.id,
+        token: await readPrivateText(join(directory, "token")),
+        kind: metadata.credential_type,
+      };
+    } catch (error) {
+      if (
+        error instanceof Deno.errors.NotFound || error instanceof SyntaxError
+      ) return null;
+      throw error;
+    }
   }
 
   async removeAuthorization(

@@ -116,6 +116,10 @@ function parse(args: string[]): Parsed {
   };
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
+    if (arg === "--") {
+      parsed.positional.push("--", ...args.slice(i + 1));
+      break;
+    }
     if (arg === "--json") parsed.json = true;
     else if (arg === "--verbose" || arg === "-v") parsed.verbose = true;
     else if (arg === "--server") parsed.server = args[++i] ?? parsed.server;

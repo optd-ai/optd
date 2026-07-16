@@ -4,6 +4,7 @@ import {
   LinuxProcessInspector,
   parseProcStat,
   parseProcUid,
+  processInspectorFor,
 } from "../../../src/adapters/outbound/process-inspection/linux.ts";
 
 Deno.test("Linux proc parser handles command names containing closing parentheses", () => {
@@ -32,6 +33,17 @@ Deno.test("full process identity rejects PID reuse, UID changes, and reboot", ()
   assert(!sameProcess(original, { ...original, startTicks: "101" }));
   assert(!sameProcess(original, { ...original, uid: 1001 }));
   assert(!sameProcess(original, { ...original, bootId: "b" }));
+});
+
+Deno.test("unsupported operating systems fail closed", () => {
+  for (const os of ["darwin", "windows"] as const) {
+    try {
+      processInspectorFor(os);
+      throw new Error("expected unsupported adapter failure");
+    } catch (error) {
+      assertEquals((error as Error).message, "process_inspection_unsupported");
+    }
+  }
 });
 
 Deno.test("Linux inspector walks real ancestry and rejects unrelated stop PID", async () => {

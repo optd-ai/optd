@@ -7,6 +7,7 @@ export type LocalCredential = {
   token: string;
   kind: LocalCredentialKind;
   authorizationId?: string;
+  anchor?: ProcessIdentity;
 };
 
 export type LocalBinding = {
