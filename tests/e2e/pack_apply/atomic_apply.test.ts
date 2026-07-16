@@ -6,6 +6,7 @@ import {
 } from "../../support/live_harness.ts";
 import { query } from "../../../src/adapters/outbound/postgres/client.ts";
 import { uuidV7 } from "../../../src/domain/ids/uuid_v7.ts";
+import { opaqueToken, tokenDigest } from "../../../src/domain/auth/token.ts";
 import { parseYamlJsonObject } from "../../../src/adapters/outbound/yaml/pack_loader.ts";
 
 Deno.test("compiled optctl completes safe, destructive, stale, timeout, risky, and global apply flows", async () => {
@@ -19,27 +20,33 @@ Deno.test("compiled optctl completes safe, destructive, stale, timeout, risky, a
     });
     assertEquals(bootstrap.code, 0, bootstrap.stderr);
 
-    const initial = await preview(harness, "prototypes/crm-default-pack");
-    await validateReady(harness, initial.id, null);
+    const acknowledgementPlan = await preview(
+      harness,
+      "prototypes/crm-default-pack",
+    );
+    await validateReady(harness, acknowledgementPlan.id, null);
     await expectError(
       harness,
-      ["migration", "apply", initial.id, "--reviewed"],
+      ["migration", "apply", acknowledgementPlan.id, "--reviewed"],
       "migration_acknowledgement_invalid",
       secrets,
     );
     const initialApply = await runOk(harness, [
-      "migration",
+      "pack",
       "apply",
-      initial.id,
+      "prototypes/crm-default-pack",
       "--safe",
     ], secrets);
+    const initial = initialApply.data.plan;
+    assertEquals(initialApply.data.validation.status, "ready");
+    assert(initialApply.data.application.id);
     const repeated = await runOk(harness, [
       "migration",
       "apply",
       initial.id,
       "--safe",
     ], secrets);
-    assertEquals(repeated.data, initialApply.data);
+    assertEquals(repeated.data, initialApply.data.application);
 
     for (const slug of ["alpha", "beta"]) {
       await runOk(
@@ -63,9 +70,21 @@ Deno.test("compiled optctl completes safe, destructive, stale, timeout, risky, a
     ) => field !== "phone");
     await Deno.writeTextFile(leadPath, JSON.stringify(lead, null, 2));
 
-    const destructiveA = await preview(harness, destructiveDir);
+    const destructiveStart = await runOk(
+      harness,
+      ["pack", "apply", destructiveDir],
+      secrets,
+    );
+    const destructiveA = destructiveStart.data.plan;
     assertEquals(destructiveA.class, "destructive");
-    const token1 = await validateToken(harness, destructiveA.id);
+    assertEquals(destructiveStart.data.application, null);
+    assertEquals(
+      destructiveStart.data.next_command,
+      `optctl migration apply ${destructiveA.id} --confirm-token <token>`,
+    );
+    const token1 = destructiveStart.data.validation
+      .confirmation_token as string;
+    assert(typeof token1 === "string" && token1.length === 43);
     secrets.push(token1);
     await expectError(
       harness,
@@ -117,6 +136,70 @@ Deno.test("compiled optctl completes safe, destructive, stale, timeout, risky, a
     await expectError(
       harness,
       ["migration", "apply", destructiveA.id, "--confirm-token", token2],
+      "migration_confirmation_invalid",
+      secrets,
+    );
+    assertEquals(
+      (await harness.login({ username: "root", password: rootPassword })).code,
+      0,
+    );
+
+    const agentPrincipal = uuidV7();
+    const agentUser = uuidV7();
+    const rootOne = uuidV7();
+    const rootTwo = uuidV7();
+    await query(
+      harness.server.sql,
+      "insert into principals(id,type,active) values($1,'agent_user',true)",
+      [agentPrincipal],
+    );
+    await query(
+      harness.server.sql,
+      "insert into agent_users(id,principal_id,human_user_id,name) select $1,$2,id,'root-binding-agent' from human_users where username='root'",
+      [agentUser, agentPrincipal],
+    );
+    for (const authorizationId of [rootOne, rootTwo]) {
+      await query(
+        harness.server.sql,
+        `insert into agent_authorizations(
+           id,agent_user_id,human_user_id,parent_authorization_id,
+           root_authorization_id,approved_by_auth_context_id)
+         select $1,$2,h.id,null,$1,c.id from human_users h
+         join auth_contexts c on c.human_user_id=h.id
+         where h.username='root' order by c.created_at desc limit 1`,
+        [authorizationId, agentUser],
+      );
+      await query(
+        harness.server.sql,
+        "insert into agent_authorization_roles(id,authorization_id,role_id,boundary_type) values($1,$2,'system:super_admin','system')",
+        [uuidV7(), authorizationId],
+      );
+    }
+    const rootTokens: string[] = [];
+    for (const authorizationId of [rootOne, rootTwo]) {
+      const value = opaqueToken();
+      rootTokens.push(value);
+      await query(
+        harness.server.sql,
+        `insert into auth_sessions(
+           id,principal_id,human_user_id,credential_kind,token_digest,authorization_id)
+         select $1,$2,h.id,'agent_authorization',$3,$4 from human_users h where h.username='root'`,
+        [uuidV7(), agentPrincipal, await tokenDigest(value), authorizationId],
+      );
+    }
+    await selectCredential(harness, rootTokens[0]);
+    const rootBoundToken = await validateToken(harness, destructiveA.id);
+    secrets.push(rootBoundToken);
+    await selectCredential(harness, rootTokens[1]);
+    await expectError(
+      harness,
+      [
+        "migration",
+        "apply",
+        destructiveA.id,
+        "--confirm-token",
+        rootBoundToken,
+      ],
       "migration_confirmation_invalid",
       secrets,
     );
@@ -258,6 +341,77 @@ Deno.test("compiled optctl completes safe, destructive, stale, timeout, risky, a
       "10s",
     ], secrets);
 
+    const riskyPackDir = join(harness.rootDir, "crm-risky-pack-apply");
+    await copyPack(riskyDir, riskyPackDir);
+    await setVersion(riskyPackDir, "0.3.1");
+    const riskyHookPath = await firstFile(join(riskyPackDir, "hooks"), ".yaml");
+    const riskyHook = parseYamlJsonObject(
+      await Deno.readTextFile(riskyHookPath),
+      riskyHookPath,
+    ) as Record<string, any>;
+    riskyHook.spec.timeout = "4s";
+    await Deno.writeTextFile(
+      riskyHookPath,
+      JSON.stringify(riskyHook, null, 2),
+    );
+    const riskyPackApply = await runOk(
+      harness,
+      ["pack", "apply", riskyPackDir, "--reviewed", "--timeout", "10s"],
+      secrets,
+    );
+    assertEquals(riskyPackApply.data.plan.class, "risky");
+    assertEquals(riskyPackApply.data.validation.status, "ready");
+    assert(riskyPackApply.data.application.id);
+
+    const stalePackDir = join(harness.rootDir, "crm-stale-pack-apply");
+    await copyPack(riskyPackDir, stalePackDir);
+    await setVersion(stalePackDir, "0.3.2");
+    const staleHookPath = await firstFile(join(stalePackDir, "hooks"), ".yaml");
+    const staleHook = parseYamlJsonObject(
+      await Deno.readTextFile(staleHookPath),
+      staleHookPath,
+    ) as Record<string, any>;
+    staleHook.spec.timeout = "5s";
+    await Deno.writeTextFile(staleHookPath, JSON.stringify(staleHook, null, 2));
+    const staleLockHeld = Promise.withResolvers<void>();
+    const releaseStaleLock = Promise.withResolvers<void>();
+    const staleBlocker = harness.server.sql.begin(async (tx) => {
+      await query(tx, `lock table "${lockedTable}" in row exclusive mode`);
+      staleLockHeld.resolve();
+      await releaseStaleLock.promise;
+    });
+    await staleLockHeld.promise;
+    const stalePackApply = harness.runOptctl([
+      "--json",
+      "pack",
+      "apply",
+      stalePackDir,
+      "--reviewed",
+    ]);
+    try {
+      await waitForPackApplyLock(harness);
+      await query(
+        harness.server.sql,
+        "update pack_active_revisions set candidate_revision_id=$1,activated_at=now() where publisher='operant' and pack_name='crm'",
+        [initial.to_pack_revision_id],
+      );
+    } finally {
+      releaseStaleLock.resolve();
+      await staleBlocker;
+    }
+    const stalePackResult = await stalePackApply;
+    assertEquals(stalePackResult.code, 1, stalePackResult.stderr);
+    assertEquals(
+      JSON.parse(stalePackResult.stderr).error.code,
+      "migration_stale",
+    );
+    assertNoSecrets(stalePackResult, secrets);
+    await query(
+      harness.server.sql,
+      "update pack_active_revisions set candidate_revision_id=$1,activated_at=now() where publisher='operant' and pack_name='crm'",
+      [riskyPackApply.data.plan.to_pack_revision_id],
+    );
+
     for (const slug of ["alpha", "beta"]) {
       await runOk(harness, ["project", "select", slug], secrets);
       const metadata = await runOk(harness, [
@@ -272,7 +426,7 @@ Deno.test("compiled optctl completes safe, destructive, stale, timeout, risky, a
         harness.server.sql,
         "select count(*)::text count from pack_migration_applications",
       )).rows[0].count,
-      "4",
+      "5",
     );
     assertEquals(
       (await query<{ leaked: boolean }>(
@@ -281,6 +435,17 @@ Deno.test("compiled optctl completes safe, destructive, stale, timeout, risky, a
       )).rows[0].leaked,
       false,
     );
+    const failures = await query<
+      { attempts: string; audits: string; redacted: boolean }
+    >(
+      harness.server.sql,
+      `select
+         (select count(*)::text from pack_migration_attempts) attempts,
+         (select count(*)::text from pack_migration_audit_events where decision='denied') audits,
+         not exists(select 1 from pack_migration_audit_events where decision='denied' and (details - 'error_code') <> '{}'::jsonb) redacted`,
+    );
+    assertEquals(failures.rows[0].audits, failures.rows[0].attempts);
+    assertEquals(failures.rows[0].redacted, true);
   } finally {
     await harness.close();
   }
@@ -351,6 +516,36 @@ function assertNoSecrets(result: CliResult, secrets: string[]) {
   const output = `${result.stdout}\n${result.stderr}`;
   for (const secret of secrets) assertEquals(output.includes(secret), false);
   assertEquals(/bearer\s+[a-z0-9._~-]+/i.test(output), false);
+}
+
+async function waitForPackApplyLock(
+  harness: Awaited<ReturnType<typeof startLiveHarness>>,
+) {
+  for (let attempt = 0; attempt < 200; attempt++) {
+    const waiting = await query<{ waiting: boolean }>(
+      harness.server.sql,
+      `select exists(
+         select 1 from pg_stat_activity
+          where pid <> pg_backend_pid()
+            and cardinality(pg_blocking_pids(pid)) > 0
+            and query like 'lock table %share row exclusive mode%'
+       ) waiting`,
+    );
+    if (waiting.rows[0]?.waiting) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("compiled pack apply did not reach the runtime lock barrier");
+}
+
+async function selectCredential(
+  harness: Awaited<ReturnType<typeof startLiveHarness>>,
+  token: string,
+) {
+  const path = join(harness.rootDir, "xdg-config", "operant", "auth.json");
+  const store = JSON.parse(await Deno.readTextFile(path));
+  const origin = new URL(harness.baseUrl).origin;
+  store.origins[origin] = { ...store.origins[origin], token };
+  await Deno.writeTextFile(path, JSON.stringify(store));
 }
 
 async function copyPack(from: string, to: string) {

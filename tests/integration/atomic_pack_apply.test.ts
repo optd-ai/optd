@@ -4,10 +4,12 @@ import {
   createPostgresClient,
   query,
   type Queryable,
+  type Sql,
 } from "../../src/adapters/outbound/postgres/client.ts";
 import { applyPlatformMigrations } from "../../src/adapters/outbound/postgres/migrations.ts";
 import { getDefinition } from "../../src/adapters/outbound/postgres/pack_repository.ts";
 import { PostgresTransactionManager } from "../../src/adapters/outbound/postgres/transaction_manager.ts";
+import { PostgresAuthorizationRepository } from "../../src/adapters/outbound/postgres/authorization_repository.ts";
 import { makeMigrationServices } from "../../src/application/services/migration_services.ts";
 import {
   findPostgresBins,
@@ -61,6 +63,12 @@ Deno.test("atomic pack apply activates globally, is idempotent, and rolls back i
       sql,
       "insert into auth_contexts(id,principal_id,human_user_id,session_id,credential_kind,roles,created_at) values($1,$2,$3,$4,'human_full','{system:super_admin}',now())",
       [auth, principal, human, session],
+    );
+    const assignmentId = uuidV7();
+    await query(
+      sql,
+      "insert into role_assignments(id,principal_id,role_id,boundary_type,active) values($1,$2,'system:super_admin','system',true)",
+      [assignmentId, principal],
     );
 
     const pack = await loadPackFromFiles(
@@ -135,6 +143,108 @@ Deno.test("atomic pack apply activates globally, is idempotent, and rolls back i
       );
     }
 
+    const revokedCandidate = structuredClone(pack);
+    revokedCandidate.version = "0.1.8";
+    revokedCandidate.sourceDigest = `sha256:${"e".repeat(64)}`;
+    revokedCandidate.revision = `operant/crm@0.1.8:sha256:${"e".repeat(64)}`;
+    const revokedPlan = await createPackMigrationPlan(
+      sql,
+      revokedCandidate,
+      auth,
+    );
+    await sql.begin((tx) =>
+      validateMigrationPlan(tx, revokedPlan.plan.id, auth)
+    );
+    const firstRuntimeTable = (await query<{ table_name: string }>(
+      sql,
+      "select table_name from pack_runtime_tables where publisher='operant' and pack_name='crm' order by case definition_kind when 'resource' then 0 else 1 end,definition_name,table_name limit 1",
+    )).rows[0].table_name;
+    const lockHeld = Promise.withResolvers<void>();
+    const unlock = Promise.withResolvers<void>();
+    const runtimeBlocker = sql.begin(async (tx) => {
+      await query(
+        tx,
+        `lock table "${firstRuntimeTable}" in row exclusive mode`,
+      );
+      lockHeld.resolve();
+      await unlock.promise;
+    });
+    await lockHeld.promise;
+    const applyStarted = Promise.withResolvers<number>();
+    const revokedServices = makeMigrationServices({
+      sql,
+      tx: new PostgresTransactionManager(sql),
+      authorization: {
+        authorize: async () => ({ ok: true, value: {} }),
+      } as any,
+      authorizeApplyInTransaction: (lockedSql, currentAuth) =>
+        new PostgresAuthorizationRepository(lockedSql as Sql).authorize({
+          auth: currentAuth,
+          boundary: { type: "system" },
+          action: "migration.apply",
+          resource: "system:migration",
+        }),
+      beforeApplyAttempt: async (tx) => {
+        applyStarted.resolve(
+          Number(
+            (await query<{ pid: number }>(tx, "select pg_backend_pid() pid"))
+              .rows[0].pid,
+          ),
+        );
+      },
+    });
+    const revokedApply = revokedServices.apply(
+      revokedPlan.plan.id,
+      { acknowledgement: "safe" },
+      authContext(auth, principal, human, session),
+    );
+    const applyingPid = await applyStarted.promise;
+    await waitUntilBlocked(sql, applyingPid);
+    await query(sql, "update role_assignments set active=false where id=$1", [
+      assignmentId,
+    ]);
+    unlock.resolve();
+    await runtimeBlocker;
+    const revokedResult = await revokedApply;
+    assertEquals(revokedResult.ok, false);
+    if (!revokedResult.ok) {
+      assertEquals(revokedResult.error.code, "authorization_changed");
+    }
+    assertEquals(
+      (await query<{ count: string }>(
+        sql,
+        "select count(*)::text count from pack_migration_applications where plan_id=$1",
+        [revokedPlan.plan.id],
+      )).rows[0].count,
+      "0",
+    );
+    assertEquals(
+      (await query<{ count: string }>(
+        sql,
+        "select count(*)::text count from pack_migration_attempts where plan_id=$1 and outcome='authorization_changed'",
+        [revokedPlan.plan.id],
+      )).rows[0].count,
+      "1",
+    );
+    assertEquals(
+      (await query<{ count: string }>(
+        sql,
+        "select count(*)::text count from pack_migration_audit_events where plan_id=$1 and decision='denied' and details->>'error_code'='authorization_changed'",
+        [revokedPlan.plan.id],
+      )).rows[0].count,
+      "1",
+    );
+    assertEquals(
+      (await query<{ id: string }>(
+        sql,
+        "select candidate_revision_id::text id from pack_active_revisions where publisher='operant' and pack_name='crm'",
+      )).rows[0].id,
+      first.plan.to_pack_revision_id,
+    );
+    await query(sql, "update role_assignments set active=true where id=$1", [
+      assignmentId,
+    ]);
+
     for (const fault of ["after_sql", "after_application"] as const) {
       const candidate = structuredClone(pack);
       candidate.version = `0.1.${fault === "after_sql" ? 1 : 2}`;
@@ -149,20 +259,20 @@ Deno.test("atomic pack apply activates globally, is idempotent, and rolls back i
       }`;
       const next = await createPackMigrationPlan(sql, candidate, auth);
       await sql.begin((tx) => validateMigrationPlan(tx, next.plan.id, auth));
-      await assertRejects(
-        () =>
-          sql!.begin((tx) =>
-            applyMigrationPlan(
-              tx,
-              next.plan.id,
-              { acknowledgement: "safe" },
-              auth,
-              fault,
-            )
-          ),
-        Error,
-        "injected migration failure",
+      const faultServices = migrationServices(
+        sql,
+        async () => {},
+        fault,
       );
+      const faultResult = await faultServices.apply(
+        next.plan.id,
+        { acknowledgement: "safe" },
+        authContext(auth, principal, human, session),
+      );
+      assertEquals(faultResult.ok, false);
+      if (!faultResult.ok) {
+        assertEquals(faultResult.error.code, "migration_apply_failed");
+      }
       assertEquals(
         (await query<{ id: string }>(
           sql,
@@ -177,6 +287,14 @@ Deno.test("atomic pack apply activates globally, is idempotent, and rolls back i
           [next.plan.id],
         )).rows[0].count,
         "0",
+      );
+      assertEquals(
+        (await query<{ count: string }>(
+          sql,
+          "select count(*)::text count from pack_migration_audit_events where plan_id=$1 and decision='denied' and details->>'error_code'='migration_apply_failed'",
+          [next.plan.id],
+        )).rows[0].count,
+        "1",
       );
     }
 
@@ -341,6 +459,7 @@ Deno.test("atomic pack apply activates globally, is idempotent, and rolls back i
           },
         }),
       } as any,
+      authorizeApplyInTransaction: async () => ({ ok: true, value: {} }),
       beforeApplyAttempt: async () => {
         deniedAttempts++;
       },
@@ -354,6 +473,68 @@ Deno.test("atomic pack apply activates globally, is idempotent, and rolls back i
       false,
     );
     assertEquals(deniedAttempts, 0);
+    assertEquals(
+      (await query<{ count: string }>(
+        sql,
+        "select count(*)::text count from pack_migration_audit_events where plan_id=$1 and decision='denied' and details->>'error_code'='policy_denied'",
+        [noRetryPlan.plan.id],
+      )).rows[0].count,
+      "1",
+    );
+
+    const exhaustedCandidate = structuredClone(pack);
+    exhaustedCandidate.version = "0.1.40";
+    exhaustedCandidate.sourceDigest = `sha256:${"8".repeat(64)}`;
+    exhaustedCandidate.revision = `operant/crm@0.1.40:sha256:${"8".repeat(64)}`;
+    const exhaustedPlan = await createPackMigrationPlan(
+      sql,
+      exhaustedCandidate,
+      auth,
+    );
+    await sql.begin((tx) =>
+      validateMigrationPlan(tx, exhaustedPlan.plan.id, auth)
+    );
+    let exhaustedAttempts = 0;
+    const exhaustedServices = migrationServices(sql, async () => {
+      exhaustedAttempts++;
+      throw Object.assign(new Error("injected exhausted deadlock"), {
+        code: "40P01",
+      });
+    });
+    const exhaustedResult = await exhaustedServices.apply(
+      exhaustedPlan.plan.id,
+      { acknowledgement: "safe" },
+      authContext(auth, principal, human, session),
+    );
+    assertEquals(exhaustedResult.ok, false);
+    if (!exhaustedResult.ok) {
+      assertEquals(exhaustedResult.error.code, "migration_retry_exhausted");
+    }
+    assertEquals(exhaustedAttempts, 3);
+    assertEquals(
+      (await query<{ count: string }>(
+        sql,
+        "select count(*)::text count from pack_migration_attempts where plan_id=$1",
+        [exhaustedPlan.plan.id],
+      )).rows[0].count,
+      "3",
+    );
+    assertEquals(
+      (await query<{ count: string }>(
+        sql,
+        "select count(*)::text count from pack_migration_audit_events where plan_id=$1 and decision='denied'",
+        [exhaustedPlan.plan.id],
+      )).rows[0].count,
+      "3",
+    );
+    assertEquals(
+      (await query<{ count: string }>(
+        sql,
+        "select count(*)::text count from pack_migration_applications where plan_id=$1",
+        [exhaustedPlan.plan.id],
+      )).rows[0].count,
+      "0",
+    );
 
     const staleCandidate = structuredClone(pack);
     staleCandidate.version = "0.1.31";
@@ -521,6 +702,23 @@ Deno.test("atomic pack apply activates globally, is idempotent, and rolls back i
         }, auth)
       ),
     );
+    const failedRecords = await query<{
+      attempts: string;
+      audits: string;
+      redacted: boolean;
+    }>(
+      sql,
+      `select
+         (select count(*)::text from pack_migration_attempts) attempts,
+         (select count(*)::text from pack_migration_audit_events where decision='denied') audits,
+         not exists(
+           select 1 from pack_migration_audit_events
+            where decision='denied'
+              and (details - 'error_code') <> '{}'::jsonb
+         ) redacted`,
+    );
+    assertEquals(failedRecords.rows[0].audits, failedRecords.rows[0].attempts);
+    assertEquals(failedRecords.rows[0].redacted, true);
   } finally {
     if (sql) await closePostgresClient(sql).catch(() => undefined);
     if (runtime) await runtime.stop().catch(() => undefined);
@@ -529,6 +727,23 @@ Deno.test("atomic pack apply activates globally, is idempotent, and rolls back i
     await Deno.remove(root, { recursive: true }).catch(() => undefined);
   }
 });
+
+async function waitUntilBlocked(
+  sql: ReturnType<typeof createPostgresClient>,
+  pid: number,
+) {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const blocked = await query<{ blocked: boolean }>(
+      sql,
+      "select cardinality(pg_blocking_pids($1)) > 0 blocked",
+      [pid],
+    );
+    if (blocked.rows[0]?.blocked) return;
+  }
+  throw new Error(
+    `apply backend ${pid} did not reach the runtime lock barrier`,
+  );
+}
 
 function authContext(
   id: string,
@@ -551,12 +766,15 @@ function authContext(
 function migrationServices(
   sql: ReturnType<typeof createPostgresClient>,
   beforeApplyAttempt: (sql: Queryable, attempt: number) => Promise<void>,
+  applyTestFault?: "after_sql" | "after_application",
 ) {
   return makeMigrationServices({
     sql,
     tx: new PostgresTransactionManager(sql),
     authorization: { authorize: async () => ({ ok: true, value: {} }) } as any,
+    authorizeApplyInTransaction: async () => ({ ok: true, value: {} }),
     beforeApplyAttempt,
+    applyTestFault,
   });
 }
 

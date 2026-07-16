@@ -21,6 +21,7 @@ Deno.test("migration apply retries only 40P01 and 40001 with fresh transactions"
       authorization: {
         authorize: async () => ({ ok: true, value: {} }),
       } as any,
+      authorizeApplyInTransaction: async () => ({ ok: true, value: {} }),
       tx: {
         transaction: async () => {
           attempts++;
@@ -59,6 +60,7 @@ Deno.test("migration apply never retries timeout or non-transient SQLSTATEs", as
       authorization: {
         authorize: async () => ({ ok: true, value: {} }),
       } as any,
+      authorizeApplyInTransaction: async () => ({ ok: true, value: {} }),
       tx: {
         transaction: async () => {
           attempts++;

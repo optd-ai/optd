@@ -18,8 +18,13 @@ export function makeMigrationServices(
     sql: Queryable;
     authorization: AuthorizationRepository;
     tx: TransactionManager<Queryable>;
-    /** Test-only dependency seam. Production composition never supplies it. */
+    authorizeApplyInTransaction: (
+      sql: Queryable,
+      auth: AuthContext,
+    ) => Promise<Result<unknown>>;
+    /** Test-only dependency seams. Production composition never supplies them. */
     beforeApplyAttempt?: (sql: Queryable, attempt: number) => Promise<void>;
+    applyTestFault?: "after_sql" | "after_application";
   },
 ) {
   const missing = (id: string) =>
@@ -88,14 +93,35 @@ export function makeMigrationServices(
       auth: AuthContext,
     ): Promise<Result<unknown>> {
       const authorized = await authorize(auth, "migration.apply");
-      if (!authorized.ok) return err(authorized.error);
+      if (!authorized.ok) {
+        await recordFailedAttempt(id, auth.id, authorized.error.code);
+        return err(authorized.error);
+      }
       let transientFailures = 0;
       while (true) {
         const attempt = transientFailures + 1;
         try {
           const application = await deps.tx.transaction(async (sql) => {
             await deps.beforeApplyAttempt?.(sql, attempt);
-            return await applyMigrationPlan(sql, id, input, auth.id);
+            return await applyMigrationPlan(
+              sql,
+              id,
+              input,
+              auth.id,
+              deps.applyTestFault,
+              async (lockedSql) => {
+                const current = await deps.authorizeApplyInTransaction(
+                  lockedSql,
+                  auth,
+                );
+                if (!current.ok) {
+                  throw new MigrationApplyError(
+                    "authorization_changed",
+                    "migration.apply authority changed while waiting for pack locks",
+                  );
+                }
+              },
+            );
           });
           return application ? ok(application) : missing(id);
         } catch (error) {

@@ -406,6 +406,7 @@ export async function applyMigrationPlan(
   request: MigrationApplyRequest,
   authContextId: string,
   testFault?: "after_sql" | "after_application",
+  authorizeLocked?: (sql: Queryable) => Promise<void>,
 ): Promise<MigrationApplication | null> {
   const locked = await query<{
     plan_json: MigrationPlan | string;
@@ -467,6 +468,7 @@ export async function applyMigrationPlan(
       `lock table ${quote(table.table_name)} in share row exclusive mode`,
     );
   }
+  await authorizeLocked?.(sql);
   const active = await query<{ candidate_revision_id: string }>(
     sql,
     "select candidate_revision_id from pack_active_revisions where publisher=$1 and pack_name=$2",
@@ -645,10 +647,33 @@ export async function recordMigrationAttempt(
   authContextId: string,
   outcome: string,
 ): Promise<void> {
+  const identity = await authorizationIdentity(sql, authContextId);
   await query(
     sql,
-    `insert into pack_migration_attempts(id,plan_id,auth_context_id,outcome) values($1,$2,$3,$4)`,
-    [uuidV7(), planId, authContextId, outcome],
+    `insert into pack_migration_attempts(id,plan_id,auth_context_id,outcome,details)
+     values($1,$2,$3,$4,$5::text::jsonb)`,
+    [
+      uuidV7(),
+      planId,
+      authContextId,
+      outcome,
+      JSON.stringify({ error_code: outcome }),
+    ],
+  );
+  await query(
+    sql,
+    `insert into pack_migration_audit_events(
+       id,plan_id,application_id,auth_context_id,principal_id,
+       authorization_root_id,action,decision,details)
+     values($1,$2,null,$3,$4,$5,'migration.apply','denied',$6::text::jsonb)`,
+    [
+      uuidV7(),
+      planId,
+      authContextId,
+      identity.principalId,
+      identity.authorizationRootId,
+      JSON.stringify({ error_code: outcome }),
+    ],
   );
 }
 

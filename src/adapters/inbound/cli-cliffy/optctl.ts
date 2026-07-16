@@ -205,6 +205,43 @@ function parseQueryPayload(
   if (sort.length) payload.sort = sort;
   return payload;
 }
+function migrationApplyOptions(args: string[]) {
+  let acknowledgement: "safe" | "reviewed" | "destructive" | undefined;
+  let confirmationToken: string | undefined;
+  let lockTimeout: string | undefined;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "--safe" || arg === "--reviewed") {
+      if (acknowledgement) {
+        throw usageError(
+          "migration apply accepts exactly one acknowledgement option",
+        );
+      }
+      acknowledgement = arg === "--safe" ? "safe" : "reviewed";
+    } else if (arg === "--confirm-token") {
+      if (acknowledgement) {
+        throw usageError(
+          "migration apply accepts exactly one acknowledgement option",
+        );
+      }
+      acknowledgement = "destructive";
+      confirmationToken = args[++i];
+    } else if (arg.startsWith("--confirm-token=")) {
+      if (acknowledgement) {
+        throw usageError(
+          "migration apply accepts exactly one acknowledgement option",
+        );
+      }
+      acknowledgement = "destructive";
+      confirmationToken = arg.slice("--confirm-token=".length);
+    } else if (arg === "--timeout") lockTimeout = args[++i];
+    else if (arg.startsWith("--timeout=")) {
+      lockTimeout = arg.slice("--timeout=".length);
+    } else throw usageError(`unknown migration apply option ${arg}`);
+  }
+  return { acknowledgement, confirmationToken, lockTimeout };
+}
+
 function parseSortArg(value: string): { field: string; direction: string } {
   const [field, direction = "asc"] = value.split(":");
   return { field, direction };
@@ -1396,6 +1433,64 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
         `${parsed.server}/packs/preview`,
         value,
       );
+    } else if (cmd === "pack" && sub === "apply" && value) {
+      const options = migrationApplyOptions(parsed.positional.slice(3));
+      if (options.acknowledgement === "destructive") {
+        throw usageError(
+          "pack apply cannot reuse a confirmation token across a new preview; run pack apply <dir> to obtain the exact migration token, then migration apply <id> --confirm-token <token>",
+        );
+      }
+      const preview = await postMultipart(
+        `${parsed.server}/packs/preview`,
+        value,
+      ) as {
+        data: { plan: { id: string; plan_digest: string; class: string } };
+      };
+      const plan = preview.data.plan;
+      const validation = await postJson(
+        `${parsed.server}/migrations/${plan.id}/validate`,
+        {},
+      ) as { data: Record<string, unknown> };
+      if (plan.class === "destructive") {
+        if (options.acknowledgement) {
+          throw usageError(
+            "destructive pack apply has no acknowledgement flag; use the returned exact migration id and confirmation token with migration apply",
+          );
+        }
+        result = {
+          ok: true,
+          data: {
+            plan,
+            validation: validation.data,
+            application: null,
+            next_command:
+              `optctl migration apply ${plan.id} --confirm-token <token>`,
+          },
+        };
+      } else {
+        const expected = plan.class === "safe" ? "safe" : "reviewed";
+        if (options.acknowledgement !== expected) {
+          throw usageError(
+            `pack apply for a ${plan.class} plan requires --${expected}`,
+          );
+        }
+        const application = await postJson(
+          `${parsed.server}/migrations/${plan.id}/apply`,
+          {
+            acknowledgement: expected,
+            confirmation_token: null,
+            ...options.lockTimeout ? { lock_timeout: options.lockTimeout } : {},
+          },
+        ) as { data: Record<string, unknown> };
+        result = {
+          ok: true,
+          data: {
+            plan,
+            validation: validation.data,
+            application: application.data,
+          },
+        };
+      }
     } else if (
       cmd === "action" && (sub === "preview" || sub === "commit") && value
     ) {
@@ -1447,47 +1542,11 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
         {},
       );
     } else if (cmd === "migration" && sub === "apply" && value) {
-      const args = parsed.positional.slice(3);
-      let acknowledgement: "safe" | "reviewed" | "destructive" | undefined;
-      let confirmationToken: string | undefined;
-      let lockTimeout: string | undefined;
-      for (let i = 0; i < args.length; i++) {
-        const arg = args[i];
-        if (arg === "--safe") {
-          if (acknowledgement) {
-            throw usageError(
-              "migration apply accepts exactly one acknowledgement option",
-            );
-          }
-          acknowledgement = "safe";
-        } else if (arg === "--reviewed") {
-          if (acknowledgement) {
-            throw usageError(
-              "migration apply accepts exactly one acknowledgement option",
-            );
-          }
-          acknowledgement = "reviewed";
-        } else if (arg === "--confirm-token") {
-          if (acknowledgement) {
-            throw usageError(
-              "migration apply accepts exactly one acknowledgement option",
-            );
-          }
-          acknowledgement = "destructive";
-          confirmationToken = args[++i];
-        } else if (arg.startsWith("--confirm-token=")) {
-          if (acknowledgement) {
-            throw usageError(
-              "migration apply accepts exactly one acknowledgement option",
-            );
-          }
-          acknowledgement = "destructive";
-          confirmationToken = arg.slice("--confirm-token=".length);
-        } else if (arg === "--timeout") lockTimeout = args[++i];
-        else if (arg.startsWith("--timeout=")) {
-          lockTimeout = arg.slice("--timeout=".length);
-        } else throw usageError(`unknown migration apply option ${arg}`);
-      }
+      const {
+        acknowledgement,
+        confirmationToken,
+        lockTimeout,
+      } = migrationApplyOptions(parsed.positional.slice(3));
       if (
         !acknowledgement ||
         (acknowledgement === "destructive" && !confirmationToken)
@@ -1564,7 +1623,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       );
     } else {
       throw usageError(
-        "usage: optctl status live/ready/bootstrap | bootstrap init | home | project list/create/view/update/archive/select | context set-project | pack preview <dir> | metadata [packs] | metadata pack <publisher/pack> | metadata resource/relationship/lifecycle/action/hook/role/policy/seed <publisher/pack:name> | secret list/set/delete | action preview/commit <namespace.action> --input '{...}' | outbox status/drain/retry | migration inspect <id> [--sql|--violations] | migration validate <id> | migration apply <id> (--safe|--reviewed|--confirm-token <token>) [--timeout duration] | query <namespace.resource> [--where expr] [--fields a,b] [--sort field:desc] [--limit n] [--cursor c] | changeset preview/commit (--file <json-file>|--input '{...}') | view <namespace.resource> <id> | history <namespace.resource> <id>",
+        "usage: optctl status live/ready/bootstrap | bootstrap init | home | project list/create/view/update/archive/select | context set-project | pack preview <dir> | pack apply <dir> [--safe|--reviewed] [--timeout duration] | metadata [packs] | metadata pack <publisher/pack> | metadata resource/relationship/lifecycle/action/hook/role/policy/seed <publisher/pack:name> | secret list/set/delete | action preview/commit <namespace.action> --input '{...}' | outbox status/drain/retry | migration inspect <id> [--sql|--violations] | migration validate <id> | migration apply <id> (--safe|--reviewed|--confirm-token <token>) [--timeout duration] | query <namespace.resource> [--where expr] [--fields a,b] [--sort field:desc] [--limit n] [--cursor c] | changeset preview/commit (--file <json-file>|--input '{...}') | view <namespace.resource> <id> | history <namespace.resource> <id>",
       );
     }
     const output = parsed.verbose

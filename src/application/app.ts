@@ -71,6 +71,13 @@ export function makeApplication(
       sql: sql as Queryable,
       authorization: authorizationRepository,
       tx,
+      authorizeApplyInTransaction: (lockedSql, auth) =>
+        new PostgresAuthorizationRepository(lockedSql as Sql).authorize({
+          auth,
+          boundary: { type: "system" },
+          action: "migration.apply",
+          resource: "system:migration",
+        }),
     }),
     queries: makeQueryObjectsService({ sql: sql as Queryable }),
     outbox: makeProcessOutboxService({
