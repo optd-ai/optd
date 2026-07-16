@@ -4,8 +4,10 @@ import { getActivePack, storeOrReuseCandidate } from "./pack_repository.ts";
 import {
   buildMigrationPlan,
   type LiveFacts,
+  migrationDigest,
   type MigrationPlan,
 } from "../../../domain/migrations/pack_migration.ts";
+import { compileMigrationPreview } from "./resource_ddl.ts";
 import { uuidV7 } from "../../../domain/ids/uuid_v7.ts";
 
 export async function createPackMigrationPlan(
@@ -28,7 +30,7 @@ export async function createPackMigrationPlan(
     activeSnapshot?.normalized ?? {},
     candidate,
   );
-  const { plan, sql: sqlPreview } = await buildMigrationPlan({
+  const { plan: draft } = await buildMigrationPlan({
     id: uuidV7(),
     candidateRevisionId: stored.id,
     authContextId,
@@ -36,6 +38,21 @@ export async function createPackMigrationPlan(
     candidate,
     liveFacts: facts,
   });
+  const compiled = await compileMigrationPreview(candidate, draft);
+  const compiledDraft: MigrationPlan = {
+    ...draft,
+    steps: compiled.steps,
+    dependency_graph: compiled.dependency_graph,
+  };
+  const { plan_digest: _draftDigest, ...digestablePlan } = compiledDraft;
+  const plan: MigrationPlan = {
+    ...compiledDraft,
+    plan_digest: await migrationDigest({
+      plan: digestablePlan,
+      sql_preview: compiled.statements,
+    }),
+  };
+  const sqlPreview = compiled.statements;
   await query(
     sql,
     `insert into pack_migration_plans_v1(id,publisher,pack_name,from_pack_revision_id,to_pack_revision_id,candidate_source_digest,plan_digest,created_auth_context_id,class,status,live_facts_digest,plan_json,sql_preview) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13::jsonb)`,
@@ -134,10 +151,19 @@ export async function validateMigrationPlan(
   for (
     const change of plan.changes.filter((item) => item.status === "blocked")
   ) {
-    const qualified = change.target.resource;
-    const resource = qualified?.split(":").pop();
-    if (!resource) continue;
-    const table = await runtimeTable(sql, plan.publisher, plan.pack, resource);
+    const qualified = change.target.resource ?? change.target.relationship;
+    const definitionName = qualified?.split(":").pop();
+    if (!definitionName) continue;
+    const definitionKind = change.target.relationship
+      ? "relationship"
+      : "resource";
+    const table = await runtimeTable(
+      sql,
+      plan.publisher,
+      plan.pack,
+      definitionKind,
+      definitionName,
+    );
     let count = 0;
     if (
       table && change.kind === "remove_field" && change.target.field &&
@@ -150,14 +176,25 @@ export async function validateMigrationPlan(
         } is not null`,
       );
       count = Number(result.rows[0]?.count ?? 0);
-    } else if (table && change.kind === "remove_resource") {
+    } else if (
+      table && [
+        "remove_resource",
+        "remove_relationship",
+        "change_relationship",
+      ].includes(change.kind)
+    ) {
       const result = await query<{ count: string }>(
         sql,
         `select count(*)::text as count from ${quote(table)}`,
       );
       count = Number(result.rows[0]?.count ?? 0);
     } else if (
-      change.kind !== "remove_field" && change.kind !== "remove_resource"
+      ![
+        "remove_field",
+        "remove_resource",
+        "remove_relationship",
+        "change_relationship",
+      ].includes(change.kind)
     ) {
       count = 1;
     }
@@ -237,6 +274,7 @@ async function collectLiveFacts(
       sql,
       candidate.publisher,
       candidate.name,
+      "resource",
       resource,
     );
     if (!table) {
@@ -278,12 +316,13 @@ async function runtimeTable(
   sql: Queryable,
   publisher: string,
   pack: string,
-  resource: string,
+  definitionKind: "resource" | "relationship",
+  definitionName: string,
 ): Promise<string | null> {
   const result = await query<{ table_name: string }>(
     sql,
-    `select table_name from pack_runtime_tables where publisher=$1 and pack_name=$2 and definition_kind='resource' and definition_name=$3`,
-    [publisher, pack, resource],
+    `select table_name from pack_runtime_tables where publisher=$1 and pack_name=$2 and definition_kind=$3 and definition_name=$4`,
+    [publisher, pack, definitionKind, definitionName],
   );
   return result.rows[0]?.table_name ?? null;
 }

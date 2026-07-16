@@ -254,6 +254,229 @@ Deno.test("strict pack loader broadly rejects superseded schema and unsafe sourc
   }
 });
 
+Deno.test("lifecycle cross-invariants reject every invalid graph and mutation", async () => {
+  const lifecycleResource =
+    `kind: Resource\napiVersion: operant.dev/v1\nmetadata: {name: ticket}\nspec:\n  fields:\n    state: {type: string, required: true, enum: [open, closed]}\n    title: {type: string, required: true, maxLength: 8}\n    count: {type: integer, minimum: 0, maximum: 10}\n    amount: {type: decimal, precision: 4, scale: 2}\n    note: {type: string}\n  axi: {}\n`;
+  const lifecycle = (
+    states: string,
+    transitions: string,
+    initial = "open",
+    field = "state",
+  ) =>
+    `kind: Lifecycle\napiVersion: operant.dev/v1\nmetadata: {name: ticket_flow}\nspec:\n  resource: ticket\n  field: ${field}\n  initial: ${initial}\n  states: ${states}\n  transitions: ${transitions}\n  axi: {}\n`;
+  const invalid: Array<[string, string, string, string?]> = [
+    [
+      "terminal initial",
+      lifecycle(
+        "[{name: open, terminal: true}, {name: closed, terminal: true}]",
+        "[]",
+      ),
+      "initial lifecycle state must be nonterminal",
+    ],
+    [
+      "duplicate states",
+      lifecycle(
+        "[{name: open}, {name: open, terminal: true}, {name: closed, terminal: true}]",
+        "[{name: close, from: [open], to: closed}]",
+      ),
+      "duplicate state name open",
+    ],
+    [
+      "duplicate transitions",
+      lifecycle(
+        "[{name: open}, {name: closed, terminal: true}]",
+        "[{name: move, from: [open], to: closed}, {name: move, from: [open], to: closed, condition: 'true'}]",
+      ),
+      "duplicate transition name move",
+    ],
+    [
+      "unknown required field",
+      lifecycle(
+        "[{name: open}, {name: closed, terminal: true, required_fields: [missing]}]",
+        "[{name: close, from: [open], to: closed}]",
+      ),
+      "undeclared resource field missing",
+    ],
+    [
+      "unknown set field",
+      lifecycle(
+        "[{name: open}, {name: closed, terminal: true}]",
+        "[{name: close, from: [open], to: closed, set: {missing: x}}]",
+      ),
+      "set.missing: undeclared resource field",
+    ],
+    [
+      "invalid set type",
+      lifecycle(
+        "[{name: open}, {name: closed, terminal: true}]",
+        "[{name: close, from: [open], to: closed, set: {count: nope}}]",
+      ),
+      "expected integer",
+    ],
+    [
+      "invalid set bounds",
+      lifecycle(
+        "[{name: open}, {name: closed, terminal: true}]",
+        "[{name: close, from: [open], to: closed, set: {count: 11}}]",
+      ),
+      "exceeds maximum",
+    ],
+    [
+      "invalid decimal set",
+      lifecycle(
+        "[{name: open}, {name: closed, terminal: true}]",
+        "[{name: close, from: [open], to: closed, set: {amount: '1.234'}}]",
+      ),
+      "decimal scale exceeds",
+    ],
+    [
+      "unknown unset field",
+      lifecycle(
+        "[{name: open}, {name: closed, terminal: true}]",
+        "[{name: close, from: [open], to: closed, unset: [missing]}]",
+      ),
+      "undeclared resource field missing",
+    ],
+    [
+      "required unset field",
+      lifecycle(
+        "[{name: open}, {name: closed, terminal: true}]",
+        "[{name: close, from: [open], to: closed, unset: [title]}]",
+      ),
+      "required field title cannot be unset",
+    ],
+    [
+      "overlapping mutation",
+      lifecycle(
+        "[{name: open}, {name: closed, terminal: true}]",
+        "[{name: close, from: [open], to: closed, set: {note: x}, unset: [note]}]",
+      ),
+      "set and unset mutations overlap",
+    ],
+    [
+      "lifecycle field mutation",
+      lifecycle(
+        "[{name: open}, {name: closed, terminal: true}]",
+        "[{name: close, from: [open], to: closed, set: {state: closed}}]",
+      ),
+      "lifecycle field is mutated by transition.to",
+    ],
+    [
+      "unknown from",
+      lifecycle(
+        "[{name: open}, {name: closed, terminal: true}]",
+        "[{name: close, from: [missing], to: closed}]",
+      ),
+      "unknown lifecycle state missing",
+    ],
+    [
+      "unknown to",
+      lifecycle(
+        "[{name: open}, {name: closed, terminal: true}]",
+        "[{name: close, from: [open], to: missing}]",
+      ),
+      "unknown lifecycle state missing",
+    ],
+    [
+      "unreachable",
+      lifecycle(
+        "[{name: open}, {name: waiting}, {name: closed, terminal: true}]",
+        "[{name: close, from: [open], to: closed}]",
+      ),
+      "unreachable lifecycle states waiting",
+      lifecycleResource.replace(
+        "enum: [open, closed]",
+        "enum: [open, waiting, closed]",
+      ),
+    ],
+    [
+      "terminal outgoing",
+      lifecycle(
+        "[{name: open}, {name: closed, terminal: true}]",
+        "[{name: close, from: [open], to: closed}, {name: reopen, from: [closed], to: open}]",
+      ),
+      "terminal state closed cannot have outgoing transitions",
+    ],
+    [
+      "undeclared lifecycle field",
+      lifecycle(
+        "[{name: open}, {name: closed, terminal: true}]",
+        "[{name: close, from: [open], to: closed}]",
+        "open",
+        "missing",
+      ),
+      "lifecycle field must be a required string field",
+    ],
+    [
+      "optional lifecycle field",
+      lifecycle(
+        "[{name: open}, {name: closed, terminal: true}]",
+        "[{name: close, from: [open], to: closed}]",
+      ),
+      "lifecycle field must be a required string field",
+      lifecycleResource.replace(
+        "state: {type: string, required: true, enum",
+        "state: {type: string, enum",
+      ),
+    ],
+    [
+      "non-string lifecycle field",
+      lifecycle(
+        "[{name: open}, {name: closed, terminal: true}]",
+        "[{name: close, from: [open], to: closed}]",
+      ),
+      "lifecycle field must be a required string field",
+      lifecycleResource.replace(
+        "state: {type: string, required: true, enum: [open, closed]}",
+        "state: {type: integer, required: true}",
+      ),
+    ],
+    [
+      "field enum mismatch",
+      lifecycle(
+        "[{name: open}, {name: waiting}, {name: closed, terminal: true}]",
+        "[{name: wait, from: [open], to: waiting}, {name: close, from: [waiting], to: closed}]",
+      ),
+      "exactly match the lifecycle field enum",
+    ],
+  ];
+  for (
+    const [name, document, message, resourceDocument = lifecycleResource]
+      of invalid
+  ) {
+    await assertRejects(
+      () =>
+        loadPackFromFiles([
+          { path: "pack.yaml", text: root },
+          { path: "resources/ticket.yaml", text: resourceDocument },
+          { path: "lifecycles/ticket_flow.yaml", text: document },
+        ]),
+      Error,
+      message,
+      name,
+    );
+  }
+  const valid = lifecycle(
+    "[{name: open}, {name: closed, terminal: true, required_fields: [title]}]",
+    "[{name: close, from: [open], to: closed, set: {count: 5, amount: '1.25'}, unset: [note]}]",
+  );
+  const duplicate = valid.replace(
+    "metadata: {name: ticket_flow}",
+    "metadata: {name: second_flow}",
+  );
+  await assertRejects(
+    () =>
+      loadPackFromFiles([
+        { path: "pack.yaml", text: root },
+        { path: "resources/ticket.yaml", text: lifecycleResource },
+        { path: "lifecycles/ticket_flow.yaml", text: valid },
+        { path: "lifecycles/second_flow.yaml", text: duplicate },
+      ]),
+    Error,
+    "more than one lifecycle",
+  );
+});
+
 Deno.test("strict pack loader canonicalizes bounded YAML aliases", async () => {
   const merged = resource.replace(
     "name: { type: string, required: true }",

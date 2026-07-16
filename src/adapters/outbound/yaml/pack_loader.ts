@@ -141,7 +141,8 @@ export async function loadPackFromFiles(
   for (const file of files) {
     if (
       file.kind === "script" &&
-      /(?:^|[;\n}]\s*)import\s*(?:\(|["'{*])|\bimport\s*\(/m.test(file.text)
+      /\bimport\s*(?:\(|[A-Za-z_$*{])|\bexport\s+(?:\*|{[^}]*})\s+from\s*["']/m
+        .test(file.text)
     ) throw new Error(`${file.path}: hook imports are not supported`);
     const digest = await sha256(file.text);
     pack.sourceFiles.push({
@@ -280,7 +281,13 @@ export function parseYamlJsonObject(
   if (nonStringKey) {
     throw new Error(`${path}: YAML mapping keys must be strings`);
   }
-  return asRecord(canonicalize(doc.toJS({ maxAliasCount: 100 })), path);
+  try {
+    return asRecord(canonicalize(doc.toJS({ maxAliasCount: 100 })), path);
+  } catch (error) {
+    throw new Error(
+      `${path}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 }
 
 export function canonicalJson(value: unknown): string {
@@ -508,46 +515,7 @@ function validateReferences(pack: LoadedPack) {
         `${def.path}: lifecycle field must be a required string field`,
       );
     }
-    const states = asArray(def.spec.states, "states").map((s) =>
-      String(asRecord(s, "state").name)
-    );
-    if (
-      new Set(states).size !== states.length ||
-      !states.includes(String(def.spec.initial))
-    ) throw new Error(`${def.path}: lifecycle states/initial are invalid`);
-    const reachable = new Set([String(def.spec.initial)]);
-    let changed = true;
-    while (changed) {
-      changed = false;
-      for (const transition of asArray(def.spec.transitions, "transitions")) {
-        const t = asRecord(transition, "transition");
-        for (const from of asArray(t.from, "from")) {
-          if (!states.includes(String(from))) {
-            throw new Error(
-              `${def.path}: transition references unknown state ${from}`,
-            );
-          }
-        }
-        if (!states.includes(String(t.to))) {
-          throw new Error(
-            `${def.path}: transition references unknown state ${t.to}`,
-          );
-        }
-        if (
-          asArray(t.from, "from").some((from) => reachable.has(String(from))) &&
-          !reachable.has(String(t.to))
-        ) {
-          reachable.add(String(t.to));
-          changed = true;
-        }
-      }
-    }
-    const unreachable = states.filter((state) => !reachable.has(state));
-    if (unreachable.length) {
-      throw new Error(
-        `${def.path}: unreachable lifecycle states ${unreachable.join(",")}`,
-      );
-    }
+    validateLifecycle(def, resource, asRecord(field, "field"));
   }
   for (const def of Object.values(pack.actions)) {
     if (def.spec.reads) {
@@ -649,6 +617,250 @@ function validateReferences(pack: LoadedPack) {
   }
 }
 
+function validateLifecycle(
+  lifecycle: NormalizedDefinition,
+  resource: NormalizedDefinition,
+  lifecycleField: Record<string, JsonValue>,
+) {
+  const path = lifecycle.path;
+  const fields = asRecord(resource.spec.fields, `${resource.path}.spec.fields`);
+  const stateRecords = asArray(lifecycle.spec.states, `${path}.spec.states`)
+    .map(
+      (state, index) => asRecord(state, `${path}.spec.states.${index}`),
+    );
+  const stateNames = stateRecords.map((state) => String(state.name));
+  assertUniqueNames(stateNames, `${path}.spec.states`, "state");
+  const initial = String(lifecycle.spec.initial);
+  const initialState = stateRecords.find((state) => state.name === initial);
+  if (!initialState) {
+    throw new Error(`${path}.spec.initial: unknown lifecycle state ${initial}`);
+  }
+  if (initialState.terminal === true) {
+    throw new Error(
+      `${path}.spec.initial: initial lifecycle state must be nonterminal`,
+    );
+  }
+  const enumValues = Array.isArray(lifecycleField.enum)
+    ? lifecycleField.enum.map(String)
+    : null;
+  if (
+    enumValues &&
+    (enumValues.some((value) => !stateNames.includes(value)) ||
+      stateNames.some((value) => !enumValues.includes(value)))
+  ) {
+    throw new Error(
+      `${path}.spec.states: lifecycle states must exactly match the lifecycle field enum`,
+    );
+  }
+  for (const state of stateRecords) {
+    validateStringConstant(
+      lifecycleField,
+      String(state.name),
+      `${path}.spec.states.${state.name}.name`,
+    );
+    for (
+      const required of asArray(
+        state.required_fields ?? [],
+        `${path}.spec.states.${state.name}.required_fields`,
+      )
+    ) {
+      if (!fields[String(required)]) {
+        throw new Error(
+          `${path}.spec.states.${state.name}.required_fields: undeclared resource field ${required}`,
+        );
+      }
+    }
+  }
+  const transitions = asArray(
+    lifecycle.spec.transitions,
+    `${path}.spec.transitions`,
+  ).map((transition, index) =>
+    asRecord(transition, `${path}.spec.transitions.${index}`)
+  );
+  assertUniqueNames(
+    transitions.map((transition) => String(transition.name)),
+    `${path}.spec.transitions`,
+    "transition",
+  );
+  const terminalStates = new Set(
+    stateRecords.filter((state) => state.terminal === true).map((state) =>
+      String(state.name)
+    ),
+  );
+  const reachable = new Set([initial]);
+  for (const transition of transitions) {
+    const transitionPath = `${path}.spec.transitions.${transition.name}`;
+    const fromStates = asArray(transition.from, `${transitionPath}.from`).map(
+      String,
+    );
+    for (const from of fromStates) {
+      if (!stateNames.includes(from)) {
+        throw new Error(
+          `${transitionPath}.from: unknown lifecycle state ${from}`,
+        );
+      }
+      if (terminalStates.has(from)) {
+        throw new Error(
+          `${transitionPath}.from: terminal state ${from} cannot have outgoing transitions`,
+        );
+      }
+    }
+    const to = String(transition.to);
+    if (!stateNames.includes(to)) {
+      throw new Error(`${transitionPath}.to: unknown lifecycle state ${to}`);
+    }
+    const set = asRecord(transition.set ?? {}, `${transitionPath}.set`);
+    const unset = asArray(transition.unset ?? [], `${transitionPath}.unset`)
+      .map(
+        String,
+      );
+    for (const fieldName of Object.keys(set)) {
+      const descriptor = fields[fieldName];
+      if (!descriptor) {
+        throw new Error(
+          `${transitionPath}.set.${fieldName}: undeclared resource field`,
+        );
+      }
+      if (fieldName === lifecycle.spec.field) {
+        throw new Error(
+          `${transitionPath}.set.${fieldName}: lifecycle field is mutated by transition.to`,
+        );
+      }
+      validateFieldConstant(
+        asRecord(descriptor, `${resource.path}.spec.fields.${fieldName}`),
+        set[fieldName],
+        `${transitionPath}.set.${fieldName}`,
+      );
+    }
+    for (const fieldName of unset) {
+      const descriptor = fields[fieldName];
+      if (!descriptor) {
+        throw new Error(
+          `${transitionPath}.unset: undeclared resource field ${fieldName}`,
+        );
+      }
+      if (fieldName === lifecycle.spec.field) {
+        throw new Error(
+          `${transitionPath}.unset: lifecycle field is mutated by transition.to`,
+        );
+      }
+      if (asRecord(descriptor, fieldName).required === true) {
+        throw new Error(
+          `${transitionPath}.unset: required field ${fieldName} cannot be unset`,
+        );
+      }
+      if (fieldName in set) {
+        throw new Error(
+          `${transitionPath}: set and unset mutations overlap at ${fieldName}`,
+        );
+      }
+    }
+  }
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const transition of transitions) {
+      if (
+        asArray(transition.from, "from").some((from) =>
+          reachable.has(String(from))
+        ) && !reachable.has(String(transition.to))
+      ) {
+        reachable.add(String(transition.to));
+        changed = true;
+      }
+    }
+  }
+  const unreachable = stateNames.filter((state) => !reachable.has(state));
+  if (unreachable.length) {
+    throw new Error(
+      `${path}.spec.states: unreachable lifecycle states ${
+        unreachable.join(",")
+      }`,
+    );
+  }
+}
+
+function assertUniqueNames(values: string[], path: string, kind: string) {
+  const seen = new Set<string>();
+  for (const value of values) {
+    if (seen.has(value)) {
+      throw new Error(`${path}: duplicate ${kind} name ${value}`);
+    }
+    seen.add(value);
+  }
+}
+
+function validateFieldConstant(
+  descriptor: Record<string, JsonValue>,
+  value: JsonValue,
+  path: string,
+) {
+  validateSeedValue(descriptor, value, path);
+  if (descriptor.type === "string") {
+    validateStringConstant(descriptor, String(value), path);
+  }
+  if (descriptor.type === "integer" && typeof value === "number") {
+    if (typeof descriptor.minimum === "number" && value < descriptor.minimum) {
+      throw new Error(`${path}: value is below minimum`);
+    }
+    if (typeof descriptor.maximum === "number" && value > descriptor.maximum) {
+      throw new Error(`${path}: value exceeds maximum`);
+    }
+  }
+  if (descriptor.type === "decimal" && typeof value === "string") {
+    const numeric = Number(value);
+    if (
+      typeof descriptor.minimum === "string" &&
+      numeric < Number(descriptor.minimum)
+    ) throw new Error(`${path}: value is below minimum`);
+    if (
+      typeof descriptor.maximum === "string" &&
+      numeric > Number(descriptor.maximum)
+    ) throw new Error(`${path}: value exceeds maximum`);
+    const [integer, fraction = ""] = value.replace("-", "").split(".");
+    if (
+      typeof descriptor.scale === "number" && fraction.length > descriptor.scale
+    ) throw new Error(`${path}: decimal scale exceeds field scale`);
+    if (
+      typeof descriptor.precision === "number" &&
+      integer.length + fraction.length > descriptor.precision
+    ) throw new Error(`${path}: decimal precision exceeds field precision`);
+  }
+}
+
+function validateStringConstant(
+  descriptor: Record<string, JsonValue>,
+  value: string,
+  path: string,
+) {
+  if (Array.isArray(descriptor.enum) && !descriptor.enum.includes(value)) {
+    throw new Error(`${path}: value is not in field enum`);
+  }
+  if (
+    typeof descriptor.minLength === "number" &&
+    [...value].length < descriptor.minLength
+  ) throw new Error(`${path}: value is shorter than minLength`);
+  if (
+    typeof descriptor.maxLength === "number" &&
+    [...value].length > descriptor.maxLength
+  ) throw new Error(`${path}: value exceeds maxLength`);
+  if (
+    (descriptor.format === "uuid" || descriptor.ref) &&
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+      .test(value)
+  ) throw new Error(`${path}: value is not a UUID`);
+  if (
+    descriptor.format === "email" && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(value)
+  ) throw new Error(`${path}: value is not an email`);
+  if (descriptor.format === "uri") {
+    try {
+      new URL(value);
+    } catch {
+      throw new Error(`${path}: value is not a URI`);
+    }
+  }
+}
+
 function validateSeedValue(
   descriptor: Record<string, JsonValue>,
   value: JsonValue,
@@ -670,14 +882,25 @@ function validateSeedValue(
   ) {
     throw new Error(`${path}: expected canonical decimal string`);
   }
-  if (type === "date" && !/^\d{4}-\d{2}-\d{2}$/.test(String(value))) {
-    throw new Error(`${path}: expected YYYY-MM-DD date`);
+  if (type === "date") {
+    const text = String(value);
+    const parsed = new Date(`${text}T00:00:00.000Z`);
+    if (
+      !/^\d{4}-\d{2}-\d{2}$/.test(text) ||
+      Number.isNaN(parsed.getTime()) ||
+      parsed.toISOString().slice(0, 10) !== text
+    ) {
+      throw new Error(`${path}: expected valid YYYY-MM-DD date`);
+    }
   }
-  if (
-    type === "timestamp" &&
-    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(String(value))
-  ) {
-    throw new Error(`${path}: expected UTC RFC 3339 timestamp`);
+  if (type === "timestamp") {
+    const text = String(value);
+    if (
+      !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(text) ||
+      Number.isNaN(Date.parse(text))
+    ) {
+      throw new Error(`${path}: expected UTC RFC 3339 timestamp`);
+    }
   }
 }
 

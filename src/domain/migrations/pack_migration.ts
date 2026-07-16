@@ -50,7 +50,20 @@ export type MigrationPlan = {
   blockers: Array<
     { change_id: string; code: string; count: number; message: string }
   >;
-  steps: Array<{ id: string; kind: string; change_ids: string[] }>;
+  steps: Array<{
+    id: string;
+    kind: string;
+    change_ids: string[];
+    statement_indexes: number[];
+  }>;
+  dependency_graph: {
+    edges: Array<{
+      from_step_id: string;
+      to_step_id: string;
+      reason: string;
+    }>;
+    topological_order: string[];
+  };
   live_facts_digest: string;
   last_validation: null | {
     id: string;
@@ -83,7 +96,7 @@ export async function buildMigrationPlan(input: {
   candidate: LoadedPack;
   liveFacts: LiveFacts;
   createdAt?: Date;
-}): Promise<{ plan: MigrationPlan; sql: string[] }> {
+}): Promise<{ plan: MigrationPlan }> {
   const changes: MigrationChange[] = [];
   const activeResources = definitions(input.active?.normalized, "resources");
   const candidateResources = Object.fromEntries(
@@ -236,12 +249,11 @@ export async function buildMigrationPlan(input: {
     count: Number(change.facts.present_values ?? change.facts.row_count ?? 0),
     message: `${change.kind} cannot be applied against current live facts`,
   }));
-  const sql = changes.filter((change) => change.status === "ready").map(
-    sqlForChange,
-  );
-  const steps = changes.filter((change) => change.status === "ready").map((
-    change,
-  ) => ({ id: uuidV7(), kind: change.kind, change_ids: [change.id] }));
+  const steps: MigrationPlan["steps"] = [];
+  const dependencyGraph: MigrationPlan["dependency_graph"] = {
+    edges: [],
+    topological_order: [],
+  };
   const rank = (value: MigrationClass) =>
     value === "destructive" ? 3 : value === "risky" ? 2 : 1;
   const planClass = changes.reduce<MigrationClass>(
@@ -275,12 +287,13 @@ export async function buildMigrationPlan(input: {
     hazards,
     blockers,
     steps,
+    dependency_graph: dependencyGraph,
     live_facts_digest: liveFactsDigest,
     last_validation: null,
     application: null,
   };
   const planDigest = await migrationDigest(immutable);
-  return { plan: { ...immutable, plan_digest: planDigest }, sql };
+  return { plan: { ...immutable, plan_digest: planDigest } };
 }
 
 function diffDefinitions(
@@ -308,7 +321,8 @@ function diffDefinitions(
     ) continue;
     const removed = before[name] && !after[name];
     const changed = before[name] && after[name];
-    const className: MigrationClass = removed
+    const relationshipReplacement = kind === "relationships" && changed;
+    const className: MigrationClass = removed || relationshipReplacement
       ? "destructive"
       : changed
       ? "risky"
@@ -319,7 +333,7 @@ function diffDefinitions(
         kind.slice(0, -1)
       }`,
       class: className,
-      status: removed ? "blocked" : "ready",
+      status: removed || relationshipReplacement ? "blocked" : "ready",
       target: { [kind.slice(0, -1)]: identity(input.candidate, name) },
       reason: `${kind.slice(0, -1)} ${
         removed ? "removed" : changed ? "changed" : "added"
@@ -327,14 +341,20 @@ function diffDefinitions(
       facts: {},
       hazard_codes: removed
         ? ["REFERENCE_BREAK", "API_BREAK"]
+        : relationshipReplacement
+        ? ["DATA_LOSS", "API_BREAK", "TABLE_REWRITE", "EXCLUSIVE_LOCK"]
         : changed && (kind === "hooks" || kind === "actions")
         ? [kind === "hooks" ? "HOOK_BEHAVIOR_CHANGE" : "ACTION_CONTRACT_CHANGE"]
         : [],
-      intermediate_revision_guidance: removed
-        ? "remove dependent references in an explicit intermediate revision"
+      intermediate_revision_guidance: removed || relationshipReplacement
+        ? "use an explicit intermediate revision and ordinary changesets before replacing dependent schema"
         : null,
-      cleanup_required: removed ? "remove dependent references" : null,
-      destructive_action: removed ? `remove ${kind.slice(0, -1)}` : null,
+      cleanup_required: removed || relationshipReplacement
+        ? "remove or migrate dependent relationship rows"
+        : null,
+      destructive_action: removed || relationshipReplacement
+        ? `${removed ? "remove" : "replace"} ${kind.slice(0, -1)}`
+        : null,
     });
   }
 }
@@ -367,13 +387,6 @@ function blockerCode(change: MigrationChange) {
 }
 function hazardMessage(code: string, target: Record<string, string>) {
   return `${code} hazard for ${Object.values(target).join(":")}`;
-}
-function sqlForChange(change: MigrationChange) {
-  return `-- ${change.kind} ${
-    Object.entries(change.target).map(([key, value]) => `${key}=${value}`).join(
-      " ",
-    )
-  }`;
 }
 export async function migrationDigest(value: unknown): Promise<string> {
   const digest = await crypto.subtle.digest(

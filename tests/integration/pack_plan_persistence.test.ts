@@ -1,4 +1,9 @@
-import { assertEquals, assertNotEquals, assertRejects } from "jsr:@std/assert";
+import {
+  assert,
+  assertEquals,
+  assertNotEquals,
+  assertRejects,
+} from "jsr:@std/assert";
 import {
   closePostgresClient,
   createPostgresClient,
@@ -69,6 +74,35 @@ Deno.test("immutable candidates are reused while every preview persists a distin
     );
     assertNotEquals(first.plan.id, second.plan.id);
     assertEquals(first.plan.from_pack_revision_id, null);
+    assert(first.plan.steps.length > 2);
+    assert(first.plan.dependency_graph.edges.length > 0);
+    assertEquals(
+      first.plan.dependency_graph.topological_order,
+      first.plan.steps.map((step) => step.id),
+    );
+    const persistedSql = (await query<{ sql_preview: string[] | string }>(
+      sql,
+      "select sql_preview from pack_migration_plans_v1 where id=$1",
+      [first.plan.id],
+    )).rows[0].sql_preview;
+    const statements = typeof persistedSql === "string"
+      ? JSON.parse(persistedSql) as string[]
+      : persistedSql;
+    assert(
+      statements.some((statement) => /^create table \"res_/.test(statement)),
+    );
+    assert(
+      statements.some((statement) => /^create table \"rel_/.test(statement)),
+    );
+    assert(
+      statements.some((statement) =>
+        /^insert into pack_active_revisions/.test(statement)
+      ),
+    );
+    assert(
+      statements.every((statement) => !statement.trimStart().startsWith("--")),
+    );
+    assert(statements.every((statement) => !/\$[0-9]+/.test(statement)));
     assertEquals(
       (await query<{ count: string }>(
         sql,

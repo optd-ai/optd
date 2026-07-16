@@ -1,5 +1,10 @@
 import { Hono } from "npm:hono";
-import { type Result, toHttpStatus } from "../../../domain/errors/result.ts";
+import {
+  err,
+  type Result,
+  toHttpStatus,
+  validationError,
+} from "../../../domain/errors/result.ts";
 import {
   errorEnvelope,
   successEnvelope,
@@ -249,17 +254,27 @@ export function makeHttpApp(
       ),
   );
 
-  app.post(
-    "/packs/preview",
-    async (c) =>
-      resultJson(
+  app.post("/packs/preview", async (c) => {
+    try {
+      return resultJson(
         c,
         await deps.packs.preview(
           await multipartFiles(c.req.raw),
           c.get("auth"),
         ),
-      ),
-  );
+      );
+    } catch (error) {
+      return resultJson(
+        c,
+        err(
+          validationError(
+            "bad_pack",
+            error instanceof Error ? error.message : String(error),
+          ),
+        ),
+      );
+    }
+  });
   app.get(
     "/migrations/:id",
     async (c) =>
