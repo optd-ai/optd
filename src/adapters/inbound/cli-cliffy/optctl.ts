@@ -6,7 +6,14 @@ import {
   type ErrorEnvelope,
   errorEnvelope,
 } from "../../../schemas/api/contracts.ts";
-import { readOrigin, writeOrigin } from "./auth_store.ts";
+import {
+  cleanupLocalAuth,
+  doctorLocalAuth,
+  localAuthStatus,
+  readOrigin,
+  removeLocalAuthorization,
+  writeOrigin,
+} from "./auth_store.ts";
 import { opaqueToken, tokenDigest } from "../../../domain/auth/token.ts";
 
 export type OptctlRunResult = { stdout: string; stderr: string; code: number };
@@ -42,7 +49,10 @@ async function requestCredentialHeaders(
 }
 async function getJson(url: string): Promise<unknown> {
   return await decodeJsonResponse(
-    await fetch(url, { headers: await credentialHeaders(url) }),
+    await fetch(url, {
+      headers: await credentialHeaders(url),
+      redirect: "error",
+    }),
   );
 }
 async function postJson(url: string, payload: unknown): Promise<unknown> {
@@ -54,6 +64,7 @@ async function postJson(url: string, payload: unknown): Promise<unknown> {
         ...await credentialHeaders(url),
       },
       body: JSON.stringify(payload),
+      redirect: "error",
     }),
   );
 }
@@ -72,6 +83,7 @@ async function postMultipart(url: string, packDir: string): Promise<unknown> {
       method: "POST",
       body: form,
       headers: await credentialHeaders(url),
+      redirect: "error",
     }),
   );
 }
@@ -627,8 +639,69 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
         username,
       });
       result = authenticatedOutput(envelopeData(result).user);
-    } else if (cmd === "auth" && (sub === "whoami" || sub === "status")) {
+    } else if (cmd === "auth" && sub === "status") {
+      result = await localAuthStatus(parsed.server);
+    } else if (cmd === "auth" && sub === "whoami") {
       result = await getJson(`${parsed.server}/api/v1/auth/me`);
+    } else if (cmd === "auth" && sub === "session-pid") {
+      return { stdout: `${Deno.ppid}\n`, stderr: "", code: 0 };
+    } else if (cmd === "auth" && sub === "doctor") {
+      const doctorArgs = parsed.positional.slice(2);
+      const fix = doctorArgs.includes("--fix");
+      if (fix && !doctorArgs.includes("--yes")) {
+        throw usageError("auth doctor --fix requires --yes");
+      }
+      const report = await doctorLocalAuth(fix);
+      const fails = !report.healthy ||
+        (doctorArgs.includes("--strict") &&
+          report.findings.some((finding) => finding.severity === "warning"));
+      return {
+        stdout: render(report, parsed.json),
+        stderr: "",
+        code: fails ? 1 : 0,
+      };
+    } else if (cmd === "auth" && sub === "cleanup") {
+      result = {
+        ok: true,
+        data: { removed: await cleanupLocalAuth(parsed.server) },
+      };
+    } else if (cmd === "auth" && sub === "isolate") {
+      const separator = parsed.positional.indexOf("--");
+      const childArgs = separator >= 0
+        ? parsed.positional.slice(separator + 1)
+        : parsed.positional.slice(2);
+      if (!childArgs.length) return { stdout: "", stderr: "", code: 127 };
+      const local = await readOrigin(parsed.server);
+      if (!local.requestToken) {
+        throw new OptctlError(errorEnvelope({
+          code: "authorization_request_credential_missing",
+          message: "an authorization-request credential is required",
+          details: {},
+        }));
+      }
+      const env: Record<string, string> = {
+        ...Deno.env.toObject(),
+        OPERANT_AUTH_TREE_STOP_PID: String(Deno.pid),
+      };
+      for (const key of Object.keys(env)) {
+        if (/^OPERANT_(?:BEARER|AUTH_TOKEN|TOKEN)$/.test(key)) delete env[key];
+      }
+      try {
+        const child = new Deno.Command(childArgs[0], {
+          args: childArgs.slice(1),
+          env,
+          stdin: "inherit",
+          stdout: "inherit",
+          stderr: "inherit",
+        }).spawn();
+        const status = await child.status;
+        return { stdout: "", stderr: "", code: status.code };
+      } catch (error) {
+        if (error instanceof Deno.errors.NotFound) {
+          return { stdout: "", stderr: "", code: 127 };
+        }
+        throw error;
+      }
     } else if (cmd === "auth" && sub === "sessions") {
       result = await getJson(`${parsed.server}/api/v1/auth/sessions`);
     } else if (cmd === "auth" && sub === "logout") {
@@ -749,9 +822,15 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
           ),
         );
         const data = envelopeData(redeemed);
+        const authorization = data.authorization as
+          | Record<string, unknown>
+          | undefined;
         await writeOrigin(parsed.server, {
           token: String(data.token),
           requestToken: undefined,
+          authorizationId: typeof authorization?.id === "string"
+            ? authorization.id
+            : value,
         });
         result = redeemed;
       } else {
@@ -893,6 +972,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
         }/revoke`,
         {},
       );
+      await removeLocalAuthorization(parsed.server, value);
     } else if (cmd === "auth" && sub === "password-reset") {
       const action = value;
       const resetArgs = parsed.positional.slice(3);
@@ -1238,10 +1318,18 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
         code: malformed.exitCode,
       };
     }
+    const unsupported = error instanceof Error &&
+      error.message === "process_inspection_unsupported";
     const unavailable = error instanceof TypeError;
     const envelope = errorEnvelope({
-      code: unavailable ? "unavailable" : "internal_error",
-      message: unavailable
+      code: unsupported
+        ? "process_inspection_unsupported"
+        : unavailable
+        ? "unavailable"
+        : "internal_error",
+      message: unsupported
+        ? "process inspection is unsupported on this operating system"
+        : unavailable
         ? "server is unavailable"
         : error instanceof Error
         ? error.message
