@@ -5,6 +5,7 @@ import {
 } from "../../../src/adapters/outbound/postgres/client.ts";
 import { seedObjectHistoryFixture } from "../../support/object_history_fixtures.ts";
 import { uuidV7 } from "../../../src/domain/ids/uuid_v7.ts";
+import { opaqueToken, tokenDigest } from "../../../src/domain/auth/token.ts";
 import {
   type LiveHarness,
   startLiveHarness,
@@ -479,6 +480,122 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
       username: "history-admin",
       password: "History-Admin-Password-42!",
     });
+    const agent = await createAgentLineage(harness, auth);
+    const currentUrl =
+      `${harness.baseUrl}/api/v1/projects/${projectOne}/objects/operant/crm/lead/${ids.object}`;
+    const historyUrl = `${currentUrl}/history`;
+    const agentSmoke = await fetch(currentUrl, {
+      headers: { authorization: `Bearer ${agent.token}` },
+    });
+    assertEquals(
+      agentSmoke.status,
+      200,
+      JSON.stringify(await agentSmoke.json()),
+    );
+    await mutateBeforeAgentBoundary(
+      harness,
+      agent,
+      currentUrl,
+      () =>
+        query(
+          harness.server.sql,
+          "update agent_authorizations set revoked_at=now() where id=$1",
+          [agent.rootId],
+        ),
+    );
+    await query(
+      harness.server.sql,
+      "update agent_authorizations set revoked_at=null where id=$1",
+      [agent.rootId],
+    );
+    await mutateBeforeAgentBoundary(
+      harness,
+      agent,
+      historyUrl,
+      () =>
+        query(
+          harness.server.sql,
+          "update agent_authorizations set superseded_at=now() where id=$1",
+          [agent.rootId],
+        ),
+    );
+    await query(
+      harness.server.sql,
+      "update agent_authorizations set superseded_at=null where id=$1",
+      [agent.rootId],
+    );
+    await mutateBeforeAgentBoundary(
+      harness,
+      agent,
+      currentUrl,
+      () =>
+        query(
+          harness.server.sql,
+          "update principals set active=false where id=$1",
+          [agent.principalId],
+        ),
+    );
+    await query(
+      harness.server.sql,
+      "update principals set active=true where id=$1",
+      [agent.principalId],
+    );
+    await mutateAfterAgentLocks(
+      harness,
+      agent,
+      leadTable,
+      currentUrl,
+      () =>
+        query(
+          harness.server.sql,
+          "update agent_authorizations set revoked_at=now() where id=$1",
+          [agent.rootId],
+        ),
+    );
+    await query(
+      harness.server.sql,
+      "update agent_authorizations set revoked_at=null where id=$1",
+      [agent.rootId],
+    );
+    await mutateAfterAgentLocks(
+      harness,
+      agent,
+      leadTable,
+      historyUrl,
+      () =>
+        query(
+          harness.server.sql,
+          "update agent_authorizations set superseded_at=now() where id=$1",
+          [agent.rootId],
+        ),
+    );
+    await query(
+      harness.server.sql,
+      "update agent_authorizations set superseded_at=null where id=$1",
+      [agent.rootId],
+    );
+    const agentFirstPage = await fetch(`${historyUrl}?limit=1`, {
+      headers: { authorization: `Bearer ${agent.token}` },
+    });
+    assertEquals(agentFirstPage.status, 200);
+    const agentCursor = (await agentFirstPage.json()).meta.next_cursor;
+    const alternate = await createAlternateAgentRoot(harness, agent, auth);
+    await query(
+      harness.server.sql,
+      "update auth_sessions set authorization_id=$1 where id=$2",
+      [alternate.leafId, agent.sessionId],
+    );
+    const changedRootContinuation = await fetch(
+      `${historyUrl}?limit=1&cursor=${encodeURIComponent(agentCursor)}`,
+      {
+        headers: { authorization: `Bearer ${agent.token}` },
+      },
+    );
+    assertEquals(changedRootContinuation.status, 400);
+    assertEquals(
+      (await changedRootContinuation.json()).error.code,
+      "invalid_cursor",
+    );
     const mismatch = await harness.runOptctl([
       "--json",
       "--project",
@@ -573,6 +690,10 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
       "operant/crm:lead",
       ids.object,
     ], "project_conflict");
+  } catch (error) {
+    console.error(error);
+    console.error(await harness.diagnostics());
+    throw error;
   } finally {
     await harness.close();
   }
@@ -746,4 +867,185 @@ async function proveRevocationOrdering(
   assertEquals(result.code, 0, result.stderr);
   await revocation;
   await expectCode(harness, readArgs, "not_found");
+}
+
+type AgentLineageFixture = {
+  token: string;
+  sessionId: string;
+  principalId: string;
+  rootId: string;
+  leafId: string;
+  agentUserId: string;
+};
+
+async function createAgentLineage(
+  harness: LiveHarness,
+  approvedByAuthContextId: string,
+): Promise<AgentLineageFixture> {
+  const principalId = uuidV7();
+  const agentUserId = uuidV7();
+  const rootId = uuidV7();
+  const leafId = uuidV7();
+  const sessionId = uuidV7();
+  const token = opaqueToken();
+  await harness.server.sql.begin(async (tx) => {
+    await query(
+      tx,
+      "insert into principals(id,type,active) values($1,'agent_user',true)",
+      [principalId],
+    );
+    await query(
+      tx,
+      `insert into agent_users(id,principal_id,human_user_id,name)
+      select $1,$2,human_user_id,'history-lineage-agent' from auth_contexts where id=$3`,
+      [agentUserId, principalId, approvedByAuthContextId],
+    );
+    await query(
+      tx,
+      `insert into agent_authorizations(
+      id,agent_user_id,human_user_id,parent_authorization_id,root_authorization_id,approved_by_auth_context_id)
+      select $1,$2,human_user_id,null,$1,$3 from auth_contexts where id=$3`,
+      [rootId, agentUserId, approvedByAuthContextId],
+    );
+    await query(
+      tx,
+      `insert into agent_authorizations(
+      id,agent_user_id,human_user_id,parent_authorization_id,root_authorization_id,approved_by_auth_context_id)
+      select $1,$2,human_user_id,$3,$3,$4 from auth_contexts where id=$4`,
+      [leafId, agentUserId, rootId, approvedByAuthContextId],
+    );
+    for (const authorizationId of [rootId, leafId]) {
+      for (
+        const role of [
+          "test:history_read",
+          "test:history_history",
+          "test:history_archive",
+        ]
+      ) {
+        await query(
+          tx,
+          "insert into agent_authorization_roles(id,authorization_id,role_id,boundary_type,project_id) select $1,$2,$3,'project',project_id from role_assignments where role_id=$3 limit 1",
+          [uuidV7(), authorizationId, role],
+        );
+      }
+    }
+    await query(
+      tx,
+      `insert into auth_sessions(
+      id,principal_id,human_user_id,credential_kind,token_digest,authorization_id)
+      select $1,$2,human_user_id,'agent_authorization',$3,$4 from auth_contexts where id=$5`,
+      [
+        sessionId,
+        principalId,
+        await tokenDigest(token),
+        leafId,
+        approvedByAuthContextId,
+      ],
+    );
+  });
+  return { token, sessionId, principalId, rootId, leafId, agentUserId };
+}
+
+async function mutateBeforeAgentBoundary(
+  _harness: LiveHarness,
+  agent: AgentLineageFixture,
+  url: string,
+  mutate: () => Promise<unknown>,
+) {
+  await mutate();
+  const denied = await fetch(url, {
+    headers: { authorization: `Bearer ${agent.token}` },
+  });
+  assert(denied.status === 401 || denied.status === 404);
+  assertEquals((await denied.json()).ok, false);
+}
+
+async function mutateAfterAgentLocks(
+  harness: LiveHarness,
+  agent: AgentLineageFixture,
+  table: string,
+  url: string,
+  mutate: () => Promise<unknown>,
+) {
+  let release!: () => void;
+  let ready!: () => void;
+  const releaseWait = new Promise<void>((resolve) => release = resolve);
+  const readyWait = new Promise<void>((resolve) => ready = resolve);
+  const blocker = harness.server.sql.begin(async (tx) => {
+    await query(
+      tx,
+      `lock table ${quoteIdentifier(table)} in access exclusive mode`,
+    );
+    ready();
+    await releaseWait;
+  });
+  await readyWait;
+  const response = fetch(url, {
+    headers: { authorization: `Bearer ${agent.token}` },
+  }).catch((error) => error as Error);
+  await waitForTableBarrier(harness, table);
+  let changed = false;
+  const mutation = mutate().then(() => changed = true);
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assertEquals(changed, false, "ancestor mutation must wait for lineage locks");
+  release();
+  await blocker;
+  const disclosed = await response;
+  if (disclosed instanceof Error) throw disclosed;
+  assertEquals(disclosed.status, 200);
+  await mutation;
+}
+
+async function waitForTableBarrier(harness: LiveHarness, table: string) {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const waiting = (await query<{ waiting: boolean }>(
+      harness.server.sql,
+      "select exists(select 1 from pg_stat_activity where wait_event_type='Lock' and query like '%'||$1||'%') waiting",
+      [table],
+    )).rows[0].waiting;
+    if (waiting) return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error("agent read did not reach the deterministic table barrier");
+}
+
+async function createAlternateAgentRoot(
+  harness: LiveHarness,
+  agent: AgentLineageFixture,
+  approvedByAuthContextId: string,
+) {
+  const rootId = uuidV7();
+  const leafId = uuidV7();
+  await harness.server.sql.begin(async (tx) => {
+    await query(
+      tx,
+      `insert into agent_authorizations(
+      id,agent_user_id,human_user_id,parent_authorization_id,root_authorization_id,approved_by_auth_context_id)
+      select $1,$2,human_user_id,null,$1,$3 from auth_contexts where id=$3`,
+      [rootId, agent.agentUserId, approvedByAuthContextId],
+    );
+    await query(
+      tx,
+      `insert into agent_authorizations(
+      id,agent_user_id,human_user_id,parent_authorization_id,root_authorization_id,approved_by_auth_context_id)
+      select $1,$2,human_user_id,$3,$3,$4 from auth_contexts where id=$4`,
+      [leafId, agent.agentUserId, rootId, approvedByAuthContextId],
+    );
+    for (const authorizationId of [rootId, leafId]) {
+      for (
+        const role of [
+          "test:history_read",
+          "test:history_history",
+          "test:history_archive",
+        ]
+      ) {
+        await query(
+          tx,
+          "insert into agent_authorization_roles(id,authorization_id,role_id,boundary_type,project_id) select $1,$2,$3,'project',project_id from role_assignments where role_id=$3 limit 1",
+          [uuidV7(), authorizationId, role],
+        );
+      }
+    }
+  });
+  return { rootId, leafId };
 }

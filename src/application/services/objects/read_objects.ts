@@ -1,6 +1,7 @@
-import type {
-  ObjectReadBoundary,
-  ReadAddress,
+import {
+  ObjectReadAuthorityInvalidError,
+  type ObjectReadBoundary,
+  type ReadAddress,
 } from "../../ports/object_reader.ts";
 import type { AuthContext } from "../../../domain/auth/model.ts";
 import type { BoundaryAuthority } from "../../../domain/authorization/model.ts";
@@ -30,36 +31,43 @@ export function makeObjectReadService(deps: {
       } catch (error) {
         return err(validationError("bad_request", message(error)));
       }
-      return await deps.boundary.execute(
-        auth,
-        address,
-        async (reader, authorization) => {
-          const resource = qualifiedIdentity(address.definition);
-          const authority = await authorization.authority(auth, {
-            type: "project",
-            projectId: address.projectId,
-          });
-          if (
-            !authority.ok || !allowed(authority.value, "read", resource)
-          ) return err(notFound());
-          const value = await reader.read(address);
-          if (
-            !value ||
-            (value.archived_at !== null &&
-              !allowed(authority.value, "read_archived", resource))
-          ) return err(notFound());
-          const current = await authorization.authority(auth, {
-            type: "project",
-            projectId: address.projectId,
-          });
-          if (
-            !current.ok || !allowed(current.value, "read", resource) ||
-            (value.archived_at !== null &&
-              !allowed(current.value, "read_archived", resource))
-          ) return err(notFound());
-          return ok(value);
-        },
-      );
+      try {
+        return await deps.boundary.execute(
+          auth,
+          address,
+          async (reader, authorization) => {
+            const resource = qualifiedIdentity(address.definition);
+            const authority = await authorization.authority(auth, {
+              type: "project",
+              projectId: address.projectId,
+            });
+            if (
+              !authority.ok || !allowed(authority.value, "read", resource)
+            ) return err(notFound());
+            const value = await reader.read(address);
+            if (
+              !value ||
+              (value.archived_at !== null &&
+                !allowed(authority.value, "read_archived", resource))
+            ) return err(notFound());
+            const current = await authorization.authority(auth, {
+              type: "project",
+              projectId: address.projectId,
+            });
+            if (
+              !current.ok || !allowed(current.value, "read", resource) ||
+              (value.archived_at !== null &&
+                !allowed(current.value, "read_archived", resource))
+            ) return err(notFound());
+            return ok(value);
+          },
+        );
+      } catch (error) {
+        if (error instanceof ObjectReadAuthorityInvalidError) {
+          return err(notFound());
+        }
+        throw error;
+      }
     },
     async history(
       address: ReadAddress,
@@ -80,63 +88,82 @@ export function makeObjectReadService(deps: {
           ),
         );
       }
-      return await deps.boundary.execute(
-        auth,
-        address,
-        async (reader, authorization) => {
-          const resource = qualifiedIdentity(address.definition);
-          const authority = await authorization.authority(auth, {
-            type: "project",
-            projectId: address.projectId,
-          });
-          if (
-            !authority.ok || !historyAllowed(authority.value, resource)
-          ) return err(notFound());
-          let before: { createdAt: string; id: string } | undefined;
-          if (input.cursor) {
-            try {
-              before = await deps.cursors().decode(
-                input.cursor,
-                binding(address, auth, authority.value, limit),
-              );
-            } catch {
-              return err(
-                validationError(
-                  "invalid_cursor",
-                  "history cursor is invalid or does not match this request",
-                ),
-              );
+      try {
+        return await deps.boundary.execute(
+          auth,
+          address,
+          async (reader, authorization, anchor) => {
+            const resource = qualifiedIdentity(address.definition);
+            const authority = await authorization.authority(auth, {
+              type: "project",
+              projectId: address.projectId,
+            });
+            if (
+              !authority.ok || !historyAllowed(authority.value, resource)
+            ) return err(notFound());
+            let before: { createdAt: string; id: string } | undefined;
+            if (input.cursor) {
+              try {
+                before = await deps.cursors().decode(
+                  input.cursor,
+                  binding(
+                    address,
+                    auth,
+                    authority.value,
+                    anchor.authorizationRootId,
+                    limit,
+                  ),
+                );
+              } catch {
+                return err(
+                  validationError(
+                    "invalid_cursor",
+                    "history cursor is invalid or does not match this request",
+                  ),
+                );
+              }
             }
-          }
-          const currentObject = await reader.read(address);
-          if (
-            !currentObject ||
-            (currentObject.archived_at !== null &&
-              !allowed(authority.value, "read_archived", resource))
-          ) return err(notFound());
-          const page = await reader.history(address, limit, before);
-          if (!page) return err(notFound());
-          const current = await authorization.authority(auth, {
-            type: "project",
-            projectId: address.projectId,
-          });
-          if (
-            !current.ok || !historyAllowed(current.value, resource) ||
-            (currentObject.archived_at !== null &&
-              !allowed(current.value, "read_archived", resource))
-          ) return err(notFound());
-          const next = page.nextPosition
-            ? await deps.cursors().encode(
-              binding(address, auth, current.value, limit),
-              page.nextPosition,
-            )
-            : null;
-          return ok({
-            items: page.items,
-            meta: { next_cursor: next, has_more: page.hasMore },
-          });
-        },
-      );
+            const currentObject = await reader.read(address);
+            if (
+              !currentObject ||
+              (currentObject.archived_at !== null &&
+                !allowed(authority.value, "read_archived", resource))
+            ) return err(notFound());
+            const page = await reader.history(address, limit, before);
+            if (!page) return err(notFound());
+            const current = await authorization.authority(auth, {
+              type: "project",
+              projectId: address.projectId,
+            });
+            if (
+              !current.ok || !historyAllowed(current.value, resource) ||
+              (currentObject.archived_at !== null &&
+                !allowed(current.value, "read_archived", resource))
+            ) return err(notFound());
+            const next = page.nextPosition
+              ? await deps.cursors().encode(
+                binding(
+                  address,
+                  auth,
+                  current.value,
+                  anchor.authorizationRootId,
+                  limit,
+                ),
+                page.nextPosition,
+              )
+              : null;
+            return ok({
+              items: page.items,
+              meta: { next_cursor: next, has_more: page.hasMore },
+            });
+          },
+        );
+      } catch (error) {
+        if (error instanceof ObjectReadAuthorityInvalidError) {
+          return err(notFound());
+        }
+        throw error;
+      }
     },
   };
 }
@@ -178,6 +205,7 @@ function binding(
   address: ReadAddress,
   auth: AuthContext,
   authority: BoundaryAuthority,
+  authorizationRootId: string,
   limit: number,
 ) {
   return {
@@ -187,6 +215,7 @@ function binding(
     object_id: address.objectId,
     principal_id: auth.principalId,
     authorization_id: auth.authorizationId ?? null,
+    authorization_root_id: authorizationRootId,
     policy_digest: authority.digest,
     limit,
   };

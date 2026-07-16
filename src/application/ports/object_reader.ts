@@ -18,6 +18,16 @@ export type HistoryPage = Readonly<{
   nextPosition: { createdAt: string; id: string } | null;
 }>;
 
+export type ReadAuthorityAnchor = Readonly<{
+  authorizationRootId: string;
+}>;
+
+export class ObjectReadAuthorityInvalidError extends Error {
+  constructor() {
+    super("object read authority is no longer valid");
+  }
+}
+
 export interface ObjectReadBoundary {
   execute<T>(
     auth: AuthContext,
@@ -25,6 +35,7 @@ export interface ObjectReadBoundary {
     work: (
       reader: ObjectReader,
       authorization: AuthorizationRepository,
+      anchor: ReadAuthorityAnchor,
     ) => Promise<T>,
   ): Promise<T>;
 }
