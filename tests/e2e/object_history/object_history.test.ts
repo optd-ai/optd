@@ -492,7 +492,7 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
       200,
       JSON.stringify(await agentSmoke.json()),
     );
-    await mutateBeforeAgentBoundary(
+    await raceBeforeAgentBoundary(
       harness,
       agent,
       currentUrl,
@@ -508,7 +508,7 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
       "update agent_authorizations set revoked_at=null where id=$1",
       [agent.rootId],
     );
-    await mutateBeforeAgentBoundary(
+    await raceBeforeAgentBoundary(
       harness,
       agent,
       historyUrl,
@@ -944,6 +944,55 @@ async function createAgentLineage(
     );
   });
   return { token, sessionId, principalId, rootId, leafId, agentUserId };
+}
+
+async function raceBeforeAgentBoundary(
+  harness: LiveHarness,
+  agent: AgentLineageFixture,
+  url: string,
+  mutate: () => Promise<unknown>,
+) {
+  await query(
+    harness.server.sql,
+    `create function test_agent_auth_context_barrier() returns trigger language plpgsql as $$
+    begin if new.authorization_id is not null then perform pg_sleep(1); end if; return new; end $$`,
+  );
+  await query(
+    harness.server.sql,
+    `create trigger test_agent_auth_context_barrier_trigger after insert on auth_contexts
+    for each row execute function test_agent_auth_context_barrier()`,
+  );
+  try {
+    const response = fetch(url, {
+      headers: { authorization: `Bearer ${agent.token}` },
+    });
+    for (let attempt = 0; attempt < 100; attempt++) {
+      const sleeping = (await query<{ sleeping: boolean }>(
+        harness.server.sql,
+        "select exists(select 1 from pg_stat_activity where wait_event='PgSleep' and query like 'insert into auth_contexts%') sleeping",
+      )).rows[0].sleeping;
+      if (sleeping) break;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      if (attempt === 99) {
+        throw new Error(
+          "agent authentication did not reach the lineage race barrier",
+        );
+      }
+    }
+    await mutate();
+    const denied = await response;
+    assertEquals(denied.status, 404);
+    assertEquals((await denied.json()).error.code, "not_found");
+  } finally {
+    await query(
+      harness.server.sql,
+      "drop trigger if exists test_agent_auth_context_barrier_trigger on auth_contexts",
+    );
+    await query(
+      harness.server.sql,
+      "drop function if exists test_agent_auth_context_barrier() ",
+    );
+  }
 }
 
 async function mutateBeforeAgentBoundary(
