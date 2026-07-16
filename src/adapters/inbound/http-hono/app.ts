@@ -113,6 +113,15 @@ export type HttpDependencies = {
       auth: AuthVariables["auth"],
     ): Promise<Result<unknown>>;
     validate(id: string, auth: AuthVariables["auth"]): Promise<Result<unknown>>;
+    apply(
+      id: string,
+      input: {
+        acknowledgement: "safe" | "reviewed" | "destructive";
+        confirmation_token?: string | null;
+        lock_timeout?: string;
+      },
+      auth: AuthVariables["auth"],
+    ): Promise<Result<unknown>>;
     sql(id: string, auth: AuthVariables["auth"]): Promise<Result<unknown>>;
   };
   queries: {
@@ -326,6 +335,65 @@ export function makeHttpApp(
         await deps.migrations.validate(c.req.param("id"), c.get("auth")),
       ),
   );
+  app.post("/migrations/:id/apply", async (c) => {
+    try {
+      const value = await c.req.json();
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        throw new Error("apply body must be an object");
+      }
+      const body = value as Record<string, unknown>;
+      const allowed = new Set([
+        "acknowledgement",
+        "confirmation_token",
+        "lock_timeout",
+      ]);
+      const unknown = Object.keys(body).filter((key) => !allowed.has(key));
+      if (unknown.length) throw new Error(`unknown apply field: ${unknown[0]}`);
+      if (
+        !(["safe", "reviewed", "destructive"] as unknown[]).includes(
+          body.acknowledgement,
+        )
+      ) {
+        throw new Error(
+          "acknowledgement must be safe, reviewed, or destructive",
+        );
+      }
+      if (
+        body.confirmation_token !== undefined &&
+        body.confirmation_token !== null &&
+        typeof body.confirmation_token !== "string"
+      ) {
+        throw new Error("confirmation_token must be a string or null");
+      }
+      if (
+        body.lock_timeout !== undefined && typeof body.lock_timeout !== "string"
+      ) {
+        throw new Error("lock_timeout must be a string");
+      }
+      return resultJson(
+        c,
+        await deps.migrations.apply(
+          c.req.param("id"),
+          body as {
+            acknowledgement: "safe" | "reviewed" | "destructive";
+            confirmation_token?: string | null;
+            lock_timeout?: string;
+          },
+          c.get("auth"),
+        ),
+      );
+    } catch (error) {
+      return resultJson(
+        c,
+        err(
+          validationError(
+            "bad_request",
+            error instanceof Error ? error.message : String(error),
+          ),
+        ),
+      );
+    }
+  });
 
   app.post(
     "/queries",

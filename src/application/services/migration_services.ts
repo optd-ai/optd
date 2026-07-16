@@ -1,9 +1,13 @@
 import { err, ok, type Result } from "../../domain/errors/result.ts";
 import {
+  applyMigrationPlan,
   getMigrationPlan,
   getMigrationSql,
+  MigrationApplyError,
+  recordMigrationAttempt,
   validateMigrationPlan,
 } from "../../adapters/outbound/postgres/pack_migration_repository.ts";
+import type { MigrationApplyRequest } from "../../domain/migrations/pack_migration.ts";
 import type { Queryable } from "../../adapters/outbound/postgres/client.ts";
 import type { AuthorizationRepository } from "../ports/authorization.ts";
 import type { AuthContext } from "../../domain/auth/model.ts";
@@ -62,6 +66,62 @@ export function makeMigrationServices(
         validateMigrationPlan(sql, id, auth.id)
       );
       return validation ? ok(validation) : missing(id);
+    },
+    async apply(
+      id: string,
+      input: MigrationApplyRequest,
+      auth: AuthContext,
+    ): Promise<Result<unknown>> {
+      const authorized = await authorize(auth, "migration.apply");
+      if (!authorized.ok) return err(authorized.error);
+      let transientFailures = 0;
+      while (true) {
+        try {
+          const application = await deps.tx.transaction((sql) =>
+            applyMigrationPlan(sql, id, input, auth.id)
+          );
+          return application ? ok(application) : missing(id);
+        } catch (error) {
+          const sqlState = typeof error === "object" && error !== null &&
+              "code" in error
+            ? String((error as { code: unknown }).code)
+            : "";
+          if (
+            (sqlState === "40P01" || sqlState === "40001") &&
+            transientFailures < 2
+          ) {
+            transientFailures++;
+            continue;
+          }
+          const code = error instanceof MigrationApplyError
+            ? error.code
+            : sqlState === "55P03"
+            ? "pack_install_busy"
+            : sqlState === "40P01" || sqlState === "40001"
+            ? "migration_retry_exhausted"
+            : "migration_apply_failed";
+          try {
+            if (await getMigrationPlan(deps.sql, id)) {
+              await deps.tx.transaction((sql) =>
+                recordMigrationAttempt(sql, id, auth.id, code)
+              );
+            }
+          } catch { /* preserve the authoritative apply error */ }
+          return err({
+            code,
+            message: error instanceof Error
+              ? error.message
+              : "migration apply failed",
+            severity: code === "pack_install_busy"
+              ? "locked"
+              : code.includes("invalid") || code === "migration_blocked"
+              ? "validation"
+              : code === "migration_stale"
+              ? "conflict"
+              : "internal",
+          });
+        }
+      }
     },
     async sql(id: string, auth: AuthContext): Promise<Result<unknown>> {
       const authorized = await authorize(auth, "migration.inspect");

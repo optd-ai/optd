@@ -62,7 +62,7 @@ export async function storeOrReuseCandidate(
   const id = uuidV7();
   const inserted = await query<{ id: string }>(
     sql,
-    `insert into pack_candidate_revisions(id,publisher,pack_name,version,source_digest,content_digest,manifest,normalized,source_files) values ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb) on conflict (publisher,pack_name,source_digest) do nothing returning id`,
+    `insert into pack_candidate_revisions(id,publisher,pack_name,version,source_digest,content_digest,manifest,normalized,source_files) values ($1,$2,$3,$4,$5,$6,$7::text::jsonb,$8::text::jsonb,$9::text::jsonb) on conflict (publisher,pack_name,source_digest) do nothing returning id`,
     [
       id,
       pack.publisher,
@@ -158,10 +158,10 @@ export async function getDefinition(
   if (!allowed.has(section)) throw new Error("unknown definition kind");
   const result = await query<{ document: Record<string, unknown> | string }>(
     sql,
-    `select cr.normalized->$4->$3 as document
+    `select jsonb_extract_path(cr.normalized,$4::text,$3::text) as document
        from pack_active_revisions ar
        join pack_candidate_revisions cr on cr.id=ar.candidate_revision_id
-      where ar.publisher=$1 and ar.pack_name=$2 and cr.normalized->$4 ? $3
+      where ar.publisher=$1 and ar.pack_name=$2
       order by ar.activated_at desc limit 1`,
     [publisher, pack, name, section],
   );

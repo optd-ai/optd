@@ -1446,6 +1446,61 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
         `${parsed.server}/migrations/${value}/validate`,
         {},
       );
+    } else if (cmd === "migration" && sub === "apply" && value) {
+      const args = parsed.positional.slice(3);
+      let acknowledgement: "safe" | "reviewed" | "destructive" | undefined;
+      let confirmationToken: string | undefined;
+      let lockTimeout: string | undefined;
+      for (let i = 0; i < args.length; i++) {
+        const arg = args[i];
+        if (arg === "--safe") {
+          if (acknowledgement) {
+            throw usageError(
+              "migration apply accepts exactly one acknowledgement option",
+            );
+          }
+          acknowledgement = "safe";
+        } else if (arg === "--reviewed") {
+          if (acknowledgement) {
+            throw usageError(
+              "migration apply accepts exactly one acknowledgement option",
+            );
+          }
+          acknowledgement = "reviewed";
+        } else if (arg === "--confirm-token") {
+          if (acknowledgement) {
+            throw usageError(
+              "migration apply accepts exactly one acknowledgement option",
+            );
+          }
+          acknowledgement = "destructive";
+          confirmationToken = args[++i];
+        } else if (arg.startsWith("--confirm-token=")) {
+          if (acknowledgement) {
+            throw usageError(
+              "migration apply accepts exactly one acknowledgement option",
+            );
+          }
+          acknowledgement = "destructive";
+          confirmationToken = arg.slice("--confirm-token=".length);
+        } else if (arg === "--timeout") lockTimeout = args[++i];
+        else if (arg.startsWith("--timeout=")) {
+          lockTimeout = arg.slice("--timeout=".length);
+        } else throw usageError(`unknown migration apply option ${arg}`);
+      }
+      if (
+        !acknowledgement ||
+        (acknowledgement === "destructive" && !confirmationToken)
+      ) {
+        throw usageError(
+          "migration apply requires exactly one of --safe, --reviewed, or --confirm-token <token>",
+        );
+      }
+      result = await postJson(`${parsed.server}/migrations/${value}/apply`, {
+        acknowledgement,
+        confirmation_token: confirmationToken ?? null,
+        ...lockTimeout ? { lock_timeout: lockTimeout } : {},
+      });
     } else if (cmd === "migration" && sub === "inspect" && value) {
       const projection = parsed.positional.includes("--sql")
         ? "sql"
@@ -1509,7 +1564,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       );
     } else {
       throw usageError(
-        "usage: optctl status live/ready/bootstrap | bootstrap init | home | project list/create/view/update/archive/select | context set-project | pack preview <dir> | metadata [packs] | metadata pack <publisher/pack> | metadata resource/relationship/lifecycle/action/hook/role/policy/seed <publisher/pack:name> | secret list/set/delete | action preview/commit <namespace.action> --input '{...}' | outbox status/drain/retry | migration inspect <id> [--sql|--violations] | migration validate <id> | query <namespace.resource> [--where expr] [--fields a,b] [--sort field:desc] [--limit n] [--cursor c] | changeset preview/commit (--file <json-file>|--input '{...}') | view <namespace.resource> <id> | history <namespace.resource> <id>",
+        "usage: optctl status live/ready/bootstrap | bootstrap init | home | project list/create/view/update/archive/select | context set-project | pack preview <dir> | metadata [packs] | metadata pack <publisher/pack> | metadata resource/relationship/lifecycle/action/hook/role/policy/seed <publisher/pack:name> | secret list/set/delete | action preview/commit <namespace.action> --input '{...}' | outbox status/drain/retry | migration inspect <id> [--sql|--violations] | migration validate <id> | migration apply <id> (--safe|--reviewed|--confirm-token <token>) [--timeout duration] | query <namespace.resource> [--where expr] [--fields a,b] [--sort field:desc] [--limit n] [--cursor c] | changeset preview/commit (--file <json-file>|--input '{...}') | view <namespace.resource> <id> | history <namespace.resource> <id>",
       );
     }
     const output = parsed.verbose

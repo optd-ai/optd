@@ -789,6 +789,54 @@ export const platformMigrations: PlatformMigration[] = [
       create trigger pack_migration_plans_v1_immutable before update or delete on pack_migration_plans_v1 for each row execute function operant_immutable_migration_plan();
     `,
   },
+  {
+    id: "1015_atomic_pack_apply",
+    sql: `
+      alter table pack_migration_confirmation_tokens
+        add column principal_id uuid references principals(id),
+        add column authorization_root_id text,
+        add column plan_digest text,
+        add column live_facts_digest text,
+        add column destructive_change_ids jsonb;
+      create table pack_migration_applications (
+        id uuid primary key,
+        plan_id uuid not null unique references pack_migration_plans_v1(id),
+        plan_digest text not null,
+        candidate_revision_id uuid not null references pack_candidate_revisions(id),
+        auth_context_id uuid not null references auth_contexts(id),
+        principal_id uuid not null references principals(id),
+        authorization_root_id text not null,
+        applied_at timestamptz not null default now()
+      );
+      create table pack_migration_attempts (
+        id uuid primary key,
+        plan_id uuid not null references pack_migration_plans_v1(id),
+        auth_context_id uuid not null references auth_contexts(id),
+        outcome text not null,
+        details jsonb not null default '{}'::jsonb,
+        created_at timestamptz not null default now()
+      );
+      create table pack_migration_audit_events (
+        id uuid primary key,
+        plan_id uuid not null references pack_migration_plans_v1(id),
+        application_id uuid references pack_migration_applications(id),
+        auth_context_id uuid not null references auth_contexts(id),
+        principal_id uuid not null references principals(id),
+        authorization_root_id text not null,
+        action text not null check(action='migration.apply'),
+        decision text not null check(decision in ('allowed','denied')),
+        details jsonb not null default '{}'::jsonb,
+        created_at timestamptz not null default now()
+      );
+      create function operant_immutable_migration_record() returns trigger language plpgsql as $$
+      begin raise exception 'migration records are append-only'; end $$;
+      create trigger pack_migration_applications_immutable before update or delete on pack_migration_applications for each row execute function operant_immutable_migration_record();
+      create trigger pack_migration_attempts_immutable before update or delete on pack_migration_attempts for each row execute function operant_immutable_migration_record();
+      create trigger pack_migration_audit_immutable before update or delete on pack_migration_audit_events for each row execute function operant_immutable_migration_record();
+      create index pack_migration_attempts_plan_idx on pack_migration_attempts(plan_id,created_at,id);
+      create index pack_migration_audit_plan_idx on pack_migration_audit_events(plan_id,created_at,id);
+    `,
+  },
 ];
 
 export async function applyPlatformMigrations(

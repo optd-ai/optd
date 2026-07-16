@@ -4,6 +4,20 @@ import { uuidV7 } from "../ids/uuid_v7.ts";
 
 export type MigrationClass = "safe" | "risky" | "destructive";
 export type MigrationStatus = "ready" | "blocked" | "applied";
+export type MigrationAcknowledgement = "safe" | "reviewed" | "destructive";
+export type MigrationApplication = {
+  id: string;
+  migration_id: string;
+  plan_digest: string;
+  candidate_revision_id: string;
+  applied_by_auth_context_id: string;
+  applied_at: string;
+};
+export type MigrationApplyRequest = {
+  acknowledgement: MigrationAcknowledgement;
+  confirmation_token?: string | null;
+  lock_timeout?: string;
+};
 export type MigrationChange = {
   id: string;
   kind: string;
@@ -77,7 +91,7 @@ export type MigrationPlan = {
     }>;
     created_at: string;
   };
-  application: null;
+  application: MigrationApplication | null;
 };
 export type ActivePackSnapshot = {
   revisionId: string;
