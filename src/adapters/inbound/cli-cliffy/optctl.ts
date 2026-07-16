@@ -373,6 +373,16 @@ function options(args: string[], name: string): string[] {
   }
   return values;
 }
+function assignmentBoundary(args: string[]): Record<string, string> {
+  const projectId = option(args, "--project");
+  if (projectId) return { type: "project", project_id: projectId };
+  const type = option(args, "--boundary");
+  if (type === "system" || type === "all_projects") return { type };
+  throw usageError(
+    "assignment boundary requires --project <uuid> or --boundary system|all_projects",
+  );
+}
+
 function issuedCredentialUpdate(
   credentials: Record<string, unknown>,
   prior: { requestToken?: string; requestSessionId?: string } = {},
@@ -1187,6 +1197,89 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
         username,
       });
       result = authenticatedOutput(data.user);
+    } else if (cmd === "auth" && sub === "authority") {
+      const authArgs = parsed.positional.slice(2);
+      const boundary = assignmentBoundary(authArgs);
+      const url = new URL(`${parsed.server}/api/v1/authorization/authority`);
+      url.searchParams.set("boundary_type", String(boundary.type));
+      if (boundary.project_id) {
+        url.searchParams.set("project_id", String(boundary.project_id));
+      }
+      result = await getJson(url.toString());
+    } else if (cmd === "assignment" && sub === "role" && value === "list") {
+      const userId = parsed.positional[3];
+      if (!userId) throw usageError("assignment role list requires <user-id>");
+      result = await getJson(
+        `${parsed.server}/api/v1/auth/users/${
+          encodeURIComponent(userId)
+        }/role-assignments`,
+      );
+    } else if (cmd === "assignment" && sub === "role" && value === "create") {
+      const assignmentArgs = parsed.positional.slice(4);
+      const userId = parsed.positional[3];
+      const role = option(assignmentArgs, "--role");
+      if (!userId || !role) {
+        throw usageError(
+          "assignment role create requires <user-id> and --role",
+        );
+      }
+      result = await postJson(
+        `${parsed.server}/api/v1/auth/users/${
+          encodeURIComponent(userId)
+        }/role-assignments`,
+        { role, boundary: assignmentBoundary(assignmentArgs) },
+      );
+    } else if (cmd === "assignment" && sub === "role" && value === "disable") {
+      const assignmentArgs = parsed.positional.slice(4);
+      const userId = parsed.positional[3];
+      const assignmentId = option(assignmentArgs, "--assignment");
+      const expected = option(assignmentArgs, "--expected-version");
+      if (!userId || !assignmentId || !expected) {
+        throw usageError(
+          "assignment role disable requires <user-id>, --assignment, and --expected-version",
+        );
+      }
+      result = await postJson(
+        `${parsed.server}/api/v1/auth/users/${
+          encodeURIComponent(userId)
+        }/role-assignments/${encodeURIComponent(assignmentId)}/disable`,
+        { expected_version: Number(expected) },
+      );
+    } else if (cmd === "policy" && sub === "assignment" && value === "list") {
+      const assignmentArgs = parsed.positional.slice(3);
+      const active = option(assignmentArgs, "--active");
+      result = await getJson(
+        `${parsed.server}/api/v1/policy-assignments${
+          active === undefined ? "" : `?active=${encodeURIComponent(active)}`
+        }`,
+      );
+    } else if (cmd === "policy" && sub === "assignment" && value === "create") {
+      const assignmentArgs = parsed.positional.slice(3);
+      const revision = option(assignmentArgs, "--policy-revision");
+      if (!revision) {
+        throw usageError("policy assignment create requires --policy-revision");
+      }
+      result = await postJson(`${parsed.server}/api/v1/policy-assignments`, {
+        policy_revision_id: revision,
+        boundary: assignmentBoundary(assignmentArgs),
+      });
+    } else if (
+      cmd === "policy" && sub === "assignment" && value === "disable"
+    ) {
+      const assignmentArgs = parsed.positional.slice(3);
+      const assignmentId = option(assignmentArgs, "--assignment");
+      const expected = option(assignmentArgs, "--expected-version");
+      if (!assignmentId || !expected) {
+        throw usageError(
+          "policy assignment disable requires --assignment and --expected-version",
+        );
+      }
+      result = await postJson(
+        `${parsed.server}/api/v1/policy-assignments/${
+          encodeURIComponent(assignmentId)
+        }/disable`,
+        { expected_version: Number(expected) },
+      );
     } else if (cmd === "project" && sub === "list") {
       const listArgs = parsed.positional.slice(2);
       const parameters = new URLSearchParams();

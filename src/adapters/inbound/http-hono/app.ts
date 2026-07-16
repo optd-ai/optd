@@ -40,6 +40,11 @@ import {
   type ProjectHttpService,
   registerProjectRoutes,
 } from "./project_routes.ts";
+import {
+  type AuthorizationHttpService,
+  registerAuthorizationRoutes,
+} from "./authorization_routes.ts";
+import { requireAssignmentBearer } from "./authorization_auth.ts";
 
 export type HttpDependencies = {
   authentication: RequestAuthenticator;
@@ -47,6 +52,7 @@ export type HttpDependencies = {
   humanAuth: HumanAuthHttpService;
   agentAuth: AgentAuthHttpService;
   projects: ProjectHttpService;
+  authorization: AuthorizationHttpService;
   metadata: {
     home(): Promise<Result<HomeDto>>;
     packs(): Promise<Result<unknown>>;
@@ -144,6 +150,13 @@ export function makeHttpApp(
       await next();
       return;
     }
+    if (
+      c.req.method === "POST" &&
+      /^\/api\/v1\/auth\/users\/[^/]+\/role-assignments(?:\/[^/]+\/disable)?$/
+        .test(c.req.path)
+    ) {
+      return await requireAssignmentBearer(deps.authentication, c, next);
+    }
     return await requireBearer(deps.authentication, c, next);
   });
 
@@ -174,6 +187,7 @@ export function makeHttpApp(
 
   registerAuthRoutes(app, deps.bootstrap, deps.humanAuth, deps.agentAuth);
   registerProjectRoutes(app, deps.projects);
+  registerAuthorizationRoutes(app, deps.authorization);
 
   app.get(
     "/metadata/home",

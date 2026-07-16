@@ -20,6 +20,8 @@ import {
   makeHumanAuthService,
 } from "./services/auth/human.ts";
 import { makeProjectService } from "./services/projects/manage_projects.ts";
+import { PostgresAuthorizationRepository } from "../adapters/outbound/postgres/authorization_repository.ts";
+import { makeAuthorizationService } from "./services/authorization/manage_assignments.ts";
 
 export function makeApplication(
   sql: Sql,
@@ -45,12 +47,16 @@ export function makeApplication(
     maximumHashes,
   );
   const passwordPolicy = loadPasswordPolicy();
+  const authorization = makeAuthorizationService(
+    new PostgresAuthorizationRepository(sql),
+  );
   return {
     authentication,
     bootstrap: makeBootstrapService(authentication, passwordPolicy),
     humanAuth: makeHumanAuthService(authentication, passwordPolicy),
     agentAuth: makeAgentAuthService(authentication),
     projects: makeProjectService(new PostgresProjectRepository(sql)),
+    authorization,
     metadata: makeInspectMetadataService({
       sql,
       clock,

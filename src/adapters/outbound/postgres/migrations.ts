@@ -623,6 +623,95 @@ export const platformMigrations: PlatformMigration[] = [
         on policy_assignments(boundary_type,project_id) where active;
     `,
   },
+  {
+    id: "1013_authorization_assignments",
+    sql: `
+      alter table system_roles add column description text;
+      alter table system_roles add column axi_summary text;
+      alter table role_assignments add column version bigint not null default 1;
+      alter table role_assignments add column created_by_auth_context_id uuid references auth_contexts(id);
+      alter table role_assignments add column disabled_by_auth_context_id uuid references auth_contexts(id);
+      alter table role_assignments add column disabled_at timestamptz;
+      create unique index role_assignment_one_active_idx
+        on role_assignments(principal_id,role_id,boundary_type,project_id) nulls not distinct where active;
+
+      alter table policy_rules add column resource text not null default '*';
+      alter table policy_rules add column condition_kind text not null default 'unconditional'
+        check(condition_kind in ('unconditional','abac','rebac'));
+      alter table policy_rules add column summary text;
+      alter table policy_assignments add column version bigint not null default 1;
+      alter table policy_assignments add column source text not null default 'operator'
+        check(source in ('operator','pack_default','platform'));
+      alter table policy_assignments add column created_by_auth_context_id uuid references auth_contexts(id);
+      alter table policy_assignments add column disabled_by_auth_context_id uuid references auth_contexts(id);
+
+      create table auth_context_role_assignments (
+        auth_context_id uuid not null references auth_contexts(id),
+        role_id text not null references system_roles(id),
+        boundary_type text not null check(boundary_type in ('system','all_projects','project')),
+        project_id uuid references projects(id),
+        check((boundary_type='project')=(project_id is not null))
+      );
+      create unique index auth_context_role_assignment_unique_idx
+        on auth_context_role_assignments(auth_context_id,role_id,boundary_type,project_id) nulls not distinct;
+      create function snapshot_auth_context_roles() returns trigger language plpgsql as $$
+      begin
+        if new.credential_kind='human_full' then
+          insert into auth_context_role_assignments(auth_context_id,role_id,boundary_type,project_id)
+            select new.id,role_id,boundary_type,project_id from role_assignments
+             where principal_id=new.principal_id and active;
+        elsif new.credential_kind='agent_authorization' then
+          insert into auth_context_role_assignments(auth_context_id,role_id,boundary_type,project_id)
+            select new.id,role_id,boundary_type,project_id from agent_authorization_roles
+             where authorization_id=new.authorization_id;
+        end if;
+        return new;
+      end
+      $$;
+      create trigger auth_context_roles_snapshot after insert on auth_contexts
+        for each row execute function snapshot_auth_context_roles();
+      create function reject_auth_context_role_mutation() returns trigger language plpgsql as $$
+      begin raise exception 'auth context role snapshots are immutable'; end
+      $$;
+      create trigger auth_context_roles_immutable before update or delete on auth_context_role_assignments
+        for each row execute function reject_auth_context_role_mutation();
+
+      update system_roles set description='Unrestricted authenticated platform administrator',
+        axi_summary='Reserved for trusted platform administration.' where id='system:super_admin';
+      update system_roles set description='Delegated platform administrator',
+        axi_summary='Administers platform and project boundaries through active policy.' where id='system:admin';
+      insert into policy_definition_versions(id,policy_id,version,active) values
+        ('01900000-0000-7000-8000-000000000201','system:administration',1,true);
+      insert into policy_rules(id,policy_definition_version_id,role_id,capability,resource,condition_kind,summary) values
+        ('01900000-0000-7000-8000-000000000211','01900000-0000-7000-8000-000000000201','system:admin','role.assignment.manage','*','unconditional','Manage roles already held in this boundary.'),
+        ('01900000-0000-7000-8000-000000000212','01900000-0000-7000-8000-000000000201','system:admin','policy.assignment.manage','*','unconditional','Manage policy activation in this boundary.'),
+        ('01900000-0000-7000-8000-000000000213','01900000-0000-7000-8000-000000000201','system:admin','auth.request.decide','*','unconditional','Decide same-anchor authorization requests for held roles.'),
+        ('01900000-0000-7000-8000-000000000214','01900000-0000-7000-8000-000000000201','system:admin','project.read','*','unconditional',null),
+        ('01900000-0000-7000-8000-000000000215','01900000-0000-7000-8000-000000000201','system:admin','project.create','*','unconditional',null),
+        ('01900000-0000-7000-8000-000000000216','01900000-0000-7000-8000-000000000201','system:admin','project.update','*','unconditional',null),
+        ('01900000-0000-7000-8000-000000000217','01900000-0000-7000-8000-000000000201','system:admin','project.archive','*','unconditional',null);
+      insert into policy_assignments(id,policy_definition_version_id,boundary_type,project_id,active,source) values
+        ('01900000-0000-7000-8000-000000000222','01900000-0000-7000-8000-000000000201','all_projects',null,true,'platform');
+
+      create table authorization_audit_events (
+        id uuid primary key,
+        auth_context_id uuid not null references auth_contexts(id),
+        event_type text not null check(event_type in (
+          'role_assignment.created','role_assignment.disabled',
+          'policy_assignment.created','policy_assignment.disabled',
+          'policy.allowed','policy.denied','policy.bypassed'
+        )),
+        assignment_id uuid,
+        details jsonb not null default '{}'::jsonb,
+        created_at timestamptz not null default now()
+      );
+      create function reject_authorization_audit_mutation() returns trigger language plpgsql as $$
+      begin raise exception 'authorization audit events are immutable'; end
+      $$;
+      create trigger authorization_audit_immutable before update or delete on authorization_audit_events
+        for each row execute function reject_authorization_audit_mutation();
+    `,
+  },
 ];
 
 export async function applyPlatformMigrations(
