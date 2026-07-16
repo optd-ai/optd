@@ -3,6 +3,7 @@ import {
   assertEquals,
   assertExists,
   assertMatch,
+  assertThrows,
 } from "jsr:@std/assert";
 import { join } from "jsr:@std/path";
 import { query } from "../../../src/adapters/outbound/postgres/client.ts";
@@ -63,22 +64,52 @@ Deno.test("compiled optctl binds one nearest Linux process credential without fa
     assertEquals(isolated.request_credential_available, true);
     await Deno.remove(resultPath);
 
-    for (const deniedExecutable of ["/bin/echo", "/usr/bin/cat"]) {
-      const deniedSpawn = await harness.runOptctl([
-        "--json",
-        "auth",
-        "isolate",
-        "--",
-        deniedExecutable,
-        "denied",
-      ]);
-      assertEquals(deniedSpawn.code, 1);
-      assertEquals(JSON.parse(deniedSpawn.stderr).error.code, "internal_error");
-      assertMatch(
-        JSON.parse(deniedSpawn.stderr).error.message,
-        /allow-run|run access|NotCapable/,
-      );
-    }
+    const explicitEcho = await harness.runOptctl([
+      "auth",
+      "isolate",
+      "--",
+      "/bin/echo",
+      "operator-child",
+    ]);
+    assertEquals(explicitEcho.code, 0, explicitEcho.stderr);
+    assertEquals(explicitEcho.stdout, "operator-child");
+    const explicitExit = await harness.runOptctl([
+      "auth",
+      "isolate",
+      "--",
+      Deno.execPath(),
+      "eval",
+      "Deno.exit(42)",
+    ]);
+    assertEquals(explicitExit.code, 42);
+    const explicitCat = await harness.runOptctl([
+      "auth",
+      "isolate",
+      "--",
+      "/bin/cat",
+    ], "operator-cat\n");
+    assertEquals(explicitCat.code, 0, explicitCat.stderr);
+    assertEquals(explicitCat.stdout, "operator-cat");
+    const isolatedEnvironment = await harness.runOptctl([
+      "auth",
+      "isolate",
+      "--",
+      "/usr/bin/env",
+    ]);
+    assertEquals(isolatedEnvironment.code, 0, isolatedEnvironment.stderr);
+    assertMatch(isolatedEnvironment.stdout, /OPERANT_AUTH_TREE_STOP_PID=\d+/);
+    assert(!isolatedEnvironment.stdout.includes("OPERANT_BOOTSTRAP_TOKEN="));
+    assert(!isolatedEnvironment.stdout.includes("OPERANT_MASTER_KEY="));
+    assertEquals(
+      (await harness.runOptctl(["auth", "isolate", "/bin/echo"])).code,
+      2,
+    );
+    assertEquals(
+      (await harness.runOptctl(["auth", "isolate", "--", "/missing/child"]))
+        .code,
+      127,
+    );
+    await proveSignalForwarding(harness);
 
     const isolatedRequest = await runHelper(
       helperPath,
@@ -233,6 +264,57 @@ Deno.test("compiled optctl binds one nearest Linux process credential without fa
   }
 });
 
+async function proveSignalForwarding(harness: LiveHarness): Promise<void> {
+  if (Deno.build.os !== "linux") return;
+  const pidPath = join(harness.rootDir, "isolate-signal-child.pid");
+  const script = `
+    await Deno.writeTextFile(Deno.args[0], String(Deno.pid));
+    await new Promise((resolve) => setTimeout(resolve, 60_000));
+  `;
+  const started = Date.now();
+  const isolate = new Deno.Command(harness.binaryPath, {
+    args: [
+      "--server",
+      harness.baseUrl,
+      "auth",
+      "isolate",
+      "--",
+      Deno.execPath(),
+      "eval",
+      script,
+      pidPath,
+    ],
+    env: {
+      ...Deno.env.toObject(),
+      HOME: harness.homeDir,
+      XDG_CONFIG_HOME: join(harness.rootDir, "xdg-config"),
+      XDG_STATE_HOME: join(harness.rootDir, "xdg-state"),
+    },
+    stdin: "null",
+    stdout: "piped",
+    stderr: "piped",
+  }).spawn();
+  const childPid = Number(await waitForText(pidPath));
+  Deno.kill(isolate.pid, "SIGTERM");
+  const output = await isolate.output();
+  assertEquals(output.code, 143, new TextDecoder().decode(output.stderr));
+  assert(Date.now() - started < 5_000, "SIGTERM was not forwarded promptly");
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assertThrows(() => Deno.kill(childPid, 0), Deno.errors.NotFound);
+}
+
+async function waitForText(path: string): Promise<string> {
+  for (let attempt = 0; attempt < 250; attempt++) {
+    try {
+      return await Deno.readTextFile(path);
+    } catch (error) {
+      if (!(error instanceof Deno.errors.NotFound)) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  }
+  throw new Error(`timed out waiting for ${path}`);
+}
+
 async function authContextCount(harness: LiveHarness): Promise<number> {
   const result = await query<{ count: number }>(
     harness.server.sql,
@@ -248,35 +330,24 @@ async function runHelper(
   resultPath: string,
   mode: string,
 ) {
-  const output = await new Deno.Command(Deno.execPath(), {
-    args: [
-      "run",
-      `--allow-run=${harness.binaryPath}`,
-      "--allow-read",
-      "--allow-write",
-      "--allow-env",
-      helper,
-      harness.binaryPath,
-      harness.baseUrl,
-      requestPath,
-      resultPath,
-      mode,
-    ],
-    env: {
-      ...Deno.env.toObject(),
-      HOME: harness.homeDir,
-      XDG_CONFIG_HOME: join(harness.rootDir, "xdg-config"),
-      XDG_STATE_HOME: join(harness.rootDir, "xdg-state"),
-    },
-    stdin: "null",
-    stdout: "piped",
-    stderr: "piped",
-  }).output();
-  return {
-    code: output.code,
-    stdout: new TextDecoder().decode(output.stdout).trimEnd(),
-    stderr: new TextDecoder().decode(output.stderr).trimEnd(),
-  };
+  return await harness.runOptctl([
+    "--json",
+    "auth",
+    "isolate",
+    "--",
+    Deno.execPath(),
+    "run",
+    `--allow-run=${harness.binaryPath},/bin/cat`,
+    "--allow-read",
+    "--allow-write",
+    "--allow-env",
+    helper,
+    harness.binaryPath,
+    harness.baseUrl,
+    requestPath,
+    resultPath,
+    mode,
+  ]);
 }
 
 async function runDirect(
@@ -399,10 +470,21 @@ function narrowAgentHelper(): string {
     }).output();
     const invalidStopBody = JSON.parse(new TextDecoder().decode(invalidStop.stderr));
     const revoked = await run(["auth", "revoke", status.authorization_id]);
+    const isolateStatOutput = await new Deno.Command("/bin/cat", {
+      args: ["/proc/" + Deno.ppid + "/stat"],
+      clearEnv: true,
+      env: {},
+      stdout: "piped",
+      stderr: "null",
+    }).output();
+    if (!isolateStatOutput.success) throw new Error("isolate ancestry unavailable");
+    const isolateStat = new TextDecoder().decode(isolateStatOutput.stdout);
+    const isolateFields = isolateStat.slice(isolateStat.lastIndexOf(")") + 1).trim().split(/\\s+/);
+    const broaderAncestorPid = Number(isolateFields[1]);
     await Deno.writeTextFile(resultPath, JSON.stringify({
       credential_type: status.credential_type,
       anchor_pid: status.anchor_pid,
-      broader_ancestor_pid: Deno.ppid,
+      broader_ancestor_pid: broaderAncestorPid,
       work_code: allowed.code,
       work_error: JSON.parse(allowed.stderr).error.code,
       denied_code: denied.code,

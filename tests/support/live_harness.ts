@@ -353,7 +353,7 @@ async function compileOptctl(): Promise<string> {
       "--allow-write",
       "--allow-env",
       "--allow-net",
-      "--allow-run=/bin/cat",
+      "--allow-run",
       "--allow-sys=uid",
       "--output",
       temporary,

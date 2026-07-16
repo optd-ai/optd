@@ -14,7 +14,7 @@ RUN test -x /bin/cat \
   --allow-write \
   --allow-env \
   --allow-net \
-  --allow-run=/bin/cat \
+  --allow-run \
   --allow-sys=uid \
   --output /opt/operant/bin/optctl \
   src/main_optctl.ts

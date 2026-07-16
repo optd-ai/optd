@@ -581,7 +581,26 @@ export class FilesystemLocalAuthStore {
           }).catch(() => undefined);
           removed++;
         }
+        removed += await this.cleanupTemporaryArtifacts(path);
       });
+    }
+    return removed;
+  }
+
+  private async cleanupTemporaryArtifacts(path: string): Promise<number> {
+    let removed = 0;
+    for await (const entry of Deno.readDir(path)) {
+      if (entry.name === ".lock") continue;
+      const child = join(path, entry.name);
+      const info = await Deno.lstat(child);
+      if (info.isSymlink) continue;
+      if (entry.isDirectory) {
+        removed += await this.cleanupTemporaryArtifacts(child);
+      } else if (entry.isFile && entry.name.endsWith(".tmp")) {
+        assertOwnerAndMode(child, info, false);
+        await safeRemove(child);
+        removed++;
+      }
     }
     return removed;
   }

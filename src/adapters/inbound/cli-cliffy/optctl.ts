@@ -558,6 +558,76 @@ async function waitForAuthorization(
   }
 }
 
+async function runIsolatedCommand(
+  childArgs: string[],
+  env: Record<string, string>,
+  origin: string,
+  asJson: boolean,
+): Promise<OptctlRunResult> {
+  let child: Deno.ChildProcess;
+  try {
+    child = new Deno.Command(childArgs[0], {
+      args: childArgs.slice(1),
+      clearEnv: true,
+      env,
+      stdin: "inherit",
+      stdout: "inherit",
+      stderr: "inherit",
+    }).spawn();
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) {
+      return {
+        stdout: "",
+        stderr: render(
+          errorEnvelope({
+            code: "isolate_child_not_found",
+            message: "isolate child command was not found",
+            details: { command: childArgs[0] },
+          }),
+          asJson,
+        ),
+        code: 127,
+      };
+    }
+    throw new OptctlError(errorEnvelope({
+      code: "isolate_launch_failed",
+      message: "failed to launch isolate child",
+      details: {
+        reason: error instanceof Error ? error.message : String(error),
+      },
+    }));
+  }
+
+  const forwarded: Deno.Signal[] = ["SIGINT", "SIGTERM"];
+  const listeners = new Map<Deno.Signal, () => void>();
+  for (const signal of forwarded) {
+    const listener = () => {
+      try {
+        child.kill(signal);
+      } catch { /* child already exited */ }
+    };
+    try {
+      Deno.addSignalListener(signal, listener);
+      listeners.set(signal, listener);
+    } catch { /* signal unsupported on this platform */ }
+  }
+  try {
+    const status = await child.status;
+    if (status.signal === "SIGINT") {
+      return { stdout: "", stderr: "", code: 130 };
+    }
+    if (status.signal === "SIGTERM") {
+      return { stdout: "", stderr: "", code: 143 };
+    }
+    return { stdout: "", stderr: "", code: status.code };
+  } finally {
+    for (const [signal, listener] of listeners) {
+      Deno.removeSignalListener(signal, listener);
+    }
+    await cleanupLocalAuth(origin).catch(() => undefined);
+  }
+}
+
 function helpText(): string {
   return new Command()
     .name("optctl")
@@ -671,10 +741,24 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       };
     } else if (cmd === "auth" && sub === "isolate") {
       const separator = parsed.positional.indexOf("--");
-      const childArgs = separator >= 0
-        ? parsed.positional.slice(separator + 1)
-        : parsed.positional.slice(2);
-      if (!childArgs.length) return { stdout: "", stderr: "", code: 127 };
+      if (separator < 0) {
+        throw usageError("auth isolate requires -- before the child command");
+      }
+      const childArgs = parsed.positional.slice(separator + 1);
+      if (!childArgs.length) {
+        return {
+          stdout: "",
+          stderr: render(
+            errorEnvelope({
+              code: "isolate_child_not_found",
+              message: "auth isolate requires a child command after --",
+              details: {},
+            }),
+            parsed.json,
+          ),
+          code: 127,
+        };
+      }
       const local = await readOrigin(parsed.server);
       if (!local.requestToken) {
         throw new OptctlError(errorEnvelope({
@@ -689,27 +773,16 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       };
       for (const key of Object.keys(env)) {
         if (
-          /^OPERANT_(?:BEARER|AUTH_TOKEN|TOKEN)$/.test(key) ||
-          key === "LD_LIBRARY_PATH" || key === "LD_PRELOAD" || key === "PATH"
+          /^OPERANT_.*(?:TOKEN|BEARER|CREDENTIAL).*$/.test(key) ||
+          key === "OPERANT_MASTER_KEY"
         ) delete env[key];
       }
-      try {
-        const child = new Deno.Command(childArgs[0], {
-          args: childArgs.slice(1),
-          clearEnv: true,
-          env,
-          stdin: "inherit",
-          stdout: "inherit",
-          stderr: "inherit",
-        }).spawn();
-        const status = await child.status;
-        return { stdout: "", stderr: "", code: status.code };
-      } catch (error) {
-        if (error instanceof Deno.errors.NotFound) {
-          return { stdout: "", stderr: "", code: 127 };
-        }
-        throw error;
-      }
+      return await runIsolatedCommand(
+        childArgs,
+        env,
+        parsed.server,
+        parsed.json,
+      );
     } else if (cmd === "auth" && sub === "sessions") {
       result = await getJson(`${parsed.server}/api/v1/auth/sessions`);
     } else if (cmd === "auth" && sub === "logout") {
