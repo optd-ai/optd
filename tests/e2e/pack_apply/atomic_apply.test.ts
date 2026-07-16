@@ -248,15 +248,26 @@ Deno.test("compiled optctl completes safe, destructive, stale, timeout, risky, a
       harness.server.sql,
       "select id::text id from projects where slug='alpha'",
     )).rows[0].id;
-    const rootPrincipal = (await query<{ id: string }>(
+    const rootAuthContext = (await query<{ id: string }>(
       harness.server.sql,
-      "select p.id::text id from principals p join human_users h on h.principal_id=p.id where h.username='root'",
+      `select c.id::text id from auth_contexts c
+       join human_users h on h.id=c.human_user_id
+       where h.username='root' order by c.created_at desc,c.id desc limit 1`,
     )).rows[0].id;
+    assertEquals(
+      (await query<{ count: string }>(
+        harness.server.sql,
+        `select count(*)::text count from projects p
+         join auth_contexts c on c.id=$2 where p.id=$1`,
+        [projectId, rootAuthContext],
+      )).rows[0].count,
+      "1",
+    );
     const rowId = uuidV7();
     await query(
       harness.server.sql,
       `insert into "${leadTable}"(id,project_id,created_by,updated_by,name,status,phone) values($1,$2,$3,$3,'Fact changed','new','555')`,
-      [rowId, projectId, rootPrincipal],
+      [rowId, projectId, rootAuthContext],
     );
     await expectError(
       harness,
@@ -419,7 +430,7 @@ Deno.test("compiled optctl completes safe, destructive, stale, timeout, risky, a
         "resource",
         "operant/crm:lead",
       ], secrets);
-      assertEquals(metadata.data.spec.fields.phone, undefined);
+      assertEquals(metadata.data.schema.fields.phone, undefined);
     }
     assertEquals(
       (await query<{ count: string }>(

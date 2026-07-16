@@ -64,6 +64,23 @@ Deno.test("immutable candidates are reused while every preview persists a distin
       "insert into auth_contexts(id,principal_id,human_user_id,session_id,credential_kind,roles,created_at) values ($1,$2,$3,$4,'human_full','{system:super_admin}',now())",
       [auth, principal, human, session],
     );
+    const projectId = uuidV7();
+    await query(
+      sql,
+      `insert into projects(
+         id,slug,display_name,created_by_auth_context_id,updated_by_auth_context_id)
+       values($1,'pack-plan-test','Pack Plan Test',$2,$2)`,
+      [projectId, auth],
+    );
+    assertEquals(
+      (await query<{ count: string }>(
+        sql,
+        `select count(*)::text count from projects p
+         join auth_contexts c on c.id=$2 where p.id=$1`,
+        [projectId, auth],
+      )).rows[0].count,
+      "1",
+    );
     const candidate = await loadPackFromFiles(
       await packFiles("prototypes/crm-default-pack"),
     );
@@ -205,11 +222,11 @@ Deno.test("immutable candidates are reused while every preview persists a distin
       change.kind === "remove_field" && change.target.field === "phone"
     )!;
     assertEquals(removeChange.status, "ready");
-    const rowId = uuidV7(), projectId = uuidV7();
+    const rowId = uuidV7();
     await query(
       sql,
       `insert into "${leadTable}"(id,project_id,created_by,updated_by,name,status,phone) values ($1,$2,$3,$3,'Lead','new','555')`,
-      [rowId, projectId, principal],
+      [rowId, projectId, auth],
     );
     const blocked = await sql.begin((tx) =>
       validateMigrationPlan(tx, removal.plan.id, auth)
@@ -234,7 +251,7 @@ Deno.test("immutable candidates are reused while every preview persists a distin
       concurrentInsert = query(
         sql!,
         `insert into "${leadTable}"(id,project_id,created_by,updated_by,name,status,phone) values ($1,$2,$3,$3,'Concurrent','new','777')`,
-        [uuidV7(), projectId, principal],
+        [uuidV7(), projectId, auth],
       );
       const validation = await validateMigrationPlan(
         tx,
