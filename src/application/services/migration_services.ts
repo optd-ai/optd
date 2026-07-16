@@ -18,6 +18,8 @@ export function makeMigrationServices(
     sql: Queryable;
     authorization: AuthorizationRepository;
     tx: TransactionManager<Queryable>;
+    /** Test-only dependency seam. Production composition never supplies it. */
+    beforeApplyAttempt?: (sql: Queryable, attempt: number) => Promise<void>;
   },
 ) {
   const missing = (id: string) =>
@@ -33,6 +35,19 @@ export function makeMigrationServices(
       action,
       resource: "system:migration",
     });
+  const recordFailedAttempt = async (
+    planId: string,
+    authContextId: string,
+    outcome: string,
+  ) => {
+    try {
+      if (await getMigrationPlan(deps.sql, planId)) {
+        await deps.tx.transaction((sql) =>
+          recordMigrationAttempt(sql, planId, authContextId, outcome)
+        );
+      }
+    } catch { /* preserve the authoritative apply outcome */ }
+  };
   return {
     async inspect(id: string, auth: AuthContext): Promise<Result<unknown>> {
       const authorized = await authorize(auth, "migration.inspect");
@@ -76,10 +91,12 @@ export function makeMigrationServices(
       if (!authorized.ok) return err(authorized.error);
       let transientFailures = 0;
       while (true) {
+        const attempt = transientFailures + 1;
         try {
-          const application = await deps.tx.transaction((sql) =>
-            applyMigrationPlan(sql, id, input, auth.id)
-          );
+          const application = await deps.tx.transaction(async (sql) => {
+            await deps.beforeApplyAttempt?.(sql, attempt);
+            return await applyMigrationPlan(sql, id, input, auth.id);
+          });
           return application ? ok(application) : missing(id);
         } catch (error) {
           const sqlState = typeof error === "object" && error !== null &&
@@ -91,6 +108,7 @@ export function makeMigrationServices(
             transientFailures < 2
           ) {
             transientFailures++;
+            await recordFailedAttempt(id, auth.id, sqlState);
             continue;
           }
           const code = error instanceof MigrationApplyError
@@ -100,13 +118,7 @@ export function makeMigrationServices(
             : sqlState === "40P01" || sqlState === "40001"
             ? "migration_retry_exhausted"
             : "migration_apply_failed";
-          try {
-            if (await getMigrationPlan(deps.sql, id)) {
-              await deps.tx.transaction((sql) =>
-                recordMigrationAttempt(sql, id, auth.id, code)
-              );
-            }
-          } catch { /* preserve the authoritative apply error */ }
+          await recordFailedAttempt(id, auth.id, code);
           return err({
             code,
             message: error instanceof Error

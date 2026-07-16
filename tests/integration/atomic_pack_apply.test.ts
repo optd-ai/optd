@@ -3,9 +3,12 @@ import {
   closePostgresClient,
   createPostgresClient,
   query,
+  type Queryable,
 } from "../../src/adapters/outbound/postgres/client.ts";
 import { applyPlatformMigrations } from "../../src/adapters/outbound/postgres/migrations.ts";
 import { getDefinition } from "../../src/adapters/outbound/postgres/pack_repository.ts";
+import { PostgresTransactionManager } from "../../src/adapters/outbound/postgres/transaction_manager.ts";
+import { makeMigrationServices } from "../../src/application/services/migration_services.ts";
 import {
   findPostgresBins,
   startPostgresRuntime,
@@ -215,6 +218,179 @@ Deno.test("atomic pack apply activates globally, is idempotent, and rolls back i
     release.resolve();
     await blocker;
 
+    for (const [index, state] of ["40P01", "40001"].entries()) {
+      const retryCandidate = structuredClone(pack);
+      retryCandidate.version = `0.1.${index + 20}`;
+      retryCandidate.sourceDigest = `sha256:${String(index + 2).repeat(64)}`;
+      retryCandidate.revision = `operant/crm@${retryCandidate.version}:sha256:${
+        String(index + 4).repeat(64)
+      }`;
+      const retryPlan = await createPackMigrationPlan(
+        sql,
+        retryCandidate,
+        auth,
+      );
+      await sql.begin((tx) =>
+        validateMigrationPlan(tx, retryPlan.plan.id, auth)
+      );
+      const transactionIds: string[] = [];
+      const services = migrationServices(sql, async (tx, attempt) => {
+        transactionIds.push(
+          (await query<{ id: string }>(tx, "select txid_current()::text id"))
+            .rows[0].id,
+        );
+        if (attempt < 3) {
+          throw Object.assign(new Error("injected transient SQLSTATE"), {
+            code: state,
+          });
+        }
+      });
+      const result = await services.apply(retryPlan.plan.id, {
+        acknowledgement: "safe",
+      }, authContext(auth, principal, human, session));
+      assertEquals(result.ok, true);
+      assertEquals(new Set(transactionIds).size, 3);
+      assertEquals(
+        (await query<{ count: string }>(
+          sql,
+          "select count(*)::text count from pack_migration_attempts where plan_id=$1 and outcome=$2",
+          [retryPlan.plan.id, state],
+        )).rows[0].count,
+        "2",
+      );
+      assertEquals(
+        (await query<{ count: string }>(
+          sql,
+          "select count(*)::text count from pack_migration_applications where plan_id=$1",
+          [retryPlan.plan.id],
+        )).rows[0].count,
+        "1",
+      );
+    }
+
+    const noRetryCandidate = structuredClone(pack);
+    noRetryCandidate.version = "0.1.30";
+    noRetryCandidate.sourceDigest = `sha256:${"6".repeat(64)}`;
+    noRetryCandidate.revision = `operant/crm@0.1.30:sha256:${"7".repeat(64)}`;
+    const noRetryPlan = await createPackMigrationPlan(
+      sql,
+      noRetryCandidate,
+      auth,
+    );
+    await sql.begin((tx) =>
+      validateMigrationPlan(tx, noRetryPlan.plan.id, auth)
+    );
+    let attempts = 0;
+    const busyServices = migrationServices(sql, async () => {
+      attempts++;
+      throw Object.assign(new Error("injected timeout"), { code: "55P03" });
+    });
+    const busyResult = await busyServices.apply(noRetryPlan.plan.id, {
+      acknowledgement: "safe",
+    }, authContext(auth, principal, human, session));
+    assertEquals(busyResult.ok, false);
+    if (!busyResult.ok) {
+      assertEquals(busyResult.error.code, "pack_install_busy");
+    }
+    assertEquals(attempts, 1);
+    assertEquals(
+      (await query<{ count: string }>(
+        sql,
+        "select count(*)::text count from pack_migration_attempts where plan_id=$1",
+        [noRetryPlan.plan.id],
+      )).rows[0].count,
+      "1",
+    );
+    assertEquals(
+      (await query<{ count: string }>(
+        sql,
+        "select count(*)::text count from pack_migration_applications where plan_id=$1",
+        [noRetryPlan.plan.id],
+      )).rows[0].count,
+      "0",
+    );
+    let acknowledgementAttempts = 0;
+    const acknowledgementServices = migrationServices(sql, async () => {
+      acknowledgementAttempts++;
+    });
+    const acknowledgementResult = await acknowledgementServices.apply(
+      noRetryPlan.plan.id,
+      { acknowledgement: "reviewed" },
+      authContext(auth, principal, human, session),
+    );
+    assertEquals(acknowledgementResult.ok, false);
+    if (!acknowledgementResult.ok) {
+      assertEquals(
+        acknowledgementResult.error.code,
+        "migration_acknowledgement_invalid",
+      );
+    }
+    assertEquals(acknowledgementAttempts, 1);
+
+    let deniedAttempts = 0;
+    const deniedServices = makeMigrationServices({
+      sql,
+      tx: new PostgresTransactionManager(sql),
+      authorization: {
+        authorize: async () => ({
+          ok: false,
+          error: {
+            code: "policy_denied",
+            message: "denied",
+            severity: "authorization" as const,
+          },
+        }),
+      } as any,
+      beforeApplyAttempt: async () => {
+        deniedAttempts++;
+      },
+    });
+    assertEquals(
+      (await deniedServices.apply(
+        noRetryPlan.plan.id,
+        { acknowledgement: "safe" },
+        authContext(auth, principal, human, session),
+      )).ok,
+      false,
+    );
+    assertEquals(deniedAttempts, 0);
+
+    const staleCandidate = structuredClone(pack);
+    staleCandidate.version = "0.1.31";
+    staleCandidate.sourceDigest = `sha256:${"0".repeat(64)}`;
+    staleCandidate.revision = `operant/crm@0.1.31:sha256:${"1".repeat(64)}`;
+    const stalePlan = await createPackMigrationPlan(sql, staleCandidate, auth);
+    await sql.begin((tx) => validateMigrationPlan(tx, stalePlan.plan.id, auth));
+    const advancement = structuredClone(pack);
+    advancement.version = "0.1.32";
+    advancement.sourceDigest = `sha256:${"4".repeat(64)}`;
+    advancement.revision = `operant/crm@0.1.32:sha256:${"5".repeat(64)}`;
+    const advancementPlan = await createPackMigrationPlan(
+      sql,
+      advancement,
+      auth,
+    );
+    await sql.begin((tx) =>
+      validateMigrationPlan(tx, advancementPlan.plan.id, auth)
+    );
+    await sql.begin((tx) =>
+      applyMigrationPlan(tx, advancementPlan.plan.id, {
+        acknowledgement: "safe",
+      }, auth)
+    );
+    let staleAttempts = 0;
+    const staleServices = migrationServices(sql, async () => {
+      staleAttempts++;
+    });
+    const staleResult = await staleServices.apply(stalePlan.plan.id, {
+      acknowledgement: "safe",
+    }, authContext(auth, principal, human, session));
+    assertEquals(staleResult.ok, false);
+    if (!staleResult.ok) {
+      assertEquals(staleResult.error.code, "migration_stale");
+    }
+    assertEquals(staleAttempts, 1);
+
     const destructive = structuredClone(pack);
     destructive.version = "0.2.0";
     destructive.sourceDigest = `sha256:${"d".repeat(64)}`;
@@ -243,17 +419,26 @@ Deno.test("atomic pack apply activates globally, is idempotent, and rolls back i
       )).rows[0].leaked,
       false,
     );
-    await assertRejects(
-      () =>
-        sql!.begin((tx) =>
-          applyMigrationPlan(tx, removal.plan.id, {
-            acknowledgement: "destructive",
-            confirmation_token: "wrong",
-          }, auth)
-        ),
-      Error,
-      "confirmation token",
+    let tokenAttempts = 0;
+    const tokenServices = migrationServices(sql, async () => {
+      tokenAttempts++;
+    });
+    const wrongTokenResult = await tokenServices.apply(
+      removal.plan.id,
+      {
+        acknowledgement: "destructive",
+        confirmation_token: "wrong",
+      },
+      authContext(auth, principal, human, session),
     );
+    assertEquals(wrongTokenResult.ok, false);
+    if (!wrongTokenResult.ok) {
+      assertEquals(
+        wrongTokenResult.error.code,
+        "migration_confirmation_invalid",
+      );
+    }
+    assertEquals(tokenAttempts, 1);
     await query(
       sql,
       "update pack_migration_confirmation_tokens set expires_at=now()-interval '1 second' where plan_id=$1",
@@ -344,6 +529,36 @@ Deno.test("atomic pack apply activates globally, is idempotent, and rolls back i
     await Deno.remove(root, { recursive: true }).catch(() => undefined);
   }
 });
+
+function authContext(
+  id: string,
+  principalId: string,
+  humanUserId: string,
+  sessionId: string,
+) {
+  return Object.freeze({
+    id,
+    principalId,
+    principalType: "human_user" as const,
+    humanUserId,
+    sessionId,
+    credentialKind: "human_full" as const,
+    roles: Object.freeze(["system:super_admin"]),
+    createdAt: new Date().toISOString(),
+  });
+}
+
+function migrationServices(
+  sql: ReturnType<typeof createPostgresClient>,
+  beforeApplyAttempt: (sql: Queryable, attempt: number) => Promise<void>,
+) {
+  return makeMigrationServices({
+    sql,
+    tx: new PostgresTransactionManager(sql),
+    authorization: { authorize: async () => ({ ok: true, value: {} }) } as any,
+    beforeApplyAttempt,
+  });
+}
 
 async function tokenDigest(token: string): Promise<string> {
   const digest = await crypto.subtle.digest(
