@@ -1205,6 +1205,9 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       if (boundary.project_id) {
         url.searchParams.set("project_id", String(boundary.project_id));
       }
+      if (authArgs.includes("--include-security")) {
+        url.searchParams.set("include_security", "true");
+      }
       result = await getJson(url.toString());
     } else if (cmd === "assignment" && sub === "role" && value === "list") {
       const userId = parsed.positional[3];

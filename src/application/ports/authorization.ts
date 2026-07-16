@@ -14,6 +14,7 @@ export interface AuthorizationRepository {
   authority(
     auth: AuthContext,
     boundary: AuthorizationBoundary,
+    includeSecurity?: boolean,
   ): Promise<Result<BoundaryAuthority>>;
   authorize(input: {
     auth: AuthContext;

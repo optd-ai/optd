@@ -44,6 +44,7 @@ export type Capability = {
   policyRevisionId: string;
   ruleId: string;
   summary?: string;
+  predicate?: string;
 };
 
 export type BoundaryAuthority = {

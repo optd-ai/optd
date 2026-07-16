@@ -19,6 +19,7 @@ export type AuthorizationHttpService = {
   authority(
     auth: AuthContext,
     boundary: unknown,
+    includeSecurity?: boolean,
   ): Promise<Result<BoundaryAuthority>>;
   roles(
     auth: AuthContext,
@@ -58,14 +59,17 @@ export function registerAuthorizationRoutes(
   app: Hono<{ Variables: AuthVariables }>,
   service: AuthorizationHttpService,
 ) {
-  app.get(
-    "/api/v1/authorization/authority",
-    async (c) =>
-      respond(
-        c,
-        await service.authority(c.get("auth"), queryBoundary(c.req.url)),
+  app.get("/api/v1/authorization/authority", async (c) => {
+    const url = new URL(c.req.url);
+    return respond(
+      c,
+      await service.authority(
+        c.get("auth"),
+        queryBoundary(c.req.url),
+        url.searchParams.get("include_security") === "true",
       ),
-  );
+    );
+  });
   app.get(
     "/api/v1/authorization/roles",
     async (c) =>
@@ -144,7 +148,11 @@ export function registerAuthorizationRoutes(
 
 function queryBoundary(urlValue: string) {
   const url = new URL(urlValue);
-  const allowed = new Set(["boundary_type", "project_id"]);
+  const allowed = new Set([
+    "boundary_type",
+    "project_id",
+    "include_security",
+  ]);
   if ([...url.searchParams.keys()].some((key) => !allowed.has(key))) {
     return undefined;
   }

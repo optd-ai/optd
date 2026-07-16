@@ -17,10 +17,14 @@ export function makeAuthorizationService(repository: AuthorizationRepository) {
     return Number.isSafeInteger(number) && number > 0 ? number : undefined;
   };
   return {
-    authority(auth: AuthContext, boundaryInput: unknown) {
+    authority(
+      auth: AuthContext,
+      boundaryInput: unknown,
+      includeSecurity = false,
+    ) {
       const boundary = parseAuthorizationBoundary(boundaryInput);
       return boundary
-        ? repository.authority(auth, boundary)
+        ? repository.authority(auth, boundary, includeSecurity)
         : invalid("authorization boundary is invalid", { field: "boundary" });
     },
     roles(auth: AuthContext, boundaryInput: unknown) {

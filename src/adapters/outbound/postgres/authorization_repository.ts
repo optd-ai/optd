@@ -26,17 +26,37 @@ type AuthorityRow = {
   resource: string | null;
   condition_kind: "unconditional" | "abac" | "rebac" | null;
   summary: string | null;
+  predicate: string | null;
 };
 
 export class PostgresAuthorizationRepository
   implements AuthorizationRepository {
   constructor(private readonly sql: Sql) {}
 
-  authority(
+  async authority(
     auth: AuthContext,
     boundary: AuthorizationBoundary,
+    includeSecurity = false,
   ): Promise<Result<BoundaryAuthority>> {
-    return currentAuthority(this.sql, auth, boundary);
+    if (includeSecurity) {
+      const system = await currentAuthority(this.sql, auth, { type: "system" });
+      if (!system.ok) return system;
+      if (
+        !system.value.superAdmin &&
+        !hasCapability(system.value, "pack.inspect_security")
+      ) {
+        return err(
+          policyDenied(
+            auth,
+            { type: "system" },
+            "pack.inspect_security",
+            "system:policy_definition",
+            system.value,
+          ),
+        );
+      }
+    }
+    return currentAuthority(this.sql, auth, boundary, includeSecurity);
   }
 
   async authorize(
@@ -191,6 +211,17 @@ export class PostgresAuthorizationRepository
           authority.value,
         );
       }
+      const definition = await query<{ active: boolean }>(
+        tx,
+        `select r.active and exists(
+          select 1 from role_definition_versions v
+          where v.role_id=r.id and v.active
+        ) active from system_roles r where r.id=$1 for share`,
+        [role],
+      );
+      if (!definition.rows[0]?.active) {
+        return err(notFound("active role definition", role));
+      }
       const target = await query<{ principal_id: string }>(
         tx,
         "select principal_id from human_users where id=$1 and status='active' for share",
@@ -295,6 +326,13 @@ export class PostgresAuthorizationRepository
           [],
         );
         if (Number(count.rows[0].count) <= 1) {
+          await assignmentAudit(
+            tx,
+            auth.id,
+            "role_assignment.disable_rejected",
+            assignmentId,
+            { reason: "last_human_super_admin", user_id: userId },
+          );
           return err(
             conflict("last_human_super_admin", { assignment_id: assignmentId }),
           );
@@ -466,6 +504,7 @@ async function currentAuthority(
   sql: Queryable,
   auth: AuthContext,
   boundary: AuthorizationBoundary,
+  includeSecurity = false,
 ): Promise<Result<BoundaryAuthority>> {
   const [type, projectId] = boundaryParams(boundary);
   const rows = await query<AuthorityRow>(
@@ -479,22 +518,28 @@ async function currentAuthority(
         and (s.authorization_id is null or exists(select 1 from agent_authorizations a where a.id=s.authorization_id and a.revoked_at is null and a.superseded_at is null))
     ), effective_roles as (
       select distinct ra.role_id from valid_actor a join role_assignments ra on a.authorization_id is null and ra.principal_id=a.principal_id and ra.active
-       where (ra.boundary_type=$4 and ra.project_id is not distinct from $5::uuid or $4='project' and ra.boundary_type='all_projects')
+       join system_roles r on r.id=ra.role_id and r.active
+       where exists(select 1 from role_definition_versions rv where rv.role_id=r.id and rv.active)
+         and (ra.boundary_type=$4 and ra.project_id is not distinct from $5::uuid or $4='project' and ra.boundary_type='all_projects')
       union
       select distinct ar.role_id from valid_actor a join agent_authorization_roles ar on ar.authorization_id=a.authorization_id
-       where (ar.boundary_type=$4 and ar.project_id is not distinct from $5::uuid or $4='project' and ar.boundary_type='all_projects')
+       join system_roles r on r.id=ar.role_id and r.active
+       where exists(select 1 from role_definition_versions rv where rv.role_id=r.id and rv.active)
+         and (ar.boundary_type=$4 and ar.project_id is not distinct from $5::uuid or $4='project' and ar.boundary_type='all_projects')
     ), super_admin as (
       select exists(
         select 1 from valid_actor a join role_assignments ra on a.authorization_id is null and ra.principal_id=a.principal_id and ra.active and ra.role_id='system:super_admin' and ra.boundary_type='system'
+          join system_roles r on r.id=ra.role_id and r.active
         union all select 1 from valid_actor a join agent_authorization_roles ar on ar.authorization_id=a.authorization_id and ar.role_id='system:super_admin' and ar.boundary_type='system'
+          join system_roles r on r.id=ar.role_id and r.active
       ) value
     ), applicable as (
-      select pd.policy_id,pd.id policy_revision_id,pr.id rule_id,pr.capability action,pr.resource,pr.condition_kind,pr.summary
+      select pd.policy_id,pd.id policy_revision_id,pr.id rule_id,pr.capability action,pr.resource,pr.condition_kind,pr.summary,pr.predicate
       from policy_assignments pa join policy_definition_versions pd on pd.id=pa.policy_definition_version_id and pd.active
       join policy_rules pr on pr.policy_definition_version_id=pd.id join effective_roles er on er.role_id=pr.role_id
       where pa.active and (pa.boundary_type=$4 and pa.project_id is not distinct from $5::uuid or $4='project' and pa.boundary_type='all_projects')
     )
-    select er.role_id,sa.value super_admin,a.policy_id,a.policy_revision_id,a.rule_id,a.action,a.resource,a.condition_kind,a.summary
+    select er.role_id,sa.value super_admin,a.policy_id,a.policy_revision_id,a.rule_id,a.action,a.resource,a.condition_kind,a.summary,a.predicate
     from valid_actor va cross join super_admin sa left join effective_roles er on true left join applicable a on true
     order by er.role_id,a.policy_id,a.rule_id`,
     [auth.sessionId, auth.principalId, auth.humanUserId, type, projectId],
@@ -525,6 +570,7 @@ async function currentAuthority(
       policyRevisionId: row.policy_revision_id,
       ruleId: row.rule_id,
       ...(row.summary ? { summary: row.summary } : {}),
+      ...(includeSecurity && row.predicate ? { predicate: row.predicate } : {}),
     });
   }
   const value = {

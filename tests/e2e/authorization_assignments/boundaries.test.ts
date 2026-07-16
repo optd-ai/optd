@@ -214,6 +214,71 @@ Deno.test("compiled optctl resolves current explicit assignment boundaries and s
     assertEquals(JSON.parse(explicitSystem.stdout).data.effective_roles, [
       "system:admin",
     ]);
+
+    await selectCredentials(harness, root);
+    const rootUser = (await query<{ id: string }>(
+      harness.server.sql,
+      "select id from human_users where username='root'",
+    )).rows[0];
+    const grantedSuperAdmin = await harness.runOptctl([
+      "--json",
+      "assignment",
+      "role",
+      "create",
+      userId,
+      "--role",
+      "system:super_admin",
+      "--boundary",
+      "system",
+    ]);
+    assertEquals(grantedSuperAdmin.code, 0, grantedSuperAdmin.stderr);
+    const granted = JSON.parse(grantedSuperAdmin.stdout).data;
+    const original = (await query<{ id: string; version: number }>(
+      harness.server.sql,
+      `select ra.id,ra.version::int version from role_assignments ra
+       join human_users u on u.principal_id=ra.principal_id
+       where u.id=$1 and ra.role_id='system:super_admin' and ra.active`,
+      [rootUser.id],
+    )).rows[0];
+    await selectCredentials(harness, bounded);
+    const removeOriginal = await harness.runOptctl([
+      "--json",
+      "assignment",
+      "role",
+      "disable",
+      rootUser.id,
+      "--assignment",
+      original.id,
+      "--expected-version",
+      String(original.version),
+    ]);
+    assertEquals(removeOriginal.code, 0, removeOriginal.stderr);
+    const rejectFinal = await harness.runOptctl([
+      "--json",
+      "assignment",
+      "role",
+      "disable",
+      userId,
+      "--assignment",
+      granted.id,
+      "--expected-version",
+      String(granted.version),
+    ]);
+    assertEquals(rejectFinal.code, 1);
+    assertEquals(
+      JSON.parse(rejectFinal.stderr).error.code,
+      "last_human_super_admin",
+    );
+    const invariant = await query<
+      { active_humans: number; rejected_audits: number }
+    >(
+      harness.server.sql,
+      `select
+        (select count(distinct u.id)::int from human_users u join role_assignments ra on ra.principal_id=u.principal_id where u.status='active' and ra.active and ra.role_id='system:super_admin') active_humans,
+        (select count(*)::int from authorization_audit_events where event_type='role_assignment.disable_rejected' and assignment_id=$1) rejected_audits`,
+      [granted.id],
+    );
+    assertEquals(invariant.rows[0], { active_humans: 1, rejected_audits: 1 });
   } finally {
     await harness.close();
   }

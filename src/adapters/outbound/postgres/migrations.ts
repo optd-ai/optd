@@ -639,6 +639,7 @@ export const platformMigrations: PlatformMigration[] = [
       alter table policy_rules add column condition_kind text not null default 'unconditional'
         check(condition_kind in ('unconditional','abac','rebac'));
       alter table policy_rules add column summary text;
+      alter table policy_rules add column predicate text;
       alter table policy_assignments add column version bigint not null default 1;
       alter table policy_assignments add column source text not null default 'operator'
         check(source in ('operator','pack_default','platform'));
@@ -697,8 +698,8 @@ export const platformMigrations: PlatformMigration[] = [
         id uuid primary key,
         auth_context_id uuid not null references auth_contexts(id),
         event_type text not null check(event_type in (
-          'role_assignment.created','role_assignment.disabled',
-          'policy_assignment.created','policy_assignment.disabled',
+          'role_assignment.created','role_assignment.disabled','role_assignment.disable_rejected',
+          'policy_assignment.created','policy_assignment.disabled','policy_assignment.disable_rejected',
           'policy.allowed','policy.denied','policy.bypassed'
         )),
         assignment_id uuid,
