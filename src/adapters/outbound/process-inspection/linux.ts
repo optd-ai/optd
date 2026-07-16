@@ -42,8 +42,10 @@ async function readProcFile(path: string): Promise<string> {
   // Keep the executable least-privileged by using the already-required
   // subprocess capability (auth isolate launches arbitrary child commands)
   // and a fixed argv, without a shell.
-  const output = await new Deno.Command("cat", {
+  const output = await new Deno.Command("/bin/cat", {
     args: [path],
+    clearEnv: true,
+    env: {},
     stdin: "null",
     stdout: "piped",
     stderr: "null",

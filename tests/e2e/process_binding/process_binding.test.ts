@@ -5,7 +5,11 @@ import {
   assertMatch,
 } from "jsr:@std/assert";
 import { join } from "jsr:@std/path";
-import { startLiveHarness } from "../../support/live_harness.ts";
+import { query } from "../../../src/adapters/outbound/postgres/client.ts";
+import {
+  type LiveHarness,
+  startLiveHarness,
+} from "../../support/live_harness.ts";
 
 type Binding = {
   id: string;
@@ -42,45 +46,47 @@ Deno.test("compiled optctl binds one nearest Linux process credential without fa
     assertEquals(inherited.anchor_uid, Deno.uid());
     assertMatch(inherited.anchor_boot_id, /^[0-9a-f-]{36}$/);
 
-    const childStatus = await harness.runOptctl([
-      "--json",
-      "auth",
-      "isolate",
-      "--",
-      harness.binaryPath,
-      "--server",
-      harness.baseUrl,
-      "--json",
-      "auth",
-      "status",
-    ]);
-    assertEquals(childStatus.code, 0, childStatus.stderr);
-    const isolated = JSON.parse(childStatus.stdout).data;
-    assertEquals(isolated.authenticated, false);
-    assertEquals(isolated.request_credential_available, true);
-
     const helperPath = join(harness.rootDir, "narrow-agent.ts");
     const requestPath = join(harness.rootDir, "narrow-request.json");
     const resultPath = join(harness.rootDir, "narrow-result.json");
     await Deno.writeTextFile(helperPath, narrowAgentHelper(), { mode: 0o600 });
-    const isolatedRequest = await harness.runOptctl([
-      "--json",
-      "auth",
-      "isolate",
-      "--",
-      Deno.execPath(),
-      "run",
-      "--allow-run",
-      "--allow-read",
-      "--allow-write",
-      "--allow-env",
+    const statusResult = await runHelper(
       helperPath,
-      harness.binaryPath,
-      harness.baseUrl,
+      harness,
+      requestPath,
+      resultPath,
+      "status-stop",
+    );
+    assertEquals(statusResult.code, 0, statusResult.stderr);
+    const isolated = await waitForJson(resultPath) as Record<string, unknown>;
+    assertEquals(isolated.authenticated, false);
+    assertEquals(isolated.request_credential_available, true);
+    await Deno.remove(resultPath);
+
+    for (const deniedExecutable of ["/bin/echo", "/usr/bin/cat"]) {
+      const deniedSpawn = await harness.runOptctl([
+        "--json",
+        "auth",
+        "isolate",
+        "--",
+        deniedExecutable,
+        "denied",
+      ]);
+      assertEquals(deniedSpawn.code, 1);
+      assertEquals(JSON.parse(deniedSpawn.stderr).error.code, "internal_error");
+      assertMatch(
+        JSON.parse(deniedSpawn.stderr).error.message,
+        /allow-run|run access|NotCapable/,
+      );
+    }
+
+    const isolatedRequest = await runHelper(
+      helperPath,
+      harness,
       requestPath,
       resultPath,
       "request",
-    ]);
+    );
     assertEquals(isolatedRequest.code, 0, isolatedRequest.stderr);
     const requestId = await waitForJson(requestPath) as string;
     const approved = await harness.runOptctl([
@@ -93,33 +99,30 @@ Deno.test("compiled optctl binds one nearest Linux process credential without fa
       "narrow-child",
     ]);
     assertEquals(approved.code, 0, approved.stderr);
-    const isolateResult = await harness.runOptctl([
-      "--json",
-      "auth",
-      "isolate",
-      "--",
-      Deno.execPath(),
-      "run",
-      "--allow-run",
-      "--allow-read",
-      "--allow-write",
-      "--allow-env",
+    const contextsBefore = await authContextCount(harness);
+    const isolateResult = await runHelper(
       helperPath,
-      harness.binaryPath,
-      harness.baseUrl,
+      harness,
       requestPath,
       resultPath,
       "finish",
-    ]);
+    );
     assertEquals(isolateResult.code, 0, isolateResult.stderr);
     const narrow = await waitForJson(resultPath) as Record<string, unknown>;
     assertEquals(narrow.credential_type, "agent");
+    assertEquals(narrow.broader_ancestor_pid, inherited.anchor_pid);
+    assert(narrow.anchor_pid !== narrow.broader_ancestor_pid);
     assertEquals(narrow.work_code, 1);
     assertEquals(narrow.work_error, "authorization_insufficient");
     assertEquals(narrow.denied_code, 1);
     assertEquals(narrow.denied_error, "authorization_insufficient");
     assertEquals(narrow.revoked_code, 0);
     assertEquals(narrow.invalid_stop_error, "internal_error");
+    assertEquals(
+      await authContextCount(harness) - contextsBefore,
+      6,
+      "one denied work request plus watch ticket, redeem, request, decision, and revoke; no broader credential retry",
+    );
 
     const otherOrigin = await harness.runOptctl([
       "--server",
@@ -230,6 +233,52 @@ Deno.test("compiled optctl binds one nearest Linux process credential without fa
   }
 });
 
+async function authContextCount(harness: LiveHarness): Promise<number> {
+  const result = await query<{ count: number }>(
+    harness.server.sql,
+    `select count(*)::int count from auth_contexts`,
+  );
+  return result.rows[0].count;
+}
+
+async function runHelper(
+  helper: string,
+  harness: LiveHarness,
+  requestPath: string,
+  resultPath: string,
+  mode: string,
+) {
+  const output = await new Deno.Command(Deno.execPath(), {
+    args: [
+      "run",
+      `--allow-run=${harness.binaryPath}`,
+      "--allow-read",
+      "--allow-write",
+      "--allow-env",
+      helper,
+      harness.binaryPath,
+      harness.baseUrl,
+      requestPath,
+      resultPath,
+      mode,
+    ],
+    env: {
+      ...Deno.env.toObject(),
+      HOME: harness.homeDir,
+      XDG_CONFIG_HOME: join(harness.rootDir, "xdg-config"),
+      XDG_STATE_HOME: join(harness.rootDir, "xdg-state"),
+    },
+    stdin: "null",
+    stdout: "piped",
+    stderr: "piped",
+  }).output();
+  return {
+    code: output.code,
+    stdout: new TextDecoder().decode(output.stdout).trimEnd(),
+    stderr: new TextDecoder().decode(output.stderr).trimEnd(),
+  };
+}
+
 async function runDirect(
   binary: string,
   server: string,
@@ -299,12 +348,28 @@ function narrowAgentHelper(): string {
   return `
     const [binary, server, requestPath, resultPath, mode] = Deno.args;
     const run = async (args) => {
+      const env = {
+        HOME: Deno.env.get("HOME"),
+        XDG_CONFIG_HOME: Deno.env.get("XDG_CONFIG_HOME"),
+        XDG_STATE_HOME: Deno.env.get("XDG_STATE_HOME"),
+      };
+      if (mode === "request" || mode === "status-stop") {
+        env.OPERANT_AUTH_TREE_STOP_PID = String(Deno.pid);
+      }
       const output = await new Deno.Command(binary, {
         args: ["--server", server, "--json", ...args],
+        clearEnv: true,
+        env,
         stdout: "piped", stderr: "piped",
       }).output();
       return { code: output.code, stdout: new TextDecoder().decode(output.stdout), stderr: new TextDecoder().decode(output.stderr) };
     };
+    if (mode === "status-stop") {
+      const status = await run(["auth", "status"]);
+      if (status.code !== 0) throw new Error(status.stderr);
+      await Deno.writeTextFile(resultPath, JSON.stringify(JSON.parse(status.stdout).data));
+      Deno.exit(0);
+    }
     if (mode === "request") {
       const request = await run(["auth", "request", "--role", "system:admin", "--boundary", "system", "--reason", "nearest child binding"]);
       if (request.code !== 0) throw new Error(request.stderr);
@@ -323,13 +388,21 @@ function narrowAgentHelper(): string {
     const denied = await run(["auth", "approve", broadId, "--yes"]);
     const invalidStop = await new Deno.Command(binary, {
       args: ["--server", server, "--json", "auth", "status"],
-      env: { ...Deno.env.toObject(), OPERANT_AUTH_TREE_STOP_PID: "2147483647" },
+      clearEnv: true,
+      env: {
+        HOME: Deno.env.get("HOME"),
+        XDG_CONFIG_HOME: Deno.env.get("XDG_CONFIG_HOME"),
+        XDG_STATE_HOME: Deno.env.get("XDG_STATE_HOME"),
+        OPERANT_AUTH_TREE_STOP_PID: "2147483647",
+      },
       stdout: "piped", stderr: "piped",
     }).output();
     const invalidStopBody = JSON.parse(new TextDecoder().decode(invalidStop.stderr));
     const revoked = await run(["auth", "revoke", status.authorization_id]);
     await Deno.writeTextFile(resultPath, JSON.stringify({
       credential_type: status.credential_type,
+      anchor_pid: status.anchor_pid,
+      broader_ancestor_pid: Deno.ppid,
       work_code: allowed.code,
       work_error: JSON.parse(allowed.stderr).error.code,
       denied_code: denied.code,

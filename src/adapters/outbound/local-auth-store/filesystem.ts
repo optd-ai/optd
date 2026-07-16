@@ -1,4 +1,4 @@
-import { basename, dirname, join } from "jsr:@std/path";
+import { basename, dirname, isAbsolute, join, resolve } from "jsr:@std/path";
 import type {
   DoctorFinding,
   DoctorReport,
@@ -87,11 +87,41 @@ export function authDataRoot(): string {
   );
 }
 
+async function firstSymlinkComponent(
+  path: string,
+  allowMissing = false,
+): Promise<string | null> {
+  if (Deno.build.os === "windows") return null;
+  const absolute = isAbsolute(path) ? path : resolve(path);
+  let current = "/";
+  for (const component of absolute.split("/").filter(Boolean)) {
+    current = join(current, component);
+    try {
+      if ((await Deno.lstat(current)).isSymlink) return current;
+    } catch (error) {
+      if (allowMissing && error instanceof Deno.errors.NotFound) return null;
+      throw error;
+    }
+  }
+  return null;
+}
+
+async function assertNoSymlinkComponents(
+  path: string,
+  allowMissing = false,
+): Promise<void> {
+  const symlink = await firstSymlinkComponent(path, allowMissing);
+  if (symlink) throw new Error(`unsafe auth store symlink: ${symlink}`);
+}
+
 async function atomicWrite(path: string, data: string): Promise<void> {
+  await assertNoSymlinkComponents(dirname(path));
+  if (await exists(path)) await assertNoSymlinkComponents(path);
   const temporary = join(
     dirname(path),
     `.${basename(path)}.${Deno.pid}.${crypto.randomUUID()}.tmp`,
   );
+  await assertNoSymlinkComponents(temporary, true);
   const file = await Deno.open(temporary, {
     createNew: true,
     write: true,
@@ -108,6 +138,7 @@ async function atomicWrite(path: string, data: string): Promise<void> {
 }
 
 async function readPrivateText(path: string): Promise<string> {
+  await assertNoSymlinkComponents(path);
   const info = await Deno.lstat(path);
   if (!info.isFile || info.isSymlink) {
     throw new Error(`unsafe auth store path: ${path}`);
@@ -142,6 +173,7 @@ function assertOwnerAndMode(
 }
 
 async function ensurePrivateDirectory(path: string): Promise<void> {
+  await assertNoSymlinkComponents(path, true);
   try {
     const info = await Deno.lstat(path);
     if (!info.isDirectory || info.isSymlink) {
@@ -155,7 +187,16 @@ async function ensurePrivateDirectory(path: string): Promise<void> {
   }
 }
 
+async function safeRemove(
+  path: string,
+  options?: Deno.RemoveOptions,
+): Promise<void> {
+  await assertNoSymlinkComponents(path);
+  await Deno.remove(path, options);
+}
+
 async function exists(path: string): Promise<boolean> {
+  await assertNoSymlinkComponents(path, true);
   try {
     await Deno.lstat(path);
     return true;
@@ -228,22 +269,24 @@ export class FilesystemLocalAuthStore {
   ): Promise<T> {
     await ensurePrivateDirectory(instancePath);
     const lock = join(instancePath, ".lock");
+    await assertNoSymlinkComponents(lock, true);
     for (let attempt = 0; attempt < 100; attempt++) {
       try {
         await Deno.mkdir(lock, { mode: 0o700 });
         try {
           return await operation();
         } finally {
-          await Deno.remove(lock).catch(() => undefined);
+          await safeRemove(lock).catch(() => undefined);
         }
       } catch (error) {
         if (!(error instanceof Deno.errors.AlreadyExists)) throw error;
+        await assertNoSymlinkComponents(lock);
         const info = await Deno.lstat(lock);
         if (
           Date.now() - (info.mtime?.getTime() ?? Date.now()) > 30_000 &&
           info.isDirectory && !info.isSymlink
         ) {
-          await Deno.remove(lock).catch(() => undefined);
+          await safeRemove(lock).catch(() => undefined);
           continue;
         }
         await new Promise((resolve) => setTimeout(resolve, 10));
@@ -321,7 +364,7 @@ export class FilesystemLocalAuthStore {
     const id = "authorization-request";
     const directory = join(path, "sessions", id);
     if (token === undefined) {
-      await Deno.remove(directory, { recursive: true }).catch(() => undefined);
+      await safeRemove(directory, { recursive: true }).catch(() => undefined);
       return;
     }
     await ensurePrivateDirectory(directory);
@@ -355,10 +398,10 @@ export class FilesystemLocalAuthStore {
     );
     if (token === undefined) {
       if (existing) {
-        await Deno.remove(join(path, "bindings", `${existing.id}.json`)).catch(
+        await safeRemove(join(path, "bindings", `${existing.id}.json`)).catch(
           () => undefined,
         );
-        await Deno.remove(join(path, "sessions", existing.session_id), {
+        await safeRemove(join(path, "sessions", existing.session_id), {
           recursive: true,
         }).catch(() => undefined);
       }
@@ -409,6 +452,11 @@ export class FilesystemLocalAuthStore {
     if (!(await exists(directory))) return [];
     const result: LocalBinding[] = [];
     for await (const entry of Deno.readDir(directory)) {
+      if (entry.isSymlink) {
+        throw new Error(
+          `unsafe auth store symlink: ${join(directory, entry.name)}`,
+        );
+      }
       if (!entry.isFile || !entry.name.endsWith(".json")) continue;
       try {
         const binding = await readJson<LocalBinding>(
@@ -500,8 +548,8 @@ export class FilesystemLocalAuthStore {
             join(path, "sessions", binding.session_id, "metadata.json"),
           );
           if (metadata.authorization_id !== authorizationId) continue;
-          await Deno.remove(join(path, "bindings", `${binding.id}.json`));
-          await Deno.remove(join(path, "sessions", binding.session_id), {
+          await safeRemove(join(path, "bindings", `${binding.id}.json`));
+          await safeRemove(join(path, "sessions", binding.session_id), {
             recursive: true,
           });
         } catch { /* cleanup remains best effort */ }
@@ -525,10 +573,10 @@ export class FilesystemLocalAuthStore {
             const live = await this.inspector.inspect(binding.anchor.pid);
             if (sameProcess(live, binding.anchor)) continue;
           } catch { /* stale */ }
-          await Deno.remove(join(path, "bindings", `${binding.id}.json`)).catch(
+          await safeRemove(join(path, "bindings", `${binding.id}.json`)).catch(
             () => undefined,
           );
-          await Deno.remove(join(path, "sessions", binding.session_id), {
+          await safeRemove(join(path, "sessions", binding.session_id), {
             recursive: true,
           }).catch(() => undefined);
           removed++;
@@ -541,7 +589,24 @@ export class FilesystemLocalAuthStore {
   async doctor(fix = false): Promise<DoctorReport> {
     const findings: DoctorFinding[] = [];
     const fixes: DoctorReport["fixes"] = [];
-    if (!(await exists(this.root))) {
+    const symlink = await firstSymlinkComponent(this.root, true);
+    if (symlink) {
+      findings.push({
+        severity: "unsafe",
+        code: "auth_store_symlink",
+        path: symlink,
+        repairable: false,
+      });
+      return { healthy: false, findings, fixes };
+    }
+    let rootExists = true;
+    try {
+      await Deno.lstat(this.root);
+    } catch (error) {
+      if (error instanceof Deno.errors.NotFound) rootExists = false;
+      else throw error;
+    }
+    if (!rootExists) {
       findings.push({
         severity: "warning",
         code: "auth_root_missing",
@@ -559,6 +624,7 @@ export class FilesystemLocalAuthStore {
       }
     } else {
       await this.inspectPath(this.root, findings, fixes, fix);
+      await this.inspectIntegrity(findings, fixes, fix);
     }
     const remaining = fix ? (await this.doctor(false)).findings : findings;
     return {
@@ -568,6 +634,233 @@ export class FilesystemLocalAuthStore {
       findings,
       fixes,
     };
+  }
+
+  private async inspectIntegrity(
+    findings: DoctorFinding[],
+    fixes: DoctorReport["fixes"],
+    fix: boolean,
+  ): Promise<void> {
+    try {
+      const identity = await readJson<Record<string, unknown>>(
+        join(this.root, "identity.json"),
+      );
+      if (
+        identity.schema_version !== 1 ||
+        identity.record_type !== "local_identity" ||
+        typeof identity.id !== "string" ||
+        typeof identity.created_at !== "string"
+      ) throw new Error("invalid identity");
+    } catch {
+      findings.push({
+        severity: "error",
+        code: "local_identity_invalid",
+        path: join(this.root, "identity.json"),
+        repairable: false,
+      });
+    }
+    const instances = join(this.root, "instances");
+    if (!(await exists(instances))) return;
+    for await (const entry of Deno.readDir(instances)) {
+      const instancePath = join(instances, entry.name);
+      if (!entry.isDirectory || !/^[0-9a-f]{64}$/.test(entry.name)) {
+        findings.push({
+          severity: "error",
+          code: "origin_partition_invalid",
+          path: instancePath,
+          repairable: false,
+        });
+        continue;
+      }
+      let server: ServerRecord;
+      try {
+        server = await readJson<ServerRecord>(
+          join(instancePath, "server.json"),
+        );
+        const normalized = normalizeOrigin(server.origin);
+        if (
+          server.schema_version !== 1 || server.record_type !== "server" ||
+          normalized !== server.origin ||
+          await digest(normalized) !== entry.name ||
+          !server.state || typeof server.state !== "object" ||
+          Array.isArray(server.state) ||
+          (server.state.projectId !== undefined &&
+            typeof server.state.projectId !== "string") ||
+          (server.state.projectSlug !== undefined &&
+            typeof server.state.projectSlug !== "string") ||
+          (server.state.username !== undefined &&
+            typeof server.state.username !== "string")
+        ) throw new Error("invalid server record");
+      } catch {
+        findings.push({
+          severity: "error",
+          code: "server_record_invalid",
+          path: join(instancePath, "server.json"),
+          repairable: false,
+        });
+        continue;
+      }
+
+      const sessionsPath = join(instancePath, "sessions");
+      const sessions = new Map<
+        string,
+        { path: string; metadata?: SessionRecord; token: boolean }
+      >();
+      if (await exists(sessionsPath)) {
+        for await (const sessionEntry of Deno.readDir(sessionsPath)) {
+          const sessionPath = join(sessionsPath, sessionEntry.name);
+          if (!sessionEntry.isDirectory) continue;
+          let metadata: SessionRecord | undefined;
+          let token = false;
+          try {
+            metadata = await readJson<SessionRecord>(
+              join(sessionPath, "metadata.json"),
+            );
+            if (
+              metadata.schema_version !== 1 ||
+              metadata.record_type !== "session" ||
+              metadata.id !== sessionEntry.name ||
+              metadata.origin !== server.origin ||
+              !["human", "agent", "authorization_request"].includes(
+                metadata.credential_type,
+              )
+            ) throw new Error("invalid session metadata");
+          } catch {
+            findings.push({
+              severity: "error",
+              code: "session_metadata_invalid",
+              path: join(sessionPath, "metadata.json"),
+              repairable: false,
+            });
+            metadata = undefined;
+          }
+          try {
+            await readPrivateText(join(sessionPath, "token"));
+            token = true;
+          } catch {
+            findings.push({
+              severity: "error",
+              code: "session_token_missing_or_invalid",
+              path: join(sessionPath, "token"),
+              repairable: false,
+            });
+          }
+          sessions.set(sessionEntry.name, {
+            path: sessionPath,
+            metadata,
+            token,
+          });
+        }
+      }
+
+      const references = new Map<string, number>();
+      const bindingsPath = join(instancePath, "bindings");
+      if (await exists(bindingsPath)) {
+        for await (const bindingEntry of Deno.readDir(bindingsPath)) {
+          if (!bindingEntry.isFile || !bindingEntry.name.endsWith(".json")) {
+            continue;
+          }
+          const bindingPath = join(bindingsPath, bindingEntry.name);
+          let binding: LocalBinding;
+          try {
+            binding = await readJson<LocalBinding>(bindingPath);
+            if (
+              binding.schema_version !== 1 ||
+              binding.record_type !== "process_binding" ||
+              `${binding.id}.json` !== bindingEntry.name ||
+              binding.origin !== server.origin ||
+              !binding.anchor || !Number.isSafeInteger(binding.anchor.pid) ||
+              typeof binding.anchor.startTicks !== "string" ||
+              !Number.isSafeInteger(binding.anchor.uid) ||
+              !binding.anchor.bootId
+            ) throw new Error("invalid binding");
+          } catch {
+            findings.push({
+              severity: "error",
+              code: "binding_record_invalid",
+              path: bindingPath,
+              repairable: false,
+            });
+            continue;
+          }
+          references.set(
+            binding.session_id,
+            (references.get(binding.session_id) ?? 0) + 1,
+          );
+          const session = sessions.get(binding.session_id);
+          if (
+            !session?.metadata || !session.token ||
+            session.metadata.credential_type === "authorization_request"
+          ) {
+            findings.push({
+              severity: "error",
+              code: "binding_session_reference_broken",
+              path: bindingPath,
+              repairable: false,
+            });
+            continue;
+          }
+          let live = false;
+          try {
+            live = sameProcess(
+              await this.inspector.inspect(binding.anchor.pid),
+              binding.anchor,
+            );
+          } catch { /* gone or denied is stale for local selection */ }
+          if (!live) {
+            findings.push({
+              severity: "error",
+              code: "process_binding_stale",
+              path: bindingPath,
+              repairable: true,
+              planned_action: "remove_stale_binding",
+            });
+            if (fix) {
+              await safeRemove(bindingPath);
+              if ((references.get(binding.session_id) ?? 0) === 1) {
+                await safeRemove(session.path, { recursive: true });
+                sessions.delete(binding.session_id);
+              }
+              fixes.push({
+                code: "process_binding_stale",
+                path: bindingPath,
+                action: "remove_stale_binding",
+              });
+            }
+          }
+        }
+      }
+      for (const [sessionId, count] of references) {
+        if (count > 1) {
+          findings.push({
+            severity: "error",
+            code: "session_binding_duplicate",
+            path: sessions.get(sessionId)?.path ?? sessionsPath,
+            repairable: false,
+          });
+        }
+      }
+      for (const [sessionId, session] of sessions) {
+        if (
+          sessionId === "authorization-request" || references.has(sessionId)
+        ) continue;
+        findings.push({
+          severity: "warning",
+          code: "orphan_session",
+          path: session.path,
+          repairable: true,
+          planned_action: "remove_orphan_session",
+        });
+        if (fix) {
+          await safeRemove(session.path, { recursive: true });
+          fixes.push({
+            code: "orphan_session",
+            path: session.path,
+            action: "remove_orphan_session",
+          });
+        }
+      }
+    }
   }
 
   private async inspectPath(
@@ -624,10 +917,58 @@ export class FilesystemLocalAuthStore {
         }
       }
     }
+    if (basename(path).endsWith(".tmp") && info.isFile) {
+      findings.push({
+        severity: "warning",
+        code: "stale_auth_temporary",
+        path,
+        repairable: true,
+        planned_action: "remove_stale_temporary",
+      });
+      if (fix) {
+        await safeRemove(path);
+        fixes.push({
+          code: "stale_auth_temporary",
+          path,
+          action: "remove_stale_temporary",
+        });
+      }
+      return;
+    }
     if (directory) {
       for await (const entry of Deno.readDir(path)) {
-        if (entry.name === ".lock") continue;
-        await this.inspectPath(join(path, entry.name), findings, fixes, fix);
+        const child = join(path, entry.name);
+        if (entry.name === ".lock") {
+          const lock = await Deno.lstat(child);
+          if (lock.isSymlink) {
+            findings.push({
+              severity: "unsafe",
+              code: "auth_store_symlink",
+              path: child,
+              repairable: false,
+            });
+          } else if (
+            Date.now() - (lock.mtime?.getTime() ?? Date.now()) > 30_000
+          ) {
+            findings.push({
+              severity: "warning",
+              code: "stale_auth_lock",
+              path: child,
+              repairable: true,
+              planned_action: "remove_stale_lock",
+            });
+            if (fix) {
+              await safeRemove(child, { recursive: true });
+              fixes.push({
+                code: "stale_auth_lock",
+                path: child,
+                action: "remove_stale_lock",
+              });
+            }
+          }
+          continue;
+        }
+        await this.inspectPath(child, findings, fixes, fix);
       }
     } else if (path.endsWith(".json")) {
       try {

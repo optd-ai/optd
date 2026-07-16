@@ -324,6 +324,12 @@ export async function assertHealth(baseUrl: string) {
 }
 
 async function compileOptctl(): Promise<string> {
+  const cat = await Deno.stat("/bin/cat").catch(() => undefined);
+  if (!cat?.isFile || ((cat.mode ?? 0) & 0o111) === 0) {
+    throw new Error(
+      "compiled Linux process inspection requires reviewed executable /bin/cat",
+    );
+  }
   const digest = await sourceDigest();
   const cacheDir = join(
     Deno.env.get("TMPDIR") ?? "/tmp",
@@ -347,7 +353,7 @@ async function compileOptctl(): Promise<string> {
       "--allow-write",
       "--allow-env",
       "--allow-net",
-      "--allow-run",
+      "--allow-run=/bin/cat",
       "--allow-sys=uid",
       "--output",
       temporary,

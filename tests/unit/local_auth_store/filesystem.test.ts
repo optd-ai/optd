@@ -1,4 +1,9 @@
-import { assertEquals, assertRejects, assertThrows } from "jsr:@std/assert@1";
+import {
+  assert,
+  assertEquals,
+  assertRejects,
+  assertThrows,
+} from "jsr:@std/assert@1";
 import type {
   ProcessIdentity,
   ProcessInspector,
@@ -144,6 +149,191 @@ Deno.test("atomic records are private and doctor safely repairs current-owner mo
   }
 });
 
+Deno.test("store rejects ancestor and final token symlinks", async () => {
+  if (Deno.build.os === "windows") return;
+  const parent = await Deno.makeTempDir();
+  const real = `${parent}/real`;
+  const linked = `${parent}/linked`;
+  await Deno.mkdir(real, { mode: 0o700 });
+  await Deno.symlink(real, linked);
+  const inspector = new FakeInspector([human]);
+  try {
+    const ancestorStore = new FilesystemLocalAuthStore(
+      `${linked}/auth`,
+      inspector,
+    );
+    await assertRejects(
+      () =>
+        ancestorStore.updateState(
+          "http://127.0.0.1:8789",
+          { token: "secret" },
+          human,
+        ),
+      Error,
+      "symlink",
+    );
+    assertEquals(
+      (await ancestorStore.doctor()).findings[0].code,
+      "auth_store_symlink",
+    );
+
+    const root = `${parent}/safe`;
+    await Deno.mkdir(root, { mode: 0o700 });
+    const store = new FilesystemLocalAuthStore(root, inspector);
+    await store.updateState(
+      "http://127.0.0.1:8789",
+      { token: "secret" },
+      human,
+    );
+    const layout = await storeLayout(root);
+    await Deno.remove(layout.token);
+    await Deno.writeTextFile(`${parent}/outside`, "stolen", { mode: 0o600 });
+    await Deno.symlink(`${parent}/outside`, layout.token);
+    await assertRejects(
+      () => store.select("http://127.0.0.1:8789", human.pid),
+      Error,
+      "symlink",
+    );
+    assertEquals(
+      (await store.doctor()).findings.some((finding) =>
+        finding.code === "auth_store_symlink"
+      ),
+      true,
+    );
+  } finally {
+    await Deno.remove(parent, { recursive: true });
+  }
+});
+
+Deno.test("doctor reports references, liveness, partitions, orphans, temp files, and stale locks", async () => {
+  const chain = [human];
+  const { root, store } = await temporaryStore(chain);
+  try {
+    await store.updateState(
+      "http://127.0.0.1:8789",
+      { token: "secret" },
+      human,
+    );
+    const layout = await storeLayout(root);
+    const originalBinding = JSON.parse(await Deno.readTextFile(layout.binding));
+    const serverValue = await Deno.readTextFile(layout.server);
+    const serverRecord = JSON.parse(serverValue);
+    await Deno.writeTextFile(
+      layout.server,
+      JSON.stringify({ ...serverRecord, state: { projectId: 42 } }),
+      { mode: 0o600 },
+    );
+    assert(
+      (await store.doctor()).findings.some((finding) =>
+        finding.code === "server_record_invalid"
+      ),
+    );
+    await Deno.writeTextFile(layout.server, serverValue, { mode: 0o600 });
+    const identityPath = `${root}/identity.json`;
+    const identityValue = await Deno.readTextFile(identityPath);
+    await Deno.writeTextFile(
+      identityPath,
+      JSON.stringify({ schema_version: 1, record_type: "wrong" }),
+      { mode: 0o600 },
+    );
+    assert(
+      (await store.doctor()).findings.some((finding) =>
+        finding.code === "local_identity_invalid"
+      ),
+    );
+    await Deno.writeTextFile(identityPath, identityValue, { mode: 0o600 });
+
+    const orphan = `${layout.sessions}/orphan`;
+    await Deno.mkdir(orphan, { mode: 0o700 });
+    const metadata = JSON.parse(await Deno.readTextFile(layout.metadata));
+    await Deno.writeTextFile(
+      `${orphan}/metadata.json`,
+      JSON.stringify({ ...metadata, id: "orphan" }),
+      { mode: 0o600 },
+    );
+    await Deno.writeTextFile(`${orphan}/token`, "orphan-secret", {
+      mode: 0o600,
+    });
+    await Deno.writeTextFile(
+      `${layout.bindings}/.binding.partial.tmp`,
+      "partial",
+      { mode: 0o600 },
+    );
+    const lock = `${layout.instance}/.lock`;
+    await Deno.mkdir(lock, { mode: 0o700 });
+    await Deno.utime(lock, new Date(0), new Date(0));
+    await Deno.mkdir(`${root}/instances/not-a-digest`, { mode: 0o700 });
+
+    const duplicateBinding = `${layout.bindings}/duplicate.json`;
+    await Deno.writeTextFile(
+      duplicateBinding,
+      JSON.stringify({ ...originalBinding, id: "duplicate" }),
+      { mode: 0o600 },
+    );
+    let duplicateReport = await store.doctor();
+    assert(
+      duplicateReport.findings.some((finding) =>
+        finding.code === "session_binding_duplicate"
+      ),
+    );
+    await Deno.remove(duplicateBinding);
+
+    const tokenValue = await Deno.readTextFile(layout.token);
+    await Deno.remove(layout.token);
+    assert(
+      (await store.doctor()).findings.some((finding) =>
+        finding.code === "session_token_missing_or_invalid"
+      ),
+    );
+    await Deno.writeTextFile(layout.token, tokenValue, { mode: 0o600 });
+    const metadataValue = await Deno.readTextFile(layout.metadata);
+    await Deno.remove(layout.metadata);
+    assert(
+      (await store.doctor()).findings.some((finding) =>
+        finding.code === "session_metadata_invalid"
+      ),
+    );
+    await Deno.writeTextFile(layout.metadata, metadataValue, { mode: 0o600 });
+
+    await Deno.writeTextFile(
+      layout.binding,
+      JSON.stringify({ ...originalBinding, session_id: "missing" }),
+      { mode: 0o600 },
+    );
+    let report = await store.doctor();
+    for (
+      const code of [
+        "binding_session_reference_broken",
+        "orphan_session",
+        "stale_auth_temporary",
+        "stale_auth_lock",
+        "origin_partition_invalid",
+      ]
+    ) assert(report.findings.some((finding) => finding.code === code), code);
+
+    await Deno.writeTextFile(layout.binding, JSON.stringify(originalBinding), {
+      mode: 0o600,
+    });
+    chain.splice(0, 1, { ...human, startTicks: "reused" });
+    report = await store.doctor();
+    assert(
+      report.findings.some((finding) =>
+        finding.code === "process_binding_stale"
+      ),
+    );
+    const fixed = await store.doctor(true);
+    assert(fixed.fixes.some((item) => item.action === "remove_stale_binding"));
+    assert(fixed.fixes.some((item) => item.action === "remove_orphan_session"));
+    assert(
+      fixed.fixes.some((item) => item.action === "remove_stale_temporary"),
+    );
+    assert(fixed.fixes.some((item) => item.action === "remove_stale_lock"));
+    assertEquals(await store.select("http://127.0.0.1:8789", human.pid), null);
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
 Deno.test("origin normalization is exact and remote HTTP is fail closed", () => {
   assertEquals(
     normalizeOrigin("HTTPS://Example.COM:443"),
@@ -155,3 +345,30 @@ Deno.test("origin normalization is exact and remote HTTP is fail closed", () => 
     "must not contain",
   );
 });
+
+async function storeLayout(root: string) {
+  const instances = `${root}/instances`;
+  const instanceEntry = (await Array.fromAsync(Deno.readDir(instances))).find((
+    entry,
+  ) => entry.isDirectory);
+  if (!instanceEntry) throw new Error("instance missing");
+  const instance = `${instances}/${instanceEntry.name}`;
+  const bindings = `${instance}/bindings`;
+  const bindingEntry = (await Array.fromAsync(Deno.readDir(bindings))).find((
+    entry,
+  ) => entry.name.endsWith(".json"));
+  if (!bindingEntry) throw new Error("binding missing");
+  const binding = `${bindings}/${bindingEntry.name}`;
+  const record = JSON.parse(await Deno.readTextFile(binding));
+  const sessions = `${instance}/sessions`;
+  const session = `${sessions}/${record.session_id}`;
+  return {
+    instance,
+    server: `${instance}/server.json`,
+    bindings,
+    binding,
+    sessions,
+    metadata: `${session}/metadata.json`,
+    token: `${session}/token`,
+  };
+}

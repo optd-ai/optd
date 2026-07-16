@@ -7,10 +7,15 @@ COPY src ./src
 RUN deno cache src/main_server.ts src/main_optctl.ts
 
 FROM deps AS optctl
-RUN deno compile \
+RUN test -x /bin/cat \
+  && deno compile \
+  --no-prompt \
   --allow-read \
+  --allow-write \
   --allow-env \
   --allow-net \
+  --allow-run=/bin/cat \
+  --allow-sys=uid \
   --output /opt/operant/bin/optctl \
   src/main_optctl.ts
 

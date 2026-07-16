@@ -688,11 +688,15 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
         OPERANT_AUTH_TREE_STOP_PID: String(Deno.pid),
       };
       for (const key of Object.keys(env)) {
-        if (/^OPERANT_(?:BEARER|AUTH_TOKEN|TOKEN)$/.test(key)) delete env[key];
+        if (
+          /^OPERANT_(?:BEARER|AUTH_TOKEN|TOKEN)$/.test(key) ||
+          key === "LD_LIBRARY_PATH" || key === "LD_PRELOAD" || key === "PATH"
+        ) delete env[key];
       }
       try {
         const child = new Deno.Command(childArgs[0], {
           args: childArgs.slice(1),
+          clearEnv: true,
           env,
           stdin: "inherit",
           stdout: "inherit",
