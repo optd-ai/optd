@@ -40,6 +40,7 @@ import {
 } from "../../../domain/auth/token.ts";
 import type { Queryable, Sql } from "./client.ts";
 import { query } from "./client.ts";
+import { authorizationBoundaryPredicate } from "./authorization_boundary_sql.ts";
 
 export class PostgresAuthRepository implements AuthRepository {
   private readonly hashes: ImmediateSemaphore;
@@ -1529,7 +1530,7 @@ export class PostgresAuthRepository implements AuthRepository {
          select 1 from human_users u
          join role_assignments ra on ra.principal_id=u.principal_id
          where u.id=$1 and u.status='active' and ra.active
-           and ra.role_id='system:super_admin'
+           and ra.role_id='system:super_admin' and ra.boundary_type='system'
        ) found`,
         [auth.humanUserId],
       )).rows[0]?.found,
@@ -1537,20 +1538,37 @@ export class PostgresAuthRepository implements AuthRepository {
     const rows = anchorSuperAdmin
       ? (await query<{ role_id: string }>(
         this.sql,
-        `select id role_id from system_roles where active order by id`,
+        `select r.id role_id from system_roles r where r.active
+          and exists(select 1 from role_definition_versions rv where rv.role_id=r.id and rv.active)
+         order by r.id`,
       )).rows
       : auth.authorizationId
       ? (await query<{ role_id: string }>(
         this.sql,
-        `select role_id from agent_authorization_roles where authorization_id=$1 and boundary_type=$2 and project_id is not distinct from $3::uuid order by role_id`,
-        [auth.authorizationId, ...params],
+        `select distinct ar.role_id from agent_authorizations a
+          join agent_authorization_roles ar on ar.authorization_id=a.id
+          join system_roles r on r.id=ar.role_id and r.active
+         where a.id=$1 and a.human_user_id=$4 and a.revoked_at is null and a.superseded_at is null
+           and exists(select 1 from role_definition_versions rv where rv.role_id=r.id and rv.active)
+           and ${authorizationBoundaryPredicate("ar", "$2", "$3")}
+         order by ar.role_id`,
+        [auth.authorizationId, ...params, auth.humanUserId],
       )).rows
       : (await query<{ role_id: string }>(
         this.sql,
-        `select ra.role_id from role_assignments ra join human_users u on u.principal_id=ra.principal_id where u.id=$1 and ra.active and ra.boundary_type=$2 and ra.project_id is not distinct from $3::uuid order by ra.role_id`,
+        `select distinct ra.role_id from role_assignments ra
+          join human_users u on u.principal_id=ra.principal_id and u.status='active'
+          join system_roles r on r.id=ra.role_id and r.active
+         where u.id=$1 and ra.active
+           and exists(select 1 from role_definition_versions rv where rv.role_id=r.id and rv.active)
+           and ${authorizationBoundaryPredicate("ra", "$2", "$3")}
+         order by ra.role_id`,
         [auth.humanUserId, ...params],
       )).rows;
-    return ok({ roles: rows.map((row) => row.role_id), boundary });
+    return ok({
+      roles: [...new Set(rows.map((row) => row.role_id))],
+      boundary,
+    });
   }
 
   async createAuthorizationRequest(
@@ -1572,8 +1590,16 @@ export class PostgresAuthRepository implements AuthRepository {
       const [boundaryType, projectId] = boundaryParams(input.boundary);
       const held = (await query<{ role_id: string }>(
         this.sql,
-        `select role_id from agent_authorization_roles where authorization_id=$1 and boundary_type=$2 and project_id is not distinct from $3::uuid`,
-        [auth.authorizationId, boundaryType, projectId],
+        `select ar.role_id from agent_authorizations a
+          join agent_authorization_roles ar on ar.authorization_id=a.id
+         where a.id=$1 and a.human_user_id=$4 and a.revoked_at is null and a.superseded_at is null
+           and ${authorizationBoundaryPredicate("ar", "$2", "$3")}`,
+        [
+          auth.authorizationId,
+          boundaryType,
+          projectId,
+          auth.humanUserId,
+        ],
       )).rows.map((row) => row.role_id);
       if (input.roles.every((role) => held.includes(role))) {
         return ok({
@@ -2306,11 +2332,17 @@ export class PostgresAgentAuthorizationGrantabilityState
         this.sql,
         `select ar.role_id
            from agent_authorizations a
+           join agent_users au on au.id=a.agent_user_id
+           join principals p on p.id=au.principal_id and p.active
+           join human_users u on u.id=a.human_user_id and u.status='active'
            join agent_authorization_roles ar on ar.authorization_id=a.id
+           join system_roles r on r.id=ar.role_id and r.active
           where a.id=$1 and a.human_user_id=$2 and a.revoked_at is null
-            and ar.boundary_type=$3 and ar.project_id is not distinct from $4::uuid
+            and a.superseded_at is null
+            and exists(select 1 from role_definition_versions rv where rv.role_id=r.id and rv.active)
+            and ${authorizationBoundaryPredicate("ar", "$3", "$4")}
           order by ar.role_id
-          for share of a,ar`,
+          for share of a,au,p,u,ar,r`,
         [
           input.auth.authorizationId,
           input.auth.humanUserId,
@@ -2323,13 +2355,16 @@ export class PostgresAgentAuthorizationGrantabilityState
         `select ra.role_id
            from role_assignments ra
            join human_users u on u.principal_id=ra.principal_id
+           join principals p on p.id=u.principal_id and p.active
+           join system_roles r on r.id=ra.role_id and r.active
           where u.id=$1 and u.status='active' and ra.active
-            and ra.boundary_type=$2 and ra.project_id is not distinct from $3::uuid
+            and exists(select 1 from role_definition_versions rv where rv.role_id=r.id and rv.active)
+            and ${authorizationBoundaryPredicate("ra", "$2", "$3")}
           order by ra.role_id
-          for share of u,ra`,
+          for share of u,p,ra,r`,
         [input.auth.humanUserId, boundaryType, projectId],
       )).rows;
-    const effectiveRoles = assignments.map((row) => row.role_id);
+    const effectiveRoles = [...new Set(assignments.map((row) => row.role_id))];
     const superAdmin = isSuperAdmin(input.auth) && await currentSuperAdmin(
       this.sql,
       input.auth,
@@ -2347,8 +2382,9 @@ export class PostgresAgentAuthorizationGrantabilityState
            from policy_assignments pa
            join policy_definition_versions pd on pd.id=pa.policy_definition_version_id and pd.active
            join policy_rules pr on pr.policy_definition_version_id=pd.id
-          where pa.active and pa.boundary_type=$1
-            and pa.project_id is not distinct from $2::uuid
+          where pa.active and ${
+          authorizationBoundaryPredicate("pa", "$1", "$2")
+        }
             and pr.role_id=any($3::text[])
           order by pd.policy_id,pd.version,pr.capability
           for share of pa,pd,pr`,

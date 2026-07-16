@@ -15,6 +15,7 @@ import { tokenDigest } from "../../../domain/auth/token.ts";
 import { err, ok, type Result } from "../../../domain/errors/result.ts";
 import { uuidV7 } from "../../../domain/ids/uuid_v7.ts";
 import { query, type Queryable, type Sql } from "./client.ts";
+import { authorizationBoundaryPredicate } from "./authorization_boundary_sql.ts";
 
 type AuthorityRow = {
   role_id: string | null;
@@ -130,8 +131,7 @@ export class PostgresAuthorizationRepository
       `
       select r.id,v.id version_id,v.version,r.display_name,r.description,r.axi_summary,r.active,
         exists(select 1 from role_assignments a where a.principal_id=$1 and a.role_id=r.id and a.active
-          and (a.boundary_type=$2 and a.project_id is not distinct from $3::uuid
-            or $2='project' and a.boundary_type='all_projects')) assigned
+          and ${authorizationBoundaryPredicate("a", "$2", "$3")}) assigned
       from system_roles r join role_definition_versions v on v.role_id=r.id and v.active
       order by r.id`,
       [auth.principalId, type, projectId],
@@ -520,12 +520,12 @@ async function currentAuthority(
       select distinct ra.role_id from valid_actor a join role_assignments ra on a.authorization_id is null and ra.principal_id=a.principal_id and ra.active
        join system_roles r on r.id=ra.role_id and r.active
        where exists(select 1 from role_definition_versions rv where rv.role_id=r.id and rv.active)
-         and (ra.boundary_type=$4 and ra.project_id is not distinct from $5::uuid or $4='project' and ra.boundary_type='all_projects')
+         and ${authorizationBoundaryPredicate("ra", "$4", "$5")}
       union
       select distinct ar.role_id from valid_actor a join agent_authorization_roles ar on ar.authorization_id=a.authorization_id
        join system_roles r on r.id=ar.role_id and r.active
        where exists(select 1 from role_definition_versions rv where rv.role_id=r.id and rv.active)
-         and (ar.boundary_type=$4 and ar.project_id is not distinct from $5::uuid or $4='project' and ar.boundary_type='all_projects')
+         and ${authorizationBoundaryPredicate("ar", "$4", "$5")}
     ), super_admin as (
       select exists(
         select 1 from valid_actor a join role_assignments ra on a.authorization_id is null and ra.principal_id=a.principal_id and ra.active and ra.role_id='system:super_admin' and ra.boundary_type='system'
@@ -537,7 +537,7 @@ async function currentAuthority(
       select pd.policy_id,pd.id policy_revision_id,pr.id rule_id,pr.capability action,pr.resource,pr.condition_kind,pr.summary,pr.predicate
       from policy_assignments pa join policy_definition_versions pd on pd.id=pa.policy_definition_version_id and pd.active
       join policy_rules pr on pr.policy_definition_version_id=pd.id join effective_roles er on er.role_id=pr.role_id
-      where pa.active and (pa.boundary_type=$4 and pa.project_id is not distinct from $5::uuid or $4='project' and pa.boundary_type='all_projects')
+      where pa.active and ${authorizationBoundaryPredicate("pa", "$4", "$5")}
     )
     select er.role_id,sa.value super_admin,a.policy_id,a.policy_revision_id,a.rule_id,a.action,a.resource,a.condition_kind,a.summary,a.predicate
     from valid_actor va cross join super_admin sa left join effective_roles er on true left join applicable a on true

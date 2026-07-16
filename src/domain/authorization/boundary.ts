@@ -26,5 +26,17 @@ export function boundaryDto(boundary: AuthorizationBoundary) {
     : { type: boundary.type };
 }
 
+export function authorizationBoundaryMatches(
+  target: AuthorizationBoundary,
+  assignment: AuthorizationBoundary,
+): boolean {
+  if (target.type === "project") {
+    return assignment.type === "all_projects" ||
+      (assignment.type === "project" &&
+        assignment.projectId === target.projectId);
+  }
+  return assignment.type === target.type;
+}
+
 export const roleIdentityPattern =
   /^(?:system:[a-z][a-z0-9_]*|[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*:[a-z][a-z0-9_]*)$/;

@@ -70,8 +70,8 @@ Deno.test("assignment disable ordering preserves immutable contexts and cuts off
       user.id,
       "--role",
       "operant/test:operator",
-      "--project",
-      project,
+      "--boundary",
+      "all_projects",
     ]);
     const policyCreated = await harness.runOptctl([
       "--json",
@@ -80,8 +80,8 @@ Deno.test("assignment disable ordering preserves immutable contexts and cuts off
       "create",
       "--policy-revision",
       policyVersion,
-      "--project",
-      project,
+      "--boundary",
+      "all_projects",
     ]);
     assertEquals(roleCreated.code, 0, roleCreated.stderr);
     assertEquals(policyCreated.code, 0, policyCreated.stderr);
@@ -181,8 +181,8 @@ Deno.test("assignment disable ordering preserves immutable contexts and cuts off
       user.id,
       "--role",
       "operant/test:operator",
-      "--project",
-      project,
+      "--boundary",
+      "all_projects",
     ]);
     assertEquals(replacementRole.code, 0, replacementRole.stderr);
     const grantBeforePolicy = await grantability.current({
@@ -251,6 +251,105 @@ Deno.test("assignment disable ordering preserves immutable contexts and cuts off
     )).rows.map((row) => row.column_name);
     assertEquals(columns.includes("allow"), false);
     assertEquals(columns.includes("roles"), false);
+  } finally {
+    await harness.close();
+  }
+});
+
+Deno.test("agent all-project grantability is current, same-human, and Project-only", async () => {
+  const harness = await startLiveHarness();
+  try {
+    assertEquals(
+      (await harness.bootstrap({
+        username: "agent-boundary-root",
+        password: "agent boundary root password",
+      })).code,
+      0,
+    );
+    const project = await createProject(harness);
+    const human = (await query<{ id: string }>(
+      harness.server.sql,
+      "select id from human_users where username='agent-boundary-root'",
+    )).rows[0];
+    const context = (await query<{ id: string }>(
+      harness.server.sql,
+      "select id from auth_contexts order by created_at desc limit 1",
+    )).rows[0];
+    const principalId = uuidV7();
+    const agentUserId = uuidV7();
+    const authorizationId = uuidV7();
+    await harness.server.sql.begin(async (tx) => {
+      await query(
+        tx as Queryable,
+        "insert into principals(id,type,active) values($1,'agent_user',true)",
+        [principalId],
+      );
+      await query(
+        tx as Queryable,
+        "insert into agent_users(id,principal_id,human_user_id,name) values($1,$2,$3,'boundary-agent')",
+        [agentUserId, principalId, human.id],
+      );
+      await query(
+        tx as Queryable,
+        `insert into agent_authorizations(id,agent_user_id,human_user_id,root_authorization_id,approved_by_auth_context_id)
+        values($1,$2,$3,$1,$4)`,
+        [authorizationId, agentUserId, human.id, context.id],
+      );
+      await query(
+        tx as Queryable,
+        `insert into agent_authorization_roles(id,authorization_id,role_id,boundary_type)
+        values($1,$2,'system:admin','all_projects')`,
+        [uuidV7(), authorizationId],
+      );
+    });
+    const auth: AuthContext = {
+      id: uuidV7(),
+      principalId,
+      principalType: "agent_user",
+      humanUserId: human.id,
+      sessionId: uuidV7(),
+      authorizationId,
+      credentialKind: "agent_authorization",
+      roles: ["system:admin"],
+      createdAt: new Date().toISOString(),
+    };
+    const state = new PostgresAgentAuthorizationGrantabilityState(
+      harness.server.sql,
+    );
+    const projectState = await state.current({
+      auth,
+      roles: ["system:admin"],
+      boundary: { type: "project", projectId: project },
+    });
+    assertEquals(projectState.ok && projectState.value.canDecide, true);
+    assertEquals(projectState.ok && projectState.value.effectiveRoles, [
+      "system:admin",
+    ]);
+    const systemState = await state.current({
+      auth,
+      roles: ["system:admin"],
+      boundary: { type: "system" },
+    });
+    assertEquals(systemState.ok && systemState.value.canDecide, false);
+    assertEquals(systemState.ok && systemState.value.effectiveRoles, []);
+    const wrongHuman = await state.current({
+      auth: { ...auth, humanUserId: uuidV7() },
+      roles: ["system:admin"],
+      boundary: { type: "project", projectId: project },
+    });
+    assertEquals(wrongHuman.ok && wrongHuman.value.effectiveRoles, []);
+    await query(
+      harness.server.sql,
+      "update agent_authorizations set revoked_at=now() where id=$1",
+      [authorizationId],
+    );
+    const revoked = await state.current({
+      auth,
+      roles: ["system:admin"],
+      boundary: { type: "project", projectId: project },
+    });
+    assertEquals(revoked.ok && revoked.value.effectiveRoles, []);
+    assertEquals(revoked.ok && revoked.value.canDecide, false);
   } finally {
     await harness.close();
   }
