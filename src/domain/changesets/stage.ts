@@ -10,6 +10,8 @@ export type StageEvidence = {
   hook_executions: unknown[];
   policy_decisions: unknown[];
   approval_requirements: unknown[];
+  required_capabilities: string[];
+  effects: string[];
   planned_events: unknown[];
   planned_deliveries: unknown[];
 };
@@ -26,6 +28,8 @@ export type StageHookInput = {
   operations: readonly CanonicalOperation[];
   projects: readonly unknown[];
   pack_revisions: readonly unknown[];
+  proposed_states?: Readonly<Record<string, Record<string, unknown>>>;
+  base_states?: Readonly<Record<string, Record<string, unknown> | null>>;
 };
 export type StageHookResult = {
   operations: CanonicalOperation[];
@@ -37,6 +41,10 @@ export type StageHookResult = {
   effects: string[];
   planned_events: unknown[];
   planned_deliveries: unknown[];
+  patch_outputs?: Array<{
+    operation_key: string;
+    output: unknown;
+  }>;
 };
 /** Implemented by trusted hook coordination; absence must fail closed for matching attachments. */
 export interface StageHookCoordinator {

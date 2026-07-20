@@ -1,4 +1,5 @@
 import { canonicalJson, canonicalSha256 } from "../ids/canonical_json.ts";
+import { uuidV7 } from "../ids/uuid_v7.ts";
 import type {
   AuthoredOperation,
   StageRequest,
@@ -51,9 +52,7 @@ export async function normalizeOperations(
   limits: OperationLimits = DEFAULT_OPERATION_LIMITS,
 ): Promise<{ operations: CanonicalOperation[]; operationGraphDigest: string }> {
   inspectLimits(request, limits);
-  const idAllocator = allocate ?? deterministicUuidAllocator(
-    await canonicalSha256({ schema: "changeset.authored.v1", request }),
-  );
+  const idAllocator = allocate ?? uuidV7;
   const entries = request.operations.map((source, ordinal) => ({
     source,
     ordinal,
@@ -94,6 +93,35 @@ export async function normalizeOperations(
   const resolved = entries.map((entry) => resolveEntry(entry, produced));
   const merged = mergeMutations(resolved);
   inspectLimits({ operations: merged }, limits);
+  const graph = { schema: "changeset.operations.v1", operations: merged };
+  const bytes = new TextEncoder().encode(canonicalJson(graph)).byteLength;
+  if (bytes > limits.maxGraphBytes) {
+    tooLarge("/operations", "canonical operation graph exceeds byte limit");
+  }
+  return {
+    operations: merged,
+    operationGraphDigest: `sha256:${await canonicalSha256(graph)}`,
+  };
+}
+
+export async function canonicalizeResolvedOperations(
+  operations: CanonicalOperation[],
+  limits: OperationLimits = DEFAULT_OPERATION_LIMITS,
+): Promise<{ operations: CanonicalOperation[]; operationGraphDigest: string }> {
+  inspectLimits({ operations }, limits);
+  const keys = new Set<string>();
+  for (let index = 0; index < operations.length; index++) {
+    const key = String(operations[index].key);
+    if (keys.has(key)) {
+      throw new OperationError(
+        "duplicate_key",
+        `/operations/${index}/key`,
+        "operation key must be unique",
+      );
+    }
+    keys.add(key);
+  }
+  const merged = mergeMutations(structuredClone(operations));
   const graph = { schema: "changeset.operations.v1", operations: merged };
   const bytes = new TextEncoder().encode(canonicalJson(graph)).byteLength;
   if (bytes > limits.maxGraphBytes) {
@@ -407,18 +435,4 @@ function isObject(value: unknown): value is Record<string, unknown> {
 }
 function escapePointer(value: string): string {
   return value.replaceAll("~", "~0").replaceAll("/", "~1");
-}
-
-function deterministicUuidAllocator(seed: string): () => string {
-  let counter = 0;
-  return () => {
-    const suffix = (counter++).toString(16).padStart(8, "0");
-    const hex = `${seed.slice(0, 24)}${suffix}`.slice(0, 32).split("");
-    hex[12] = "7";
-    hex[16] = ["8", "9", "a", "b"][parseInt(hex[16], 16) & 3];
-    const value = hex.join("");
-    return `${value.slice(0, 8)}-${value.slice(8, 12)}-${value.slice(12, 16)}-${
-      value.slice(16, 20)
-    }-${value.slice(20)}`;
-  };
 }

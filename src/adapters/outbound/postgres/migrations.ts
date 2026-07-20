@@ -1050,6 +1050,25 @@ export const platformMigrations: PlatformMigration[] = [
       create index staged_policy_stage_idx on staged_policy_decisions(stage_id,project_id,ordinal);
     `,
   },
+  {
+    id: "1019_staged_component_and_creator_evidence",
+    sql: `
+      alter table staged_changesets
+        add column created_principal_id uuid references principals(id);
+      alter table staged_changesets disable trigger staged_changesets_immutable;
+      update staged_changesets s set created_principal_id=a.principal_id
+        from auth_contexts a where a.id=s.created_auth_context_id;
+      alter table staged_changesets enable trigger staged_changesets_immutable;
+      alter table staged_changesets alter column created_principal_id set not null;
+
+      alter table staged_changeset_operations
+        add column component_digest text not null default 'sha256:0000000000000000000000000000000000000000000000000000000000000000'
+          check(component_digest ~ '^sha256:[0-9a-f]{64}$'),
+        alter column resource_revision_id drop not null;
+      alter table staged_changeset_operations alter column component_digest drop default;
+      alter table staged_changeset_dependencies add column component_digest text;
+    `,
+  },
 ];
 
 export async function applyPlatformMigrations(

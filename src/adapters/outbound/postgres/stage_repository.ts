@@ -4,13 +4,23 @@ import type {
 } from "../../../application/ports/stage_repository.ts";
 import type { AuthContext } from "../../../domain/auth/model.ts";
 import type { CanonicalOperation } from "../../../domain/changesets/operations.ts";
-import { stageDigest } from "../../../domain/changesets/stage.ts";
-import { canonicalJson } from "../../../domain/ids/canonical_json.ts";
+import {
+  stageDigest,
+  type StageHookResult,
+} from "../../../domain/changesets/stage.ts";
+import {
+  canonicalJson,
+  canonicalSha256,
+} from "../../../domain/ids/canonical_json.ts";
 import { err, ok, type Result } from "../../../domain/errors/result.ts";
-import { uuidV7 } from "../../../domain/ids/uuid_v7.ts";
+import { isUuidV7, uuidV7 } from "../../../domain/ids/uuid_v7.ts";
 import { PostgresAuthorizationRepository } from "./authorization_repository.ts";
 import { query, type Queryable, quoteIdentifier, type Sql } from "./client.ts";
 import { lockReadAuthority } from "./object_read_boundary.ts";
+import {
+  type FieldSpec,
+  lowerCelToSql,
+} from "../../../domain/queries/expression_lowerer.ts";
 
 type Revision = {
   id: string;
@@ -24,52 +34,249 @@ type Prepared = {
   revisions: Revision[];
   dependencies: Record<string, unknown>[];
   decisions: Record<string, unknown>[];
+  hookDeclarations: Record<string, unknown>[];
   operationRows: Array<
-    { operationId: string; revisionId: string; operation: CanonicalOperation }
+    {
+      operationId: string;
+      revisionId: string;
+      componentDigest: string;
+      operation: CanonicalOperation;
+    }
   >;
 };
 
 export class PostgresStageRepository implements StageRepository {
   constructor(private readonly sql: Sql) {}
 
+  async hookInput(
+    operations: CanonicalOperation[],
+    auth: AuthContext,
+  ): Promise<
+    Result<{
+      operations: readonly CanonicalOperation[];
+      projects: readonly unknown[];
+      pack_revisions: readonly unknown[];
+    }>
+  > {
+    try {
+      return await this.sql.begin(async (tx) => {
+        const projects: Record<string, unknown>[] = [];
+        for (
+          const projectId of [
+            ...new Set(operations.map((operation) => operation.project_id)),
+          ].sort()
+        ) {
+          await lockReadAuthority(tx, auth, projectId);
+          const project =
+            (await query<{ id: string; version: string; status: string }>(
+              tx,
+              "select id,version,status from projects where id=$1 for share",
+              [projectId],
+            )).rows[0];
+          if (!project || project.status !== "active") {
+            throw domain(
+              "project_inactive",
+              "Project is not active",
+              "conflict",
+            );
+          }
+          projects.push({
+            project_id: project.id,
+            version: Number(project.version),
+            status: project.status,
+          });
+        }
+        const revisions: Record<string, unknown>[] = [];
+        const packs = [
+          ...new Set(operations.map((operation) => {
+            const identity = parseIdentity(componentIdentity(operation));
+            return `${identity.publisher}/${identity.pack}`;
+          })),
+        ].sort();
+        for (const pack of packs) {
+          const [publisher, packName] = pack.split("/");
+          const revision = (await query<
+            { id: string; content_digest: string; normalized: unknown }
+          >(
+            tx,
+            `select cr.id,cr.content_digest,cr.normalized from pack_active_revisions ar join pack_candidate_revisions cr on cr.id=ar.candidate_revision_id where ar.publisher=$1 and ar.pack_name=$2 for share of ar,cr`,
+            [publisher, packName],
+          )).rows[0];
+          if (!revision) {
+            throw domain(
+              "validation_failed",
+              "Active pack revision is unavailable",
+              "validation",
+            );
+          }
+          revisions.push({
+            publisher,
+            pack: packName,
+            revision_id: revision.id,
+            content_digest: revision.content_digest,
+            matching_hooks: matchingStageHooks(
+              record(revision.normalized),
+              operations,
+            ),
+          });
+        }
+        const proposedStates: Record<string, Record<string, unknown>> = {};
+        const baseStates: Record<string, Record<string, unknown> | null> = {};
+        for (const operation of operations) {
+          if (!["create", "update", "transition"].includes(operation.op)) {
+            continue;
+          }
+          const key = String(operation.key);
+          const parsed = parseIdentity(componentIdentity(operation));
+          proposedStates[key] = await proposedState(tx, operation, parsed);
+          baseStates[key] = operation.op === "create"
+            ? null
+            : await currentResourceState(tx, operation, parsed);
+        }
+        return ok({
+          operations,
+          projects,
+          pack_revisions: revisions,
+          proposed_states: proposedStates,
+          base_states: baseStates,
+        });
+      }) as Result<{
+        operations: readonly CanonicalOperation[];
+        projects: readonly unknown[];
+        pack_revisions: readonly unknown[];
+      }>;
+    } catch (error) {
+      return mapError(error);
+    }
+  }
+
   async create(
-    input: { operations: CanonicalOperation[]; operationGraphDigest: string },
+    input: {
+      operations: CanonicalOperation[];
+      operationGraphDigest: string;
+      hookResult?: StageHookResult;
+    },
     auth: AuthContext,
   ): Promise<Result<StageDto>> {
     try {
       return await this.sql.begin(async (tx) => {
-        const prepared = await prepare(tx, input.operations, auth);
+        const prepared = await prepare(
+          tx,
+          input.operations,
+          auth,
+          input.hookResult !== undefined,
+        );
+        const operationGraphDigest = `sha256:${await canonicalSha256({
+          schema: "changeset.operations.v1",
+          operations: input.operations,
+        })}`;
+        const hook = input.hookResult;
+        if (
+          prepared.hookDeclarations.length &&
+          (hook?.hook_executions.length ?? 0) < prepared.hookDeclarations.length
+        ) {
+          throw domain(
+            "hook_rejected",
+            "Hook coordinator did not return complete execution evidence",
+            "validation",
+          );
+        }
+        const currentRevisionIds = new Set(
+          prepared.revisions.map((revision) => revision.id),
+        );
+        for (const execution of hook?.hook_executions ?? []) {
+          if (
+            !currentRevisionIds.has(String(record(execution).pack_revision_id))
+          ) {
+            throw domain(
+              "project_conflict",
+              "Active pack revision changed after hook coordination",
+              "conflict",
+            );
+          }
+        }
+        const dependencies: Record<string, unknown>[] = [
+          ...prepared.dependencies,
+          ...(hook?.dependencies ?? []).map(record),
+          ...(hook?.required_capabilities ?? []).map((capability) => ({
+            kind: "policy",
+            required_capability: capability,
+          })),
+          ...(hook?.effects ?? []).map((effect) => ({
+            kind: "policy",
+            required_effect: effect,
+          })),
+        ].map(record).sort((a, b) =>
+          canonicalJson(a).localeCompare(canonicalJson(b))
+        );
         const evidence = {
-          operation_graph_digest: input.operationGraphDigest,
+          operation_graph_digest: operationGraphDigest,
           projects: prepared.projects,
           pack_revisions: prepared.revisions.map(publicRevision),
           operations: input.operations,
-          dependencies: prepared.dependencies,
-          hook_executions: [],
+          dependencies,
+          hook_executions: (hook?.hook_executions ?? []).map((execution) => {
+            const value = record(execution);
+            return Object.fromEntries(
+              Object.entries(value).filter(([key]) =>
+                !["stderr", "stderr_text", "duration_ms", "created_at"]
+                  .includes(key)
+              ),
+            );
+          }),
           policy_decisions: prepared.decisions,
-          approval_requirements: [],
-          planned_events: [],
-          planned_deliveries: [],
+          approval_requirements: hook?.approval_requirements ?? [],
+          required_capabilities: [
+            ...prepared.decisions.map((decision) =>
+              `${String(decision.project_id)}:${String(decision.action)}:${
+                String(decision.resource_identity)
+              }`
+            ),
+            ...(hook?.required_capabilities ?? []),
+          ].sort(),
+          effects: [
+            ...input.operations.map((operation) =>
+              `${operation.project_id}:${operation.op}:${
+                componentIdentity(operation)
+              }`
+            ),
+            ...(hook?.effects ?? []),
+          ].sort(),
+          planned_events: hook?.planned_events ?? [],
+          planned_deliveries: hook?.planned_deliveries ?? [],
         };
         const digest = await stageDigest(evidence);
+        const lineage = auth.authorizationId
+          ? (await query<{ id: string }>(
+            tx,
+            `with recursive lineage(id) as (
+              select $1::uuid union select a.parent_authorization_id
+              from agent_authorizations a join lineage child on child.id=a.id
+              where a.parent_authorization_id is not null
+            ) select id from lineage order by id`,
+            [auth.authorizationId],
+          )).rows.map((row) => row.id)
+          : [];
         const id = uuidV7();
         await query(
           tx,
           `insert into staged_changesets(
-          id,schema_version,source_kind,source_identity_json,created_auth_context_id,creating_context_json,
+          id,schema_version,source_kind,source_identity_json,created_auth_context_id,created_principal_id,creating_context_json,
           operation_graph_digest,stage_digest,canonical_graph_json,projects_json,pack_revisions_json,warnings_json,
-          planned_events_json,planned_deliveries_json) values($1,1,'direct',$2::jsonb,$3,$4::jsonb,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,'[]','[]','[]') returning created_at`,
+          planned_events_json,planned_deliveries_json) values($1,1,'direct',$2::jsonb,$3,$4,$5::jsonb,$6,$7,$8::jsonb,$9::jsonb,$10::jsonb,$11::jsonb,$12::jsonb,$13::jsonb) returning created_at`,
           [
             id,
             {},
             auth.id,
+            auth.principalId,
             {
               principal_id: auth.principalId,
               human_user_id: auth.humanUserId,
               session_id: auth.sessionId,
               authorization_id: auth.authorizationId ?? null,
+              authorization_lineage_ids: lineage,
             },
-            input.operationGraphDigest,
+            operationGraphDigest,
             digest,
             {
               schema: "changeset.operations.v1",
@@ -77,6 +284,9 @@ export class PostgresStageRepository implements StageRepository {
             },
             prepared.projects,
             prepared.revisions.map(publicRevision),
+            hook?.warnings ?? [],
+            hook?.planned_events ?? [],
+            hook?.planned_deliveries ?? [],
           ],
         );
         for (
@@ -87,14 +297,15 @@ export class PostgresStageRepository implements StageRepository {
           const row = prepared.operationRows[ordinal];
           await query(
             tx,
-            `insert into staged_changeset_operations(stage_id,ordinal,operation_id,project_id,pack_revision_id,resource_revision_id,operation_kind,object_id,canonical_operation_json)
-            values($1,$2,$3,$4,$5,$5,$6,$7,$8::jsonb)`,
+            `insert into staged_changeset_operations(stage_id,ordinal,operation_id,project_id,pack_revision_id,resource_revision_id,component_digest,operation_kind,object_id,canonical_operation_json)
+            values($1,$2,$3,$4,$5,null,$6,$7,$8,$9::jsonb)`,
             [
               id,
               ordinal,
               row.operationId,
               row.operation.project_id,
               row.revisionId,
+              row.componentDigest,
               row.operation.op,
               operationObjectId(row.operation),
               row.operation,
@@ -103,14 +314,14 @@ export class PostgresStageRepository implements StageRepository {
         }
         for (
           let ordinal = 0;
-          ordinal < prepared.dependencies.length;
+          ordinal < dependencies.length;
           ordinal++
         ) {
-          const dep = prepared.dependencies[ordinal];
+          const dep = dependencies[ordinal];
           await query(
             tx,
-            `insert into staged_changeset_dependencies(stage_id,ordinal,dependency_kind,project_id,pack_revision_id,resource_revision_id,object_id,expected_version_id,dependency_json)
-            values($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb)`,
+            `insert into staged_changeset_dependencies(stage_id,ordinal,dependency_kind,project_id,pack_revision_id,resource_revision_id,component_digest,object_id,expected_version_id,dependency_json)
+            values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)`,
             [
               id,
               ordinal,
@@ -118,6 +329,7 @@ export class PostgresStageRepository implements StageRepository {
               dep.project_id ?? null,
               dep.pack_revision_id ?? null,
               dep.resource_revision_id ?? null,
+              dep.component_digest ?? null,
               dep.object_id ?? null,
               dep.expected_version_id ?? null,
               dep,
@@ -140,10 +352,53 @@ export class PostgresStageRepository implements StageRepository {
             ],
           );
         }
+        for (
+          let ordinal = 0;
+          ordinal < (hook?.hook_executions.length ?? 0);
+          ordinal++
+        ) {
+          const execution = record(hook!.hook_executions[ordinal]);
+          await query(
+            tx,
+            `insert into staged_hook_executions(id,stage_id,ordinal,phase,pack_revision_id,hook_revision_id,input_digest,output_digest,output_json,stderr_text,duration_ms,grant_snapshot_json)
+             values($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11,$12::jsonb)`,
+            [
+              String(execution.id ?? uuidV7()),
+              id,
+              ordinal,
+              execution.phase,
+              execution.pack_revision_id,
+              execution.hook_revision_id,
+              execution.input_digest,
+              execution.output_digest,
+              record(execution.output),
+              String(execution.stderr ?? ""),
+              Number(execution.duration_ms ?? 0),
+              record(execution.grant_snapshot),
+            ],
+          );
+        }
+        for (
+          let ordinal = 0;
+          ordinal < (hook?.approval_requirements.length ?? 0);
+          ordinal++
+        ) {
+          const requirement = record(hook!.approval_requirements[ordinal]);
+          await query(
+            tx,
+            `insert into staged_approval_requirements(id,stage_id,ordinal,requirement_json) values($1,$2,$3,$4::jsonb)`,
+            [String(requirement.id ?? uuidV7()), id, ordinal, requirement],
+          );
+        }
         await query(
           tx,
-          "insert into staged_changeset_lifecycle(stage_id,status,version) values($1,'ready',1)",
-          [id],
+          `insert into staged_changeset_lifecycle(stage_id,status,version) values($1,$2,1)`,
+          [
+            id,
+            (hook?.approval_requirements.length ?? 0)
+              ? "awaiting_approval"
+              : "ready",
+          ],
         );
         return ok(await load(tx, id)!);
       }) as Result<StageDto>;
@@ -217,6 +472,7 @@ async function prepare(
   sql: Queryable,
   operations: CanonicalOperation[],
   auth: AuthContext,
+  coordinatorSupplied: boolean,
 ): Promise<Prepared> {
   const projectIds = [
     ...new Set(operations.map((operation) => operation.project_id)),
@@ -285,6 +541,7 @@ async function prepare(
       );
     }
   }
+  const hookDeclarations: Record<string, unknown>[] = [];
   const uniqueRevisions = [
     ...new Map(
       [...revisions.values()].map((revision) => [revision.id, revision]),
@@ -300,16 +557,28 @@ async function prepare(
       pack: revision.pack,
       content_digest: revision.contentDigest,
     });
-    if (
-      hasStageHook(
-        revision.normalized,
-        operations.filter((operation) => {
-          const parsed = parseIdentity(componentIdentity(operation));
-          return parsed.publisher === revision.publisher &&
-            parsed.pack === revision.pack;
-        }),
-      )
-    ) {
+    const revisionOperations = operations.filter((operation) => {
+      const parsed = parseIdentity(componentIdentity(operation));
+      return parsed.publisher === revision.publisher &&
+        parsed.pack === revision.pack;
+    });
+    const matchingDeclarations = matchingStageHooks(
+      revision.normalized,
+      revisionOperations,
+    );
+    for (const declaration of matchingDeclarations) {
+      const pinnedDeclaration = {
+        ...declaration,
+        pack_revision_id: revision.id,
+      };
+      hookDeclarations.push(pinnedDeclaration);
+      dependencies.push({
+        kind: "resource",
+        pack_revision_id: revision.id,
+        hook_declaration: pinnedDeclaration,
+      });
+    }
+    if (matchingDeclarations.length && !coordinatorSupplied) {
       throw domain(
         "hook_coordinator_unavailable",
         "A required stage hook coordinator is unavailable",
@@ -319,6 +588,7 @@ async function prepare(
   }
   const decisions: Record<string, unknown>[] = [];
   const operationRows: Prepared["operationRows"] = [];
+  const stagedLinkSignatures = new Set<string>();
   const creates = new Map(
     operations.filter((op) => op.op === "create").map((
       op,
@@ -328,14 +598,80 @@ async function prepare(
     const identity = componentIdentity(operation),
       parsed = parseIdentity(identity);
     const revision = revisions.get(`${parsed.publisher}/${parsed.pack}`)!;
-    validateDeclaredFields(
-      operation,
+    const definition = record(
       record(
-        record(
-          revision.normalized[operationDefinitionKind(operation)],
-        )[parsed.name],
-      ),
+        revision.normalized[operationDefinitionKind(operation)],
+      )[parsed.name],
     );
+    const componentDigest = `sha256:${await canonicalSha256({
+      candidate_revision_id: revision.id,
+      definition_kind: operationDefinitionKind(operation),
+      definition_name: parsed.name,
+      definition,
+    })}`;
+    if (operation.op === "create") {
+      const lifecycle = Object.values(record(revision.normalized.lifecycles))
+        .map(record).find((candidate) =>
+          record(candidate.spec).resource === identity
+        );
+      if (lifecycle) {
+        const lifecycleSpec = record(lifecycle.spec);
+        const field = String(lifecycleSpec.field);
+        const initial = String(lifecycleSpec.initial);
+        const fields = record(operation.fields);
+        if (Object.hasOwn(fields, field) && fields[field] !== initial) {
+          throw domain(
+            "operation_conflict",
+            "Create lifecycle field conflicts with initial state",
+            "conflict",
+          );
+        }
+        operation.fields = { ...fields, [field]: initial };
+        dependencies.push({
+          kind: "lifecycle",
+          project_id: operation.project_id,
+          pack_revision_id: revision.id,
+          component_digest: `sha256:${await canonicalSha256({
+            candidate_revision_id: revision.id,
+            definition_kind: "lifecycles",
+            definition_name: String(
+              record(lifecycle.metadata).name ?? "lifecycle",
+            ),
+            definition: lifecycle,
+          })}`,
+          initial,
+          field,
+        });
+      }
+    }
+    validateDeclaredFields(operation, definition);
+    if (operation.op === "link") {
+      const unique = Array.isArray(record(definition.spec).unique)
+        ? (record(definition.spec).unique as unknown[]).map(String)
+        : [];
+      if (unique.length) {
+        const values = record(operation.fields);
+        const signature = canonicalJson([
+          operation.project_id,
+          identity,
+          ...unique.map((field) =>
+            field === "from"
+              ? operation.from
+              : field === "to"
+              ? operation.to
+              : values[field]
+          ),
+        ]);
+        if (stagedLinkSignatures.has(signature)) {
+          throw domain(
+            "operation_conflict",
+            "Staged links violate relationship uniqueness",
+            "conflict",
+          );
+        }
+        stagedLinkSignatures.add(signature);
+      }
+    }
     const action = operation.op;
     const authorization = await new PostgresAuthorizationRepository(sql as Sql)
       .authorize({
@@ -357,15 +693,25 @@ async function prepare(
       capability.action === action &&
       (capability.resource === "*" || capability.resource === identity)
     );
-    if (
-      !authorization.value.superAdmin &&
-      !matchingCapabilities.some((capability) =>
-        capability.condition === "unconditional"
-      )
-    ) {
+    const policyEvaluation = authorization.value.superAdmin
+      ? {
+        allowed: true,
+        matched_rule_ids: ["system:super_admin"],
+        rule_evidence: [],
+      }
+      : await evaluateStagePolicy(
+        sql,
+        auth,
+        operation,
+        parsed,
+        revision,
+        definition,
+        matchingCapabilities,
+      );
+    if (!policyEvaluation.allowed) {
       throw domain(
         "policy_denied",
-        "Conditional policy did not produce a proven stage-time allow decision",
+        "Current stage policy denied the operation",
         "authorization",
       );
     }
@@ -377,6 +723,8 @@ async function prepare(
       authority_digest: authorization.value.digest,
       superadmin_bypass: authorization.value.superAdmin,
       operation_key: operation.key,
+      matched_rule_ids: policyEvaluation.matched_rule_ids,
+      rule_evidence: policyEvaluation.rule_evidence,
     });
     dependencies.push({
       kind: "policy",
@@ -396,7 +744,8 @@ async function prepare(
       kind: "resource",
       project_id: operation.project_id,
       pack_revision_id: revision.id,
-      resource_revision_id: revision.id,
+      resource_revision_id: null,
+      component_digest: componentDigest,
       identity,
     });
     await validateCurrent(
@@ -406,10 +755,23 @@ async function prepare(
       revision,
       dependencies,
       creates,
+      componentDigest,
+      auth,
+    );
+    validateDeclaredFields(operation, definition);
+    await validateUniqueness(
+      sql,
+      operation,
+      parsed,
+      definition,
+      revision,
+      componentDigest,
+      dependencies,
     );
     operationRows.push({
       operationId: uuidV7(),
       revisionId: revision.id,
+      componentDigest,
       operation,
     });
   }
@@ -419,6 +781,7 @@ async function prepare(
     revisions: uniqueRevisions,
     dependencies,
     decisions,
+    hookDeclarations,
     operationRows,
   };
 }
@@ -430,6 +793,8 @@ async function validateCurrent(
   revision: Revision,
   dependencies: Record<string, unknown>[],
   creates: Map<string, string>,
+  componentDigest: string,
+  auth: AuthContext,
 ): Promise<void> {
   if (operation.op === "create" || operation.op === "link") {
     if (operation.op === "link") {
@@ -484,15 +849,78 @@ async function validateCurrent(
               "validation",
             );
           }
+          const endpointIdentity = parseIdentity(expectedResource);
+          const endpointDefinition = record(
+            record(revision.normalized.resources)[endpointIdentity.name],
+          );
+          const endpointComponentDigest = `sha256:${await canonicalSha256({
+            candidate_revision_id: revision.id,
+            definition_kind: "resources",
+            definition_name: endpointIdentity.name,
+            definition: endpointDefinition,
+          })}`;
           dependencies.push({
             kind: "relationship",
             project_id: operation.project_id,
             pack_revision_id: revision.id,
+            component_digest: endpointComponentDigest,
             object_id: endpoint,
             expected_version_id: row.expected_version_id,
             endpoint: side,
             resource_identity: row.resource_identity,
           });
+        }
+      }
+      const unique = Array.isArray(spec.unique) ? spec.unique.map(String) : [];
+      if (unique.length) {
+        const runtime = (await query<{ table_name: string }>(
+          sql,
+          "select table_name from pack_runtime_tables where publisher=$1 and pack_name=$2 and definition_kind='relationship' and definition_name=$3",
+          [parsed.publisher, parsed.pack, parsed.name],
+        )).rows[0];
+        const values = record(operation.fields);
+        const params: unknown[] = [operation.project_id];
+        const predicates = unique.map((field) => {
+          params.push(
+            field === "from"
+              ? operation.from
+              : field === "to"
+              ? operation.to
+              : values[field],
+          );
+          const column = field === "from"
+            ? "from_object_id"
+            : field === "to"
+            ? "to_object_id"
+            : field;
+          return `${
+            quoteIdentifier(column)
+          } is not distinct from $${params.length}`;
+        });
+        const duplicate = runtime && (await query<{ id: string }>(
+          sql,
+          `select id from ${
+            quoteIdentifier(runtime.table_name)
+          } where project_id=$1 and archived_at is null and ${
+            predicates.join(" and ")
+          } limit 1 for share`,
+          params,
+        )).rows[0];
+        dependencies.push({
+          kind: "uniqueness",
+          project_id: operation.project_id,
+          pack_revision_id: revision.id,
+          component_digest: componentDigest,
+          fields: unique,
+          values: params.slice(1),
+          existing_id: duplicate?.id ?? null,
+        });
+        if (duplicate) {
+          throw domain(
+            "operation_conflict",
+            "Active relationship already exists",
+            "conflict",
+          );
         }
       }
     }
@@ -520,7 +948,8 @@ async function validateCurrent(
       kind: "object_version",
       project_id: operation.project_id,
       pack_revision_id: revision.id,
-      resource_revision_id: revision.id,
+      resource_revision_id: null,
+      component_digest: componentDigest,
       object_id: objectId,
       expected_version_id: null,
       created_in_graph: true,
@@ -555,8 +984,63 @@ async function validateCurrent(
     } current_row where project_id=$1 and id=$2 for share`,
     [operation.project_id, objectId],
   )).rows[0];
-  if (!row || row.archived_at) {
+  if (!row) {
     throw domain("not_found", "Current object was not found", "not_found");
+  }
+  if (row.archived_at) {
+    if (operation.op !== "comment") {
+      throw domain("not_found", "Current object was not found", "not_found");
+    }
+    const archivedAuthority = await new PostgresAuthorizationRepository(
+      sql as Sql,
+    ).authorize({
+      auth,
+      boundary: { type: "project", projectId: operation.project_id },
+      action: "read_archived",
+      resource: componentIdentity(operation),
+    });
+    if (!archivedAuthority.ok) {
+      throw domain(
+        archivedAuthority.error.code,
+        archivedAuthority.error.message,
+        archivedAuthority.error.severity,
+      );
+    }
+    if (!archivedAuthority.value.superAdmin) {
+      const capabilities = archivedAuthority.value.capabilities.filter((
+        capability,
+      ) =>
+        capability.action === "read_archived" &&
+        (capability.resource === "*" ||
+          capability.resource === componentIdentity(operation))
+      );
+      const definition = record(
+        record(revision.normalized.resources)[parsed.name],
+      );
+      const evaluated = await evaluateStagePolicy(
+        sql,
+        auth,
+        operation,
+        parsed,
+        revision,
+        definition,
+        capabilities,
+      );
+      if (!evaluated.allowed) {
+        throw domain(
+          "policy_denied",
+          "Archived comment target is not visible",
+          "authorization",
+        );
+      }
+    }
+    dependencies.push({
+      kind: "policy",
+      project_id: operation.project_id,
+      action: "read_archived",
+      resource_identity: componentIdentity(operation),
+      authority_digest: archivedAuthority.value.digest,
+    });
   }
   if (operation.op === "transition") {
     if (!lifecycle) {
@@ -584,7 +1068,11 @@ async function validateCurrent(
         "conflict",
       );
     }
-    const proposed = { ...record(row.snapshot), ...record(operation.set) };
+    const canonicalSet = { ...record(operation.set) };
+    const canonicalUnset = new Set(
+      (operation.unset as string[] | undefined) ?? [],
+    );
+    const proposed = { ...record(row.snapshot), ...canonicalSet };
     for (const field of (operation.unset as string[] | undefined) ?? []) {
       delete proposed[field];
     }
@@ -601,6 +1089,8 @@ async function validateCurrent(
         );
       }
       proposed[field] = value;
+      canonicalSet[field] = value;
+      canonicalUnset.delete(field);
     }
     for (const field of (edge.unset as string[] | undefined) ?? []) {
       if (Object.hasOwn(record(operation.set), field)) {
@@ -611,6 +1101,63 @@ async function validateCurrent(
         );
       }
       delete proposed[field];
+      delete canonicalSet[field];
+      canonicalUnset.add(field);
+    }
+    operation.set = Object.fromEntries(
+      Object.entries(canonicalSet).sort(([a], [b]) => a.localeCompare(b)),
+    );
+    if (!Object.keys(record(operation.set)).length) delete operation.set;
+    operation.unset = [...canonicalUnset].sort();
+    if (!(operation.unset as string[]).length) delete operation.unset;
+    if (edge.condition) {
+      const resourceDefinition = record(
+        record(revision.normalized.resources)[parsed.name],
+      );
+      const definitions = record(record(resourceDefinition.spec).fields);
+      const fieldSpecs = Object.fromEntries(
+        Object.entries(definitions).map(([name, value]) => {
+          const descriptor = record(value);
+          return [name, {
+            type: String(descriptor.type) as FieldSpec["type"],
+            ...(descriptor.required !== true ? { nullable: true } : {}),
+            ...(descriptor.format === "uuid" || descriptor.ref
+              ? { format: "uuid" as const }
+              : {}),
+          }];
+        }),
+      );
+      const names = Object.keys(fieldSpecs).sort();
+      const lowered = lowerCelToSql(String(edge.condition), {
+        fields: fieldSpecs,
+        actor: {
+          id: { type: "string", value: auth.principalId },
+          human_user_id: { type: "string", value: auth.humanUserId },
+        },
+        alias: "proposed",
+        parameterOffset: names.length,
+        maxNodes: 80,
+        maxLength: 1000,
+      });
+      const casts = names.map((name, index) =>
+        `$${index + 1}::${fieldSqlType(fieldSpecs[name].type)} as ${
+          quoteIdentifier(name)
+        }`
+      );
+      const condition = await query<{ allowed: boolean }>(
+        sql,
+        `select coalesce((${lowered.sql}),false) allowed from (select ${
+          casts.join(",")
+        }) proposed`,
+        [...names.map((name) => proposed[name] ?? null), ...lowered.params],
+      );
+      if (!condition.rows[0]?.allowed) {
+        throw domain(
+          "operation_conflict",
+          "Lifecycle transition condition was not satisfied",
+          "conflict",
+        );
+      }
     }
     const state = (spec.states as unknown[]).map(record).find((candidate) =>
       candidate.name === target
@@ -630,8 +1177,16 @@ async function validateCurrent(
       kind: "lifecycle",
       project_id: operation.project_id,
       pack_revision_id: revision.id,
-      resource_revision_id: revision.id,
-      identity: String(lifecycle.identity ?? "lifecycle"),
+      resource_revision_id: null,
+      component_digest: `sha256:${await canonicalSha256({
+        candidate_revision_id: revision.id,
+        definition_kind: "lifecycles",
+        definition_name: String(record(lifecycle.metadata).name ?? "lifecycle"),
+        definition: lifecycle,
+      })}`,
+      identity: String(
+        lifecycle.identity ?? record(lifecycle.metadata).name ?? "lifecycle",
+      ),
       from: row.lifecycle_value,
       to: target,
     });
@@ -667,11 +1222,480 @@ async function validateCurrent(
     kind: operation.op === "unlink" ? "relationship" : "object_version",
     project_id: operation.project_id,
     pack_revision_id: revision.id,
-    resource_revision_id: revision.id,
+    resource_revision_id: null,
+    component_digest: componentDigest,
     object_id: objectId,
     expected_version_id: row.current_object_version_id,
     version: Number(row.version),
   });
+}
+
+async function evaluateStagePolicy(
+  sql: Queryable,
+  auth: AuthContext,
+  operation: CanonicalOperation,
+  parsed: ReturnType<typeof parseIdentity>,
+  revision: Revision,
+  definition: Record<string, unknown>,
+  capabilities: Array<{
+    condition: string;
+    ruleId: string;
+    policy: string;
+    policyRevisionId: string;
+  }>,
+): Promise<{
+  allowed: boolean;
+  matched_rule_ids: string[];
+  rule_evidence: Record<string, unknown>[];
+}> {
+  const ruleIds = capabilities.map((capability) => capability.ruleId);
+  if (!ruleIds.length) {
+    return { allowed: false, matched_rule_ids: [], rule_evidence: [] };
+  }
+  const rows = (await query<{
+    id: string;
+    policy_definition_version_id: string;
+    condition_kind: string;
+    predicate: string | null;
+    relation_relationship: string | null;
+    relation_object_side: "from" | "to" | null;
+    relation_subject_side: "from" | "to" | null;
+    relation_subject: "actor.id" | "actor.human_user_id" | null;
+  }>(
+    sql,
+    `select pr.id,pr.policy_definition_version_id,pr.condition_kind,pr.predicate,
+      pr.relation_relationship,pr.relation_object_side,pr.relation_subject_side,pr.relation_subject
+     from policy_rules pr join policy_definition_versions pd on pd.id=pr.policy_definition_version_id
+     where pr.id=any($1::uuid[]) and pd.active and pd.candidate_revision_id=$2
+       and exists(select 1 from policy_assignments pa where pa.policy_definition_version_id=pd.id and pa.active
+         and (pa.boundary_type='all_projects' or (pa.boundary_type='project' and pa.project_id=$3)))
+       and (exists(select 1 from role_assignments ra where ra.principal_id=$4 and ra.role_id=pr.role_id and ra.active
+         and (ra.boundary_type='all_projects' or (ra.boundary_type='project' and ra.project_id=$3)))
+         or exists(select 1 from agent_authorization_roles ar where ar.authorization_id=$5 and ar.role_id=pr.role_id
+         and (ar.boundary_type='all_projects' or (ar.boundary_type='project' and ar.project_id=$3))))
+     order by pr.id for share of pr,pd`,
+    [
+      ruleIds,
+      revision.id,
+      operation.project_id,
+      auth.principalId,
+      auth.authorizationId ?? null,
+    ],
+  )).rows;
+  const proposed = await proposedState(sql, operation, parsed);
+  const fieldDefinitions = record(record(definition.spec).fields);
+  const fields = Object.fromEntries(
+    Object.entries(fieldDefinitions).map(([name, value]) => {
+      const spec = record(value);
+      return [name, {
+        type: String(spec.type) as FieldSpec["type"],
+        ...(spec.required !== true ? { nullable: true } : {}),
+        ...(spec.format === "uuid" || spec.ref
+          ? { format: "uuid" as const }
+          : {}),
+      }];
+    }),
+  );
+  const matched: string[] = [];
+  const evidence: Record<string, unknown>[] = [];
+  for (const rule of rows) {
+    let whereAllowed = true;
+    let normalizedWhere: unknown = null;
+    if (rule.predicate) {
+      const names = Object.keys(fields).sort();
+      const casts = names.map((name, index) =>
+        `$${index + 1}::${fieldSqlType(fields[name].type)} as ${
+          quoteIdentifier(name)
+        }`
+      );
+      const lowered = lowerCelToSql(rule.predicate, {
+        fields,
+        actor: {
+          id: { type: "string", value: auth.principalId },
+          human_user_id: { type: "string", value: auth.humanUserId },
+        },
+        alias: "proposed",
+        parameterOffset: names.length,
+        maxNodes: 80,
+        maxLength: 1000,
+      });
+      normalizedWhere = lowered.normalized;
+      const evaluated = await query<{ allowed: boolean }>(
+        sql,
+        `select coalesce((${lowered.sql}),false) allowed from (select ${
+          casts.join(",")
+        }) proposed`,
+        [...names.map((name) => proposed[name] ?? null), ...lowered.params],
+      );
+      whereAllowed = evaluated.rows[0]?.allowed === true;
+    }
+    let relationAllowed = true;
+    if (rule.relation_relationship) {
+      relationAllowed = await evaluateDirectRelation(
+        sql,
+        auth,
+        operation,
+        rule,
+      );
+    }
+    const allowed = whereAllowed && relationAllowed;
+    evidence.push({
+      rule_id: rule.id,
+      policy_definition_version_id: rule.policy_definition_version_id,
+      condition_kind: rule.condition_kind,
+      normalized_where: normalizedWhere,
+      where_allowed: whereAllowed,
+      relation_allowed: relationAllowed,
+      allowed,
+    });
+    if (allowed) matched.push(rule.id);
+  }
+  return {
+    allowed: matched.length > 0,
+    matched_rule_ids: matched,
+    rule_evidence: evidence,
+  };
+}
+
+async function currentResourceState(
+  sql: Queryable,
+  operation: CanonicalOperation,
+  parsed: ReturnType<typeof parseIdentity>,
+): Promise<Record<string, unknown>> {
+  const runtime = (await query<{ table_name: string }>(
+    sql,
+    "select table_name from pack_runtime_tables where publisher=$1 and pack_name=$2 and definition_kind='resource' and definition_name=$3",
+    [parsed.publisher, parsed.pack, parsed.name],
+  )).rows[0];
+  if (!runtime) return {};
+  const current = (await query<{ snapshot: unknown }>(
+    sql,
+    `select to_jsonb(current_row) snapshot from ${
+      quoteIdentifier(runtime.table_name)
+    } current_row where project_id=$1 and id=$2`,
+    [operation.project_id, operation.object_id],
+  )).rows[0];
+  return record(current?.snapshot);
+}
+
+async function proposedState(
+  sql: Queryable,
+  operation: CanonicalOperation,
+  parsed: ReturnType<typeof parseIdentity>,
+): Promise<Record<string, unknown>> {
+  if (operation.op === "create") {
+    return {
+      ...record(operation.fields),
+      id: operation.object_id,
+      project_id: operation.project_id,
+    };
+  }
+  if (operation.op === "link") {
+    return {
+      ...record(operation.fields),
+      id: operation.relationship_id,
+      project_id: operation.project_id,
+      from: operation.from,
+      to: operation.to,
+    };
+  }
+  const kind = operation.op === "unlink" ? "relationship" : "resource";
+  const runtime = (await query<{ table_name: string }>(
+    sql,
+    "select table_name from pack_runtime_tables where publisher=$1 and pack_name=$2 and definition_kind=$3 and definition_name=$4",
+    [parsed.publisher, parsed.pack, kind, parsed.name],
+  )).rows[0];
+  if (!runtime) return {};
+  const id = operation.op === "unlink"
+    ? operation.relationship_id
+    : operation.object_id;
+  const current = (await query<{ snapshot: unknown }>(
+    sql,
+    `select to_jsonb(current_row) snapshot from ${
+      quoteIdentifier(runtime.table_name)
+    } current_row where project_id=$1 and id=$2`,
+    [operation.project_id, id],
+  )).rows[0];
+  const proposed = { ...record(current?.snapshot), ...record(operation.set) };
+  for (const field of (operation.unset as string[] | undefined) ?? []) {
+    delete proposed[field];
+  }
+  if (operation.op === "transition") {
+    const lifecycle = (await query<{ normalized: unknown }>(
+      sql,
+      `select cr.normalized from pack_active_revisions ar join pack_candidate_revisions cr on cr.id=ar.candidate_revision_id where ar.publisher=$1 and ar.pack_name=$2`,
+      [parsed.publisher, parsed.pack],
+    )).rows[0];
+    const definition = Object.values(
+      record(record(lifecycle?.normalized).lifecycles),
+    ).map(record).find((candidate) =>
+      record(candidate.spec).resource === componentIdentity(operation)
+    );
+    if (definition) {
+      const spec = record(definition.spec);
+      const lifecycleField = String(spec.field);
+      const currentState = proposed[lifecycleField];
+      const edge = Array.isArray(spec.transitions)
+        ? spec.transitions.map(record).find((candidate) =>
+          candidate.to === operation.to && Array.isArray(candidate.from) &&
+          candidate.from.includes(currentState)
+        )
+        : undefined;
+      proposed[lifecycleField] = operation.to;
+      for (const [field, value] of Object.entries(record(edge?.set))) {
+        proposed[field] = value;
+      }
+      for (const field of (edge?.unset as string[] | undefined) ?? []) {
+        delete proposed[field];
+      }
+    }
+  }
+  return proposed;
+}
+
+async function evaluateDirectRelation(
+  sql: Queryable,
+  auth: AuthContext,
+  operation: CanonicalOperation,
+  rule: {
+    relation_relationship: string | null;
+    relation_object_side: "from" | "to" | null;
+    relation_subject_side: "from" | "to" | null;
+    relation_subject: "actor.id" | "actor.human_user_id" | null;
+  },
+): Promise<boolean> {
+  if (
+    !rule.relation_relationship || !rule.relation_object_side ||
+    !rule.relation_subject_side || !rule.relation_subject
+  ) return false;
+  if (rule.relation_object_side === rule.relation_subject_side) return false;
+  const relation = parseIdentity(rule.relation_relationship);
+  const runtime = (await query<{ table_name: string }>(
+    sql,
+    "select table_name from pack_runtime_tables where publisher=$1 and pack_name=$2 and definition_kind='relationship' and definition_name=$3",
+    [relation.publisher, relation.pack, relation.name],
+  )).rows[0];
+  if (!runtime) return false;
+  const objectColumn = rule.relation_object_side === "from"
+    ? "from_object_id"
+    : "to_object_id";
+  const subjectColumn = rule.relation_subject_side === "from"
+    ? "from_object_id"
+    : "to_object_id";
+  const objectId = operation.op === "link" || operation.op === "unlink"
+    ? operation.relationship_id
+    : operation.object_id;
+  const subjectId = rule.relation_subject === "actor.id"
+    ? auth.principalId
+    : auth.humanUserId;
+  return Boolean(
+    (await query<{ allowed: boolean }>(
+      sql,
+      `select exists(select 1 from ${
+        quoteIdentifier(runtime.table_name)
+      } where project_id=$1 and archived_at is null and ${
+        quoteIdentifier(objectColumn)
+      }=$2 and ${quoteIdentifier(subjectColumn)}=$3) allowed`,
+      [operation.project_id, objectId, subjectId],
+    )).rows[0]?.allowed,
+  );
+}
+
+function fieldSqlType(type: FieldSpec["type"]): string {
+  return type === "integer"
+    ? "bigint"
+    : type === "decimal"
+    ? "numeric"
+    : type === "boolean"
+    ? "boolean"
+    : type === "date"
+    ? "date"
+    : type === "timestamp"
+    ? "timestamptz"
+    : "text";
+}
+
+async function validateUniqueness(
+  sql: Queryable,
+  operation: CanonicalOperation,
+  parsed: ReturnType<typeof parseIdentity>,
+  definition: Record<string, unknown>,
+  revision: Revision,
+  componentDigest: string,
+  dependencies: Record<string, unknown>[],
+): Promise<void> {
+  if (!["create", "update", "transition"].includes(operation.op)) return;
+  const fieldDefinitions = record(record(definition.spec).fields);
+  const constraints = Array.isArray(record(definition.spec).constraints)
+    ? (record(definition.spec).constraints as unknown[]).map(record)
+    : [];
+  const uniqueSets = [
+    ...Object.entries(fieldDefinitions).filter(([, field]) =>
+      record(field).unique === true
+    ).map(([field]) => [field]),
+    ...constraints.filter((constraint) =>
+      constraint.kind === "unique" && !constraint.where
+    ).map((constraint) => (constraint.fields as unknown[]).map(String)),
+  ];
+  const runtime = (await query<{ table_name: string }>(
+    sql,
+    "select table_name from pack_runtime_tables where publisher=$1 and pack_name=$2 and definition_kind='resource' and definition_name=$3",
+    [parsed.publisher, parsed.pack, parsed.name],
+  )).rows[0];
+  if (!runtime) return;
+  let proposed = record(operation.fields);
+  const objectId = String(operation.object_id ?? "");
+  if (operation.op !== "create") {
+    const current = (await query<{ snapshot: unknown }>(
+      sql,
+      `select to_jsonb(current_row) snapshot from ${
+        quoteIdentifier(runtime.table_name)
+      } current_row where project_id=$1 and id=$2`,
+      [operation.project_id, objectId],
+    )).rows[0];
+    proposed = { ...record(current?.snapshot), ...record(operation.set) };
+    for (const field of (operation.unset as string[] | undefined) ?? []) {
+      delete proposed[field];
+    }
+  }
+  const fieldSpecs = Object.fromEntries(
+    Object.entries(fieldDefinitions).map(([name, value]) => {
+      const spec = record(value);
+      return [name, {
+        type: String(spec.type) as FieldSpec["type"],
+        ...(spec.required !== true ? { nullable: true } : {}),
+        ...(spec.format === "uuid" || spec.ref
+          ? { format: "uuid" as const }
+          : {}),
+      }];
+    }),
+  );
+  for (
+    const constraint of constraints.filter((candidate) =>
+      candidate.kind === "check"
+    )
+  ) {
+    const names = Object.keys(fieldSpecs).sort();
+    const lowered = lowerCelToSql(String(constraint.expression), {
+      fields: fieldSpecs,
+      alias: "proposed",
+      parameterOffset: names.length,
+      maxNodes: 80,
+      maxLength: 1000,
+    });
+    const casts = names.map((name, index) =>
+      `$${index + 1}::${fieldSqlType(fieldSpecs[name].type)} as ${
+        quoteIdentifier(name)
+      }`
+    );
+    const result = await query<{ allowed: boolean }>(
+      sql,
+      `select coalesce((${lowered.sql}),false) allowed from (select ${
+        casts.join(",")
+      }) proposed`,
+      [...names.map((name) => proposed[name] ?? null), ...lowered.params],
+    );
+    if (!result.rows[0]?.allowed) {
+      throw domain(
+        "validation_failed",
+        `Constraint '${String(constraint.name)}' rejected proposed state`,
+        "validation",
+      );
+    }
+  }
+  for (
+    const constraint of constraints.filter((candidate) =>
+      candidate.kind === "foreign_key"
+    )
+  ) {
+    const sourceFields = (constraint.fields as unknown[]).map(String);
+    if (
+      sourceFields.some((field) =>
+        proposed[field] === undefined || proposed[field] === null
+      )
+    ) continue;
+    const target = record(constraint.target);
+    const targetIdentity = parseIdentity(String(target.resource));
+    const targetFields = (target.fields as unknown[]).map(String);
+    const targetRuntime = (await query<{ table_name: string }>(
+      sql,
+      "select table_name from pack_runtime_tables where publisher=$1 and pack_name=$2 and definition_kind='resource' and definition_name=$3",
+      [targetIdentity.publisher, targetIdentity.pack, targetIdentity.name],
+    )).rows[0];
+    if (!targetRuntime || targetFields.length !== sourceFields.length) {
+      throw domain(
+        "validation_failed",
+        "Foreign-key target is unavailable",
+        "validation",
+      );
+    }
+    const params: unknown[] = [operation.project_id];
+    const predicates = targetFields.map((field, index) => {
+      params.push(proposed[sourceFields[index]]);
+      return `${quoteIdentifier(field)} is not distinct from $${params.length}`;
+    });
+    const targetRow =
+      (await query<{ id: string; current_object_version_id: string }>(
+        sql,
+        `select id,current_object_version_id from ${
+          quoteIdentifier(targetRuntime.table_name)
+        } where project_id=$1 and archived_at is null and ${
+          predicates.join(" and ")
+        } limit 1 for share`,
+        params,
+      )).rows[0];
+    if (!targetRow) {
+      throw domain(
+        "validation_failed",
+        "Foreign-key target does not exist",
+        "validation",
+      );
+    }
+    dependencies.push({
+      kind: "object_version",
+      project_id: operation.project_id,
+      object_id: targetRow.id,
+      expected_version_id: targetRow.current_object_version_id,
+      foreign_key_constraint: constraint.name,
+    });
+  }
+  for (const fields of uniqueSets) {
+    if (
+      fields.some((field) =>
+        proposed[field] === undefined || proposed[field] === null
+      )
+    ) continue;
+    const params: unknown[] = [operation.project_id, objectId];
+    const predicates = fields.map((field) => {
+      params.push(proposed[field]);
+      return `${quoteIdentifier(field)} is not distinct from $${params.length}`;
+    });
+    const duplicate = (await query<{ id: string }>(
+      sql,
+      `select id from ${
+        quoteIdentifier(runtime.table_name)
+      } where project_id=$1 and id<>$2 and archived_at is null and ${
+        predicates.join(" and ")
+      } limit 1 for share`,
+      params,
+    )).rows[0];
+    dependencies.push({
+      kind: "uniqueness",
+      project_id: operation.project_id,
+      pack_revision_id: revision.id,
+      component_digest: componentDigest,
+      fields,
+      values: fields.map((field) => proposed[field]),
+      existing_id: duplicate?.id ?? null,
+    });
+    if (duplicate) {
+      throw domain(
+        "operation_conflict",
+        "Proposed state violates uniqueness",
+        "conflict",
+      );
+    }
+  }
 }
 
 async function canAccess(
@@ -681,9 +1705,12 @@ async function canAccess(
   action: string,
   lock: boolean,
 ): Promise<boolean> {
-  const root = (await query<{ created_auth_context_id: string }>(
+  const root = (await query<{
+    created_auth_context_id: string;
+    created_principal_id: string;
+  }>(
     sql,
-    `select created_auth_context_id from staged_changesets where id=$1 ${
+    `select created_auth_context_id,created_principal_id from staged_changesets where id=$1 ${
       lock ? "for share" : ""
     }`,
     [stageId],
@@ -696,8 +1723,14 @@ async function canAccess(
   )).rows.map((row) => row.project_id);
   for (const projectId of projects) {
     await lockReadAuthority(sql, auth, projectId);
+    const project = (await query<{ status: string }>(
+      sql,
+      "select status from projects where id=$1 for share",
+      [projectId],
+    )).rows[0];
+    if (!project || project.status !== "active") return false;
   }
-  if (root.created_auth_context_id === auth.id) return true;
+  if (root.created_principal_id === auth.principalId) return true;
   for (const projectId of projects) {
     const allowed = await new PostgresAuthorizationRepository(sql as Sql)
       .authorize({
@@ -707,6 +1740,14 @@ async function canAccess(
         resource: "changeset",
       });
     if (!allowed.ok) return false;
+    if (
+      !allowed.value.superAdmin &&
+      !allowed.value.capabilities.some((capability) =>
+        capability.action === action &&
+        (capability.resource === "*" || capability.resource === "changeset") &&
+        capability.condition === "unconditional"
+      )
+    ) return false;
   }
   return true;
 }
@@ -735,6 +1776,17 @@ async function load(sql: Queryable, id: string): Promise<StageDto | null> {
     "select decision_json from staged_policy_decisions where stage_id=$1 order by ordinal",
     [id],
   )).rows.map((item) => record(item.decision_json));
+  const hooks = (await query<Record<string, unknown>>(
+    sql,
+    `select id,phase,pack_revision_id,hook_revision_id,input_digest,output_digest,
+      output_json output,stderr_text stderr,duration_ms,grant_snapshot_json grant_snapshot,created_at
+     from staged_hook_executions where stage_id=$1 order by ordinal`,
+    [id],
+  )).rows.map((hook) => ({
+    ...hook,
+    duration_ms: Number(hook.duration_ms),
+    created_at: timestamp(hook.created_at),
+  }));
   const approvals = (await query<{ requirement_json: unknown }>(
     sql,
     "select requirement_json from staged_approval_requirements where stage_id=$1 order by ordinal",
@@ -765,7 +1817,7 @@ async function load(sql: Queryable, id: string): Promise<StageDto | null> {
     pack_revisions: array(row.pack_revisions_json),
     operations,
     dependencies,
-    hook_executions: [],
+    hook_executions: hooks,
     policy_decisions: policies,
     warnings: array(row.warnings_json),
     approval_requirements: approvals,
@@ -785,22 +1837,39 @@ async function load(sql: Queryable, id: string): Promise<StageDto | null> {
   };
 }
 
-function hasStageHook(
+function matchingStageHooks(
   normalized: Record<string, unknown>,
   operations: CanonicalOperation[],
-): boolean {
+): Record<string, unknown>[] {
   const resources = new Set(operations.map(componentIdentity));
-  return Object.values(record(normalized.hooks)).some((hook) => {
-    const attachments = record(record(hook).spec).attachments;
-    return Array.isArray(attachments) && attachments.some((attachment) => {
-      const phase = record(attachment).phase;
-      const stagePhase = phase === "changeset.before_stage" ||
-        phase === "changeset.validate";
-      const resource = record(attachment).resource;
-      return stagePhase &&
-        (resource === undefined || resources.has(String(resource)));
-    });
-  });
+  const declarations: Record<string, unknown>[] = [];
+  for (const [name, hookValue] of Object.entries(record(normalized.hooks))) {
+    const hook = record(hookValue);
+    const attachments = record(hook.spec).attachments;
+    if (!Array.isArray(attachments)) continue;
+    for (const attachmentValue of attachments) {
+      const attachment = record(attachmentValue);
+      const phase = attachment.phase;
+      const resource = attachment.resource;
+      if (
+        (phase === "changeset.before_stage" ||
+          phase === "changeset.validate") &&
+        (resource === undefined || resources.has(String(resource)))
+      ) {
+        declarations.push({
+          hook: name,
+          phase,
+          resource: resource ?? null,
+          order: attachment.order ?? 0,
+          script_digest: hook.scriptDigest ?? hook.script_digest ?? null,
+        });
+      }
+    }
+  }
+  return declarations.sort((a, b) =>
+    Number(a.order) - Number(b.order) ||
+    String(a.hook).localeCompare(String(b.hook))
+  );
 }
 function validateDeclaredFields(
   operation: CanonicalOperation,
@@ -817,25 +1886,7 @@ function validateDeclaredFields(
             "validation",
           );
         }
-        const field = record(fields[key]);
-        const valid = value === null
-          ? field.nullable === true
-          : field.type === "string" || field.type === "timestamp"
-          ? typeof value === "string"
-          : field.type === "integer"
-          ? Number.isSafeInteger(value)
-          : field.type === "number"
-          ? typeof value === "number" && Number.isFinite(value)
-          : field.type === "boolean"
-          ? typeof value === "boolean"
-          : true;
-        if (!valid) {
-          throw domain(
-            "validation_failed",
-            `Field '${key}' has the wrong type`,
-            "validation",
-          );
-        }
+        validateFieldValue(key, value, record(fields[key]));
       }
     }
   }
@@ -844,6 +1895,13 @@ function validateDeclaredFields(
       throw domain(
         "validation_failed",
         `Field '${key}' is not declared`,
+        "validation",
+      );
+    }
+    if (record(fields[key]).required === true) {
+      throw domain(
+        "validation_failed",
+        `Required field '${key}' cannot be unset`,
         "validation",
       );
     }
@@ -863,6 +1921,123 @@ function validateDeclaredFields(
     }
   }
 }
+
+function validateFieldValue(
+  name: string,
+  value: unknown,
+  field: Record<string, unknown>,
+): void {
+  const invalid = (reason: string): never => {
+    throw domain(
+      "validation_failed",
+      `Field '${name}' ${reason}`,
+      "validation",
+    );
+  };
+  if (value === null) invalid("is not nullable");
+  const type = String(field.type);
+  if (type === "string") {
+    if (typeof value !== "string") invalid("has the wrong type");
+    const text = value as string;
+    const length = [...text].length;
+    if (field.minLength !== undefined && length < Number(field.minLength)) {
+      invalid("is shorter than its minimum length");
+    }
+    if (field.maxLength !== undefined && length > Number(field.maxLength)) {
+      invalid("is longer than its maximum length");
+    }
+    if (Array.isArray(field.enum) && !field.enum.includes(text)) {
+      invalid("is not an allowed value");
+    }
+    if (field.format === "email" && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(text)) {
+      invalid("is not a valid email");
+    }
+    if (field.format === "uri") {
+      try {
+        if (!new URL(text).protocol) invalid("is not a valid URI");
+      } catch {
+        invalid("is not a valid URI");
+      }
+    }
+    if (
+      (field.format === "uuid" || field.ref !== undefined) && !isUuidV7(text)
+    ) invalid("must be a lowercase UUIDv7 reference");
+    return;
+  }
+  if (type === "integer") {
+    if (!Number.isSafeInteger(value)) invalid("has the wrong type");
+    if (field.minimum !== undefined && Number(value) < Number(field.minimum)) {
+      invalid("is below its minimum");
+    }
+    if (field.maximum !== undefined && Number(value) > Number(field.maximum)) {
+      invalid("is above its maximum");
+    }
+    return;
+  }
+  if (type === "decimal") {
+    if (typeof value !== "string") invalid("has the wrong type");
+    const decimal = value as string;
+    if (
+      !/^-?(?:0|[1-9][0-9]*)(?:\.[0-9]*[1-9])?$/.test(decimal) ||
+      decimal === "-0"
+    ) invalid("is not a canonical decimal");
+    const [whole, fraction = ""] = decimal.replace("-", "").split(".");
+    if (
+      field.precision !== undefined &&
+      whole.replace(/^0$/, "").length + fraction.length >
+        Number(field.precision)
+    ) invalid("exceeds decimal precision");
+    if (field.scale !== undefined && fraction.length > Number(field.scale)) {
+      invalid("exceeds decimal scale");
+    }
+    if (
+      field.minimum !== undefined && Number(decimal) < Number(field.minimum)
+    ) invalid("is below its minimum");
+    if (
+      field.maximum !== undefined && Number(decimal) > Number(field.maximum)
+    ) invalid("is above its maximum");
+    return;
+  }
+  if (type === "boolean") {
+    if (typeof value !== "boolean") invalid("has the wrong type");
+    return;
+  }
+  if (type === "date") {
+    if (typeof value !== "string") invalid("has the wrong type");
+    const date = value as string;
+    if (
+      !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
+      Number.isNaN(Date.parse(`${date}T00:00:00Z`)) ||
+      new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) !== date
+    ) invalid("is not a canonical date");
+    if (field.minimum !== undefined && date < String(field.minimum)) {
+      invalid("is below its minimum");
+    }
+    if (field.maximum !== undefined && date > String(field.maximum)) {
+      invalid("is above its maximum");
+    }
+    return;
+  }
+  if (type === "timestamp") {
+    if (typeof value !== "string") invalid("has the wrong type");
+    const timestamp = value as string;
+    if (
+      !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(timestamp) ||
+      Number.isNaN(Date.parse(timestamp))
+    ) invalid("is not a canonical UTC timestamp");
+    if (
+      field.minimum !== undefined &&
+      Date.parse(timestamp) < Date.parse(String(field.minimum))
+    ) invalid("is below its minimum");
+    if (
+      field.maximum !== undefined &&
+      Date.parse(timestamp) > Date.parse(String(field.maximum))
+    ) invalid("is above its maximum");
+    return;
+  }
+  invalid("uses an unsupported field type");
+}
+
 function componentIdentity(operation: CanonicalOperation): string {
   return String(operation.relationship ?? operation.resource);
 }

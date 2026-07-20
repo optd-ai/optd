@@ -1,4 +1,9 @@
-import { assertEquals, assertRejects, assertThrows } from "jsr:@std/assert@1";
+import {
+  assertEquals,
+  assertNotEquals,
+  assertRejects,
+  assertThrows,
+} from "jsr:@std/assert@1";
 import {
   authoredOperationContract,
   stageRequestContract,
@@ -167,7 +172,7 @@ Deno.test("patch engine implements pointer escapes and RFC 6902 arrays", () => {
   );
 });
 
-Deno.test("normalization is repeatable and rejects mutation conflicts", async () => {
+Deno.test("normalization allocates fresh IDs and rejects mutation conflicts", async () => {
   const request = {
     project_id: project,
     operations: [
@@ -185,10 +190,17 @@ Deno.test("normalization is repeatable and rejects mutation conflicts", async ()
       },
     ],
   };
-  assertEquals(
-    await normalizeOperations(request),
-    await normalizeOperations(request),
+  const first = await normalizeOperations(request);
+  const second = await normalizeOperations(request);
+  assertNotEquals(
+    first.operations[0].object_id,
+    second.operations[0].object_id,
   );
+  assertNotEquals(
+    first.operations[1].comment_id,
+    second.operations[1].comment_id,
+  );
+  assertNotEquals(first.operationGraphDigest, second.operationGraphDigest);
   await assertRejects(
     () =>
       normalizeOperations({

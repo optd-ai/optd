@@ -9,6 +9,9 @@ import {
   quoteIdentifier,
 } from "../../../src/adapters/outbound/postgres/client.ts";
 import { uuidV7 } from "../../../src/domain/ids/uuid_v7.ts";
+import { makeStageChangesetService } from "../../../src/application/services/changesets/stage_changesets.ts";
+import { PostgresStageRepository } from "../../../src/adapters/outbound/postgres/stage_repository.ts";
+import type { AuthContext } from "../../../src/domain/auth/model.ts";
 import {
   type LiveHarness,
   startLiveHarness,
@@ -194,11 +197,28 @@ Deno.test({
       assertEquals(second.code, 0, second.stderr);
       const secondData = JSON.parse(second.stdout).data;
       assertNotEquals(secondData.id, firstData.id);
-      assertEquals(
+      assertNotEquals(
+        secondData.operations[0].object_id,
+        firstData.operations[0].object_id,
+      );
+      assertNotEquals(
         secondData.operation_graph_digest,
         firstData.operation_graph_digest,
       );
-      assertEquals(secondData.stage_digest, firstData.stage_digest);
+      assertNotEquals(secondData.stage_digest, firstData.stage_digest);
+      const relogin = await harness.login({
+        username: "owner",
+        password: "Correct-horse-battery-1!",
+      });
+      assertEquals(relogin.code, 0, relogin.stderr);
+      const newSessionInspect = await harness.runOptctl([
+        "--json",
+        "changeset",
+        "inspect",
+        firstData.id,
+      ]);
+      assertEquals(newSessionInspect.code, 0, newSessionInspect.stderr);
+      assertEquals(JSON.parse(newSessionInspect.stdout).data.id, firstData.id);
       const cancellations = await harness.runConcurrent([{
         args: [
           "--json",
@@ -289,6 +309,78 @@ Deno.test({
           "validation_failed",
         );
       }
+      for (
+        const invalid of [
+          {
+            project_id: projectId,
+            operations: [{
+              op: "create",
+              resource: "testpub/strict:item",
+              fields: { state: "new" },
+            }],
+          },
+          {
+            project_id: projectId,
+            operations: [{
+              op: "create",
+              resource: "testpub/strict:item",
+              fields: { name: "bad", state: "new", score: "wrong" },
+            }],
+          },
+          {
+            project_id: projectId,
+            operations: [{
+              op: "update",
+              resource: "testpub/strict:item",
+              object_id: facts.transitionId,
+              unset: ["name"],
+            }],
+          },
+          {
+            project_id: projectId,
+            operations: [{
+              op: "update",
+              resource: "testpub/strict:item",
+              object_id: facts.transitionId,
+              expected_version: 2,
+              set: { score: 3 },
+            }],
+          },
+          {
+            project_id: projectId,
+            operations: [{
+              op: "update",
+              resource: "testpub/strict:item",
+              object_id: facts.transitionId,
+              set: { name: "Transition" },
+            }],
+          },
+          {
+            project_id: projectId,
+            operations: [{
+              op: "transition",
+              resource: "testpub/strict:item",
+              object_id: facts.transitionId,
+              to: "new",
+            }],
+          },
+          {
+            project_id: betaProjectId,
+            operations: [{
+              op: "link",
+              relationship: "testpub/strict:item_link",
+              from: facts.betaFromId,
+              to: uuidV7(),
+            }],
+          },
+        ]
+      ) {
+        const rejected = await harness.runJson(
+          ["--json", "changeset", "stage"],
+          invalid,
+        );
+        assertEquals(rejected.code, 1, rejected.stderr);
+      }
       assertEquals(
         (await query<{ count: string }>(
           harness.server.sql,
@@ -305,8 +397,8 @@ Deno.test({
         harness.server.sql.begin(async (tx) => {
           await query(
             tx,
-            `insert into staged_changesets(id,schema_version,source_kind,source_identity_json,created_auth_context_id,creating_context_json,operation_graph_digest,stage_digest,canonical_graph_json,projects_json,pack_revisions_json,warnings_json,planned_events_json,planned_deliveries_json)
-             values($1,1,'direct',$2::jsonb,$3,$2::jsonb,$4,$4,$2::jsonb,'[]','[]','[]','[]','[]')`,
+            `insert into staged_changesets(id,schema_version,source_kind,source_identity_json,created_auth_context_id,created_principal_id,creating_context_json,operation_graph_digest,stage_digest,canonical_graph_json,projects_json,pack_revisions_json,warnings_json,planned_events_json,planned_deliveries_json)
+             values($1,1,'direct',$2::jsonb,$3,(select principal_id from auth_contexts where id=$3),$2::jsonb,$4,$4,$2::jsonb,'[]','[]','[]','[]','[]')`,
             [injectedId, {}, auth, `sha256:${"0".repeat(64)}`],
           );
           await query(
@@ -400,6 +492,107 @@ Deno.test({
         )).rows[0].count,
         beforeHookFailure,
       );
+      const authRow = (await query<Record<string, unknown>>(
+        harness.server.sql,
+        `select c.id,c.principal_id,c.human_user_id,c.session_id,c.credential_kind,c.roles,c.created_at,
+          p.type principal_type from auth_contexts c join principals p on p.id=c.principal_id
+         order by c.created_at desc limit 1`,
+      )).rows[0];
+      const directAuth: AuthContext = Object.freeze({
+        id: String(authRow.id),
+        principalId: String(authRow.principal_id),
+        principalType: String(authRow.principal_type) as "human_user",
+        humanUserId: String(authRow.human_user_id),
+        sessionId: String(authRow.session_id),
+        credentialKind: String(authRow.credential_kind) as "human_full",
+        roles: Array.isArray(authRow.roles) ? authRow.roles.map(String) : [],
+        createdAt: new Date(authRow.created_at as string).toISOString(),
+      });
+      const injected = makeStageChangesetService(
+        new PostgresStageRepository(harness.server.sql),
+        {
+          coordinate(input) {
+            const revision = input.pack_revisions[0] as Record<string, unknown>;
+            return Promise.resolve({
+              operations: structuredClone(input.operations) as never,
+              dependencies: [{ kind: "policy", coordinator_read: true }],
+              hook_executions: [{
+                phase: "changeset.validate",
+                pack_revision_id: revision.revision_id,
+                hook_revision_id: uuidV7(),
+                input_digest: `sha256:${"1".repeat(64)}`,
+                output_digest: `sha256:${"2".repeat(64)}`,
+                output: { warnings: [] },
+                stderr: "",
+                duration_ms: 1,
+                grant_snapshot: {},
+              }],
+              warnings: [{
+                path: "/",
+                code: "coordinated",
+                message: "validated",
+              }],
+              approval_requirements: [{ id: uuidV7(), capability: "review" }],
+              required_capabilities: ["review"],
+              effects: ["validated"],
+              planned_events: [{ id: "event:validated" }],
+              planned_deliveries: [],
+            });
+          },
+        },
+      );
+      const coordinated = await injected.stage({
+        project_id: projectId,
+        operations: [{
+          op: "create",
+          resource: "testpub/strict:item",
+          fields: { name: "coordinated" },
+        }],
+      }, directAuth);
+      assertEquals(coordinated.ok, true);
+      if (coordinated.ok) {
+        assertEquals(coordinated.value.status, "awaiting_approval");
+        assertEquals(coordinated.value.hook_executions.length, 1);
+        assertEquals(coordinated.value.warnings.length, 1);
+        assertEquals(coordinated.value.approval_requirements.length, 1);
+        for (
+          const statement of [
+            "update staged_changeset_operations set operation_kind=operation_kind where stage_id=$1",
+            "update staged_changeset_dependencies set dependency_kind=dependency_kind where stage_id=$1",
+            "update staged_hook_executions set phase=phase where stage_id=$1",
+            "update staged_policy_decisions set action=action where stage_id=$1",
+            "update staged_approval_requirements set ordinal=ordinal where stage_id=$1",
+          ]
+        ) {
+          await assertRejects(() =>
+            query(harness.server.sql, statement, [coordinated.value.id])
+          );
+        }
+        const requirement = (await query<{ id: string }>(
+          harness.server.sql,
+          "select id from staged_approval_requirements where stage_id=$1",
+          [coordinated.value.id],
+        )).rows[0];
+        const decisionId = uuidV7();
+        await query(
+          harness.server.sql,
+          `insert into staged_approval_decisions(id,stage_id,requirement_id,principal_id,decision,decided_auth_context_id) values($1,$2,$3,$4,'approve',$5)`,
+          [
+            decisionId,
+            coordinated.value.id,
+            requirement.id,
+            directAuth.principalId,
+            directAuth.id,
+          ],
+        );
+        await assertRejects(() =>
+          query(
+            harness.server.sql,
+            "delete from staged_approval_decisions where id=$1",
+            [decisionId],
+          )
+        );
+      }
     } finally {
       await harness.close();
     }
@@ -507,8 +700,8 @@ async function prerequisiteCommit(harness: LiveHarness, authContextId: string) {
   await harness.server.sql.begin(async (tx) => {
     await query(
       tx,
-      `insert into staged_changesets(id,schema_version,source_kind,source_identity_json,created_auth_context_id,creating_context_json,operation_graph_digest,stage_digest,canonical_graph_json,projects_json,pack_revisions_json,warnings_json,planned_events_json,planned_deliveries_json)
-       values($1,1,'seed',$2::jsonb,$3,$2::jsonb,$4,$4,$5::jsonb,'[]','[]','[]','[]','[]')`,
+      `insert into staged_changesets(id,schema_version,source_kind,source_identity_json,created_auth_context_id,created_principal_id,creating_context_json,operation_graph_digest,stage_digest,canonical_graph_json,projects_json,pack_revisions_json,warnings_json,planned_events_json,planned_deliveries_json)
+       values($1,1,'seed',$2::jsonb,$3,(select principal_id from auth_contexts where id=$3),$2::jsonb,$4,$4,$5::jsonb,'[]','[]','[]','[]','[]')`,
       [stageId, {}, authContextId, digest, {
         schema: "changeset.operations.v1",
         operations: [],

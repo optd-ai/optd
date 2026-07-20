@@ -27,10 +27,14 @@ import { makeObjectReadService } from "./services/objects/read_objects.ts";
 import { HistoryCursorSigner } from "../domain/history/cursor.ts";
 import { makeExpressionService } from "./services/queries/expressions.ts";
 import { err } from "../domain/errors/result.ts";
+import type { StageHookCoordinator } from "../domain/changesets/stage.ts";
 
 export function makeApplication(
   sql: Sql,
-  options: { bootstrapToken?: string } = {},
+  options: {
+    bootstrapToken?: string;
+    stageHookCoordinator?: StageHookCoordinator;
+  } = {},
 ) {
   const clock = new SystemClock();
   const tx = new PostgresTransactionManager(sql);
@@ -40,6 +44,7 @@ export function makeApplication(
   });
   const changesets = makeStageChangesetService(
     new PostgresStageRepository(sql),
+    options.stageHookCoordinator,
   );
   const maximumHashes = Number(
     Deno.env.get("OPERANT_PASSWORD_MAX_CONCURRENT_HASHES") ?? "4",

@@ -1,6 +1,10 @@
 import type { AuthContext } from "../../domain/auth/model.ts";
 import type { CanonicalOperation } from "../../domain/changesets/operations.ts";
 import type { Result } from "../../domain/errors/result.ts";
+import type {
+  StageHookInput,
+  StageHookResult,
+} from "../../domain/changesets/stage.ts";
 
 export type StageDto = {
   id: string;
@@ -33,8 +37,16 @@ export type StageDto = {
 };
 
 export interface StageRepository {
+  hookInput?(
+    operations: CanonicalOperation[],
+    auth: AuthContext,
+  ): Promise<Result<StageHookInput>>;
   create(
-    input: { operations: CanonicalOperation[]; operationGraphDigest: string },
+    input: {
+      operations: CanonicalOperation[];
+      operationGraphDigest: string;
+      hookResult?: StageHookResult;
+    },
     auth: AuthContext,
   ): Promise<Result<StageDto>>;
   inspect(id: string, auth: AuthContext): Promise<Result<StageDto>>;
