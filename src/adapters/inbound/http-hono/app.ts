@@ -24,10 +24,7 @@ import type {
   ActionRequest,
 } from "../../../application/services/run_action.ts";
 import type { PackPreviewDto } from "../../../application/services/pack_services.ts";
-import type {
-  QueryObjectsDto,
-  QueryObjectsRequest,
-} from "../../../application/services/query_objects.ts";
+import type { QueryObjectsDto } from "../../../application/services/query_objects.ts";
 import type { UploadedPackFile } from "../../outbound/yaml/pack_loader.ts";
 import type { RequestAuthenticator } from "../../../application/ports/authentication.ts";
 import type { AuthVariables } from "./auth_middleware.ts";
@@ -153,7 +150,7 @@ export type HttpDependencies = {
   };
   queries: {
     query(
-      input: QueryObjectsRequest,
+      input: unknown,
       auth: AuthVariables["auth"],
     ): Promise<Result<QueryObjectsDto>>;
   };
@@ -450,7 +447,7 @@ export function makeHttpApp(
 
   app.post("/api/v1/queries", async (c) => {
     const result = await deps.queries.query(
-      await authenticatedJson(c),
+      await requestJson(c),
       c.get("auth"),
     );
     if (!result.ok) return resultJson(c, result);
@@ -633,6 +630,16 @@ export function makeHttpApp(
   });
 
   return app;
+}
+
+async function requestJson(c: {
+  req: { json(): Promise<unknown> };
+}): Promise<Record<string, unknown>> {
+  const body = await c.req.json();
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw new SyntaxError("request body must be a JSON object");
+  }
+  return body as Record<string, unknown>;
 }
 
 export async function authenticatedJson<T extends Record<string, unknown>>(c: {

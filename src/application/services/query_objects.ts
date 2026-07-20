@@ -687,7 +687,7 @@ function duplicates(values: string[], kind: string) {
 function qi(v: string) {
   return quoteIdentifier(v);
 }
-function record(v: unknown): Record<string, any> {
+function record(v: unknown): Record<string, unknown> {
   if (typeof v === "string") {
     try {
       v = JSON.parse(v);

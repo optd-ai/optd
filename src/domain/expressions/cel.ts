@@ -30,6 +30,12 @@ export type LoweredExpression = Readonly<
   { sql: string; params: unknown[]; normalized: unknown }
 >;
 
+type CelExpr = NonNullable<ReturnType<typeof parse>["expr"]>;
+type ExprKind = NonNullable<CelExpr["exprKind"]>;
+type KindValue<C extends ExprKind["case"]> = Extract<
+  ExprKind,
+  { case: C }
+>["value"];
 type Scalar = FieldType;
 type Value = {
   sql: string;
@@ -52,11 +58,16 @@ export class ExpressionError extends Error {
   }
 }
 
-export function parseCel(source: string): any {
+export function parseCel(source: string): ReturnType<typeof parse> {
   try {
     return parse(source);
   } catch (error) {
-    const location = (error as any)?.location;
+    const location = (error as {
+      location?: {
+        start?: { line?: number; column?: number; offset?: number };
+        end?: { offset?: number };
+      };
+    }).location;
     throw new ExpressionError(
       "expression_syntax",
       "expression syntax is invalid",
@@ -86,6 +97,9 @@ export function lowerExpression(
   }
   const parsed = parseCel(source);
   const state: State = { params: [], nodes: 0, context };
+  if (!parsed.expr) {
+    throw new ExpressionError("expression_syntax", "expression AST is missing");
+  }
   const value = lower(parsed.expr, state);
   if (value.type !== "boolean") {
     throw new ExpressionError(
@@ -117,7 +131,7 @@ export async function expressionDigest(normalized: unknown): Promise<string> {
   }`;
 }
 
-function lower(expr: any, state: State): Value {
+function lower(expr: CelExpr, state: State): Value {
   if (++state.nodes > (state.context.maxNodes ?? 80)) {
     throw new ExpressionError(
       "expression_too_complex",
@@ -141,7 +155,7 @@ function lower(expr: any, state: State): Value {
   }
 }
 
-function call(node: any, state: State): Value {
+function call(node: KindValue<"callExpr">, state: State): Value {
   const fn = node.function;
   const args = node.args ?? [];
   if (fn === "_&&_" || fn === "_||_") {
@@ -305,7 +319,7 @@ function ident(name: string, state: State): Value {
     normalized: ["field", name],
   };
 }
-function select(node: any, state: State): Value {
+function select(node: KindValue<"selectExpr">, state: State): Value {
   if (node.operand?.exprKind?.case !== "identExpr") {
     throw unsupported("traversal");
   }
@@ -333,7 +347,7 @@ function select(node: any, state: State): Value {
   }
   return parameter(actor.value, actor.type, state, ["actor", node.field]);
 }
-function constant(node: any, state: State): Value {
+function constant(node: KindValue<"constExpr">, state: State): Value {
   const kind = node.constantKind;
   if (kind.case === "stringValue") {
     return parameter(
@@ -368,8 +382,8 @@ function constant(node: any, state: State): Value {
   if (kind.case === "nullValue") throw unsupported("null literal");
   throw unsupported("literal", kind.case);
 }
-function list(node: any, state: State): Value {
-  const elements: Value[] = (node.elements ?? []).map((item: any) => {
+function list(node: KindValue<"listExpr">, state: State): Value {
+  const elements: Value[] = (node.elements ?? []).map((item: CelExpr) => {
     if (item.exprKind?.case !== "constExpr") throw unsupported("array element");
     return constant(item.exprKind.value, state);
   });

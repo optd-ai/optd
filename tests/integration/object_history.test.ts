@@ -30,14 +30,17 @@ Deno.test("populated 1015 to 1016 upgrade preserves shared immutable evidence", 
   try {
     runtime = await startPostgresRuntime();
     sql = createPostgresClient(runtime.databaseUrl);
-    const migration = platformMigrations.at(-1)!;
-    assertEquals(migration.id, "1016_project_object_history");
+    const migrationIndex = platformMigrations.findIndex((item) =>
+      item.id === "1016_project_object_history"
+    );
+    assertEquals(migrationIndex >= 0, true);
+    const migration = platformMigrations[migrationIndex];
     assertEquals(
       /drop table[^;]*object_versions[^;]*cascade/i.test(migration.sql),
       false,
     );
     await sql.begin((tx) =>
-      applyPlatformMigrations(tx, platformMigrations.slice(0, -1))
+      applyPlatformMigrations(tx, platformMigrations.slice(0, migrationIndex))
     );
     const [
       principal,
