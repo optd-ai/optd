@@ -12,6 +12,13 @@
         "format": "uuid",
       },
     },
+    "reads": {
+      "lead": {
+        "resource": "lead",
+        "id_from": "input.lead_id",
+        "required": true,
+      },
+    },
     "axi": {
       "purpose": "Convert a qualified lead into company, contact, and opportunity records.",
       "help": [

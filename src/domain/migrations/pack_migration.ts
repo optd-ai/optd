@@ -12,6 +12,12 @@ export type MigrationApplication = {
   candidate_revision_id: string;
   applied_by_auth_context_id: string;
   applied_at: string;
+  hook_secret_grants: {
+    preserved: string[];
+    reauthorization_required: string[];
+    new_ungranted_slots: string[];
+    unused_retained: string[];
+  };
 };
 export type MigrationApplyRequest = {
   acknowledgement: MigrationAcknowledgement;

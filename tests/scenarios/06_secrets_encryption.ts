@@ -4,23 +4,25 @@ import { startAuthenticatedHarness } from "../support/authenticated_harness.ts";
 
 Deno.test("scenario: encrypted secrets are masked through authenticated public CLI", async () => {
   const previousKey = Deno.env.get("OPERANT_SECRET_MASTER_KEY");
-  Deno.env.set("OPERANT_SECRET_MASTER_KEY", "scenario-master-key");
+  Deno.env.set(
+    "OPERANT_SECRET_MASTER_KEY",
+    btoa(String.fromCharCode(...new Uint8Array(32).fill(7))),
+  );
   const harness = await startAuthenticatedHarness();
   try {
     const secretValue = "live-secret-value-please-do-not-leak";
     const set = await harness.runOptctl([
       "--json",
       "secret",
-      "set",
+      "create",
       "api_token",
-      "--value",
-      secretValue,
+      "--stdin",
       "--description",
       "hook API token",
-    ]);
+    ], `${secretValue}\n`);
     assertEquals(set.code, 0, set.stderr);
     assert(!set.stdout.includes(secretValue));
-    assertStringIncludes(set.stdout, '"masked": true');
+    assertStringIncludes(set.stdout, '"status": "active"');
 
     const list = await harness.runOptctl([
       "--json",
@@ -36,7 +38,7 @@ Deno.test("scenario: encrypted secrets are masked through authenticated public C
       `select
          encode((select ciphertext from platform_secrets where name='api_token'), 'escape') as ciphertext_text,
          coalesce((select string_agg(request_metadata_json::text || coalesce(policy_summary_json::text,''), ' ')
-                   from audit_events where resource='platform.secret'), '') as audit_text`,
+                   from audit_events where resource='system:secret'), '') as audit_text`,
     );
     assert(stored.rows[0]);
     assert(!stored.rows[0].ciphertext_text.includes(secretValue));

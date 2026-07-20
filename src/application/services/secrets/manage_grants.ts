@@ -13,6 +13,11 @@ export function makeHookSecretGrantService(
     sql: Queryable;
     tx: TransactionManager<Queryable>;
     authorization: AuthorizationRepository;
+    authorizeInTransaction: (
+      sql: Queryable,
+      auth: AuthContext,
+      action: string,
+    ) => Promise<Result<unknown>>;
   },
 ) {
   async function dual(auth: AuthContext): Promise<Result<unknown> | null> {
@@ -26,6 +31,19 @@ export function makeHookSecretGrantService(
       if (!result.ok) return result;
     }
     return null;
+  }
+  async function dualInTransaction(
+    sql: Queryable,
+    auth: AuthContext,
+  ): Promise<void> {
+    for (const action of ["secret.grant", "hook.secret.configure"]) {
+      const result = await deps.authorizeInTransaction(sql, auth, action);
+      if (!result.ok) {
+        throw Object.assign(new Error(result.error.message), {
+          authorizationError: result.error,
+        });
+      }
+    }
   }
   return {
     async list(input: { auth: AuthContext }): Promise<Result<unknown>> {
@@ -46,8 +64,6 @@ export function makeHookSecretGrantService(
         secret_id?: unknown;
       },
     ): Promise<Result<unknown>> {
-      const denied = await dual(input.auth);
-      if (denied) return denied;
       if (
         ![
           input.hook_revision_id,
@@ -58,6 +74,7 @@ export function makeHookSecretGrantService(
       ) return invalid();
       try {
         const id = await deps.tx.transaction(async (tx) => {
+          await dualInTransaction(tx, input.auth);
           const hook = (await query<
             {
               hook_security_digest: string;
@@ -124,6 +141,11 @@ export function makeHookSecretGrantService(
               input.auth.id,
             ],
           );
+          await query(
+            tx,
+            `insert into hook_secret_grant_heads(hook_revision_id,slot,grant_id) values($1,$2,$3)`,
+            [input.hook_revision_id, input.slot, id],
+          );
           return id;
         });
         return ok(
@@ -145,14 +167,13 @@ export function makeHookSecretGrantService(
         secret_id?: unknown;
       },
     ): Promise<Result<unknown>> {
-      const denied = await dual(input.auth);
-      if (denied) return denied;
       if (
         input.expected_current_grant_id !== grantId ||
         typeof input.secret_id !== "string"
       ) return invalid();
       try {
         const id = await deps.tx.transaction(async (tx) => {
+          await dualInTransaction(tx, input.auth);
           const current = (await query<
             {
               hook_revision_id: string;
@@ -161,18 +182,12 @@ export function makeHookSecretGrantService(
             }
           >(
             tx,
-            "select hook_revision_id,hook_security_digest,slot from hook_secret_grants where id=$1 for update",
+            `select g.hook_revision_id,g.hook_security_digest,g.slot
+               from hook_secret_grant_heads h join hook_secret_grants g on g.id=h.grant_id
+              where h.grant_id=$1 for update of h,g`,
             [grantId],
           )).rows[0];
-          if (
-            !current ||
-            (await currentGrant(
-                tx,
-                current.hook_revision_id,
-                current.slot,
-                true,
-              ))?.id !== grantId
-          ) {
+          if (!current) {
             throw coded(
               "hook_grant_stale",
               "expected current grant is stale",
@@ -205,6 +220,12 @@ export function makeHookSecretGrantService(
               grantId,
             ],
           );
+          await query(
+            tx,
+            `update hook_secret_grant_heads set grant_id=$2,version=version+1,updated_at=now()
+              where hook_revision_id=$3 and slot=$4 and grant_id=$1`,
+            [grantId, id, current.hook_revision_id, current.slot],
+          );
           return id;
         });
         return ok(
@@ -222,8 +243,6 @@ export function makeHookSecretGrantService(
       grantId: string,
       input: { auth: AuthContext; reason?: unknown },
     ): Promise<Result<unknown>> {
-      const denied = await dual(input.auth);
-      if (denied) return denied;
       if (
         input.reason !== undefined &&
         (typeof input.reason !== "string" || input.reason.length < 1 ||
@@ -231,9 +250,11 @@ export function makeHookSecretGrantService(
       ) return invalid();
       try {
         return await deps.tx.transaction(async (tx) => {
+          await dualInTransaction(tx, input.auth);
           const grant = (await query<{ id: string }>(
             tx,
-            "select id from hook_secret_grants where id=$1 for update",
+            `select g.id from hook_secret_grant_heads h join hook_secret_grants g on g.id=h.grant_id
+              where h.grant_id=$1 for update of h,g`,
             [grantId],
           )).rows[0];
           if (!grant) {
@@ -262,6 +283,11 @@ export function makeHookSecretGrantService(
             `insert into hook_secret_grant_revocations(id,grant_id,revoked_auth_context_id,reason) values($1,$2,$3,$4)`,
             [uuidV7(), grantId, input.auth.id, input.reason ?? null],
           );
+          await query(
+            tx,
+            "delete from hook_secret_grant_heads where grant_id=$1",
+            [grantId],
+          );
           return ok({ grant_id: grantId, status: "revoked" });
         });
       } catch (error) {
@@ -279,8 +305,11 @@ async function currentGrant(
 ): Promise<{ id: string } | null> {
   return (await query<{ id: string }>(
     sql,
-    `select g.id from hook_secret_grants g join platform_secrets s on s.id=g.secret_id and s.status='active' where g.hook_revision_id=$1 and g.slot=$2 and not exists(select 1 from hook_secret_grant_revocations r where r.grant_id=g.id) and not exists(select 1 from hook_secret_grants n where n.supersedes_grant_id=g.id) order by g.created_at desc limit 1${
-      lock ? " for update of g" : ""
+    `select g.id from hook_secret_grant_heads h
+       join hook_secret_grants g on g.id=h.grant_id
+       join platform_secrets s on s.id=g.secret_id and s.status='active'
+      where h.hook_revision_id=$1 and h.slot=$2${
+      lock ? " for update of h,g" : ""
     }`,
     [hookRevisionId, slot],
   )).rows[0] ?? null;
@@ -304,6 +333,10 @@ function coded(
   return Object.assign(new Error(message), { code, severity });
 }
 function grantError(error: unknown): ReturnType<typeof err> {
+  const authorizationError =
+    (error as { authorizationError?: Parameters<typeof err>[0] })
+      .authorizationError;
+  if (authorizationError) return err(authorizationError);
   const value = error as Error & {
     code?: string;
     severity?: "validation" | "conflict";

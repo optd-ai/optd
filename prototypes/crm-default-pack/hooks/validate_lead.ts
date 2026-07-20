@@ -1,6 +1,6 @@
 const envelope = JSON.parse(await new Response(Deno.stdin.readable).text());
-const operation = envelope.input?.operation ?? envelope.input?.proposed ?? {};
-const fields = operation.fields ?? operation;
+const operation = envelope.input?.operation ?? {};
+const fields = envelope.input?.proposed ?? operation.fields ?? operation;
 const errors = [];
 const warnings = [];
 if (!fields.name || String(fields.name).trim() === "") {
@@ -34,4 +34,9 @@ if (!fields.company_name) {
 console.error(
   `validate_lead errors=${errors.length} warnings=${warnings.length}`,
 );
-console.log(JSON.stringify({ errors, warnings }));
+console.log(JSON.stringify({
+  allow: errors.length === 0,
+  errors,
+  warnings,
+  required_approvals: [],
+}));

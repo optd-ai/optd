@@ -1625,6 +1625,47 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       );
     } else if (cmd === "secret" && sub === "grants") {
       result = await getJson(`${parsed.server}/hook-secret-grants`);
+    } else if (cmd === "secret" && sub === "grant" && value) {
+      const options = parsed.positional.slice(3);
+      let hookIdentity: string | undefined;
+      let slot: string | undefined;
+      for (let index = 0; index < options.length; index++) {
+        if (options[index] === "--hook") hookIdentity = options[++index];
+        else if (options[index] === "--slot") slot = options[++index];
+        else throw usageError(`unknown grant option ${options[index]}`);
+      }
+      if (!hookIdentity || !slot) {
+        throw usageError("grant requires --hook <hook> --slot <slot>");
+      }
+      const listed = await getJson(`${parsed.server}/secrets`) as {
+        data?: { secrets?: Array<{ id: string; name: string }> };
+      };
+      const secret = listed.data?.secrets?.find((item) => item.name === value);
+      if (!secret) throw usageError(`unknown secret ${value}`);
+      const [publisher, pack, hookName] = splitDefinitionIdentity(hookIdentity);
+      const metadata = await getJson(
+        `${parsed.server}/metadata/packs/${publisher}/${pack}/hooks/${hookName}?include_security=true`,
+      ) as {
+        data?: {
+          hook_revision_id?: string;
+          security_digest?: string;
+          security?: { secret_slots?: Array<{ slot?: string }> };
+        };
+      };
+      if (
+        !metadata.data?.hook_revision_id || !metadata.data.security_digest ||
+        !metadata.data.security?.secret_slots?.some((item) =>
+          item.slot === slot
+        )
+      ) {
+        throw usageError(`hook ${hookIdentity} does not declare slot ${slot}`);
+      }
+      result = await postJson(`${parsed.server}/hook-secret-grants`, {
+        hook_revision_id: metadata.data.hook_revision_id,
+        expected_security_digest: metadata.data.security_digest,
+        slot,
+        secret_id: secret.id,
+      });
     } else if (cmd === "secret" && sub === "replace-grant" && value) {
       const option = parsed.positional.slice(3);
       if (option.length !== 2 || option[0] !== "--secret") {

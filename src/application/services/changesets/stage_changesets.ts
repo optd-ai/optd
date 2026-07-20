@@ -15,8 +15,13 @@ import { canonicalSha256 } from "../../../domain/ids/canonical_json.ts";
 import type {
   StageHookCoordinator,
   StageHookDeclaration,
+  StageHookInput,
   StageHookResult,
 } from "../../../domain/changesets/stage.ts";
+import {
+  buildHookEnvelope,
+  StageHookError,
+} from "../hooks/stage_hook_coordinator.ts";
 import {
   applyPatches,
   compilePatchedMutation,
@@ -52,7 +57,11 @@ export function makeStageChangesetService(
           Record<string, Record<string, unknown> | null>
         > = {};
         let hookWorkingStates: Record<string, Record<string, unknown>> = {};
-        if (hookCoordinator) {
+        const requiresHookDiscovery = hookCoordinator &&
+          (repository.hasHooks
+            ? await repository.hasHooks(normalized.operations)
+            : true);
+        if (hookCoordinator && requiresHookDiscovery) {
           const pinned = repository.hookInput
             ? await repository.hookInput(normalized.operations, auth)
             : {
@@ -269,31 +278,25 @@ export function makeStageChangesetService(
 
 async function validateHookResult(
   value: unknown,
-  hookInput: Readonly<{
-    operations: readonly Record<string, unknown>[];
-    projects: readonly unknown[];
-    pack_revisions: readonly unknown[];
-    hook_declarations: readonly StageHookDeclaration[];
-    grant_snapshot: Readonly<Record<string, unknown>>;
-    proposed_states: Readonly<Record<string, Record<string, unknown>>>;
-    base_states: Readonly<Record<string, Record<string, unknown> | null>>;
-  }>,
+  hookInput: StageHookInput,
 ): Promise<StageHookResult> {
   const reject = (path: string, message: string): never => {
     throw new OperationError("hook_rejected", path, message);
   };
-  if (!isRecord(value)) {
-    reject("/", "hook coordinator returned a non-object result");
-  }
-  const result = value as Record<string, unknown>;
   if (
-    !isExactRecord(result, ["hook_executions"]) ||
-    !Array.isArray(result.hook_executions)
+    !isExactRecord(value, ["hook_executions"]) ||
+    !Array.isArray((value as Record<string, unknown>).hook_executions)
   ) {
     reject("/", "hook coordinator result has missing or unknown fields");
   }
-  const declarations = hookInput.hook_declarations;
-  const executions = result.hook_executions as unknown[];
+  const executions = (value as Record<string, unknown>)
+    .hook_executions as unknown[];
+  if (executions.length !== hookInput.hook_declarations.length) {
+    reject(
+      "/hook_executions",
+      "hook execution count does not match pinned declarations",
+    );
+  }
   const outputFields = [
     "added_operations",
     "patch_outputs",
@@ -308,301 +311,176 @@ async function validateHookResult(
   const flattened: Record<string, unknown[]> = Object.fromEntries(
     outputFields.map((field) => [field, []]),
   );
-  if (executions.length !== declarations.length) {
-    reject(
-      "/hook_executions",
-      "hook execution count does not match pinned declarations",
-    );
-  }
+  const working: Record<string, Record<string, unknown>> = structuredClone(
+    hookInput.proposed_states,
+  );
   const executionIds = new Set<string>();
-  const patchPaths = new Set<string>();
   for (let index = 0; index < executions.length; index++) {
     const execution = isRecord(executions[index])
       ? executions[index] as Record<string, unknown>
       : {};
-    const declaration = declarations[index];
-    const keys = [
-      "id",
-      "attachment_id",
-      "hook_revision_id",
-      "pack_revision_id",
-      "phase",
-      "input_digest",
-      "output_digest",
-      "output",
-      "stderr",
-      "duration_ms",
-      "grant_snapshot",
-    ];
+    const declaration = hookInput.hook_declarations[index];
     if (
-      !isExactRecord(execution, keys) || !isUuidV7(execution.id) ||
-      !isUuidV7(execution.attachment_id) ||
-      !isUuidV7(execution.hook_revision_id) ||
-      !isUuidV7(execution.pack_revision_id) ||
+      !isExactRecord(execution, [
+        "id",
+        "attachment_id",
+        "hook_revision_id",
+        "pack_revision_id",
+        "phase",
+        "input_digest",
+        "output_digest",
+        "output",
+        "script_digest",
+        "security_digest",
+        "stderr",
+        "logs_truncated",
+        "secrets_redacted",
+        "duration_ms",
+        "grant_snapshot",
+      ]) || !isUuidV7(execution.id) || executionIds.has(String(execution.id)) ||
+      execution.attachment_id !== declaration.attachment_id ||
+      execution.hook_revision_id !== declaration.hook_revision_id ||
+      execution.pack_revision_id !== declaration.pack_revision_id ||
+      execution.phase !== declaration.phase ||
+      execution.script_digest !== declaration.script_digest ||
+      execution.security_digest !== declaration.security_digest ||
+      typeof execution.stderr !== "string" ||
+      new TextEncoder().encode(execution.stderr).byteLength >
+        4 * 1024 * 1024 + 64 ||
+      typeof execution.logs_truncated !== "boolean" ||
+      typeof execution.secrets_redacted !== "boolean" ||
+      !Number.isSafeInteger(execution.duration_ms) ||
+      Number(execution.duration_ms) < 0 ||
+      !/^sha256:[0-9a-f]{64}$/.test(String(execution.input_digest)) ||
+      !/^sha256:[0-9a-f]{64}$/.test(String(execution.output_digest)) ||
       !isExactRecord(execution.output, outputFields) ||
       !outputFields.every((field) =>
         Array.isArray((execution.output as Record<string, unknown>)[field])
       ) ||
-      !isExactRecord(execution.grant_snapshot, [
-        "principal_id",
-        "auth_context_id",
-        "assignment_digest",
-        "policy_digest",
-      ]) ||
-      !isUuidV7(execution.grant_snapshot.principal_id) ||
-      !isUuidV7(execution.grant_snapshot.auth_context_id) ||
-      !/^sha256:[0-9a-f]{64}$/.test(
-        String(execution.grant_snapshot.assignment_digest),
-      ) ||
-      !/^sha256:[0-9a-f]{64}$/.test(
-        String(execution.grant_snapshot.policy_digest),
-      ) ||
-      typeof execution.stderr !== "string" ||
-      new TextEncoder().encode(execution.stderr).byteLength > 65_536 ||
-      !Number.isSafeInteger(execution.duration_ms) ||
-      Number(execution.duration_ms) < 0 ||
-      Number(execution.duration_ms) > 86_400_000 ||
-      !/^sha256:[0-9a-f]{64}$/.test(String(execution.input_digest)) ||
-      !/^sha256:[0-9a-f]{64}$/.test(String(execution.output_digest))
+      !isExactRecord(execution.grant_snapshot, ["grants"]) ||
+      !Array.isArray(
+        (execution.grant_snapshot as Record<string, unknown>).grants,
+      )
     ) {
       reject(
         `/hook_executions/${index}`,
         "hook execution evidence is malformed",
       );
     }
-    const executionId = String(execution.id);
-    if (executionIds.has(executionId)) {
-      reject(`/hook_executions/${index}/id`, "duplicate hook execution id");
-    }
-    executionIds.add(executionId);
-    if (
-      execution.attachment_id !== declaration.attachment_id ||
-      execution.hook_revision_id !== declaration.hook_revision_id ||
-      execution.pack_revision_id !== declaration.pack_revision_id ||
-      execution.phase !== declaration.phase
-    ) {
-      reject(
-        `/hook_executions/${index}`,
-        "hook execution does not match pinned ordered declaration",
-      );
-    }
-    const expectedInputDigest = `sha256:${await canonicalSha256({
-      schema: "changeset.hook-input.v1",
-      declaration,
-      operations: hookInput.operations,
-      projects: hookInput.projects,
-      pack_revisions: hookInput.pack_revisions,
-      proposed_states: hookInput.proposed_states,
-      base_states: hookInput.base_states,
-      grant_snapshot: hookInput.grant_snapshot,
-      previous_output_digest: index === 0 ? null : String(
-        (executions[index - 1] as Record<string, unknown>).output_digest,
-      ),
-    })}`;
-    if (execution.input_digest !== expectedInputDigest) {
-      reject(
-        `/hook_executions/${index}/input_digest`,
-        "hook input digest does not match pinned input",
-      );
-    }
-    if (
-      await canonicalSha256(execution.grant_snapshot) !==
-        await canonicalSha256(hookInput.grant_snapshot)
-    ) {
+    executionIds.add(String(execution.id));
+    const grants = (execution.grant_snapshot as { grants: unknown[] }).grants;
+    if (grants.length !== declaration.secret_slots.length) {
       reject(
         `/hook_executions/${index}/grant_snapshot`,
-        "grant snapshot does not match pinned authority",
+        "hook grant evidence is incomplete",
       );
     }
-    const outputDigest = `sha256:${await canonicalSha256(execution.output)}`;
-    if (execution.output_digest !== outputDigest) {
+    for (let grantIndex = 0; grantIndex < grants.length; grantIndex++) {
+      const grant = isRecord(grants[grantIndex])
+        ? grants[grantIndex] as Record<string, unknown>
+        : {};
+      const slot = declaration.secret_slots[grantIndex];
+      if (
+        !isExactRecord(grant, [
+          "grant_id",
+          "secret_id",
+          "value_version",
+          "slot",
+          "env",
+        ]) ||
+        !isUuidV7(grant.grant_id) || !isUuidV7(grant.secret_id) ||
+        !Number.isSafeInteger(grant.value_version) ||
+        Number(grant.value_version) < 1 ||
+        grant.slot !== slot.slot || grant.env !== slot.env
+      ) {
+        reject(
+          `/hook_executions/${index}/grant_snapshot/grants/${grantIndex}`,
+          "hook grant evidence is malformed",
+        );
+      }
+    }
+    const envelope = buildHookEnvelope(declaration, hookInput, working);
+    if (
+      execution.input_digest !== `sha256:${await canonicalSha256(envelope)}`
+    ) {
+      reject(
+        `/hook_executions/${index}/input_digest`,
+        "hook input digest does not match curated input",
+      );
+    }
+    if (
+      execution.output_digest !==
+        `sha256:${await canonicalSha256(execution.output)}`
+    ) {
       reject(
         `/hook_executions/${index}/output_digest`,
         "hook output digest does not match canonical output",
       );
     }
     const output = execution.output as Record<string, unknown>;
-    for (
-      const [patchIndex, batch] of (output.patch_outputs as unknown[]).entries()
-    ) {
-      if (
-        !isExactRecord(batch, ["operation_key", "output"]) ||
-        typeof batch.operation_key !== "string" ||
-        !patchOutputContract.check(batch.output)
-      ) {
-        reject(
-          `/hook_executions/${index}/output/patch_outputs/${patchIndex}`,
-          "patch output is malformed",
-        );
-      }
-      const validBatch = batch as {
-        operation_key: string;
-        output: { patches: readonly { path: string }[] };
-      };
-      for (const patch of validBatch.output.patches) {
-        const identity = `${validBatch.operation_key}\0${patch.path}`;
-        if (patchPaths.has(identity)) {
-          reject(
-            `/hook_executions/${index}/output/patch_outputs/${patchIndex}`,
-            "duplicate hook patch path",
-          );
-        }
-        patchPaths.add(identity);
-      }
-    }
-    deepFreeze(execution.output);
     for (const field of outputFields) {
       flattened[field].push(...output[field] as unknown[]);
     }
-  }
-  for (const field of outputFields) {
-    if (flattened[field].length > 10_000) {
-      reject(`/${field}`, "hook evidence limit exceeded");
-    }
-  }
-  const resultEvidence = {
-    ...flattened,
-    hook_executions: executions,
-  } as unknown as StageHookResult;
-  for (
-    const [index, warning] of (resultEvidence.warnings as unknown[]).entries()
-  ) {
-    if (
-      !isRecord(warning) || Object.keys(warning).some((key) =>
-        !["path", "code", "message", "details"].includes(key)
-      ) ||
-      typeof warning.path !== "string" || typeof warning.code !== "string" ||
-      typeof warning.message !== "string" || warning.code.length === 0 ||
-      warning.message.length === 0 ||
-      (warning.details !== undefined && !isRecord(warning.details))
-    ) {
-      reject(`/warnings/${index}`, "warning is malformed");
-    }
-  }
-  const readIdentities = new Set<string>();
-  for (
-    const [index, dependencyValue]
-      of (resultEvidence.read_dependencies as unknown[])
-        .entries()
-  ) {
-    const dependency = isRecord(dependencyValue) ? dependencyValue : {};
-    const objectRead = dependency.kind === "object_version" ||
-      dependency.kind === "relationship";
-    const expected = objectRead
-      ? [
-        "kind",
-        "project_id",
-        "definition",
-        "object_id",
-        "expected_version_id",
-        "digest",
-      ]
-      : ["kind", "project_id", "definition", "query_digest"];
-    if (
-      !isExactRecord(dependency, expected) ||
-      !["object_version", "relationship", "policy", "assignment", "uniqueness"]
-        .includes(String(dependency.kind)) ||
-      !isUuidV7(dependency.project_id) ||
-      typeof dependency.definition !== "string" ||
-      !/^[a-z][a-z0-9_]{0,62}\/[a-z][a-z0-9_]{0,62}:[a-z][a-z0-9_]{0,62}$/.test(
-        dependency.definition,
-      ) ||
-      (objectRead && (!isUuidV7(dependency.object_id) ||
-        !isUuidV7(dependency.expected_version_id) ||
-        !/^sha256:[0-9a-f]{64}$/.test(String(dependency.digest)))) ||
-      (!objectRead &&
-        !/^sha256:[0-9a-f]{64}$/.test(String(dependency.query_digest)))
-    ) reject(`/read_dependencies/${index}`, "read dependency is malformed");
-    const readIdentity = await canonicalSha256(dependency);
-    if (readIdentities.has(readIdentity)) {
-      reject(`/read_dependencies/${index}`, "duplicate read dependency");
-    }
-    readIdentities.add(readIdentity);
-  }
-  const requirementIds = new Set<string>();
-  for (
-    const [index, requirementValue]
-      of (resultEvidence.approval_requirements as unknown[])
-        .entries()
-  ) {
-    const requirement = isRecord(requirementValue) ? requirementValue : {};
-    if (
-      !isExactRecord(
-        requirement,
-        requirement.project_id === undefined
-          ? ["id", "capability"]
-          : ["id", "capability", "project_id"],
-      ) ||
-      !isUuidV7(requirement.id) || typeof requirement.capability !== "string" ||
-      !/^[a-z][a-z0-9_.:-]{0,255}$/.test(requirement.capability) ||
-      (requirement.project_id !== undefined &&
-        !isUuidV7(requirement.project_id))
-    ) {
-      reject(
-        `/approval_requirements/${index}`,
-        "approval requirement is malformed",
-      );
-    }
-    if (requirementIds.has(String(requirement.id))) {
-      reject(
-        `/approval_requirements/${index}/id`,
-        "duplicate approval requirement id",
-      );
-    }
-    requirementIds.add(String(requirement.id));
-  }
-  for (const field of ["planned_events", "planned_deliveries"]) {
-    const identities = new Set<string>();
-    for (
-      const [index, item]
-        of (resultEvidence as unknown as Record<string, unknown[]>)[field]
-          .entries()
-    ) {
-      if (
-        !isRecord(item) || Object.keys(item).some((key) =>
-          !["id", "kind"].includes(key)
-        ) ||
-        typeof item.id !== "string" || item.id.length === 0 ||
-        item.id.length > 512 ||
-        (item.kind !== undefined && typeof item.kind !== "string")
-      ) {
-        reject(`/${field}/${index}`, "planned identity is malformed");
+    if (declaration.phase === "changeset.before_stage") {
+      for (const rawBatch of output.patch_outputs as unknown[]) {
+        const batchValue = isRecord(rawBatch)
+          ? rawBatch as Record<string, unknown>
+          : {};
+        if (
+          batchValue.operation_key !== declaration.operation_key ||
+          !isRecord(batchValue.output) ||
+          !Array.isArray(batchValue.output.patches)
+        ) {
+          reject(
+            `/hook_executions/${index}/output/patch_outputs`,
+            "hook patch output does not match its operation",
+          );
+        }
+        const batchOutput = batchValue.output as Record<string, unknown>;
+        const before = working[declaration.operation_key!] ?? {};
+        const paths = (batchOutput.patches as Array<{ path: string }>)
+          .map((patch) =>
+            patch.path.slice(1).split("/")[0].replaceAll("~1", "/").replaceAll(
+              "~0",
+              "~",
+            )
+          );
+        working[declaration.operation_key!] = applyPatches(
+          before,
+          batchOutput.patches as never[],
+          new Set([...Object.keys(before), ...paths]),
+        );
       }
-      const identity = String((item as Record<string, unknown>).id);
-      if (identities.has(identity)) {
-        reject(`/${field}/${index}/id`, "duplicate planned identity");
-      }
-      identities.add(identity);
     }
   }
-  for (const field of ["required_capabilities", "effects"]) {
-    const values =
-      (resultEvidence as unknown as Record<string, unknown[]>)[field];
-    if (
-      values.some((item) =>
-        typeof item !== "string" || !/^[a-z][a-z0-9_.:-]{0,255}$/.test(item)
-      ) || new Set(values).size !== values.length
-    ) reject(`/${field}`, "hook vocabulary is malformed or duplicated");
-  }
-  return deepFreeze(resultEvidence);
-}
-
-function deepFreeze<T>(value: T): T {
-  if (value !== null && typeof value === "object" && !Object.isFrozen(value)) {
-    for (const child of Object.values(value as Record<string, unknown>)) {
-      deepFreeze(child);
-    }
-    Object.freeze(value);
-  }
-  return value;
+  return {
+    hook_executions: executions as StageHookResult["hook_executions"],
+    added_operations: flattened
+      .added_operations as StageHookResult["added_operations"],
+    patch_outputs: flattened.patch_outputs as StageHookResult["patch_outputs"],
+    read_dependencies: flattened
+      .read_dependencies as StageHookResult["read_dependencies"],
+    warnings: flattened.warnings as StageHookResult["warnings"],
+    approval_requirements: flattened
+      .approval_requirements as StageHookResult["approval_requirements"],
+    required_capabilities: flattened.required_capabilities as string[],
+    effects: flattened.effects as string[],
+    planned_events: flattened
+      .planned_events as StageHookResult["planned_events"],
+    planned_deliveries: flattened
+      .planned_deliveries as StageHookResult["planned_deliveries"],
+  };
 }
 
 function isExactRecord(
   value: unknown,
   keys: readonly string[],
 ): value is Record<string, unknown> {
-  return isRecord(value) && Object.keys(value).sort().join("\0") ===
-      [...keys].sort().join("\0");
+  if (!isRecord(value)) return false;
+  const actual = Object.keys(value).sort();
+  const expected = [...keys].sort();
+  return actual.length === expected.length &&
+    actual.every((key, index) => key === expected[index]);
 }
 
 function validationResult(error: unknown): Result<never> {
@@ -612,6 +490,16 @@ function validationResult(error: unknown): Result<never> {
       message: "request does not satisfy its contract",
       severity: "validation",
       details: { issues: error.issues },
+    });
+  }
+  if (error instanceof StageHookError) {
+    return err({
+      code: error.code,
+      message: error.message,
+      severity: error.code === "hook_secret_unavailable"
+        ? "unavailable"
+        : "validation",
+      details: error.details,
     });
   }
   if (error instanceof PatchError) {

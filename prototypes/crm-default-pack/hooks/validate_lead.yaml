@@ -25,7 +25,6 @@
         "input": {
           "operation": "$operation",
           "proposed": "$proposed",
-          "actor": "$actor",
         },
       },
     ],

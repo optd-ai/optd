@@ -23,7 +23,7 @@
         "action": "operant/crm:convert_lead",
         "order": 100,
         "input": {
-          "lead": "$current",
+          "lead": "$reads.lead",
           "input": "$action.input",
         },
       },
@@ -48,9 +48,9 @@
           ],
         },
         {
-          "resource": "operant/crm:opportunity",
+          "resource": "operant/crm:contact_company",
           "ops": [
-            "create",
+            "link",
           ],
         },
         {
@@ -60,9 +60,9 @@
           ],
         },
         {
-          "resource": "operant/crm:contact_company",
+          "resource": "operant/crm:opportunity",
           "ops": [
-            "link",
+            "create",
           ],
         },
         {

@@ -211,12 +211,21 @@ export async function loadPackFromFiles(
           `${file.path}: referenced hook script ${script} is missing`,
         );
       }
-      const security = await validateHookContract(
-        def.identity,
-        spec,
-        scriptFile.digest,
-        scriptFile.content,
-      );
+      let security;
+      try {
+        security = await validateHookContract(
+          def.identity,
+          spec,
+          scriptFile.digest,
+          scriptFile.content,
+        );
+      } catch (error) {
+        throw new Error(
+          `${file.path}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
       document.spec = security.normalized as JsonValue;
       def.spec = security.normalized as Record<string, JsonValue>;
       pack.hooks[objectName] = {

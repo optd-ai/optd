@@ -348,23 +348,35 @@ export async function getDefinition(
     "seeds",
   ]);
   if (!allowed.has(section)) throw new Error("unknown definition kind");
-  const result = await query<{ document: Record<string, unknown> | string }>(
+  const result = await query<{
+    document: Record<string, unknown> | string;
+    component_revision_id: string | null;
+    hook_security_digest: string | null;
+    hook_script_digest: string | null;
+  }>(
     sql,
-    `select jsonb_extract_path(cr.normalized,$4::text,$3::text) as document
+    `select jsonb_extract_path(cr.normalized,$4::text,$3::text) as document,
+            component.id as component_revision_id,
+            component.hook_security_digest,component.hook_script_digest
        from pack_active_revisions ar
        join pack_candidate_revisions cr on cr.id=ar.candidate_revision_id
+       left join pack_component_revisions component
+         on component.candidate_revision_id=cr.id
+        and component.definition_kind=trim(trailing 's' from $4::text)
+        and component.definition_name=$3
       where ar.publisher=$1 and ar.pack_name=$2
       order by ar.activated_at desc limit 1`,
     [publisher, pack, name, section],
   );
-  const value = result.rows[0]?.document;
+  const row = result.rows[0];
+  const value = row?.document;
   if (!value) return null;
   const document = typeof value === "string" ? JSON.parse(value) : value;
   return {
     document,
     spec: document.spec ?? {},
-    script_digest: section === "hooks"
-      ? (document.spec as Record<string, unknown> | undefined)?.script_digest
-      : undefined,
+    component_revision_id: row.component_revision_id,
+    security_digest: row.hook_security_digest,
+    script_digest: row.hook_script_digest,
   };
 }

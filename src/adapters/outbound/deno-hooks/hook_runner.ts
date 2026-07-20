@@ -165,12 +165,36 @@ export class DenoHookRunner {
       this.#options.stderrLimitBytes ?? DEFAULT_STDERR_LIMIT,
       true,
     );
-    let timer: number | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<"timeout">((resolve) => {
       timer = setTimeout(() => resolve("timeout"), hook.timeoutMs);
     });
-    const completed = await Promise.race([child.status, timeout]);
+    const stdoutOverflow = stdoutPromise.then((value) =>
+      value.overflow ? "stdout_overflow" as const : new Promise<never>(() => {})
+    );
+    const completed = await Promise.race([
+      child.status,
+      timeout,
+      stdoutOverflow,
+    ]);
     if (timer !== undefined) clearTimeout(timer);
+    if (completed === "stdout_overflow") {
+      await killAndReap(child);
+      const stderr = await stderrPromise.catch(() => ({
+        bytes: new Uint8Array(),
+        truncated: false,
+      }));
+      const logs = redact(decode(stderr.bytes), redactions);
+      return failure(
+        hook,
+        started,
+        "hook_stdout_limit",
+        "hook stdout exceeded the byte limit",
+        logs.text + (stderr.truncated ? TRUNCATION_MARKER : ""),
+        stderr.truncated,
+        logs.changed,
+      );
+    }
     if (completed === "timeout") {
       await killAndReap(child);
       const stderr = await stderrPromise.catch(() => ({
@@ -414,7 +438,13 @@ export function validateOutputShape(
       }
     }
   } else if (schema === "patch.v1") {
-    if (!exactKeys(output, ["patches"]) || !Array.isArray(output.patches)) {
+    if (
+      !hasOnlyKeys(output, ["patches", "warnings"], ["patches"]) ||
+      !Array.isArray(output.patches) ||
+      (output.warnings !== undefined &&
+        (!Array.isArray(output.warnings) ||
+          output.warnings.some((message) => !validMessage(message))))
+    ) {
       return "patch.v1 output has an invalid shape";
     }
     for (const patch of output.patches) {
@@ -582,6 +612,14 @@ function exactKeys(value: JsonRecord, keys: string[]): boolean {
   const expected = [...keys].sort();
   return actual.length === expected.length &&
     actual.every((key, index) => key === expected[index]);
+}
+function hasOnlyKeys(
+  value: JsonRecord,
+  allowed: string[],
+  required: string[],
+): boolean {
+  return Object.keys(value).every((key) => allowed.includes(key)) &&
+    required.every((key) => Object.hasOwn(value, key));
 }
 function validMessage(value: unknown): boolean {
   if (!isRecord(value)) return false;

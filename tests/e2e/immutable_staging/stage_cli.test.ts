@@ -11,6 +11,7 @@ import {
 import { isUuidV7, uuidV7 } from "../../../src/domain/ids/uuid_v7.ts";
 import { canonicalSha256 } from "../../../src/domain/ids/canonical_json.ts";
 import { makeStageChangesetService } from "../../../src/application/services/changesets/stage_changesets.ts";
+import { buildHookEnvelope } from "../../../src/application/services/hooks/stage_hook_coordinator.ts";
 import { PostgresStageRepository } from "../../../src/adapters/outbound/postgres/stage_repository.ts";
 import type { AuthContext } from "../../../src/domain/auth/model.ts";
 import {
@@ -775,7 +776,7 @@ Deno.test({
       assertEquals(hookFailure.code, 1);
       assertEquals(
         JSON.parse(hookFailure.stderr).error.code,
-        "hook_coordinator_unavailable",
+        "hook_invalid_output",
       );
       assertEquals(
         (await query<{ count: string }>(
@@ -832,22 +833,18 @@ Deno.test({
                 phase: declaration.phase,
                 pack_revision_id: declaration.pack_revision_id,
                 hook_revision_id: declaration.hook_revision_id,
-                input_digest: `sha256:${await canonicalSha256({
-                  schema: "changeset.hook-input.v1",
-                  declaration,
-                  operations: input.operations,
-                  projects: input.projects,
-                  pack_revisions: input.pack_revisions,
-                  proposed_states: input.proposed_states,
-                  base_states: input.base_states,
-                  grant_snapshot: input.grant_snapshot,
-                  previous_output_digest: null,
-                })}`,
+                input_digest: `sha256:${await canonicalSha256(
+                  buildHookEnvelope(declaration, input, input.proposed_states),
+                )}`,
                 output_digest: `sha256:${await canonicalSha256(output)}`,
                 output,
+                script_digest: declaration.script_digest,
+                security_digest: declaration.security_digest,
                 stderr: "",
+                logs_truncated: false,
+                secrets_redacted: false,
                 duration_ms: 1,
-                grant_snapshot: input.grant_snapshot,
+                grant_snapshot: { grants: [] },
               }],
             };
           },

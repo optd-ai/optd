@@ -32,15 +32,15 @@
     "effects": {
       "operations": [
         {
-          "resource": "operant/crm:opportunity",
-          "ops": [
-            "transition",
-          ],
-        },
-        {
           "resource": "operant/crm:note",
           "ops": [
             "create",
+          ],
+        },
+        {
+          "resource": "operant/crm:opportunity",
+          "ops": [
+            "transition",
           ],
         },
       ],

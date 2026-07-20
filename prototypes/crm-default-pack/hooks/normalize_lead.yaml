@@ -24,7 +24,6 @@
         "order": 100,
         "input": {
           "operation": "$operation",
-          "actor": "$actor",
         },
       },
     ],

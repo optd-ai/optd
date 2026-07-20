@@ -1,4 +1,15 @@
-import { assertEquals, assertStringIncludes } from "jsr:@std/assert";
+function assertEquals(actual: unknown, expected: unknown): void {
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+    throw new Error(
+      `expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`,
+    );
+  }
+}
+function assertStringIncludes(actual: string, expected: string): void {
+  if (!actual.includes(expected)) {
+    throw new Error(`expected string to include ${expected}`);
+  }
+}
 import {
   DenoHookRunner,
   type HookDefinition,
@@ -28,7 +39,7 @@ Deno.test("DenoHookRunner captures stderr and valid output", async () => {
   const result = await runner.run(
     hook(
       "ok",
-      `console.error("hello logs"); console.log(JSON.stringify({ errors: [], warnings: [] }));`,
+      `console.error("hello logs"); console.log(JSON.stringify({ allow: true, errors: [], warnings: [], required_approvals: [] }));`,
     ),
     {
       hook: "ok",
@@ -45,7 +56,7 @@ Deno.test("DenoHookRunner reports permission failures", async () => {
   const result = await runner.run(
     hook(
       "env_denied",
-      `Deno.env.get("SECRET"); console.log(JSON.stringify({ errors: [] }));`,
+      `Deno.env.get("SECRET"); console.log(JSON.stringify({ allow: true, errors: [], warnings: [], required_approvals: [] }));`,
     ),
     {
       hook: "env_denied",
@@ -70,9 +81,13 @@ Deno.test("DenoHookRunner rejects permissions blocked by global policy", async (
     },
   });
   const result = await runner.run(
-    hook("blocked", `console.log(JSON.stringify({ errors: [] }));`, {
-      permissions: { env: true },
-    }),
+    hook(
+      "blocked",
+      `console.log(JSON.stringify({ allow: true, errors: [], warnings: [], required_approvals: [] }));`,
+      {
+        permissions: { env: true },
+      },
+    ),
     {
       hook: "blocked",
       phase: "changeset.validate",
@@ -80,7 +95,7 @@ Deno.test("DenoHookRunner rejects permissions blocked by global policy", async (
     },
   );
   assertEquals(result.ok, false);
-  assertEquals(result.error?.code, "permission_policy_denied");
+  assertEquals(result.error?.code, "hook_capability_denied");
 });
 
 Deno.test("DenoHookRunner reports timeouts", async () => {
@@ -88,7 +103,7 @@ Deno.test("DenoHookRunner reports timeouts", async () => {
   const result = await runner.run(
     hook(
       "timeout",
-      `await new Promise((resolve) => setTimeout(resolve, 1000)); console.log(JSON.stringify({ errors: [] }));`,
+      `await new Promise((resolve) => setTimeout(resolve, 1000)); console.log(JSON.stringify({ allow: true, errors: [], warnings: [], required_approvals: [] }));`,
       { timeoutMs: 20 },
     ),
     {
@@ -98,7 +113,7 @@ Deno.test("DenoHookRunner reports timeouts", async () => {
     },
   );
   assertEquals(result.ok, false);
-  assertEquals(result.error?.code, "timeout");
+  assertEquals(result.error?.code, "hook_timeout");
 });
 
 Deno.test("DenoHookRunner injects only declared secret env vars", async () => {
@@ -112,13 +127,13 @@ Deno.test("DenoHookRunner injects only declared secret env vars", async () => {
       `const token = Deno.env.get("API_TOKEN");
        let otherAllowed = false;
        try { otherAllowed = Deno.env.get("OTHER_TOKEN") !== undefined; } catch { otherAllowed = false; }
-       console.log(JSON.stringify({ errors: token === "shh-value" && !otherAllowed ? [] : ["bad env"] }));`,
+       console.log(JSON.stringify({ allow: token === "shh-value" && !otherAllowed, errors: token === "shh-value" && !otherAllowed ? [] : [{path:"/",code:"bad_env",message:"bad env"}], warnings: [], required_approvals: [] }));`,
       { secrets: [{ name: "api_token", env: "API_TOKEN" }] },
     ),
     { hook: "secret_env", phase: "changeset.validate", input: {} },
   );
   assertEquals(result.ok, true);
-  assertEquals(result.output?.errors, []);
+  assertEquals(result.output?.allow, true);
 });
 
 Deno.test("DenoHookRunner fails before spawn when a declared secret is missing", async () => {
@@ -126,7 +141,7 @@ Deno.test("DenoHookRunner fails before spawn when a declared secret is missing",
   const result = await runner.run(
     hook(
       "missing_secret",
-      `console.error("spawned"); console.log(JSON.stringify({ errors: [] }));`,
+      `console.error("spawned"); console.log(JSON.stringify({ allow: true, errors: [], warnings: [], required_approvals: [] }));`,
       {
         secrets: [{ name: "api_token", env: "API_TOKEN" }],
       },
@@ -134,7 +149,7 @@ Deno.test("DenoHookRunner fails before spawn when a declared secret is missing",
     { hook: "missing_secret", phase: "changeset.validate", input: {} },
   );
   assertEquals(result.ok, false);
-  assertEquals(result.error?.code, "missing_secret");
+  assertEquals(result.error?.code, "hook_secret_unavailable");
   assertEquals(result.logs, "");
 });
 
@@ -146,7 +161,7 @@ Deno.test("DenoHookRunner reports bad JSON and invalid schema", async () => {
     input: {},
   });
   assertEquals(badJson.ok, false);
-  assertEquals(badJson.error?.code, "invalid_stdout_json");
+  assertEquals(badJson.error?.code, "hook_invalid_output");
 
   const invalid = await runner.run(
     hook("bad_schema", `console.log(JSON.stringify({ patches: {} }));`, {
@@ -155,5 +170,5 @@ Deno.test("DenoHookRunner reports bad JSON and invalid schema", async () => {
     { hook: "bad_schema", phase: "changeset.before_preview", input: {} },
   );
   assertEquals(invalid.ok, false);
-  assertEquals(invalid.error?.code, "invalid_output_schema");
+  assertEquals(invalid.error?.code, "hook_invalid_output");
 });

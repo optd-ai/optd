@@ -93,6 +93,10 @@ export async function getMigrationPlan(
     application_candidate_revision_id: string | null;
     application_auth_context_id: string | null;
     application_applied_at: Date | string | null;
+    application_hook_secret_grant_report:
+      | MigrationApplication["hook_secret_grants"]
+      | string
+      | null;
   }>(
     sql,
     `select p.plan_json,
@@ -102,7 +106,8 @@ export async function getMigrationPlan(
             a.id application_id, a.plan_digest application_plan_digest,
             a.candidate_revision_id application_candidate_revision_id,
             a.auth_context_id application_auth_context_id,
-            a.applied_at application_applied_at
+            a.applied_at application_applied_at,
+            a.hook_secret_grant_report application_hook_secret_grant_report
        from pack_migration_plans_v1 p
        left join pack_migration_applications a on a.plan_id=p.id
        left join lateral (
@@ -129,6 +134,15 @@ export async function getMigrationPlan(
       applied_at: row.application_applied_at instanceof Date
         ? row.application_applied_at.toISOString()
         : String(row.application_applied_at),
+      hook_secret_grants:
+        typeof row.application_hook_secret_grant_report === "string"
+          ? JSON.parse(row.application_hook_secret_grant_report)
+          : row.application_hook_secret_grant_report ?? {
+            preserved: [],
+            reauthorization_required: [],
+            new_ungranted_slots: [],
+            unused_retained: [],
+          },
     }
     : null;
   if (
@@ -588,7 +602,7 @@ export async function applyMigrationPlan(
     plan.to_pack_revision_id,
     authContextId,
   );
-  await carryEquivalentHookSecretGrants(
+  const grantReport = await carryEquivalentHookSecretGrants(
     sql,
     plan.from_pack_revision_id,
     plan.to_pack_revision_id,
@@ -600,8 +614,8 @@ export async function applyMigrationPlan(
   const applicationId = uuidV7();
   const inserted = await query<{ applied_at: Date | string }>(
     sql,
-    `insert into pack_migration_applications(id,plan_id,plan_digest,candidate_revision_id,auth_context_id,principal_id,authorization_root_id)
-     values($1,$2,$3,$4,$5,$6,$7) returning applied_at`,
+    `insert into pack_migration_applications(id,plan_id,plan_digest,candidate_revision_id,auth_context_id,principal_id,authorization_root_id,hook_secret_grant_report)
+     values($1,$2,$3,$4,$5,$6,$7,$8::jsonb) returning applied_at`,
     [
       applicationId,
       id,
@@ -610,6 +624,7 @@ export async function applyMigrationPlan(
       authContextId,
       identity.principalId,
       identity.authorizationRootId,
+      JSON.stringify(grantReport),
     ],
   );
   if (testFault === "after_application") {
@@ -649,6 +664,7 @@ export async function applyMigrationPlan(
     applied_at: appliedAt instanceof Date
       ? appliedAt.toISOString()
       : String(appliedAt),
+    hook_secret_grants: grantReport,
   };
 }
 
@@ -693,8 +709,20 @@ async function carryEquivalentHookSecretGrants(
   fromRevisionId: string | null,
   toRevisionId: string,
   authContextId: string,
-): Promise<void> {
-  if (fromRevisionId === null) return;
+): Promise<MigrationApplication["hook_secret_grants"]> {
+  const empty = {
+    preserved: [],
+    reauthorization_required: [],
+    new_ungranted_slots: [],
+    unused_retained: [],
+  };
+  if (fromRevisionId === null) {
+    const slots = await hookSlots(sql, toRevisionId);
+    return {
+      ...empty,
+      new_ungranted_slots: slots.map((slot) => slot.identity),
+    };
+  }
   const rows = (await query<{
     grant_id: string;
     new_hook_revision_id: string;
@@ -705,7 +733,8 @@ async function carryEquivalentHookSecretGrants(
     sql,
     `select g.id as grant_id,new_hook.id as new_hook_revision_id,
             new_hook.hook_security_digest,g.slot,g.secret_id
-       from hook_secret_grants g
+       from hook_secret_grant_heads old_head
+       join hook_secret_grants g on g.id=old_head.grant_id
        join pack_component_revisions old_hook on old_hook.id=g.hook_revision_id
        join pack_component_revisions new_hook
          on new_hook.candidate_revision_id=$2
@@ -715,15 +744,16 @@ async function carryEquivalentHookSecretGrants(
        join platform_secrets s on s.id=g.secret_id and s.status='active'
       where old_hook.candidate_revision_id=$1
         and not exists(select 1 from hook_secret_grant_revocations r where r.grant_id=g.id)
-        and not exists(select 1 from hook_secret_grants successor where successor.supersedes_grant_id=g.id)
         and exists(
-          select 1 from jsonb_array_elements(new_hook.hook_normalized_config->'secrets') slot
-           where slot->>'slot'=g.slot
+          select 1
+            from jsonb_array_elements(new_hook.hook_normalized_config->'secrets') as slots(slot_json)
+           where slots.slot_json->>'slot'=g.slot
         )
       order by new_hook.definition_name,g.slot,g.id`,
     [fromRevisionId, toRevisionId],
   )).rows;
   for (const row of rows) {
+    const id = uuidV7();
     await query(
       sql,
       `insert into hook_secret_grants(
@@ -731,7 +761,7 @@ async function carryEquivalentHookSecretGrants(
          created_auth_context_id,inherited_from_grant_id
        ) values($1,$2,$3,$4,$5,$6,$7)`,
       [
-        uuidV7(),
+        id,
         row.new_hook_revision_id,
         row.hook_security_digest,
         row.slot,
@@ -740,7 +770,57 @@ async function carryEquivalentHookSecretGrants(
         row.grant_id,
       ],
     );
+    await query(
+      sql,
+      `insert into hook_secret_grant_heads(hook_revision_id,slot,grant_id)
+       values($1,$2,$3)`,
+      [row.new_hook_revision_id, row.slot, id],
+    );
   }
+  const oldSlots = await hookSlots(sql, fromRevisionId, true);
+  const newSlots = await hookSlots(sql, toRevisionId);
+  const oldByIdentity = new Map(oldSlots.map((slot) => [slot.identity, slot]));
+  const newByIdentity = new Map(newSlots.map((slot) => [slot.identity, slot]));
+  return {
+    preserved: rows.map((row) => `${row.new_hook_revision_id}:${row.slot}`)
+      .sort(),
+    reauthorization_required: newSlots.filter((slot) => {
+      const old = oldByIdentity.get(slot.identity);
+      return old !== undefined && old.security_digest !== slot.security_digest;
+    }).map((slot) => slot.identity).sort(),
+    new_ungranted_slots: newSlots.filter((slot) =>
+      !oldByIdentity.has(slot.identity)
+    ).map((slot) => slot.identity).sort(),
+    unused_retained: oldSlots.filter((slot) =>
+      !newByIdentity.has(slot.identity)
+    ).map((slot) => slot.identity).sort(),
+  };
+}
+
+async function hookSlots(
+  sql: Queryable,
+  revisionId: string,
+  grantedOnly = false,
+): Promise<Array<{ identity: string; security_digest: string }>> {
+  return (await query<
+    { hook_identity: string; slot: string; security_digest: string }
+  >(
+    sql,
+    `select component.definition_name as hook_identity,slots.slot_json->>'slot' as slot,
+            component.hook_security_digest as security_digest
+       from pack_component_revisions component
+       cross join lateral jsonb_array_elements(component.hook_normalized_config->'secrets') as slots(slot_json)
+      where component.candidate_revision_id=$1 and component.definition_kind='hook'
+        and ($2::boolean=false or exists(
+          select 1 from hook_secret_grant_heads head
+           where head.hook_revision_id=component.id and head.slot=slots.slot_json->>'slot'
+        ))
+      order by component.definition_name,slots.slot_json->>'slot'`,
+    [revisionId, grantedOnly],
+  )).rows.map((row) => ({
+    identity: `${row.hook_identity}:${row.slot}`,
+    security_digest: row.security_digest,
+  }));
 }
 
 async function projectPackAuthorization(
@@ -1013,9 +1093,12 @@ async function existingApplication(
     candidate_revision_id: string;
     auth_context_id: string;
     applied_at: Date | string;
+    hook_secret_grant_report:
+      | MigrationApplication["hook_secret_grants"]
+      | string;
   }>(
     sql,
-    `select id,plan_digest,candidate_revision_id,auth_context_id,applied_at from pack_migration_applications where plan_id=$1`,
+    `select id,plan_digest,candidate_revision_id,auth_context_id,applied_at,hook_secret_grant_report from pack_migration_applications where plan_id=$1`,
     [planId],
   );
   const row = result.rows[0];
@@ -1029,6 +1112,9 @@ async function existingApplication(
       applied_at: row.applied_at instanceof Date
         ? row.applied_at.toISOString()
         : String(row.applied_at),
+      hook_secret_grants: typeof row.hook_secret_grant_report === "string"
+        ? JSON.parse(row.hook_secret_grant_report)
+        : row.hook_secret_grant_report,
     }
     : null;
 }

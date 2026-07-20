@@ -4,4 +4,4 @@ console.error(
     envelope.input?.event_id ?? envelope.event_id ?? "unknown"
   }`,
 );
-console.log(JSON.stringify({ errors: [], warnings: [] }));
+console.log(JSON.stringify({ outcome: "success" }));

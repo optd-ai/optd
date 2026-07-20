@@ -15,11 +15,12 @@
       "run": false,
     },
     "output": {
-      "schema": "validation.v1",
+      "schema": "delivery.v1",
     },
     "attachments": [
       {
         "phase": "event.after_commit",
+        "event": "object.changed",
         "order": 100,
         "input": {
           "event": "$event",

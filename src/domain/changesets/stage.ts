@@ -16,15 +16,32 @@ export type StageHookDeclaration = Readonly<{
   hook: string;
   phase: "changeset.before_stage" | "changeset.validate";
   resource: string | null;
+  operation_key: string | null;
   order: number;
   script_digest: string;
+  security_digest: string;
+  script_content: string;
+  timeout_ms: number;
+  output_schema: "patch.v1" | "validation.v1";
+  permissions: Readonly<{
+    net: readonly string[];
+    env: readonly string[];
+  }>;
+  secret_slots: readonly Readonly<{ slot: string; env: string }>[];
+  input_mapping: Readonly<Record<string, unknown>>;
+  condition: string | null;
+  effects: readonly unknown[];
   declaration_digest: string;
 }>;
+export type HookSecretGrantEvidence = Readonly<{
+  grant_id: string;
+  secret_id: string;
+  value_version: number;
+  slot: string;
+  env: string;
+}>;
 export type HookGrantSnapshot = Readonly<{
-  principal_id: string;
-  auth_context_id: string;
-  assignment_digest: string;
-  policy_digest: string;
+  grants: readonly HookSecretGrantEvidence[];
 }>;
 export type StageHookOutput = Readonly<{
   added_operations: readonly AuthoredOperation[];
@@ -49,7 +66,11 @@ export type StageHookExecution = Readonly<{
   input_digest: string;
   output_digest: string;
   output: StageHookOutput;
+  script_digest: string;
+  security_digest: string;
   stderr: string;
+  logs_truncated: boolean;
+  secrets_redacted: boolean;
   duration_ms: number;
   grant_snapshot: HookGrantSnapshot;
 }>;
@@ -116,7 +137,6 @@ export type StageHookInput = Readonly<{
   projects: readonly unknown[];
   pack_revisions: readonly unknown[];
   hook_declarations: readonly StageHookDeclaration[];
-  grant_snapshot: HookGrantSnapshot;
   proposed_states: Readonly<Record<string, Record<string, unknown>>>;
   base_states: Readonly<Record<string, Record<string, unknown> | null>>;
 }>;

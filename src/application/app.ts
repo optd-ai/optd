@@ -9,6 +9,9 @@ import { makeProcessOutboxService } from "./services/process_outbox.ts";
 import { DenoHookRunner } from "../adapters/outbound/deno-hooks/hook_runner.ts";
 import { makeSecretsService } from "./services/secrets/manage_secrets.ts";
 import { makeHookSecretGrantService } from "./services/secrets/manage_grants.ts";
+import { EnvelopeCrypto } from "../adapters/outbound/crypto/envelope.ts";
+import { PostgresHookSecretRepository } from "../adapters/outbound/postgres/hook_secret_repository.ts";
+import { TrustedStageHookCoordinator } from "./services/hooks/stage_hook_coordinator.ts";
 import { OPERANT_VERSION } from "../config/runtime.ts";
 import type { Queryable, Sql } from "../adapters/outbound/postgres/client.ts";
 import { PostgresTransactionManager } from "../adapters/outbound/postgres/transaction_manager.ts";
@@ -40,20 +43,33 @@ export function makeApplication(
   const clock = new SystemClock();
   const tx = new PostgresTransactionManager(sql);
   const authorizationRepository = new PostgresAuthorizationRepository(sql);
+  const cryptoAdapter = new EnvelopeCrypto();
   const secrets = makeSecretsService({
     sql: sql as Queryable,
     tx,
     authorization: authorizationRepository,
+    crypto: cryptoAdapter,
   });
   const hookSecretGrants = makeHookSecretGrantService({
     sql: sql as Queryable,
     tx,
     authorization: authorizationRepository,
+    authorizeInTransaction: (lockedSql, auth, action) =>
+      new PostgresAuthorizationRepository(lockedSql as Sql).authorize({
+        auth,
+        boundary: { type: "system" },
+        action,
+        resource: "system:hook-secret-grant",
+      }),
   });
   const hookRunner = new DenoHookRunner();
+  const stageHookCoordinator = options.stageHookCoordinator ??
+    new TrustedStageHookCoordinator(
+      new PostgresHookSecretRepository(sql, cryptoAdapter),
+    );
   const changesets = makeStageChangesetService(
     new PostgresStageRepository(sql),
-    options.stageHookCoordinator,
+    stageHookCoordinator,
   );
   const maximumHashes = Number(
     Deno.env.get("OPERANT_PASSWORD_MAX_CONCURRENT_HASHES") ?? "4",

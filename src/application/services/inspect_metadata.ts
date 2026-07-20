@@ -132,6 +132,8 @@ export function makeInspectMetadataService(
       });
       if (options.includeSecurity) {
         Object.assign(base, {
+          hook_revision_id: row.component_revision_id,
+          security_digest: row.security_digest,
           script_digest: row.script_digest ??
             await hookDigest(deps.sql, publisher, pack, name),
           security: {
@@ -144,7 +146,7 @@ export function makeInspectMetadataService(
               ? spec.secrets.map((item) =>
                 typeof item === "string"
                   ? item
-                  : allow(jsonRecord(item), ["name", "slot"])
+                  : allow(jsonRecord(item), ["name", "slot", "env"])
               )
               : [],
             attachments: attachments.map((item) =>

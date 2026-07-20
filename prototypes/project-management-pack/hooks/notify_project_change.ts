@@ -5,4 +5,4 @@ console.error(
     event.object_id ?? "unknown"
   }`,
 );
-console.log(JSON.stringify({ errors: [], warnings: [] }));
+console.log(JSON.stringify({ outcome: "success" }));

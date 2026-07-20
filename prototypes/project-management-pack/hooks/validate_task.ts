@@ -65,4 +65,9 @@ if (resource.endsWith(".timesheet_entry") || resource === "timesheet_entry") {
 console.error(
   `validate_task errors=${errors.length} warnings=${warnings.length}`,
 );
-console.log(JSON.stringify({ errors, warnings }));
+console.log(JSON.stringify({
+  allow: errors.length === 0,
+  errors,
+  warnings,
+  required_approvals: [],
+}));

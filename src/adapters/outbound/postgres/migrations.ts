@@ -1179,10 +1179,24 @@ export const platformMigrations: PlatformMigration[] = [
       alter table platform_secrets add constraint platform_secrets_name_unique unique(name);
       alter table platform_secrets add constraint platform_secrets_nonce_96_bit check(octet_length(nonce)=12);
 
+      alter table pack_migration_applications add column hook_secret_grant_report jsonb not null default '{"preserved":[],"reauthorization_required":[],"new_ungranted_slots":[],"unused_retained":[]}'::jsonb;
       alter table pack_component_revisions add column hook_security_digest text;
       alter table pack_component_revisions add column hook_script_digest text;
       alter table pack_component_revisions add column hook_normalized_config jsonb;
       alter table pack_component_revisions add column hook_script_content text;
+      alter table staged_hook_executions add column script_digest text;
+      alter table staged_hook_executions add column security_digest text;
+      alter table staged_hook_executions add column logs_truncated boolean;
+      alter table staged_hook_executions add column secrets_redacted boolean;
+      alter table staged_hook_executions add constraint staged_hook_security_evidence check(
+        script_digest ~ '^sha256:[0-9a-f]{64}$' and
+        security_digest ~ '^sha256:[0-9a-f]{64}$' and
+        logs_truncated is not null and secrets_redacted is not null
+      );
+      alter table staged_hook_executions alter column script_digest set not null;
+      alter table staged_hook_executions alter column security_digest set not null;
+      alter table staged_hook_executions alter column logs_truncated set not null;
+      alter table staged_hook_executions alter column secrets_redacted set not null;
       alter table pack_component_revisions add constraint hook_revision_security_facts check(
         (definition_kind='hook') =
         (hook_security_digest is not null and hook_script_digest is not null and
@@ -1209,8 +1223,26 @@ export const platformMigrations: PlatformMigration[] = [
         revoked_at timestamptz not null default now(),
         check(reason is null or char_length(reason) between 1 and 1000)
       );
+      create table hook_secret_grant_heads(
+        hook_revision_id uuid not null references pack_component_revisions(id),
+        slot text not null,
+        grant_id uuid not null unique references hook_secret_grants(id),
+        version bigint not null default 1 check(version > 0),
+        updated_at timestamptz not null default now(),
+        primary key(hook_revision_id,slot)
+      );
       create index hook_secret_grants_hook_slot_idx on hook_secret_grants(hook_revision_id,slot,created_at desc);
       create index hook_secret_grants_secret_idx on hook_secret_grants(secret_id);
+
+      insert into policy_rules(
+        id,policy_definition_version_id,role_id,capability,resource,condition_kind,summary
+      ) values
+        ('01900000-0000-7000-8000-000000000251','01900000-0000-7000-8000-000000000201','system:admin','secret.list','system:secret','unconditional','List redacted secret metadata.'),
+        ('01900000-0000-7000-8000-000000000252','01900000-0000-7000-8000-000000000201','system:admin','secret.create','system:secret','unconditional','Create encrypted secrets.'),
+        ('01900000-0000-7000-8000-000000000253','01900000-0000-7000-8000-000000000201','system:admin','secret.rotate','system:secret','unconditional','Rotate encrypted secrets.'),
+        ('01900000-0000-7000-8000-000000000254','01900000-0000-7000-8000-000000000201','system:admin','secret.disable','system:secret','unconditional','Disable encrypted secrets.'),
+        ('01900000-0000-7000-8000-000000000255','01900000-0000-7000-8000-000000000201','system:admin','secret.grant','system:hook-secret-grant','unconditional','Grant secrets to reviewed hook slots.'),
+        ('01900000-0000-7000-8000-000000000256','01900000-0000-7000-8000-000000000201','system:admin','hook.secret.configure','system:hook-secret-grant','unconditional','Configure reviewed hook secret slots.');
     `,
   },
 ];

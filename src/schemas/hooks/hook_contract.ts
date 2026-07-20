@@ -11,9 +11,8 @@ const SLOT = /^[a-z][a-z0-9_]{0,62}$/;
 const ENV = /^[A-Z][A-Z0-9_]{0,127}$/;
 const DNS_LABEL = /^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)$/;
 const INPUT_REFS: Record<string, Set<string>> = {
-  "action.stage": new Set(["$actor", "$action.input", "$reads"]),
+  "action.stage": new Set(["$action.input", "$reads"]),
   "changeset.before_stage": new Set([
-    "$actor",
     "$operation",
     "$current",
     "$proposed",
@@ -21,7 +20,6 @@ const INPUT_REFS: Record<string, Set<string>> = {
     "$object_version",
   ]),
   "changeset.validate": new Set([
-    "$actor",
     "$operation",
     "$current",
     "$proposed",

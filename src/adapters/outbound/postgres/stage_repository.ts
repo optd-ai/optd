@@ -52,6 +52,28 @@ type Prepared = {
 export class PostgresStageRepository implements StageRepository {
   constructor(private readonly sql: Sql) {}
 
+  async hasHooks(operations: CanonicalOperation[]): Promise<boolean> {
+    const identities = [...new Set(operations.map(componentIdentity))].sort();
+    for (const identity of identities) {
+      const parsed = parseIdentity(identity);
+      const found = (await query<{ present: boolean }>(
+        this.sql,
+        `select exists(
+           select 1 from pack_active_revisions active
+           join pack_hook_attachment_revisions attachment
+             on attachment.candidate_revision_id=active.candidate_revision_id
+          where active.publisher=$1 and active.pack_name=$2
+            and attachment.phase in ('changeset.before_stage','changeset.validate')
+            and (attachment.declaration_spec->'resource'='null'::jsonb or
+                 attachment.declaration_spec->>'resource'=$3)
+         ) as present`,
+        [parsed.publisher, parsed.pack, identity],
+      )).rows[0]?.present;
+      if (found) return true;
+    }
+    return false;
+  }
+
   async hookInput(
     operations: CanonicalOperation[],
     auth: AuthContext,
@@ -113,7 +135,6 @@ export class PostgresStageRepository implements StageRepository {
               "validation",
             );
           }
-          const normalized = record(revision.normalized);
           const operationResources = new Set(operations.map(componentIdentity));
           const attachments = (await query<{
             id: string;
@@ -123,64 +144,86 @@ export class PostgresStageRepository implements StageRepository {
             ordinal: number;
             declaration_digest: string;
             declaration_spec: unknown;
+            hook_security_digest: string;
+            hook_script_digest: string;
+            hook_normalized_config: unknown;
+            hook_script_content: string;
           }>(
             tx,
-            `select id,hook_revision_id,hook_identity,phase,ordinal,declaration_digest,declaration_spec
-             from pack_hook_attachment_revisions
-             where candidate_revision_id=$1
-               and phase in ('changeset.before_stage','changeset.validate') order by
-               case phase when 'changeset.before_stage' then 0 else 1 end,
-               ordinal,hook_identity,id for share`,
+            `select a.id,a.hook_revision_id,a.hook_identity,a.phase,a.ordinal,
+                    a.declaration_digest,a.declaration_spec,h.hook_security_digest,
+                    h.hook_script_digest,h.hook_normalized_config,h.hook_script_content
+             from pack_hook_attachment_revisions a
+             join pack_component_revisions h on h.id=a.hook_revision_id
+             where a.candidate_revision_id=$1
+               and a.phase in ('changeset.before_stage','changeset.validate') order by
+               case a.phase when 'changeset.before_stage' then 0 else 1 end,
+               a.ordinal,a.hook_identity,a.id for share of a,h`,
             [revision.id],
           )).rows.filter((attachment) => {
-            const resource = record(attachment.declaration_spec).resource;
+            const declaration = record(attachment.declaration_spec);
+            const resource = declaration.resource;
+            const condition = declaration.condition;
+            if (condition === "false") return false;
+            if (
+              condition !== null && condition !== "true" &&
+              condition !== "active()"
+            ) {
+              throw domain(
+                "hook_condition_invalid",
+                "Hook condition cannot be evaluated in the frozen stage context",
+                "validation",
+              );
+            }
             return resource === null ||
               operationResources.has(String(resource));
           });
-          const sourceFiles = array(revision.source_files).map(record);
           for (const attachment of attachments) {
-            const hookName = attachment.hook_identity.split(":")[1];
-            const hookDefinition = record(record(normalized.hooks)[hookName]);
-            const hookComponent = await loadComponentRevision(
-              tx,
-              revision.id,
-              "hook",
-              hookName,
-              hookDefinition,
-            );
-            if (hookComponent.id !== attachment.hook_revision_id) {
-              throw domain(
-                "validation_failed",
-                "Pinned hook component changed",
-                "validation",
-              );
-            }
-            const script = String(record(hookDefinition.spec).script);
-            const scriptFile = sourceFiles.find((file) =>
-              file.path === `hooks/${script}`
-            );
-            const scriptDigest = String(scriptFile?.digest ?? "");
-            if (!/^sha256:[0-9a-f]{64}$/.test(scriptDigest)) {
-              throw domain(
-                "validation_failed",
-                "Pinned hook script digest is unavailable",
-                "validation",
-              );
-            }
             const declaration = record(attachment.declaration_spec);
-            hookDeclarations.push({
-              attachment_id: attachment.id,
-              hook_revision_id: hookComponent.id,
-              pack_revision_id: revision.id,
-              hook: attachment.hook_identity,
-              phase: attachment.phase,
-              resource: declaration.resource === null
-                ? null
-                : String(declaration.resource),
-              order: attachment.ordinal,
-              script_digest: scriptDigest,
-              declaration_digest: attachment.declaration_digest,
+            const config = record(attachment.hook_normalized_config);
+            const permissions = record(config.permissions);
+            const outputSchema = String(record(config.output).schema);
+            const slots = array(config.secrets).map((value) => {
+              const slot = record(value);
+              return { slot: String(slot.slot), env: String(slot.env) };
             });
+            const matchingOperations = operations.filter((operation) =>
+              declaration.resource === null ||
+              componentIdentity(operation) === String(declaration.resource)
+            );
+            const operationKeys = declaration.resource === null
+              ? [null]
+              : matchingOperations.map((operation) => String(operation.key));
+            for (const operationKey of operationKeys) {
+              hookDeclarations.push({
+                attachment_id: attachment.id,
+                hook_revision_id: attachment.hook_revision_id,
+                pack_revision_id: revision.id,
+                hook: attachment.hook_identity,
+                phase: attachment.phase,
+                resource: declaration.resource === null
+                  ? null
+                  : String(declaration.resource),
+                operation_key: operationKey,
+                order: attachment.ordinal,
+                script_digest: attachment.hook_script_digest,
+                security_digest: attachment.hook_security_digest,
+                script_content: attachment.hook_script_content,
+                timeout_ms: Number(config.timeout_ms),
+                output_schema: outputSchema as "patch.v1" | "validation.v1",
+                permissions: {
+                  net: array(permissions.net).map(String),
+                  env: array(permissions.env).map(String),
+                },
+                secret_slots: slots,
+                input_mapping: record(declaration.input),
+                condition: declaration.condition === null
+                  ? null
+                  : String(declaration.condition),
+                effects: array(record(config.effects).operations),
+                declaration_digest: attachment.declaration_digest,
+              });
+            }
           }
           revisions.push({
             publisher,
@@ -207,17 +250,6 @@ export class PostgresStageRepository implements StageRepository {
           projects,
           pack_revisions: revisions,
           hook_declarations: hookDeclarations.sort(compareHookDeclarations),
-          grant_snapshot: {
-            principal_id: auth.principalId,
-            auth_context_id: auth.id,
-            assignment_digest: `sha256:${await canonicalSha256({
-              principal_id: auth.principalId,
-              roles: [...auth.roles].sort(),
-            })}`,
-            policy_digest: `sha256:${await canonicalSha256(
-              revisions,
-            )}`,
-          },
           proposed_states: proposedStates,
           base_states: baseStates,
         });
@@ -440,8 +472,11 @@ export class PostgresStageRepository implements StageRepository {
           const execution = record(hook!.hook_executions[ordinal]);
           await query(
             tx,
-            `insert into staged_hook_executions(id,stage_id,ordinal,attachment_id,phase,pack_revision_id,hook_revision_id,input_digest,output_digest,output_json,stderr_text,duration_ms,grant_snapshot_json)
-             values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13::jsonb)`,
+            `insert into staged_hook_executions(
+               id,stage_id,ordinal,attachment_id,phase,pack_revision_id,hook_revision_id,
+               input_digest,output_digest,output_json,script_digest,security_digest,
+               stderr_text,logs_truncated,secrets_redacted,duration_ms,grant_snapshot_json
+             ) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13,$14,$15,$16,$17::jsonb)`,
             [
               execution.id,
               id,
@@ -453,7 +488,11 @@ export class PostgresStageRepository implements StageRepository {
               execution.input_digest,
               execution.output_digest,
               execution.output,
+              execution.script_digest,
+              execution.security_digest,
               execution.stderr,
+              execution.logs_truncated,
+              execution.secrets_redacted,
               execution.duration_ms,
               record(execution.grant_snapshot),
             ],
@@ -662,7 +701,9 @@ async function prepare(
          case phase when 'changeset.before_stage' then 0 else 1 end,ordinal,hook_identity,id for share`,
       [revision.id],
     )).rows.filter((attachment) => {
-      const resource = record(attachment.declaration_spec).resource;
+      const spec = record(attachment.declaration_spec);
+      if (spec.condition === "false") return false;
+      const resource = spec.resource;
       return resource === null || resourceIdentities.has(String(resource));
     });
     const pinnedForRevision = pinnedHookDeclarations.filter((declaration) =>
@@ -670,7 +711,8 @@ async function prepare(
     );
     if (
       pinnedHookDeclarations.length &&
-      pinnedForRevision.length !== currentAttachments.length
+      new Set(pinnedForRevision.map((item) => item.attachment_id)).size !==
+        currentAttachments.length
     ) {
       throw domain(
         "hook_rejected",
@@ -678,9 +720,17 @@ async function prepare(
         "validation",
       );
     }
-    for (let index = 0; index < pinnedForRevision.length; index++) {
-      const pinned = pinnedForRevision[index];
-      const current = currentAttachments[index];
+    for (const pinned of pinnedForRevision) {
+      const current = currentAttachments.find((item) =>
+        item.id === pinned.attachment_id
+      );
+      if (!current) {
+        throw domain(
+          "hook_rejected",
+          "Pinned hook attachment disappeared before persistence",
+          "validation",
+        );
+      }
       const spec = record(current.declaration_spec);
       if (
         pinned.attachment_id !== current.id ||
@@ -1998,7 +2048,8 @@ async function load(sql: Queryable, id: string): Promise<StageDto | null> {
   const hooks = (await query<Record<string, unknown>>(
     sql,
     `select id,attachment_id,phase,pack_revision_id,hook_revision_id,input_digest,output_digest,
-      output_json output,stderr_text stderr,duration_ms,grant_snapshot_json grant_snapshot,created_at
+      output_json output,script_digest,security_digest,stderr_text stderr,logs_truncated,
+      secrets_redacted,duration_ms,grant_snapshot_json grant_snapshot,created_at
      from staged_hook_executions where stage_id=$1 order by ordinal`,
     [id],
   )).rows.map((hook) => ({
@@ -2061,7 +2112,11 @@ function compareHookDeclarations(
   right: StageHookDeclaration,
 ): number {
   return phaseOrder(left.phase) - phaseOrder(right.phase) ||
-    left.order - right.order || left.hook.localeCompare(right.hook);
+    left.order - right.order || left.hook.localeCompare(right.hook) ||
+    left.attachment_id.localeCompare(right.attachment_id) ||
+    String(left.operation_key ?? "").localeCompare(
+      String(right.operation_key ?? ""),
+    );
 }
 
 function phaseOrder(phase: string): number {

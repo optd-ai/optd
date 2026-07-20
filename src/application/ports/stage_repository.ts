@@ -38,6 +38,7 @@ export type StageDto = {
 };
 
 export interface StageRepository {
+  hasHooks?(operations: CanonicalOperation[]): Promise<boolean>;
   hookInput?(
     operations: CanonicalOperation[],
     auth: AuthContext,
