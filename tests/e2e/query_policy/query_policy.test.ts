@@ -81,24 +81,42 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       "--safe",
     ]);
     assertEquals(applied.code, 0, applied.stderr);
-    const expressionHelp = await harness.runOptctl([
-      "--json",
-      "expression",
-      "help",
+    const expressionContexts = [
+      "query",
+      "policy",
       "partial-index",
-    ]);
-    assertEquals(expressionHelp.code, 0, expressionHelp.stderr);
-    assertStringIncludes(expressionHelp.stdout, "partial-index");
-    const expressionValid = await harness.runOptctl([
-      "--json",
-      "expression",
-      "validate",
-      "operant/crm:lead",
-      "--context",
-      "partial-index",
-      'status == "new" && active()',
-    ]);
-    assertEquals(expressionValid.code, 0, expressionValid.stderr);
+      "constraint",
+      "lifecycle",
+      "action",
+      "hook",
+      "axi",
+    ];
+    for (const context of expressionContexts) {
+      const expressionHelp = await harness.runOptctl([
+        "--json",
+        "expression",
+        "help",
+        context,
+      ]);
+      assertEquals(expressionHelp.code, 0, expressionHelp.stderr);
+      assertStringIncludes(expressionHelp.stdout, context);
+      const expressionValid = await harness.runOptctl([
+        "--json",
+        "expression",
+        "validate",
+        "operant/crm:lead",
+        "--context",
+        context,
+        context === "policy"
+          ? 'actor.id != "" && score >= 1'
+          : 'status == "new" && active()',
+      ]);
+      assertEquals(expressionValid.code, 0, expressionValid.stderr);
+    }
+    const cliSource = await Deno.readTextFile(
+      "src/adapters/inbound/cli-cliffy/optctl.ts",
+    );
+    assert(!/expressions\/(cel|parser)|expression_lowerer/.test(cliSource));
     const expressionInvalid = await harness.runOptctl([
       "--json",
       "expression",
@@ -112,28 +130,50 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
     assertStringIncludes(expressionInvalid.stderr, "expression_syntax");
     assertStringIncludes(expressionInvalid.stderr, "line");
     for (
-      const command of [
-        ["expression", "help", "unknown-context"],
+      const [command, code, detail] of [
         [
-          "expression",
-          "validate",
-          "operant/crm:missing",
-          "--context",
-          "query",
-          "true",
+          ["expression", "help", "unknown-context"],
+          "bad_request",
+          "unknown expression context",
         ],
         [
-          "expression",
-          "validate",
-          "operant/crm:lead",
-          "--context",
-          "query",
-          'score == "wrong"',
+          [
+            "expression",
+            "validate",
+            "operant/crm:missing",
+            "--context",
+            "query",
+            "true",
+          ],
+          "not_found",
+          "definition was not found",
         ],
-      ]
+        [
+          [
+            "expression",
+            "validate",
+            "operant/crm:lead",
+            "--context",
+            "query",
+            'score == "wrong"',
+          ],
+          "bad_request",
+          "expression_type",
+        ],
+      ] as const
     ) {
       const rejected = await harness.runOptctl(["--json", ...command]);
       assert(rejected.code !== 0, rejected.stdout);
+      const body = JSON.parse(rejected.stderr) as Envelope;
+      assertEquals(body.error?.code, code);
+      assertStringIncludes(rejected.stderr, detail);
+      if (detail === "expression_type") {
+        const details = body.error?.details as {
+          issues: Array<{ path: string; code: string }>;
+        };
+        assertEquals(details.issues[0].path, "/expression");
+        assertEquals(details.issues[0].code, "expression_type");
+      }
     }
 
     const created = await harness.runOptctl([
@@ -381,6 +421,29 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       ]);
       assert(failed.code !== 0, failed.stderr);
     }
+    const injectionLiteral = "needle' OR 1=1 -- /* ; DROP TABLE projects; */";
+    const literalResult = await runJson(harness, [
+      "--project",
+      "query-sales",
+      "query",
+      "operant/crm:lead",
+      "--where",
+      `name == ${JSON.stringify(injectionLiteral)}`,
+      "--include-total",
+    ]);
+    assertEquals(literalResult.data.items, []);
+    assertEquals(literalResult.meta.total, 0);
+    const afterLiteral = await runJson(harness, [
+      "--project",
+      "query-sales",
+      "query",
+      "operant/crm:lead",
+      "--where",
+      'name == "Typed Lead"',
+      "--include-total",
+    ]);
+    assertEquals(afterLiteral.meta.total, 3);
+
     const ordinaryPassword = "Ordinary-Query-Password-42!";
     const createdOrdinary = await harness.runOptctl([
       "--json",
@@ -433,6 +496,31 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       await requestExpressionDenied.text(),
       "authorization_insufficient",
     );
+    const requestExpressionValidateDenied = await fetch(
+      `${harness.baseUrl}/api/v1/expressions/validate`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${requestToken}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          definition: {
+            kind: "resource",
+            publisher: "operant",
+            pack: "crm",
+            name: "lead",
+          },
+          context: "query",
+          expression: "true",
+        }),
+      },
+    );
+    assertEquals(requestExpressionValidateDenied.status, 403);
+    assertStringIncludes(
+      await requestExpressionValidateDenied.text(),
+      "authorization_insufficient",
+    );
 
     const ordinaryProcess = await harness.loginProcess({
       username: "ordinary-query",
@@ -448,6 +536,25 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       from principals p join human_users h on h.principal_id=p.id
       where h.username='ordinary-query'`,
     )).rows[0];
+    const matrixRows = Array.from({ length: 8 }, (_, index) => ({
+      id: uuidV7(),
+      name: `Matrix ${index}`,
+      score: index % 2 === 0 ? 50 : 5,
+      nextActivity: index < 3
+        ? null
+        : index < 6
+        ? "2026-09-01T12:00:00Z"
+        : "2026-09-02T12:00:00Z",
+    }));
+    for (const row of matrixRows) {
+      await query(
+        harness.server.sql,
+        `insert into ${quoteIdentifier(table)}
+        (id,project_id,name,status,score,enabled,due_date,amount,next_activity_at,created_by,updated_by)
+        values($1,$2,$3,'new',$4,true,'2026-08-01',10.50,$5,$6,$6)`,
+        [row.id, project, row.name, row.score, row.nextActivity, auth],
+      );
+    }
     const ordinaryRoleAssignment = uuidV7();
     await query(
       harness.server.sql,
@@ -530,26 +637,31 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       harness.server.sql,
       "select table_name from pack_runtime_tables where publisher='operant' and pack_name='crm' and definition_kind='relationship' and definition_name='lead_viewer'",
     )).rows[0].table_name;
-    const actorEdge = uuidV7(), humanEdge = uuidV7();
-    for (
-      const [edge, subject] of [
-        [actorEdge, ordinaryIdentity.principal_id],
-        [humanEdge, ordinaryIdentity.human_user_id],
-      ]
-    ) {
+    const actorEdge = uuidV7(),
+      humanEdge = uuidV7(),
+      actorAlternateEdge = uuidV7();
+    const policyEdges = [
+      [actorEdge, ids.object, ordinaryIdentity.principal_id],
+      [humanEdge, ids.object, ordinaryIdentity.human_user_id],
+      [actorAlternateEdge, ids.projectTwoObject, ordinaryIdentity.principal_id],
+      [uuidV7(), matrixRows[1].id, ordinaryIdentity.human_user_id],
+    ];
+    for (const [edge, object, subject] of policyEdges) {
       await query(
         harness.server.sql,
         `insert into ${quoteIdentifier(viewerTable)}
         (id,project_id,from_object_id,to_object_id,created_by,updated_by)
         values($1,$2,$3,$4,$5,$5)`,
-        [edge, project, ids.object, subject, auth],
+        [edge, project, object, subject, auth],
       );
     }
     await query(
       harness.server.sql,
-      `update ${quoteIdentifier(table)}
-      set score=case when id=$1 then 42 else 5 end`,
-      [ids.object],
+      `update ${
+        quoteIdentifier(table)
+      } set score=case when id=$1 then 42 else 5 end
+      where id=any($2::uuid[])`,
+      [ids.object, [ids.object, ids.otherObject, ids.projectTwoObject]],
     );
 
     const ordinaryArgs = [
@@ -569,24 +681,41 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
         "update policy_assignments set active=true where id=$1",
         [assignment],
       );
-      const allowed = await runJson(
+      const expectedIds = mode.name === "unconditional"
+        ? [
+          ids.object,
+          ids.otherObject,
+          ids.projectTwoObject,
+          ...matrixRows.map((row) => row.id),
+        ]
+        : mode.name === "abac"
+        ? [
+          ids.object,
+          ...matrixRows.filter((row) => row.score >= 40).map((row) => row.id),
+        ]
+        : mode.name === "actor"
+        ? [ids.object, ids.projectTwoObject]
+        : mode.name === "human"
+        ? [ids.object, matrixRows[1].id]
+        : [ids.object];
+      const collected = await collectCliPages(
         harness,
-        ordinaryArgs,
         ordinaryProcess.launcher,
+        ordinaryArgs,
+        ["score:asc", "created_at:desc"],
+        2,
       );
-      const expected = mode.name === "unconditional" ? 3 : 1;
       assertEquals(
-        (allowed.data.items as unknown[]).length,
-        expected,
+        [...collected].sort(),
+        [...expectedIds].sort(),
         mode.name,
       );
-      assertEquals(allowed.meta.total, expected, mode.name);
       if (mode.name === "actor") {
         await query(
           harness.server.sql,
           `update ${quoteIdentifier(viewerTable)}
-          set archived_at=now() where id=$1`,
-          [actorEdge],
+          set archived_at=now() where id=any($1::uuid[])`,
+          [[actorEdge, actorAlternateEdge]],
         );
         await expectCliEmpty(harness, ordinaryProcess.launcher, ordinaryArgs);
         await query(
@@ -673,7 +802,95 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       ordinaryArgs,
       ordinaryProcess.launcher,
     );
-    assertEquals(allProjectsAllowed.meta.total, 3);
+    assertEquals(allProjectsAllowed.meta.total, 11);
+    await query(
+      harness.server.sql,
+      `update ${
+        quoteIdentifier(table)
+      } set created_at='2026-01-01T00:00:00.000Z'
+      where project_id=$1`,
+      [project],
+    );
+    for (const direction of ["asc", "desc"] as const) {
+      const nullableOrder = await collectCliPages(
+        harness,
+        ordinaryProcess.launcher,
+        ordinaryArgs,
+        [
+          `next_activity_at:${direction}`,
+          `score:${direction === "asc" ? "desc" : "asc"}`,
+        ],
+        2,
+      );
+      const expectedOrder = (await query<{ id: string }>(
+        harness.server.sql,
+        `select id from ${
+          quoteIdentifier(table)
+        } where project_id=$1 and archived_at is null
+        order by next_activity_at ${direction} nulls ${
+          direction === "asc" ? "last" : "first"
+        },
+        score ${direction === "asc" ? "desc" : "asc"} nulls ${
+          direction === "asc" ? "first" : "last"
+        },
+        id ${direction === "asc" ? "desc" : "asc"}`,
+        [project],
+      )).rows.map((row) => row.id);
+      assertEquals(nullableOrder, expectedOrder);
+      const nullIds = new Set(
+        matrixRows.filter((row) => row.nextActivity === null).map((row) =>
+          row.id
+        ),
+      );
+      const nullPositions = nullableOrder
+        .map((id, index) => nullIds.has(id) ? index : -1)
+        .filter((index) => index >= 0);
+      assert(nullPositions.length > 1);
+      assert(
+        direction === "asc"
+          ? nullPositions.every((position) =>
+            position >= nullableOrder.length - nullIds.size
+          )
+          : nullPositions.every((position) => position < nullIds.size),
+      );
+    }
+    const sparseFirst = await runJson(harness, [
+      ...ordinaryArgs,
+      "--sort",
+      "created_at:asc",
+      "--limit",
+      "2",
+    ], ordinaryProcess.launcher);
+    const sparseCursor = String(sparseFirst.meta.next_cursor);
+    const preservedIds = (sparseFirst.data.items as Array<{ id: string }>).map((
+      item,
+    ) => item.id);
+    await query(
+      harness.server.sql,
+      `update ${quoteIdentifier(table)} set archived_at=now()
+      where project_id=$1 and not(id=any($2::uuid[]))`,
+      [project, preservedIds],
+    );
+    const sparseContinuation = await runJson(harness, [
+      ...ordinaryArgs,
+      "--sort",
+      "created_at:asc",
+      "--limit",
+      "2",
+      "--cursor",
+      sparseCursor,
+    ], ordinaryProcess.launcher);
+    assertEquals(sparseContinuation.data.items, []);
+    assertEquals(sparseContinuation.meta.has_more, false);
+    assertEquals(sparseContinuation.meta.total, 2);
+    await query(
+      harness.server.sql,
+      `update ${
+        quoteIdentifier(table)
+      } set archived_at=null where project_id=$1`,
+      [project],
+    );
+
     const ordinaryFirst = await runJson(harness, [
       ...ordinaryArgs,
       "--sort",
@@ -720,7 +937,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       ordinaryArgs,
       ordinaryProcess.launcher,
     );
-    assertEquals(activeOnly.meta.total, 2);
+    assertEquals(activeOnly.meta.total, 10);
     const archivedDenied = await ordinaryProcess.launcher.runOptctl([
       "--json",
       ...ordinaryArgs,
@@ -752,7 +969,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       ...ordinaryArgs,
       "--include-archived",
     ], ordinaryProcess.launcher);
-    assertEquals(archivedAllowed.meta.total, 3);
+    assertEquals(archivedAllowed.meta.total, 11);
     await query(
       harness.server.sql,
       `update ${quoteIdentifier(table)}
@@ -817,6 +1034,38 @@ async function runJson(
   const body = JSON.parse(result.stdout) as Envelope;
   assertEquals(body.ok, true);
   return body;
+}
+
+async function collectCliPages(
+  harness: Awaited<ReturnType<typeof startLiveHarness>>,
+  launcher: CliLauncher,
+  args: string[],
+  sorts: string[],
+  limit: number,
+): Promise<string[]> {
+  const ids: string[] = [];
+  let cursor: string | undefined;
+  let total: number | undefined;
+  do {
+    const page = await runJson(harness, [
+      ...args,
+      ...sorts.flatMap((sort) => ["--sort", sort]),
+      "--limit",
+      String(limit),
+      ...(cursor ? ["--cursor", cursor] : []),
+    ], launcher);
+    const items = page.data.items as Array<{ id: string }>;
+    total ??= Number(page.meta.total);
+    assertEquals(page.meta.total, total);
+    if (page.meta.has_more) assertEquals(items.length, limit);
+    for (const item of items) {
+      assert(!ids.includes(item.id), `duplicate paginated id ${item.id}`);
+      ids.push(item.id);
+    }
+    cursor = page.meta.has_more ? String(page.meta.next_cursor) : undefined;
+  } while (cursor);
+  assertEquals(ids.length, total);
+  return ids;
 }
 
 async function expectCliEmpty(

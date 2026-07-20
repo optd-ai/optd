@@ -573,12 +573,17 @@ function keysetSql(
         } is not distinct from $${params.length}`,
       );
     }
-    params.push(values[i]);
-    const p = `$${params.length}`,
-      col = `q.${qi(column(sort[i].field, kind))}`,
+    const col = `q.${qi(column(sort[i].field, kind))}`;
+    let after: string;
+    if (values[i] === null) {
+      after = sort[i].direction === "asc" ? "false" : `${col} is not null`;
+    } else {
+      params.push(values[i]);
+      const p = `$${params.length}`;
       after = sort[i].direction === "asc"
-        ? (values[i] === null ? "false" : `(${col}>${p} or ${col} is null)`)
-        : (values[i] === null ? `${col} is not null` : `${col}<${p}`);
+        ? `(${col}>${p} or ${col} is null)`
+        : `${col}<${p}`;
+    }
     clauses.push(`(${[...equal, after].join(" and ")})`);
   }
   return `(${clauses.join(" or ")})`;
