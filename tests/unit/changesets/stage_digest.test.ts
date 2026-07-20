@@ -9,10 +9,15 @@ const base: StageEvidence = {
   projects: [{ project_id: "project-a", version: 1, status: "active" }],
   pack_revisions: [{ id: "pack-a", digest: `sha256:${"1".repeat(64)}` }],
   operations: [{ op: "create", project_id: "project-a" }] as never,
-  dependencies: [{ kind: "resource", component_revision_id: "component-a" }],
+  dependencies: [{
+    kind: "resource",
+    component_revision_id: "component-a",
+    hook_declaration: { attachment_id: "attachment-a" },
+  }],
   hook_executions: [{
     id: "hook-a",
     output_digest: `sha256:${"2".repeat(64)}`,
+    output: { effects: ["effect-a"] },
   }],
   policy_decisions: [{ id: "policy-a", allowed: true }],
   approval_requirements: [{ id: "approval-a", capability: "review" }],
@@ -31,18 +36,28 @@ Deno.test("stage digest includes every frozen evidence category", async () => {
       projects: [{ project_id: "project-a", version: 2 }],
     }],
     ["pack", { ...base, pack_revisions: [{ id: "pack-b" }] }],
-    ["component/dependency", {
+    ["component revision", {
       ...base,
       dependencies: [{
         kind: "resource",
         component_revision_id: "component-b",
+        hook_declaration: { attachment_id: "attachment-a" },
       }],
     }],
-    ["security/hook", {
+    ["hook declaration", {
+      ...base,
+      dependencies: [{
+        kind: "resource",
+        component_revision_id: "component-a",
+        hook_declaration: { attachment_id: "attachment-b" },
+      }],
+    }],
+    ["hook output", {
       ...base,
       hook_executions: [{
         id: "hook-a",
         output_digest: `sha256:${"3".repeat(64)}`,
+        output: { effects: ["effect-b"] },
       }],
     }],
     ["policy", {

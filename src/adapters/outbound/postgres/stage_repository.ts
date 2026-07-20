@@ -717,6 +717,7 @@ async function prepare(
   const decisions: Record<string, unknown>[] = [];
   const operationRows: Prepared["operationRows"] = [];
   const stagedLinkSignatures = new Set<string>();
+  const stagedUniqueSignatures = new Set<string>();
   const creates = new Map(
     operations.filter((op) => op.op === "create").map((
       op,
@@ -910,6 +911,7 @@ async function prepare(
       component.id,
       componentDigest,
       dependencies,
+      stagedUniqueSignatures,
     );
     operationRows.push({
       operationId: uuidV7(),
@@ -1724,6 +1726,7 @@ async function validateUniqueness(
   componentRevisionId: string,
   componentDigest: string,
   dependencies: Record<string, unknown>[],
+  stagedUniqueSignatures: Set<string>,
 ): Promise<void> {
   if (!["create", "update", "transition"].includes(operation.op)) return;
   const fieldDefinitions = record(record(definition.spec).fields);
@@ -1871,6 +1874,20 @@ async function validateUniqueness(
       params.push(proposed[field]);
       return `${quoteIdentifier(field)} is not distinct from $${params.length}`;
     });
+    const signature = canonicalJson([
+      operation.project_id,
+      `${parsed.publisher}/${parsed.pack}:${parsed.name}`,
+      fields,
+      fields.map((field) => proposed[field]),
+    ]);
+    if (stagedUniqueSignatures.has(signature)) {
+      throw domain(
+        "operation_conflict",
+        "Sibling proposed states violate uniqueness",
+        "conflict",
+      );
+    }
+    stagedUniqueSignatures.add(signature);
     const duplicate = (await query<{ id: string }>(
       sql,
       `select id from ${

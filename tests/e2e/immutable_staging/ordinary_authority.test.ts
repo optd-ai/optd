@@ -203,6 +203,66 @@ Deno.test({
       );
       await disableAuthority(harness, humanRelation);
 
+      const commentGrant = await installAuthority(harness, {
+        principal: human.principal_id,
+        project: alpha,
+        candidate: facts.candidate,
+        role: "test/stage:commenter",
+        actions: ["comment"],
+        condition: "unconditional",
+        boundary: "project",
+        rootAuth,
+      });
+      await query(
+        harness.server.sql,
+        `update ${
+          quoteIdentifier(facts.itemTable)
+        } set archived_at=now() where id=$1`,
+        [facts.neither],
+      );
+      const beforeArchivedComment = await stageCount(harness);
+      await expectStageDenied(harness, humanProcess.launcher, {
+        project_id: alpha,
+        operations: [{
+          op: "comment",
+          project_id: alpha,
+          resource: "test/stage:item",
+          object_id: facts.neither,
+          body: "archived",
+        }],
+      });
+      assertEquals(await stageCount(harness), beforeArchivedComment);
+      const archivedReadGrant = await installAuthority(harness, {
+        principal: human.principal_id,
+        project: alpha,
+        candidate: facts.candidate,
+        role: "test/stage:archived-reader",
+        actions: ["read_archived"],
+        condition: "unconditional",
+        boundary: "project",
+        rootAuth,
+      });
+      const archivedComment = await stage(harness, humanProcess.launcher, {
+        project_id: alpha,
+        operations: [{
+          op: "comment",
+          project_id: alpha,
+          resource: "test/stage:item",
+          object_id: facts.neither,
+          body: "archived allowed",
+        }],
+      });
+      assertEquals(archivedComment.code, 0, archivedComment.stderr);
+      await query(
+        harness.server.sql,
+        `update ${
+          quoteIdentifier(facts.itemTable)
+        } set archived_at=null where id=$1`,
+        [facts.neither],
+      );
+      await disableAuthority(harness, commentGrant);
+      await disableAuthority(harness, archivedReadGrant);
+
       const combined = await installAuthority(harness, {
         principal: human.principal_id,
         project: alpha,
@@ -979,6 +1039,7 @@ async function seedObjects(
   }
   return {
     candidate: metadata.candidate,
+    itemTable: metadata.item_table,
     viewerTable: metadata.viewer_table,
     ...values,
   };

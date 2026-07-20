@@ -1229,6 +1229,16 @@ export const platformMigrations: PlatformMigration[] = [
         on pack_hook_attachment_revisions(candidate_revision_id,hook_revision_id,phase,ordinal);
     `,
   },
+  {
+    id: "1023_hook_attachment_component_ordinal_identity",
+    sql: `
+      drop index pack_hook_attachment_candidate_hook_phase_ordinal_unique;
+      create unique index pack_hook_attachment_component_ordinal_unique
+        on pack_hook_attachment_revisions(
+          candidate_revision_id,hook_revision_id,component_revision_id,phase,ordinal
+        ) nulls not distinct;
+    `,
+  },
 ];
 
 export async function applyPlatformMigrations(

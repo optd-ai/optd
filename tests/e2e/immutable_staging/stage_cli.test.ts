@@ -74,10 +74,59 @@ Deno.test({
           metadata: { name: "item" },
           spec: {
             fields: {
-              name: { type: "string", required: true },
-              state: { type: "string", required: true },
-              score: { type: "integer" },
+              name: {
+                type: "string",
+                required: true,
+                minLength: 2,
+                maxLength: 40,
+              },
+              state: { type: "string", required: true, enum: ["new", "done"] },
+              score: { type: "integer", minimum: 0, maximum: 10 },
+              code: {
+                type: "string",
+                minLength: 2,
+                maxLength: 8,
+                unique: true,
+              },
+              email: { type: "string", format: "email" },
+              amount: {
+                type: "decimal",
+                precision: 5,
+                scale: 2,
+                minimum: "0.01",
+                maximum: "999.99",
+              },
+              due_date: {
+                type: "date",
+                minimum: "2026-01-01",
+                maximum: "2026-12-31",
+              },
+              occurs_at: {
+                type: "timestamp",
+                minimum: "2026-01-01T00:00:00Z",
+                maximum: "2026-12-31T23:59:59Z",
+              },
+              ref_id: {
+                type: "string",
+                ref: "testpub/strict:item",
+              },
+              completed_note: { type: "string" },
+              result: { type: "string" },
             },
+            constraints: [
+              {
+                name: "name_check",
+                kind: "check",
+                expression: "name != 'forbidden'",
+              },
+              {
+                name: "ref_fk",
+                kind: "foreign_key",
+                fields: ["ref_id"],
+                target: { resource: "testpub/strict:item", fields: ["id"] },
+                onDelete: "restrict",
+              },
+            ],
             axi: {},
           },
         }),
@@ -92,6 +141,7 @@ Deno.test({
             from: { resource: "testpub/strict:item" },
             to: { resource: "testpub/strict:item" },
             fields: { label: { type: "string" } },
+            unique: ["from", "to"],
             axi: {},
           },
         }),
@@ -106,8 +156,18 @@ Deno.test({
             resource: "testpub/strict:item",
             field: "state",
             initial: "new",
-            states: [{ name: "new" }, { name: "done", terminal: true }],
-            transitions: [{ name: "finish", from: ["new"], to: "done" }],
+            states: [{ name: "new" }, {
+              name: "done",
+              terminal: true,
+              required_fields: ["completed_note"],
+            }],
+            transitions: [{
+              name: "finish",
+              from: ["new"],
+              to: "done",
+              condition: "score >= 1",
+              set: { result: "finished" },
+            }],
             axi: {},
           },
         }),
@@ -147,7 +207,7 @@ Deno.test({
           op: "create",
           key: "item",
           resource: "testpub/strict:item",
-          fields: { name: "A", state: "new" },
+          fields: { name: "AA", state: "new" },
         }, {
           op: "update",
           project_id: projectId,
@@ -167,6 +227,7 @@ Deno.test({
           object_id: facts.transitionId,
           expected_version: 1,
           to: "done",
+          set: { completed_note: "complete" },
         }, {
           op: "archive",
           project_id: projectId,
@@ -177,8 +238,8 @@ Deno.test({
           op: "link",
           project_id: betaProjectId,
           relationship: "testpub/strict:item_link",
-          from: facts.betaFromId,
-          to: facts.betaToId,
+          from: facts.betaToId,
+          to: facts.betaThirdId,
           fields: { label: "peer" },
         }, {
           op: "unlink",
@@ -197,6 +258,18 @@ Deno.test({
       const firstEnvelope = JSON.parse(first.stdout);
       const firstData = firstEnvelope.data ?? firstEnvelope;
       if (!firstData.id) throw new Error(first.stdout);
+      const createdOperation = firstData.operations.find((
+        operation: { op: string },
+      ) => operation.op === "create");
+      assertEquals(createdOperation.fields.state, "new");
+      const transitionOperation = firstData.operations.find((
+        operation: { op: string },
+      ) => operation.op === "transition");
+      assertEquals(transitionOperation.to, "done");
+      assertEquals(transitionOperation.set, {
+        completed_note: "complete",
+        result: "finished",
+      });
       const inspect = await harness.runOptctl([
         "--json",
         "changeset",
@@ -205,6 +278,15 @@ Deno.test({
       ]);
       assertEquals(inspect.code, 0, inspect.stderr);
       assertEquals(JSON.parse(inspect.stdout).data, firstData);
+      await harness.restart();
+      const restartedInspect = await harness.runOptctl([
+        "--json",
+        "changeset",
+        "inspect",
+        firstData.id,
+      ]);
+      assertEquals(restartedInspect.code, 0, restartedInspect.stderr);
+      assertEquals(JSON.parse(restartedInspect.stdout).data, firstData);
       const second = await harness.runJson(
         ["--json", "changeset", "stage"],
         request,
@@ -324,6 +406,44 @@ Deno.test({
           "validation_failed",
         );
       }
+      for (
+        const duplicate of [
+          {
+            project_id: betaProjectId,
+            operations: [{
+              op: "link",
+              relationship: "testpub/strict:item_link",
+              from: facts.betaFromId,
+              to: facts.betaToId,
+              fields: { label: "physical-duplicate" },
+            }],
+          },
+          {
+            project_id: betaProjectId,
+            operations: [{
+              op: "link",
+              relationship: "testpub/strict:item_link",
+              from: facts.betaFromId,
+              to: facts.betaThirdId,
+            }, {
+              op: "link",
+              relationship: "testpub/strict:item_link",
+              from: facts.betaFromId,
+              to: facts.betaThirdId,
+            }],
+          },
+        ]
+      ) {
+        const rejected = await harness.runJson(
+          ["--json", "changeset", "stage"],
+          duplicate,
+        );
+        assertEquals(rejected.code, 1, rejected.stderr);
+        assertEquals(
+          JSON.parse(rejected.stderr).error.code,
+          "operation_conflict",
+        );
+      }
       const itemTable = (await query<{ table_name: string }>(
         harness.server.sql,
         "select table_name from pack_runtime_tables where publisher='testpub' and pack_name='strict' and definition_kind='resource' and definition_name='item'",
@@ -385,6 +505,65 @@ Deno.test({
               fields: { name: "bad", state: "new", score: "wrong" },
             }],
           },
+          ...[
+            { name: "x", state: "new" },
+            { name: "bad-enum", state: "invalid" },
+            { name: "low-int", state: "new", score: -1 },
+            { name: "high-int", state: "new", score: 11 },
+            { name: "forbidden", state: "new", score: 9 },
+            { name: "duplicate", state: "new", code: "taken" },
+            { name: "email", state: "new", email: "invalid" },
+            { name: "decimal", state: "new", amount: "01.0" },
+            { name: "precision", state: "new", amount: "1234.56" },
+            { name: "scale", state: "new", amount: "1.234" },
+            { name: "range", state: "new", amount: "1000" },
+            { name: "date", state: "new", due_date: "2026-02-30" },
+            { name: "date-range", state: "new", due_date: "2027-01-01" },
+            {
+              name: "timestamp",
+              state: "new",
+              occurs_at: "2026-01-01T00:00:00+00:00",
+            },
+            { name: "reference", state: "new", ref_id: uuidV7() },
+          ].map((fields) => ({
+            project_id: projectId,
+            operations: [{
+              op: "create",
+              resource: "testpub/strict:item",
+              fields,
+            }],
+          })),
+          {
+            project_id: projectId,
+            operations: [{
+              op: "create",
+              resource: "testpub/strict:item",
+              fields: { name: "sibling-a", state: "new", code: "sibling" },
+            }, {
+              op: "create",
+              resource: "testpub/strict:item",
+              fields: { name: "sibling-b", state: "new", code: "sibling" },
+            }],
+          },
+          {
+            project_id: projectId,
+            operations: [{
+              op: "transition",
+              resource: "testpub/strict:item",
+              object_id: facts.conditionId,
+              to: "done",
+              set: { completed_note: "condition" },
+            }],
+          },
+          {
+            project_id: projectId,
+            operations: [{
+              op: "transition",
+              resource: "testpub/strict:item",
+              object_id: facts.transitionId,
+              to: "done",
+            }],
+          },
           {
             project_id: projectId,
             operations: [{
@@ -437,7 +616,18 @@ Deno.test({
           ["--json", "changeset", "stage"],
           invalid,
         );
-        assertEquals(rejected.code, 1, rejected.stderr);
+        assertEquals(
+          rejected.code,
+          1,
+          `${JSON.stringify(invalid)}\n${rejected.stderr}`,
+        );
+        const error = JSON.parse(rejected.stderr).error;
+        assertEquals(typeof error.code, "string");
+        assertEquals(typeof error.message, "string");
+        assertEquals(
+          /select |pack_runtime|res_testpub/i.test(rejected.stderr),
+          false,
+        );
       }
       assertEquals(
         (await query<{ count: string }>(
@@ -693,6 +883,21 @@ Deno.test({
           ["pack_component_revisions", "id", laterItemComponent],
           ["pack_hook_attachment_revisions", "id", attachment.id],
         ] as const;
+        const immutableCatalog = (await query<{ table_name: string }>(
+          harness.server.sql,
+          `select c.relname table_name from pg_trigger t
+           join pg_class c on c.oid=t.tgrelid
+           where not t.tgisinternal and t.tgname like '%immutable%'
+             and c.relname in ('staged_changesets','staged_changeset_operations',
+              'staged_changeset_dependencies','staged_hook_executions',
+              'staged_policy_decisions','staged_approval_requirements',
+              'staged_approval_decisions','pack_component_revisions',
+              'pack_hook_attachment_revisions') order by c.relname`,
+        )).rows.map((row) => row.table_name);
+        assertEquals(
+          immutableCatalog,
+          immutableRows.map((row) => row[0]).sort(),
+        );
         for (const [table, column, id] of immutableRows) {
           await assertRejects(() =>
             query(
@@ -708,6 +913,55 @@ Deno.test({
               [id],
             )
           );
+        }
+
+        const beforeFaults = await stageEvidenceCounts(harness);
+        for (
+          const table of [
+            "staged_changesets",
+            "staged_changeset_operations",
+            "staged_changeset_dependencies",
+            "staged_hook_executions",
+            "staged_policy_decisions",
+            "staged_approval_requirements",
+            "staged_changeset_lifecycle",
+          ]
+        ) {
+          await query(
+            harness.server.sql,
+            `create function test_fail_stage_insert() returns trigger language plpgsql as $$
+             begin raise exception 'injected ${table} insertion failure'; end $$`,
+          );
+          await query(
+            harness.server.sql,
+            `create trigger test_fail_stage_insert_trigger before insert on ${table}
+             for each row execute function test_fail_stage_insert()`,
+          );
+          try {
+            const failed = await injected.stage({
+              project_id: projectId,
+              operations: [{
+                op: "create",
+                resource: "testpub/strict:item",
+                fields: { name: `fault-${table}` },
+              }],
+            }, directAuth);
+            assertEquals(failed.ok, false, table);
+            assertEquals(
+              await stageEvidenceCounts(harness),
+              beforeFaults,
+              table,
+            );
+          } finally {
+            await query(
+              harness.server.sql,
+              `drop trigger test_fail_stage_insert_trigger on ${table}`,
+            );
+            await query(
+              harness.server.sql,
+              "drop function test_fail_stage_insert()",
+            );
+          }
         }
 
         await query(
@@ -749,6 +1003,20 @@ Deno.test({
   },
 });
 
+async function stageEvidenceCounts(harness: LiveHarness) {
+  return (await query<Record<string, string>>(
+    harness.server.sql,
+    `select
+      (select count(*)::text from staged_changesets) roots,
+      (select count(*)::text from staged_changeset_operations) operations,
+      (select count(*)::text from staged_changeset_dependencies) dependencies,
+      (select count(*)::text from staged_hook_executions) hooks,
+      (select count(*)::text from staged_policy_decisions) policies,
+      (select count(*)::text from staged_approval_requirements) approvals,
+      (select count(*)::text from staged_changeset_lifecycle) lifecycle`,
+  )).rows[0];
+}
+
 async function seedCurrentFacts(
   harness: LiveHarness,
   alpha: string,
@@ -769,6 +1037,7 @@ async function seedCurrentFacts(
   )).rows[0];
   const ids = {
     transitionId: uuidV7(),
+    conditionId: uuidV7(),
     archiveId: uuidV7(),
     betaFromId: uuidV7(),
     betaToId: uuidV7(),
@@ -776,13 +1045,14 @@ async function seedCurrentFacts(
     relationshipId: uuidV7(),
   };
   const objects = [
-    [alpha, ids.transitionId, "Transition"],
-    [alpha, ids.archiveId, "Archive"],
-    [beta, ids.betaFromId, "From"],
-    [beta, ids.betaToId, "To"],
-    [beta, ids.betaThirdId, "Third"],
+    [alpha, ids.transitionId, "Transition", 1, "taken"],
+    [alpha, ids.conditionId, "Condition", 0, null],
+    [alpha, ids.archiveId, "Archive", null, null],
+    [beta, ids.betaFromId, "From", null, null],
+    [beta, ids.betaToId, "To", null, null],
+    [beta, ids.betaThirdId, "Third", null, null],
   ] as const;
-  for (const [project, objectId, name] of objects) {
+  for (const [project, objectId, name, score, code] of objects) {
     const commitId = await prerequisiteCommit(
         harness,
         metadata.auth_context_id,
@@ -793,7 +1063,7 @@ async function seedCurrentFacts(
       `insert into object_versions(id,project_id,definition_kind,resource_identity,object_id,version,changeset_commit_id,operation,resource_revision,snapshot_json,changed_fields,auth_context_id)
        values($1,$2,'resource','testpub/strict:item',$3,1,$4,'create',$5,$6::jsonb,array['name','state'],$7)`,
       [versionId, project, objectId, commitId, metadata.revision_id, {
-        data: { name, state: "new" },
+        data: { name, state: "new", score, code },
         archived_at: null,
       }, metadata.auth_context_id],
     );
@@ -801,8 +1071,16 @@ async function seedCurrentFacts(
       harness.server.sql,
       `insert into ${
         quoteIdentifier(metadata.resource_table)
-      }(id,project_id,version,current_object_version_id,created_by,updated_by,name,state,score) values($1,$2,1,$3,$5,$5,$4,'new',null)`,
-      [objectId, project, versionId, name, metadata.auth_context_id],
+      }(id,project_id,version,current_object_version_id,created_by,updated_by,name,state,score,code) values($1,$2,1,$3,$7,$7,$4,'new',$5,$6)`,
+      [
+        objectId,
+        project,
+        versionId,
+        name,
+        score,
+        code,
+        metadata.auth_context_id,
+      ],
     );
   }
   const relationshipVersion = uuidV7(),

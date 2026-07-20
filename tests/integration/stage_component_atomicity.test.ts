@@ -317,7 +317,7 @@ async function assertConstraintMatrix(sql: Sql, value: Projection) {
       sql,
       `select count(*)::text count from pg_indexes where indexname in
        ('pack_component_revisions_candidate_revision_id_definition_k_key',
-        'pack_hook_attachment_candidate_hook_phase_ordinal_unique')`,
+        'pack_hook_attachment_component_ordinal_unique')`,
     )).rows[0].count,
     "2",
   );
