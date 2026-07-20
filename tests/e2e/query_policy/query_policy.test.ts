@@ -698,7 +698,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       ordinaryCursor,
     ]);
     assert(revokedCursor.code !== 0);
-    assertStringIncludes(revokedCursor.stderr, "not_found");
+    assertStringIncludes(revokedCursor.stderr, "invalid_cursor");
     await query(
       harness.server.sql,
       `update policy_assignments set active=true,

@@ -160,7 +160,7 @@ async function execute(
     definition.identity,
     "read",
   );
-  if (!superAdmin && !readRules.length) throw hidden();
+  if (!superAdmin && !readRules.length && !request.cursor) throw hidden();
   let archivedRules: PolicyRow[] = [];
   if (request.include_archived && !superAdmin) {
     archivedRules = await policyRows(
@@ -170,7 +170,7 @@ async function execute(
       definition.identity,
       "read_archived",
     );
-    if (!archivedRules.length) throw hidden();
+    if (!archivedRules.length && !request.cursor) throw hidden();
   }
 
   const params: unknown[] = [request.project_id];
