@@ -1,3 +1,4 @@
+import { ObjectReadAuthorityInvalidError } from "../../../application/ports/object_reader.ts";
 import type {
   StageDto,
   StageRepository,
@@ -483,7 +484,7 @@ export class PostgresStageRepository implements StageRepository {
         return ok(await load(tx, id)!);
       }) as Result<StageDto>;
     } catch (error) {
-      return mapError(error);
+      return mapStageError(error);
     }
   }
 
@@ -1312,7 +1313,12 @@ async function validateCurrent(
         fields: fieldSpecs,
         actor: {
           id: { type: "string", value: auth.principalId },
-          human_user_id: { type: "string", value: auth.humanUserId },
+          human_user_id: {
+            type: "string",
+            value: auth.principalType === "agent_user"
+              ? null
+              : auth.humanUserId,
+          },
         },
         alias: "proposed",
         parameterOffset: names.length,
@@ -1499,7 +1505,12 @@ async function evaluateStagePolicy(
         fields,
         actor: {
           id: { type: "string", value: auth.principalId },
-          human_user_id: { type: "string", value: auth.humanUserId },
+          human_user_id: {
+            type: "string",
+            value: auth.principalType === "agent_user"
+              ? null
+              : auth.humanUserId,
+          },
         },
         alias: "proposed",
         parameterOffset: names.length,
@@ -1674,6 +1685,8 @@ async function evaluateDirectRelation(
     : operation.object_id;
   const subjectId = rule.relation_subject === "actor.id"
     ? auth.principalId
+    : auth.principalType === "agent_user"
+    ? null
     : auth.humanUserId;
   return Boolean(
     (await query<{ allowed: boolean }>(
@@ -2322,9 +2335,19 @@ function mapError(error: unknown): Result<never> {
     details: {},
   });
 }
+function mapStageError(error: unknown): Result<never> {
+  if (error instanceof ObjectReadAuthorityInvalidError) {
+    return err({
+      code: "authorization_insufficient",
+      message: "current authority is no longer valid",
+      severity: "authorization",
+      details: {},
+    });
+  }
+  return mapError(error);
+}
 function mapAccessError(error: unknown): Result<never> {
-  const item = error as { code?: string };
-  if (item.code === "OBJECT_READ_AUTHORITY_INVALID") return err(notFound());
+  if (error instanceof ObjectReadAuthorityInvalidError) return err(notFound());
   return mapError(error);
 }
 function notFound() {
