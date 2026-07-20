@@ -49,6 +49,9 @@ export class HistoryCursorSigner {
       throw new Error("bad cursor");
     }
     const bytes = decodeBase64Url(cursor);
+    if (!constantTimeDigestEqual(cursor, encodeBase64Url(bytes))) {
+      throw new Error("bad cursor");
+    }
     if (bytes.length <= 32) throw new Error("bad cursor");
     const signature = bytes.slice(0, 32);
     const payload = bytes.slice(32);

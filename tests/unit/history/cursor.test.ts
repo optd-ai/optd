@@ -77,6 +77,29 @@ Deno.test("history cursors reject position, version, and ordinary-SHA recomputat
   }
 });
 
+Deno.test("history cursors reject noncanonical base64url aliases", async () => {
+  const signer = new HistoryCursorSigner("stable-master-key");
+  let canonical = "";
+  let alias: string | null = null;
+  let encodedBinding: typeof binding = binding;
+  for (let suffix = 0; suffix < 4 && alias === null; suffix++) {
+    encodedBinding = {
+      ...binding,
+      policy_digest: `policy-${"x".repeat(suffix)}`,
+    };
+    canonical = await signer.encode(encodedBinding, position);
+    alias = trailingBitAlias(canonical);
+  }
+  if (alias === null) throw new Error("expected an aliasable cursor length");
+  assertEquals(decode(alias), decode(canonical));
+  await assertRejects(() => signer.decode(alias, encodedBinding));
+  for (
+    const malformed of [`${canonical}=`, ` ${canonical}`, `${canonical}\n`]
+  ) {
+    await assertRejects(() => signer.decode(malformed, encodedBinding));
+  }
+});
+
 Deno.test("history cursor key configuration has no fallback", () => {
   assertThrows(() => new HistoryCursorSigner(" "));
 });
@@ -87,6 +110,18 @@ function decode(cursor: string) {
       "===".slice((cursor.length + 3) % 4),
   );
   return Uint8Array.from(raw, (value) => value.charCodeAt(0));
+}
+const base64UrlAlphabet =
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+function trailingBitAlias(value: string): string | null {
+  const unusedBits = value.length % 4 === 2
+    ? 4
+    : value.length % 4 === 3
+    ? 2
+    : 0;
+  if (unusedBits === 0) return null;
+  const last = base64UrlAlphabet.indexOf(value.at(-1)!);
+  return `${value.slice(0, -1)}${base64UrlAlphabet[last | 1]}`;
 }
 function encode(value: Uint8Array) {
   return btoa(String.fromCharCode(...value)).replaceAll("+", "-").replaceAll(

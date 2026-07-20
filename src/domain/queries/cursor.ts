@@ -52,6 +52,7 @@ export class QueryCursorSigner {
         throw new Error();
       }
       const bytes = unbase64url(cursor);
+      if (!constantTimeDigestEqual(cursor, base64url(bytes))) throw new Error();
       if (bytes.length <= 32 || bytes.length > 3072) throw new Error();
       const signature = bytes.slice(0, 32), payload = bytes.slice(32);
       const expected = new Uint8Array(

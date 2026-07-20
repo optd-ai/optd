@@ -366,6 +366,54 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
     assert(forgedResult.code !== 0);
     assertStringIncludes(forgedResult.stderr, "invalid_cursor");
 
+    let canonicalAlias: string | null = null;
+    let canonicalCursor = "";
+    let canonicalSort = "";
+    for (
+      const sort of ["name:asc", "amount:asc", "due_date:asc", "enabled:asc"]
+    ) {
+      const candidatePage = await runJson(harness, [
+        "--project",
+        "query-sales",
+        "query",
+        "operant/crm:lead",
+        "--where",
+        'name == "Typed Lead"',
+        "--sort",
+        sort,
+        "--limit",
+        "1",
+        "--include-total",
+      ]);
+      canonicalCursor = String(candidatePage.meta.next_cursor);
+      canonicalAlias = trailingBitAlias(canonicalCursor);
+      canonicalSort = sort;
+      if (canonicalAlias !== null) break;
+    }
+    assert(canonicalAlias !== null, "expected an aliasable query cursor");
+    assertEquals(
+      decodeBase64Url(canonicalAlias),
+      decodeBase64Url(canonicalCursor),
+    );
+    const aliasResult = await harness.runOptctl([
+      "--json",
+      "--project",
+      "query-sales",
+      "query",
+      "operant/crm:lead",
+      "--where",
+      'name == "Typed Lead"',
+      "--sort",
+      canonicalSort,
+      "--limit",
+      "1",
+      "--include-total",
+      "--cursor",
+      canonicalAlias,
+    ]);
+    assert(aliasResult.code !== 0);
+    assertStringIncludes(aliasResult.stderr, "invalid_cursor");
+
     const toon = await harness.runOptctl([
       "--project",
       "query-sales",
@@ -1842,6 +1890,28 @@ async function expectCliEmpty(
   const result = await runJson(harness, args, launcher);
   assertEquals(result.data.items, []);
   assertEquals(result.meta.total, 0);
+}
+
+const base64UrlAlphabet =
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+function trailingBitAlias(value: string): string | null {
+  const unusedBits = value.length % 4 === 2
+    ? 4
+    : value.length % 4 === 3
+    ? 2
+    : 0;
+  if (unusedBits === 0) return null;
+  const last = base64UrlAlphabet.indexOf(value.at(-1)!);
+  return `${value.slice(0, -1)}${base64UrlAlphabet[last | 1]}`;
+}
+
+function decodeBase64Url(value: string): Uint8Array {
+  const raw = atob(
+    value.replaceAll("-", "+").replaceAll("_", "/") +
+      "===".slice((value.length + 3) % 4),
+  );
+  return Uint8Array.from(raw, (character) => character.charCodeAt(0));
 }
 
 async function expectCliDenied(
