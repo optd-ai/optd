@@ -1222,6 +1222,13 @@ export const platformMigrations: PlatformMigration[] = [
         foreign key(attachment_id) references pack_hook_attachment_revisions(id);
     `,
   },
+  {
+    id: "1022_hook_attachment_ordinal_identity",
+    sql: `
+      create unique index pack_hook_attachment_candidate_hook_phase_ordinal_unique
+        on pack_hook_attachment_revisions(candidate_revision_id,hook_revision_id,phase,ordinal);
+    `,
+  },
 ];
 
 export async function applyPlatformMigrations(

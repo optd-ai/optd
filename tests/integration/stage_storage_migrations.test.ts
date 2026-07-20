@@ -15,6 +15,8 @@ import {
 } from "../../src/adapters/outbound/postgres-process/lifecycle.ts";
 import { canonicalSha256 } from "../../src/domain/ids/canonical_json.ts";
 import { isUuidV7, uuidV7 } from "../../src/domain/ids/uuid_v7.ts";
+import { storeOrReuseCandidate } from "../../src/adapters/outbound/postgres/pack_repository.ts";
+import type { LoadedPack } from "../../src/adapters/outbound/yaml/pack_loader.ts";
 
 Deno.test({
   name:
@@ -213,10 +215,11 @@ Deno.test({
           ordinal: number;
           declaration_digest: string;
           component_revision_id: string | null;
+          declaration_spec: Record<string, unknown>;
         }
       >(
         sql,
-        "select id,phase,ordinal,declaration_digest,component_revision_id from pack_hook_attachment_revisions where candidate_revision_id=$1 order by ordinal,phase",
+        "select id,phase,ordinal,declaration_digest,component_revision_id,declaration_spec from pack_hook_attachment_revisions where candidate_revision_id=$1 order by ordinal,phase",
         [candidate],
       );
       assertEquals(attachments.rows.map((row) => row.phase).sort(), [
@@ -225,13 +228,112 @@ Deno.test({
         "changeset.validate",
         "event.after_commit",
       ]);
+      const expectedAttachmentSpecs = [
+        {
+          hook: "test/upgrade:guard",
+          phase: "changeset.before_stage",
+          resource: "test/upgrade:thing",
+          action: null,
+          event: null,
+          order: 0,
+          condition: null,
+          input: {},
+        },
+        {
+          hook: "test/upgrade:guard",
+          phase: "action.stage",
+          resource: null,
+          action: "test/upgrade:run",
+          event: null,
+          order: 0,
+          condition: null,
+          input: {},
+        },
+        {
+          hook: "test/upgrade:guard",
+          phase: "changeset.validate",
+          resource: "test/upgrade:thing",
+          action: null,
+          event: null,
+          order: 0,
+          condition: null,
+          input: {},
+        },
+        {
+          hook: "test/upgrade:guard",
+          phase: "event.after_commit",
+          resource: null,
+          action: null,
+          event: "thing.changed",
+          order: 0,
+          condition: null,
+          input: {},
+        },
+      ];
       for (const attachment of attachments.rows) {
         assertEquals(isUuidV7(attachment.id), true);
+        const expected = expectedAttachmentSpecs.find((item) =>
+          item.phase === attachment.phase
+        )!;
+        assertEquals(attachment.declaration_spec, expected);
         assertEquals(
-          /^sha256:[0-9a-f]{64}$/.test(attachment.declaration_digest),
-          true,
+          attachment.declaration_digest,
+          `sha256:${await canonicalSha256(expected)}`,
+        );
+        assertEquals(
+          attachment.component_revision_id === null,
+          attachment.phase === "event.after_commit",
         );
       }
+      assertEquals(
+        (await query<{ count: string }>(
+          sql,
+          `select count(*)::text count from staged_changeset_operations o
+           join pack_component_revisions c on c.id=o.component_revision_id
+           where o.stage_id=$1 and o.component_revision_id is not null`,
+          [stage],
+        )).rows[0].count,
+        "1",
+      );
+      const legacyPack = {
+        publisher: "test",
+        name: "upgrade",
+        version: "1.0.0",
+        revision: `test/upgrade@1.0.0:sha256:${"2".repeat(64)}`,
+        sourceDigest: `sha256:${"1".repeat(64)}`,
+        manifest: {},
+        normalized: definitions,
+        sourceFiles: [],
+        resources: definitions.resources,
+        relationships: definitions.relationships,
+        lifecycles: definitions.lifecycles,
+        actions: definitions.actions,
+        hooks: definitions.hooks,
+        roles: definitions.roles,
+        policies: definitions.policies,
+        seeds: definitions.seeds,
+        scripts: {},
+      } as unknown as LoadedPack;
+      const reused = await sql.begin((tx) =>
+        storeOrReuseCandidate(tx, legacyPack)
+      );
+      assertEquals(reused, { id: candidate, reused: true });
+      assertEquals(
+        (await query<{ count: string }>(
+          sql,
+          "select count(*)::text count from pack_component_revisions where candidate_revision_id=$1",
+          [candidate],
+        )).rows[0].count,
+        "8",
+      );
+      assertEquals(
+        (await query<{ count: string }>(
+          sql,
+          "select count(*)::text count from pack_hook_attachment_revisions where candidate_revision_id=$1",
+          [candidate],
+        )).rows[0].count,
+        "4",
+      );
       await assertRejects(() =>
         query(
           sql!,
