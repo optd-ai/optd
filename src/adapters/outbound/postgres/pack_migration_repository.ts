@@ -583,7 +583,11 @@ export async function applyMigrationPlan(
     tokenId = found.id;
   }
   for (const index of statementOrder(plan)) await query(sql, statements[index]);
-  await projectPackAuthorization(sql, plan.to_pack_revision_id);
+  await projectPackAuthorization(
+    sql,
+    plan.to_pack_revision_id,
+    authContextId,
+  );
   if (testFault === "after_sql") {
     throw new Error("injected migration failure after SQL");
   }
@@ -681,6 +685,7 @@ export async function recordMigrationAttempt(
 async function projectPackAuthorization(
   sql: Queryable,
   candidateRevisionId: string,
+  applyAuthContextId: string,
 ): Promise<void> {
   const candidate = await query<
     {
@@ -706,13 +711,32 @@ async function projectPackAuthorization(
   const roles = definitions(normalized, "roles");
   const policies = definitions(normalized, "policies");
   const prefix = `${row.publisher}/${row.pack_name}:`;
+  const explicitAssignments = (await query<{
+    id: string;
+    policy_id: string;
+    boundary_type: "system" | "all_projects" | "project";
+    project_id: string | null;
+    source: "operator";
+    created_by_auth_context_id: string | null;
+  }>(
+    sql,
+    `select pa.id,pd.policy_id,pa.boundary_type,pa.project_id,pa.source,
+      pa.created_by_auth_context_id
+    from policy_assignments pa
+    join policy_definition_versions pd on pd.id=pa.policy_definition_version_id
+    where pa.active and pa.source='operator' and pd.policy_id like $1
+      and pd.candidate_revision_id is distinct from $2
+    order by pa.id for update of pa`,
+    [`${prefix}%`, candidateRevisionId],
+  )).rows;
 
   await query(
     sql,
-    `update policy_assignments pa set active=false,disabled_at=now(),version=pa.version+1
+    `update policy_assignments pa set active=false,disabled_at=now(),
+      disabled_by_auth_context_id=$3,version=pa.version+1
     from policy_definition_versions pd where pa.policy_definition_version_id=pd.id and pa.active
-      and pa.source='pack_default' and pd.policy_id like $1 and pd.candidate_revision_id is distinct from $2`,
-    [`${prefix}%`, candidateRevisionId],
+      and pd.policy_id like $1 and pd.candidate_revision_id is distinct from $2`,
+    [`${prefix}%`, candidateRevisionId, applyAuthContextId],
   );
   for (
     const [name, document] of Object.entries(roles).sort(([a], [b]) =>
@@ -840,14 +864,38 @@ async function projectPackAuthorization(
         }
       }
     }
+    for (
+      const assignment of explicitAssignments.filter((item) =>
+        item.policy_id === policyId
+      )
+    ) {
+      await query(
+        sql,
+        `insert into policy_assignments(id,policy_definition_version_id,
+          boundary_type,project_id,active,source,created_by_auth_context_id)
+        values($1,$2,$3,$4,true,$5,$6) on conflict do nothing`,
+        [
+          await stableProjectionId(
+            candidateRevisionId,
+            `carry:${assignment.id}`,
+          ),
+          definitionId,
+          assignment.boundary_type,
+          assignment.project_id,
+          assignment.source,
+          assignment.created_by_auth_context_id,
+        ],
+      );
+    }
     if (spec.default_assignment === "all_projects") {
       await query(
         sql,
-        `insert into policy_assignments(id,policy_definition_version_id,boundary_type,project_id,active,source)
-        values($1,$2,'all_projects',null,true,'pack_default') on conflict do nothing`,
+        `insert into policy_assignments(id,policy_definition_version_id,boundary_type,project_id,active,source,created_by_auth_context_id)
+        values($1,$2,'all_projects',null,true,'pack_default',$3) on conflict do nothing`,
         [
           await stableProjectionId(candidateRevisionId, `default:${name}`),
           definitionId,
+          applyAuthContextId,
         ],
       );
     }
@@ -1131,10 +1179,10 @@ function fields(
   document: Record<string, unknown> | undefined,
 ): Record<string, unknown> {
   const spec = document?.spec;
-  return spec && typeof spec === "object" && !Array.isArray(spec) &&
-      (spec as Record<string, unknown>).fields &&
-      typeof (spec as Record<string, unknown>).fields === "object"
-    ? (spec as Record<string, any>).fields
+  if (!spec || typeof spec !== "object" || Array.isArray(spec)) return {};
+  const declared = (spec as Record<string, unknown>).fields;
+  return declared && typeof declared === "object" && !Array.isArray(declared)
+    ? declared as Record<string, unknown>
     : {};
 }
 function opaqueToken() {

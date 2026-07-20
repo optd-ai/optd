@@ -148,6 +148,10 @@ export type HttpDependencies = {
     ): Promise<Result<unknown>>;
     sql(id: string, auth: AuthVariables["auth"]): Promise<Result<unknown>>;
   };
+  expressions: {
+    help(context?: string): Result<unknown>;
+    validate(input: unknown): Promise<Result<unknown>>;
+  };
   queries: {
     query(
       input: unknown,
@@ -444,6 +448,23 @@ export function makeHttpApp(
       );
     }
   });
+
+  app.get("/api/v1/expressions/help", (c) => {
+    const keys = Object.keys(c.req.queries());
+    const contexts = c.req.queries().context ?? [];
+    if (keys.some((key) => key !== "context") || contexts.length > 1) {
+      return resultJson(
+        c,
+        err(validationError("bad_request", "expression help query is invalid")),
+      );
+    }
+    return resultJson(c, deps.expressions.help(contexts[0] ?? "query"));
+  });
+  app.post(
+    "/api/v1/expressions/validate",
+    async (c) =>
+      resultJson(c, await deps.expressions.validate(await requestJson(c))),
+  );
 
   app.post("/api/v1/queries", async (c) => {
     const result = await deps.queries.query(

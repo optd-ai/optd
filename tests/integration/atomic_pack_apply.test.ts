@@ -144,6 +144,37 @@ Deno.test("atomic pack apply activates globally, is idempotent, and rolls back i
     assert(Number(projection.policies) > 0);
     assert(Number(projection.rules) > 0);
     assert(Number(projection.defaults) > 0);
+    const carryProject = uuidV7();
+    await query(
+      sql,
+      "insert into projects(id,slug,display_name,created_by_auth_context_id,updated_by_auth_context_id) values($1,'carry-project','Carry Project',$2,$2)",
+      [carryProject, auth],
+    );
+    const activePolicyVersion = (await query<{ id: string }>(
+      sql,
+      "select id from policy_definition_versions where policy_id='operant/crm:sales_access' and active",
+    )).rows[0].id;
+    const carriedAssignmentIds = [uuidV7(), uuidV7(), uuidV7()];
+    for (
+      const [index, boundary] of [
+        "project",
+        "all_projects",
+        "system",
+      ].entries()
+    ) {
+      await query(
+        sql,
+        `insert into policy_assignments(id,policy_definition_version_id,boundary_type,project_id,active,source,created_by_auth_context_id)
+         values($1,$2,$3,$4,true,'operator',$5)`,
+        [
+          carriedAssignmentIds[index],
+          activePolicyVersion,
+          boundary,
+          boundary === "project" ? carryProject : null,
+          auth,
+        ],
+      );
+    }
     const activeDefinition = await getDefinition(
       sql,
       "resources",
@@ -316,7 +347,92 @@ Deno.test("atomic pack apply activates globally, is idempotent, and rolls back i
       );
     }
 
-    const timeoutCandidate = structuredClone(pack);
+    const carryCandidate = structuredClone(pack);
+    carryCandidate.version = "0.1.8";
+    carryCandidate.sourceDigest = `sha256:${"7".repeat(64)}`;
+    carryCandidate.revision = `operant/crm@0.1.8:sha256:${"6".repeat(64)}`;
+    const carryPolicy = carryCandidate.policies.sales_access.document as {
+      spec: { default_assignment: "none" | "all_projects" };
+    };
+    carryPolicy.spec.default_assignment = "none";
+    const normalizedCarryPolicy = (carryCandidate.normalized.policies as Record<
+      string,
+      { spec: { default_assignment: "none" | "all_projects" } }
+    >).sales_access;
+    normalizedCarryPolicy.spec.default_assignment = "none";
+    const carryPlan = await createPackMigrationPlan(sql, carryCandidate, auth);
+    await sql.begin((tx) => validateMigrationPlan(tx, carryPlan.plan.id, auth));
+    await sql.begin((tx) =>
+      applyMigrationPlan(
+        tx,
+        carryPlan.plan.id,
+        {
+          acknowledgement: carryPlan.plan.class === "safe"
+            ? "safe"
+            : carryPlan.plan.class === "risky"
+            ? "reviewed"
+            : "destructive",
+        },
+        auth,
+      )
+    );
+    assertEquals(
+      (await query<{ count: string }>(
+        sql,
+        `select count(*)::text count
+        from policy_assignments pa join policy_definition_versions pd
+          on pd.id=pa.policy_definition_version_id
+        where pd.candidate_revision_id=$1 and pa.active and pa.source='operator'`,
+        [carryPlan.plan.to_pack_revision_id],
+      )).rows[0].count,
+      "3",
+    );
+    assertEquals(
+      (await query<{ count: string }>(
+        sql,
+        `select count(*)::text count
+        from policy_assignments pa join policy_definition_versions pd
+          on pd.id=pa.policy_definition_version_id
+        where pd.candidate_revision_id=$1 and pa.active and pa.source='pack_default'`,
+        [carryPlan.plan.to_pack_revision_id],
+      )).rows[0].count,
+      "0",
+    );
+    assertEquals(
+      (await query<{ count: string }>(
+        sql,
+        "select count(*)::text count from policy_assignments where id=any($1::uuid[]) and active",
+        [carriedAssignmentIds],
+      )).rows[0].count,
+      "0",
+    );
+
+    const restoredCandidate = structuredClone(pack);
+    restoredCandidate.version = "0.1.81";
+    restoredCandidate.sourceDigest = `sha256:${"5".repeat(64)}`;
+    restoredCandidate.revision = `operant/crm@0.1.81:sha256:${"4".repeat(64)}`;
+    const restoredPlan = await createPackMigrationPlan(
+      sql,
+      restoredCandidate,
+      auth,
+    );
+    await sql.begin((tx) =>
+      validateMigrationPlan(tx, restoredPlan.plan.id, auth)
+    );
+    await sql.begin((tx) =>
+      applyMigrationPlan(
+        tx,
+        restoredPlan.plan.id,
+        {
+          acknowledgement: restoredPlan.plan.class === "safe"
+            ? "safe"
+            : "reviewed",
+        },
+        auth,
+      )
+    );
+
+    const timeoutCandidate = structuredClone(restoredCandidate);
     timeoutCandidate.version = "0.1.9";
     timeoutCandidate.sourceDigest = `sha256:${"9".repeat(64)}`;
     timeoutCandidate.revision = `operant/crm@0.1.9:sha256:${"8".repeat(64)}`;

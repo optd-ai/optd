@@ -12,6 +12,7 @@ export type FieldSpec = Readonly<{
   type: FieldType;
   nullable?: boolean;
   column?: string;
+  format?: "uuid";
 }>;
 export type ActorValue = Readonly<{
   type: "string";
@@ -338,12 +339,6 @@ function select(node: KindValue<"selectExpr">, state: State): Value {
     actor.array || (typeof actor.value !== "string" && actor.value !== null)
   ) {
     throw unsupported("actor arrays or non-scalar actor values");
-  }
-  if (actor.value === null) {
-    throw new ExpressionError(
-      "expression_type",
-      `nullable actor.${node.field} cannot be compared when null`,
-    );
   }
   return parameter(actor.value, actor.type, state, ["actor", node.field]);
 }

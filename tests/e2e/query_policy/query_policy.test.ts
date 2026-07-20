@@ -58,6 +58,37 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       "--safe",
     ]);
     assertEquals(applied.code, 0, applied.stderr);
+    const expressionHelp = await harness.runOptctl([
+      "--json",
+      "expression",
+      "help",
+      "partial-index",
+    ]);
+    assertEquals(expressionHelp.code, 0, expressionHelp.stderr);
+    assertStringIncludes(expressionHelp.stdout, "partial-index");
+    const expressionValid = await harness.runOptctl([
+      "--json",
+      "expression",
+      "validate",
+      "operant/crm:lead",
+      "--context",
+      "partial-index",
+      'status == "new" && active()',
+    ]);
+    assertEquals(expressionValid.code, 0, expressionValid.stderr);
+    const expressionInvalid = await harness.runOptctl([
+      "--json",
+      "expression",
+      "validate",
+      "operant/crm:lead",
+      "--context",
+      "query",
+      "status ==",
+    ]);
+    assert(expressionInvalid.code !== 0);
+    assertStringIncludes(expressionInvalid.stderr, "expression_syntax");
+    assertStringIncludes(expressionInvalid.stderr, "line");
+
     const created = await harness.runOptctl([
       "--json",
       "project",

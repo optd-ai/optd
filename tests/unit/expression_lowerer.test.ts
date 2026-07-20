@@ -40,6 +40,25 @@ Deno.test("CEL lowerer fails closed on forbidden forms", () => {
     ]
   ) expect(source, code);
 });
+Deno.test("nullable actor human symbol preserves alternate allow candidates", () => {
+  const lowered = lowerCelToSql(
+    "id == actor.human_user_id || id == actor.id",
+    {
+      ...context,
+      actor: {
+        human_user_id: { type: "string", value: null },
+        id: { type: "string", value: "019b7a2e-7c10-7000-8000-000000000001" },
+      },
+    },
+  );
+  assertEquals(lowered.params, [
+    null,
+    "019b7a2e-7c10-7000-8000-000000000001",
+  ]);
+  assertStringIncludes(lowered.sql, '"id" = $1');
+  assertStringIncludes(lowered.sql, '"id" = $2');
+});
+
 Deno.test("CEL syntax preserves safe location", () => {
   try {
     lowerCelToSql("status ==", context);

@@ -31,10 +31,12 @@ Deno.test("query pushes assigned ABAC before count and page on PostgreSQL", asyn
       session = uuidV7(),
       authId = uuidV7(),
       project = uuidV7(),
+      projectTwo = uuidV7(),
       candidate = uuidV7(),
       roleVersion = uuidV7(),
       policyVersion = uuidV7(),
-      assignment = uuidV7();
+      assignment = uuidV7(),
+      roleAssignment = uuidV7();
     await query(
       sql,
       "insert into principals(id,type,active) values($1,'human_user',true)",
@@ -57,8 +59,8 @@ Deno.test("query pushes assigned ABAC before count and page on PostgreSQL", asyn
     );
     await query(
       sql,
-      "insert into projects(id,slug,display_name,created_by_auth_context_id,updated_by_auth_context_id) values($1,'query-project','Query Project',$2,$2)",
-      [project, authId],
+      "insert into projects(id,slug,display_name,created_by_auth_context_id,updated_by_auth_context_id) values($1,'query-project','Query Project',$3,$3),($2,'query-project-two','Query Project Two',$3,$3)",
+      [project, projectTwo, authId],
     );
     const normalized = {
       resources: {
@@ -109,7 +111,7 @@ Deno.test("query pushes assigned ABAC before count and page on PostgreSQL", asyn
     await query(
       sql,
       "insert into role_assignments(id,principal_id,role_id,boundary_type,project_id,active) values($1,$2,'operant/querytest:reader','project',$3,true)",
-      [uuidV7(), principal, project],
+      [roleAssignment, principal, project],
     );
     await query(
       sql,
@@ -161,6 +163,65 @@ Deno.test("query pushes assigned ABAC before count and page on PostgreSQL", asyn
     );
     assertEquals(result.value.total, 1);
     assertEquals(result.value.has_more, false);
+
+    const request = {
+      project_id: project,
+      definition: {
+        kind: "resource" as const,
+        publisher: "operant",
+        pack: "querytest",
+        name: "lead",
+      },
+    };
+    await query(
+      sql,
+      "update role_assignments set boundary_type='system',project_id=null where id=$1",
+      [roleAssignment],
+    );
+    await query(
+      sql,
+      "update policy_assignments set boundary_type='system',project_id=null where id=$1",
+      [assignment],
+    );
+    assertEquals((await service.query(request, auth)).ok, false);
+    assertEquals(
+      (await service.query({ ...request, project_id: projectTwo }, auth)).ok,
+      false,
+    );
+
+    await query(
+      sql,
+      "update role_assignments set boundary_type='all_projects',project_id=null where id=$1",
+      [roleAssignment],
+    );
+    await query(
+      sql,
+      "update policy_assignments set boundary_type='all_projects',project_id=null where id=$1",
+      [assignment],
+    );
+    assertEquals((await service.query(request, auth)).ok, true);
+    const allProjectsEmpty = await service.query({
+      ...request,
+      project_id: projectTwo,
+    }, auth);
+    assertEquals(allProjectsEmpty.ok, true);
+    if (allProjectsEmpty.ok) assertEquals(allProjectsEmpty.value.items, []);
+
+    await query(
+      sql,
+      "update role_assignments set boundary_type='project',project_id=$2 where id=$1",
+      [roleAssignment, project],
+    );
+    await query(
+      sql,
+      "update policy_assignments set boundary_type='project',project_id=$2 where id=$1",
+      [assignment, project],
+    );
+    assertEquals((await service.query(request, auth)).ok, true);
+    assertEquals(
+      (await service.query({ ...request, project_id: projectTwo }, auth)).ok,
+      false,
+    );
   } finally {
     if (sql) await closePostgresClient(sql).catch(() => undefined);
     if (runtime) await runtime.stop().catch(() => undefined);

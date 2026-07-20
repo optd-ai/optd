@@ -25,6 +25,7 @@ import { makeAuthorizationService } from "./services/authorization/manage_assign
 import { PostgresObjectReadBoundary } from "../adapters/outbound/postgres/object_read_boundary.ts";
 import { makeObjectReadService } from "./services/objects/read_objects.ts";
 import { HistoryCursorSigner } from "../domain/history/cursor.ts";
+import { makeExpressionService } from "./services/queries/expressions.ts";
 
 export function makeApplication(
   sql: Sql,
@@ -89,6 +90,7 @@ export function makeApplication(
         }),
     }),
     queries: makeQueryObjectsService({ sql }),
+    expressions: makeExpressionService(sql as Queryable),
     outbox: makeProcessOutboxService({
       sql: sql as Queryable,
       tx,

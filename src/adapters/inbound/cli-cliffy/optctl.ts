@@ -16,11 +16,6 @@ import {
 } from "./auth_store.ts";
 import { opaqueToken, tokenDigest } from "../../../domain/auth/token.ts";
 import { isUuidV7 } from "../../../domain/ids/uuid_v7.ts";
-import {
-  expressionHelp,
-  type FieldSpec,
-  lowerExpression,
-} from "../../../domain/expressions/cel.ts";
 
 export type OptctlRunResult = { stdout: string; stderr: string; code: number };
 type Parsed = {
@@ -125,12 +120,6 @@ export function authenticatedOutput(
   extra: Record<string, unknown> = {},
 ) {
   return { ok: true, data: { user, authenticated: true, ...extra } };
-}
-
-function cliRecord(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {};
 }
 
 function render(value: unknown, asJson?: boolean): string {
@@ -1668,21 +1657,11 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       );
     } else if (cmd === "expression" && sub === "help") {
       const context = value ?? "query";
-      if (
-        ![
-          "query",
-          "policy",
-          "partial-index",
-          "constraint",
-          "lifecycle",
-          "action",
-          "hook",
-          "axi",
-        ].includes(context)
-      ) {
-        throw usageError(`unknown expression context ${context}`);
-      }
-      result = { help: expressionHelp(context) };
+      result = await getJson(
+        `${parsed.server}/api/v1/expressions/help?context=${
+          encodeURIComponent(context)
+        }`,
+      );
     } else if (cmd === "expression" && sub === "validate" && value) {
       const args = parsed.positional.slice(3);
       const contextIndex = args.findIndex((arg) => arg === "--context");
@@ -1696,38 +1675,11 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
         throw usageError("expression validate requires an expression");
       }
       const [publisher, pack, name] = splitDefinitionIdentity(value);
-      const metadata = await getJson(
-        `${parsed.server}/metadata/packs/${publisher}/${pack}/resources/${name}${await metadataQuery(
-          parsed,
-          [],
-        )}`,
-      );
-      const data = cliRecord(cliRecord(metadata).data);
-      const descriptors = cliRecord(cliRecord(data.schema).fields);
-      const fields: Record<string, FieldSpec> = {
-        created_at: { type: "timestamp" },
-        updated_at: { type: "timestamp" },
-        archived_at: { type: "timestamp", nullable: true },
-      };
-      for (const [field, descriptorValue] of Object.entries(descriptors)) {
-        const descriptor = cliRecord(descriptorValue);
-        const type = String(descriptor.type);
-        fields[field] = {
-          type:
-            (["integer", "decimal", "boolean", "date", "timestamp"].includes(
-                type,
-              )
-              ? type
-              : "string") as FieldSpec["type"],
-          nullable: descriptor.required !== true,
-        };
-      }
-      const lowered = lowerExpression(source, { fields });
-      result = {
-        valid: true,
+      result = await postJson(`${parsed.server}/api/v1/expressions/validate`, {
+        definition: { kind: "resource", publisher, pack, name },
         context: args[contextIndex + 1],
-        normalized: lowered.normalized,
-      };
+        expression: source,
+      });
     } else if (cmd === "query" && sub) {
       const relationship = sub === "relationship";
       const identity = relationship ? parsed.positional[2] : sub;

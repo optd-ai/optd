@@ -239,6 +239,7 @@ async function execute(
         request.cursor,
         shapeDigest,
         policyDigest,
+        sort.map((item) => definition.fields[item.field]),
       );
     } catch {
       throw new QueryFailure(
@@ -295,7 +296,11 @@ async function execute(
     const last = page[page.length - 1];
     next = await cursors.encode(shapeDigest, policyDigest, {
       values: sort.map((s) =>
-        value(last, column(s.field, request.definition.kind))
+        typedValue(
+          last,
+          column(s.field, request.definition.kind),
+          definition.fields[s.field],
+        )
       ),
       id: String(last.id),
     });
@@ -340,20 +345,29 @@ async function resolveDefinition(
     spec = record(document.spec),
     descriptors = record(spec.fields);
   const fields: Record<string, FieldSpec> = {
-    id: { type: "string" },
+    id: { type: "string", format: "uuid" },
     created_at: { type: "timestamp" },
     updated_at: { type: "timestamp" },
     archived_at: { type: "timestamp", nullable: true },
   };
   if (request.definition.kind === "relationship") {
-    fields.from = { type: "string", column: "from_object_id" };
-    fields.to = { type: "string", column: "to_object_id" };
+    fields.from = {
+      type: "string",
+      column: "from_object_id",
+      format: "uuid",
+    };
+    fields.to = {
+      type: "string",
+      column: "to_object_id",
+      format: "uuid",
+    };
   }
   for (const [name, d] of Object.entries(descriptors)) {
     const desc = record(d);
     fields[name] = {
       type: fieldType(desc.type),
       nullable: desc.required !== true,
+      ...(desc.ref ? { format: "uuid" as const } : {}),
     };
   }
   return {
@@ -423,8 +437,8 @@ async function effectiveRoles(
   }>(
     sql,
     auth.authorizationId
-      ? `select ar.role_id,rv.id version_id,rv.version,ar.boundary_type from agent_authorization_roles ar join role_definition_versions rv on rv.role_id=ar.role_id and rv.active where ar.authorization_id=$1 and (ar.boundary_type in ('system','all_projects') or ar.project_id=$2) order by ar.role_id`
-      : `select ra.role_id,rv.id version_id,rv.version,ra.boundary_type from role_assignments ra join role_definition_versions rv on rv.role_id=ra.role_id and rv.active where ra.principal_id=$1 and ra.active and (ra.boundary_type in ('system','all_projects') or ra.project_id=$2) order by ra.role_id`,
+      ? `select ar.role_id,rv.id version_id,rv.version,ar.boundary_type from agent_authorization_roles ar join role_definition_versions rv on rv.role_id=ar.role_id and rv.active where ar.authorization_id=$1 and (ar.boundary_type='all_projects' or ar.project_id=$2 or (ar.role_id='system:super_admin' and ar.boundary_type='system')) order by ar.role_id`
+      : `select ra.role_id,rv.id version_id,rv.version,ra.boundary_type from role_assignments ra join role_definition_versions rv on rv.role_id=ra.role_id and rv.active where ra.principal_id=$1 and ra.active and (ra.boundary_type='all_projects' or ra.project_id=$2 or (ra.role_id='system:super_admin' and ra.boundary_type='system')) order by ra.role_id`,
     [auth.authorizationId ?? auth.principalId, project],
   )).rows;
 }
@@ -443,7 +457,7 @@ async function policyRows(
  from policy_rules pr join policy_definition_versions pd on pd.id=pr.policy_definition_version_id and pd.active
  join policy_assignments pa on pa.policy_definition_version_id=pd.id and pa.active
  left join pack_active_revisions ar on ar.candidate_revision_id=pd.candidate_revision_id
- where pr.role_id=any($1::text[]) and pr.capability=$2 and pr.resource=$3 and (pa.boundary_type in ('system','all_projects') or pa.project_id=$4)
+ where pr.role_id=any($1::text[]) and pr.capability=$2 and pr.resource=$3 and (pa.boundary_type='all_projects' or pa.project_id=$4)
  and (pd.candidate_revision_id is null or ar.candidate_revision_id is not null) order by pd.policy_id,pr.rule_name,pr.id`,
     [roles, action, resource, project],
   )).rows;
@@ -625,6 +639,13 @@ function typedValue(
 ): unknown {
   const found = value(row, field);
   if (spec?.type === "decimal") return canonicalDecimal(found);
+  if (spec?.type === "timestamp" && found !== null) {
+    const instant = new Date(String(found));
+    if (Number.isNaN(instant.getTime())) {
+      throw new QueryFailure("internal_error", "database timestamp is invalid");
+    }
+    return instant.toISOString();
+  }
   if (spec?.type === "integer" && found !== null) {
     if (typeof found !== "string" || !/^-?[0-9]+$/.test(found)) {
       throw new QueryFailure(
@@ -667,7 +688,9 @@ function canonicalDecimal(value: unknown): unknown {
   return /^-0(?:\.0*)?$/.test(normalized) ? "0" : normalized;
 }
 function timestamp(v: unknown) {
-  return v == null ? null : v instanceof Date ? v.toISOString() : String(v);
+  if (v == null) return null;
+  const instant = v instanceof Date ? v : new Date(String(v));
+  return Number.isNaN(instant.getTime()) ? String(v) : instant.toISOString();
 }
 function fieldType(v: unknown): FieldSpec["type"] {
   return ["integer", "decimal", "boolean", "date", "timestamp"].includes(
