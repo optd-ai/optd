@@ -960,6 +960,96 @@ export const platformMigrations: PlatformMigration[] = [
         on role_definition_versions(candidate_revision_id) where active;
     `,
   },
+  {
+    id: "1018_immutable_staged_changesets",
+    sql: `
+      create table staged_changesets (
+        id uuid primary key,
+        schema_version integer not null check(schema_version=1),
+        source_kind text not null check(source_kind in ('direct','action','seed')),
+        source_identity_json jsonb not null check(jsonb_typeof(source_identity_json)='object'),
+        created_auth_context_id uuid not null references auth_contexts(id),
+        creating_context_json jsonb not null check(jsonb_typeof(creating_context_json)='object'),
+        operation_graph_digest text not null check(operation_graph_digest ~ '^sha256:[0-9a-f]{64}$'),
+        stage_digest text not null check(stage_digest ~ '^sha256:[0-9a-f]{64}$'),
+        canonical_graph_json jsonb not null check(jsonb_typeof(canonical_graph_json)='object'),
+        projects_json jsonb not null check(jsonb_typeof(projects_json)='array'),
+        pack_revisions_json jsonb not null check(jsonb_typeof(pack_revisions_json)='array'),
+        warnings_json jsonb not null check(jsonb_typeof(warnings_json)='array'),
+        planned_events_json jsonb not null check(jsonb_typeof(planned_events_json)='array'),
+        planned_deliveries_json jsonb not null check(jsonb_typeof(planned_deliveries_json)='array'),
+        created_at timestamptz not null default now()
+      );
+      create table staged_changeset_operations (
+        stage_id uuid not null references staged_changesets(id), ordinal integer not null check(ordinal>=0),
+        operation_id uuid not null, project_id uuid not null references projects(id),
+        pack_revision_id uuid not null references pack_candidate_revisions(id),
+        resource_revision_id uuid not null references pack_candidate_revisions(id),
+        operation_kind text not null check(operation_kind in ('create','update','transition','archive','link','unlink','comment')),
+        object_id uuid, canonical_operation_json jsonb not null check(jsonb_typeof(canonical_operation_json)='object'),
+        primary key(stage_id,ordinal), unique(stage_id,operation_id)
+      );
+      create table staged_changeset_dependencies (
+        stage_id uuid not null references staged_changesets(id), ordinal integer not null check(ordinal>=0),
+        dependency_kind text not null check(dependency_kind in ('project','pack_revision','resource','lifecycle','object_version','relationship','uniqueness','policy','assignment')),
+        project_id uuid references projects(id), pack_revision_id uuid references pack_candidate_revisions(id),
+        resource_revision_id uuid references pack_candidate_revisions(id), object_id uuid, expected_version_id uuid references object_versions(id),
+        dependency_json jsonb not null check(jsonb_typeof(dependency_json)='object'), primary key(stage_id,ordinal)
+      );
+      create table staged_hook_executions (
+        id uuid primary key, stage_id uuid not null references staged_changesets(id), ordinal integer not null check(ordinal>=0),
+        phase text not null check(phase in ('changeset.before_stage','changeset.validate')),
+        pack_revision_id uuid not null references pack_candidate_revisions(id), hook_revision_id uuid not null,
+        input_digest text not null, output_digest text not null, output_json jsonb not null,
+        stderr_text text not null, duration_ms bigint not null check(duration_ms>=0), grant_snapshot_json jsonb not null,
+        created_at timestamptz not null default now(), unique(stage_id,ordinal)
+      );
+      create table staged_policy_decisions (
+        id uuid primary key, stage_id uuid not null references staged_changesets(id), ordinal integer not null check(ordinal>=0),
+        project_id uuid not null references projects(id), action text not null, resource_identity text not null,
+        decision_json jsonb not null check(jsonb_typeof(decision_json)='object'), unique(stage_id,ordinal)
+      );
+      create table staged_approval_requirements (
+        id uuid primary key, stage_id uuid not null references staged_changesets(id), ordinal integer not null check(ordinal>=0),
+        requirement_json jsonb not null check(jsonb_typeof(requirement_json)='object'), unique(stage_id,ordinal)
+      );
+      create table staged_changeset_lifecycle (
+        stage_id uuid primary key references staged_changesets(id),
+        status text not null check(status in ('ready','awaiting_approval','rejected','cancelled','committed')),
+        version bigint not null default 1 check(version>0), cancelled_auth_context_id uuid references auth_contexts(id),
+        cancelled_at timestamptz, cancellation_reason text check(cancellation_reason is null or octet_length(cancellation_reason)<=4096),
+        committed_at timestamptz,
+        check((status='cancelled')=(cancelled_auth_context_id is not null and cancelled_at is not null)),
+        check((status='committed')=(committed_at is not null))
+      );
+      create table staged_approval_decisions (
+        id uuid primary key, stage_id uuid not null references staged_changesets(id),
+        requirement_id uuid not null references staged_approval_requirements(id), principal_id uuid not null references principals(id),
+        decision text not null check(decision in ('approve','reject')), reason text,
+        decided_auth_context_id uuid not null references auth_contexts(id), decided_at timestamptz not null default now(),
+        unique(requirement_id,principal_id)
+      );
+      alter table changeset_commits add column stage_id uuid references staged_changesets(id),
+        add column authorization_cutoff_at timestamptz,
+        add column operation_graph_digest text;
+      create unique index changeset_commits_stage_idx on changeset_commits(stage_id);
+      alter table changeset_commits add constraint changeset_commits_stage_complete check(
+        (stage_id is null and authorization_cutoff_at is null and operation_graph_digest is null) or
+        (stage_id is not null and authorization_cutoff_at is not null and operation_graph_digest ~ '^sha256:[0-9a-f]{64}$'));
+      create function operant_reject_staged_evidence_mutation() returns trigger language plpgsql as $$
+      begin raise exception 'staged changeset evidence is immutable'; end $$;
+      create trigger staged_changesets_immutable before update or delete on staged_changesets for each row execute function operant_reject_staged_evidence_mutation();
+      create trigger staged_operations_immutable before update or delete on staged_changeset_operations for each row execute function operant_reject_staged_evidence_mutation();
+      create trigger staged_dependencies_immutable before update or delete on staged_changeset_dependencies for each row execute function operant_reject_staged_evidence_mutation();
+      create trigger staged_hooks_immutable before update or delete on staged_hook_executions for each row execute function operant_reject_staged_evidence_mutation();
+      create trigger staged_policy_immutable before update or delete on staged_policy_decisions for each row execute function operant_reject_staged_evidence_mutation();
+      create trigger staged_approvals_immutable before update or delete on staged_approval_requirements for each row execute function operant_reject_staged_evidence_mutation();
+      create trigger staged_decisions_immutable before update or delete on staged_approval_decisions for each row execute function operant_reject_staged_evidence_mutation();
+      create index staged_operations_project_idx on staged_changeset_operations(stage_id,project_id,ordinal);
+      create index staged_dependencies_stage_idx on staged_changeset_dependencies(stage_id,dependency_kind,ordinal);
+      create index staged_policy_stage_idx on staged_policy_decisions(stage_id,project_id,ordinal);
+    `,
+  },
 ];
 
 export async function applyPlatformMigrations(

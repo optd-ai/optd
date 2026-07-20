@@ -1,9 +1,9 @@
 import { SystemClock } from "./ports/clock.ts";
 import { makeInspectMetadataService } from "./services/inspect_metadata.ts";
-import { makeChangesetServices } from "./services/changeset_services.ts";
+import { makeStageChangesetService } from "./services/changesets/stage_changesets.ts";
+import { PostgresStageRepository } from "../adapters/outbound/postgres/stage_repository.ts";
 import { makePackServices } from "./services/pack_services.ts";
 import { makeQueryObjectsService } from "./services/query_objects.ts";
-import { makeRunActionService } from "./services/run_action.ts";
 import { makeMigrationServices } from "./services/migration_services.ts";
 import { makeProcessOutboxService } from "./services/process_outbox.ts";
 import { DenoHookRunner } from "../adapters/outbound/deno-hooks/hook_runner.ts";
@@ -26,6 +26,7 @@ import { PostgresObjectReadBoundary } from "../adapters/outbound/postgres/object
 import { makeObjectReadService } from "./services/objects/read_objects.ts";
 import { HistoryCursorSigner } from "../domain/history/cursor.ts";
 import { makeExpressionService } from "./services/queries/expressions.ts";
+import { err } from "../domain/errors/result.ts";
 
 export function makeApplication(
   sql: Sql,
@@ -37,11 +38,9 @@ export function makeApplication(
   const hookRunner = new DenoHookRunner({
     secretResolver: (name) => secrets.resolveSecret(name),
   });
-  const changesets = makeChangesetServices({
-    sql: sql as Queryable,
-    tx,
-    hookRunner,
-  });
+  const changesets = makeStageChangesetService(
+    new PostgresStageRepository(sql),
+  );
   const maximumHashes = Number(
     Deno.env.get("OPERANT_PASSWORD_MAX_CONCURRENT_HASHES") ?? "4",
   );
@@ -97,10 +96,23 @@ export function makeApplication(
       hookRunner,
     }),
     secrets,
-    actions: makeRunActionService({
-      sql: sql as Queryable,
-      hookRunner,
-      changesets,
-    }),
+    actions: {
+      preview() {
+        return Promise.resolve(err({
+          code: "unavailable",
+          message: "action staging is unavailable",
+          severity: "unavailable",
+          details: {},
+        }));
+      },
+      commit() {
+        return Promise.resolve(err({
+          code: "unavailable",
+          message: "action commit is unavailable",
+          severity: "unavailable",
+          details: {},
+        }));
+      },
+    },
   };
 }

@@ -9,6 +9,7 @@ import {
 } from "../../../src/domain/changesets/operations.ts";
 import {
   applyPatches,
+  compilePatchedMutation,
   PatchError,
 } from "../../../src/domain/changesets/patch.ts";
 
@@ -17,6 +18,45 @@ const generated = [
   "019b7a2e-7c10-7000-8000-000000000010",
   "019b7a2e-7c10-7000-8000-000000000011",
 ];
+
+Deno.test("all seven authored operation schemas are accepted exactly", () => {
+  const values = [
+    { op: "create", resource: "operant/crm:lead", fields: {} },
+    {
+      op: "update",
+      resource: "operant/crm:lead",
+      object_id: generated[0],
+      set: { score: 1 },
+    },
+    {
+      op: "transition",
+      resource: "operant/crm:lead",
+      object_id: generated[0],
+      to: "done",
+    },
+    { op: "archive", resource: "operant/crm:lead", object_id: generated[0] },
+    {
+      op: "link",
+      relationship: "operant/crm:lead_owner",
+      from: generated[0],
+      to: generated[1],
+    },
+    {
+      op: "unlink",
+      relationship: "operant/crm:lead_owner",
+      relationship_id: generated[0],
+    },
+    {
+      op: "comment",
+      resource: "operant/crm:lead",
+      object_id: generated[0],
+      body: "ok",
+    },
+  ];
+  for (const value of values) {
+    assertEquals(authoredOperationContract.check(value), true);
+  }
+});
 
 Deno.test("authored operations reject caller IDs and legacy aliases", () => {
   for (
@@ -125,4 +165,133 @@ Deno.test("patch engine implements pointer escapes and RFC 6902 arrays", () => {
     PatchError,
     "mutable",
   );
+});
+
+Deno.test("normalization is repeatable and rejects mutation conflicts", async () => {
+  const request = {
+    project_id: project,
+    operations: [
+      {
+        op: "create" as const,
+        key: "lead",
+        resource: "operant/crm:lead",
+        fields: { score: 1 },
+      },
+      {
+        op: "comment" as const,
+        resource: "operant/crm:lead",
+        object_id: { $ref: "lead.object_id" },
+        body: "x",
+      },
+    ],
+  };
+  assertEquals(
+    await normalizeOperations(request),
+    await normalizeOperations(request),
+  );
+  await assertRejects(
+    () =>
+      normalizeOperations({
+        project_id: project,
+        operations: [
+          {
+            op: "update",
+            resource: "operant/crm:lead",
+            object_id: generated[0],
+            set: { score: 1 },
+          },
+          {
+            op: "update",
+            resource: "operant/crm:lead",
+            object_id: generated[0],
+            set: { score: 2 },
+          },
+        ],
+      }),
+    OperationError,
+    "different values",
+  );
+  await assertRejects(
+    () =>
+      normalizeOperations({
+        project_id: project,
+        operations: [
+          {
+            op: "archive",
+            resource: "operant/crm:lead",
+            object_id: generated[0],
+          },
+          {
+            op: "update",
+            resource: "operant/crm:lead",
+            object_id: generated[0],
+            set: { score: 2 },
+          },
+        ],
+      }),
+    OperationError,
+    "archive",
+  );
+});
+
+Deno.test("normalization enforces all operational limits", async () => {
+  const request = {
+    project_id: project,
+    operations: [{
+      op: "create" as const,
+      resource: "operant/crm:lead",
+      fields: { name: "abcd" },
+    }],
+  };
+  const limits = (
+    maxOperations: number,
+    maxDepth: number,
+    maxGraphBytes: number,
+    maxStringBytes: number,
+  ) => ({ maxOperations, maxDepth, maxGraphBytes, maxStringBytes });
+  await assertRejects(
+    () => normalizeOperations(request, undefined, limits(0, 64, 1000, 100)),
+    OperationError,
+  );
+  await assertRejects(
+    () => normalizeOperations(request, undefined, limits(2, 64, 10, 100)),
+    OperationError,
+  );
+  await assertRejects(
+    () => normalizeOperations(request, undefined, limits(2, 64, 1000, 3)),
+    OperationError,
+  );
+  await assertRejects(
+    () => normalizeOperations(request, undefined, limits(2, 2, 1000, 100)),
+    OperationError,
+  );
+});
+
+Deno.test("patch failures and canonical recompilation are deterministic", () => {
+  assertThrows(
+    () =>
+      applyPatches(
+        { a: 1 },
+        [{ op: "test", path: "/a", value: 2 }],
+        new Set(["a"]),
+      ),
+    PatchError,
+    "test failed",
+  );
+  assertThrows(
+    () =>
+      applyPatches({ a: 1 }, [
+        { op: "replace", path: "/a", value: 2 },
+        { op: "replace", path: "/a", value: 3 },
+      ], new Set(["a"])),
+    PatchError,
+    "duplicate",
+  );
+  assertEquals(compilePatchedMutation(null, { z: 1, a: 2 }), {
+    fields: { a: 2, z: 1 },
+  });
+  assertEquals(compilePatchedMutation({ a: 1, b: 2 }, { a: 3, c: null }), {
+    set: { a: 3, c: null },
+    unset: ["b"],
+  });
 });

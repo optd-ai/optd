@@ -14,11 +14,7 @@ import type {
   MetadataOptions,
 } from "../../../application/services/inspect_metadata.ts";
 import type { ReadAddress } from "../../../application/ports/object_reader.ts";
-import type {
-  ChangesetCommitDto,
-  ChangesetPreviewDto,
-  ChangesetRequest,
-} from "../../../application/services/changeset_services.ts";
+import type { StageDto } from "../../../application/ports/stage_repository.ts";
 import type {
   ActionDto,
   ActionRequest,
@@ -171,15 +167,16 @@ export type HttpDependencies = {
     ): Promise<Result<ActionDto>>;
   };
   changesets: {
-    preview(input: ChangesetRequest): Promise<Result<ChangesetPreviewDto>>;
-    commit(input: ChangesetRequest): Promise<Result<ChangesetCommitDto>>;
-    view(
-      resource: string,
+    stage(
+      input: unknown,
+      auth: AuthVariables["auth"],
+    ): Promise<Result<StageDto>>;
+    inspect(id: string, auth: AuthVariables["auth"]): Promise<Result<StageDto>>;
+    cancel(
       id: string,
-      includeArchived?: boolean,
-      actor?: unknown,
-    ): Promise<Result<unknown>>;
-    history(resource: string, id: string): Promise<Result<unknown>>;
+      input: unknown,
+      auth: AuthVariables["auth"],
+    ): Promise<Result<StageDto>>;
   };
   outbox: {
     list(): Promise<Result<unknown>>;
@@ -510,15 +507,33 @@ export function makeHttpApp(
       ),
   );
 
-  app.post(
-    "/changesets/preview",
+  app.post("/api/v1/changesets/stage", async (c) => {
+    const result = await deps.changesets.stage(
+      await requestJson(c),
+      c.get("auth"),
+    );
+    if (result.ok) return c.json(successEnvelope(result.value), 201);
+    return resultJson(c, result);
+  });
+  app.get(
+    "/api/v1/changesets/:stage_id",
     async (c) =>
-      resultJson(c, await deps.changesets.preview(await authenticatedJson(c))),
+      resultJson(
+        c,
+        await deps.changesets.inspect(c.req.param("stage_id"), c.get("auth")),
+      ),
   );
   app.post(
-    "/changesets/commit",
+    "/api/v1/changesets/:stage_id/cancel",
     async (c) =>
-      resultJson(c, await deps.changesets.commit(await authenticatedJson(c))),
+      resultJson(
+        c,
+        await deps.changesets.cancel(
+          c.req.param("stage_id"),
+          await requestJson(c),
+          c.get("auth"),
+        ),
+      ),
   );
   const registerObjectReads = (
     kind: "resource" | "relationship",

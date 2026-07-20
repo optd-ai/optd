@@ -153,6 +153,40 @@ function applyArray(parent: unknown[], key: string, patch: JsonPatch): void {
   }
 }
 
+/** Recompiles a patched proposed data document into deterministic top-level mutation maps. */
+export function compilePatchedMutation(
+  before: Record<string, unknown> | null,
+  after: Record<string, unknown>,
+): { fields: Record<string, unknown> } | {
+  set?: Record<string, unknown>;
+  unset?: string[];
+} {
+  if (before === null) {
+    return {
+      fields: Object.fromEntries(
+        Object.keys(after).sort().map((
+          key,
+        ) => [key, structuredClone(after[key])]),
+      ),
+    };
+  }
+  const set: Record<string, unknown> = {};
+  const unset: string[] = [];
+  for (
+    const key of [...new Set([...Object.keys(before), ...Object.keys(after)])]
+      .sort()
+  ) {
+    if (!Object.hasOwn(after, key)) unset.push(key);
+    else if (!Object.hasOwn(before, key) || !equal(before[key], after[key])) {
+      set[key] = structuredClone(after[key]);
+    }
+  }
+  return {
+    ...(Object.keys(set).length ? { set } : {}),
+    ...(unset.length ? { unset } : {}),
+  };
+}
+
 function readChild(parent: unknown, key: string, path: string): unknown {
   if (Array.isArray(parent)) {
     if (!/^(?:0|[1-9][0-9]*)$/.test(key) || Number(key) >= parent.length) {

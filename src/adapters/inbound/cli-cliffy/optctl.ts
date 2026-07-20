@@ -425,29 +425,34 @@ async function parseSecretSetPayload(
   return payload;
 }
 async function readChangesetInput(args: string[]): Promise<unknown> {
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-    if (arg === "--file") return await readJsonFile(args[++i] ?? "");
-    if (arg.startsWith("--file=")) {
-      return await readJsonFile(arg.slice("--file=".length));
-    }
-    if (arg === "--input" || arg === "--json-input") {
-      return JSON.parse(args[++i] ?? "");
-    }
-    if (arg.startsWith("--input=")) {
-      return JSON.parse(arg.slice("--input=".length));
-    }
-    if (arg.startsWith("--json-input=")) {
-      return JSON.parse(arg.slice("--json-input=".length));
-    }
-    if (arg === "--idempotency-key") i++;
-    else if (arg.startsWith("--idempotency-key=")) continue;
-    else if (!arg.startsWith("--")) return await readJsonFile(arg);
-    else throw usageError(`unknown changeset option ${arg}`);
+  if (args.length === 1 && !args[0].startsWith("--")) {
+    return await readJsonFile(args[0]);
   }
-  throw usageError(
-    "changeset preview/commit requires <json-file>, --file, or --input JSON",
-  );
+  if (args.length === 2 && args[0] === "--file") {
+    return await readJsonFile(args[1]);
+  }
+  if (args.length === 1 && args[0].startsWith("--file=")) {
+    return await readJsonFile(args[0].slice(7));
+  }
+  throw usageError("changeset stage requires exactly one JSON file");
+}
+
+function changesetId(value: string | undefined): string {
+  if (!value || !isUuidV7(value)) {
+    throw usageError("stage id must be a lowercase UUIDv7");
+  }
+  return value;
+}
+
+function cancelPayload(args: string[]): { reason?: string } {
+  if (!args.length) return {};
+  if (args.length === 2 && args[0] === "--reason") {
+    return { reason: args[1] };
+  }
+  if (args.length === 1 && args[0].startsWith("--reason=")) {
+    return { reason: args[0].slice(9) };
+  }
+  throw usageError("changeset cancel accepts only --reason <text>");
 }
 
 function option(args: string[], name: string): string | undefined {
@@ -1697,15 +1702,23 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
           parsed.positional.slice(relationship ? 3 : 2),
         ),
       );
-    } else if (cmd === "changeset" && sub === "preview") {
+    } else if (cmd === "changeset" && sub === "stage") {
       result = await postJson(
-        `${parsed.server}/changesets/preview`,
+        `${parsed.server}/api/v1/changesets/stage`,
         await readChangesetInput(parsed.positional.slice(2)),
       );
-    } else if (cmd === "changeset" && sub === "commit") {
+    } else if (cmd === "changeset" && sub === "inspect") {
+      if (parsed.positional.length !== 3) {
+        throw usageError("changeset inspect requires one stage id");
+      }
+      result = await getJson(
+        `${parsed.server}/api/v1/changesets/${changesetId(value)}`,
+      );
+    } else if (cmd === "changeset" && sub === "cancel") {
+      const id = changesetId(value);
       result = await postJson(
-        `${parsed.server}/changesets/commit`,
-        await readChangesetInput(parsed.positional.slice(2)),
+        `${parsed.server}/api/v1/changesets/${id}/cancel`,
+        cancelPayload(parsed.positional.slice(3)),
       );
     } else if ((cmd === "view" || cmd === "history") && sub && value) {
       const relationship = sub === "relationship";
@@ -1775,7 +1788,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       );
     } else {
       throw usageError(
-        "usage: optctl status live/ready/bootstrap | bootstrap init | home | project list/create/view/update/archive/select | context set-project | pack preview <dir> | pack apply <dir> [--safe|--reviewed] [--timeout duration] | metadata [packs] | metadata pack <publisher/pack> | metadata resource/relationship/lifecycle/action/hook/role/policy/seed <publisher/pack:name> | secret list/set/delete | action preview/commit <namespace.action> --input '{...}' | outbox status/drain/retry | migration inspect <id> [--sql|--violations] | migration validate <id> | migration apply <id> (--safe|--reviewed|--confirm-token <token>) [--timeout duration] | query <namespace.resource> [--where expr] [--fields a,b] [--sort field:desc] [--limit n] [--cursor c] | changeset preview/commit (--file <json-file>|--input '{...}') | --project <selector> view publisher/pack:name <uuid> | --project <selector> history publisher/pack:name <uuid> [--limit n] [--cursor c] | --project <selector> view relationship publisher/pack:name <uuid> | --project <selector> history relationship publisher/pack:name <uuid> [--limit n] [--cursor c]",
+        "usage: optctl status live/ready/bootstrap | bootstrap init | home | project list/create/view/update/archive/select | context set-project | pack preview <dir> | pack apply <dir> [--safe|--reviewed] [--timeout duration] | metadata [packs] | metadata pack <publisher/pack> | metadata resource/relationship/lifecycle/action/hook/role/policy/seed <publisher/pack:name> | secret list/set/delete | action preview/commit <namespace.action> --input '{...}' | outbox status/drain/retry | migration inspect <id> [--sql|--violations] | migration validate <id> | migration apply <id> (--safe|--reviewed|--confirm-token <token>) [--timeout duration] | query <namespace.resource> [--where expr] [--fields a,b] [--sort field:desc] [--limit n] [--cursor c] | changeset stage <json-file> | changeset inspect <stage-id> | changeset cancel <stage-id> [--reason text] | --project <selector> view publisher/pack:name <uuid> | --project <selector> history publisher/pack:name <uuid> [--limit n] [--cursor c] | --project <selector> view relationship publisher/pack:name <uuid> | --project <selector> history relationship publisher/pack:name <uuid> [--limit n] [--cursor c]",
       );
     }
     const output = parsed.verbose

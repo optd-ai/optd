@@ -1,5 +1,4 @@
 import { canonicalJson, canonicalSha256 } from "../ids/canonical_json.ts";
-import { uuidV7 } from "../ids/uuid_v7.ts";
 import type {
   AuthoredOperation,
   StageRequest,
@@ -48,10 +47,13 @@ export class OperationError extends Error {
 
 export async function normalizeOperations(
   request: StageRequest,
-  allocate: () => string = uuidV7,
+  allocate?: () => string,
   limits: OperationLimits = DEFAULT_OPERATION_LIMITS,
 ): Promise<{ operations: CanonicalOperation[]; operationGraphDigest: string }> {
   inspectLimits(request, limits);
+  const idAllocator = allocate ?? deterministicUuidAllocator(
+    await canonicalSha256({ schema: "changeset.authored.v1", request }),
+  );
   const entries = request.operations.map((source, ordinal) => ({
     source,
     ordinal,
@@ -84,7 +86,7 @@ export async function normalizeOperations(
     if (property) {
       produced.set(entry.key, {
         property,
-        id: allocate(),
+        id: idAllocator(),
         project_id: entry.project_id,
       });
     }
@@ -405,4 +407,18 @@ function isObject(value: unknown): value is Record<string, unknown> {
 }
 function escapePointer(value: string): string {
   return value.replaceAll("~", "~0").replaceAll("/", "~1");
+}
+
+function deterministicUuidAllocator(seed: string): () => string {
+  let counter = 0;
+  return () => {
+    const suffix = (counter++).toString(16).padStart(8, "0");
+    const hex = `${seed.slice(0, 24)}${suffix}`.slice(0, 32).split("");
+    hex[12] = "7";
+    hex[16] = ["8", "9", "a", "b"][parseInt(hex[16], 16) & 3];
+    const value = hex.join("");
+    return `${value.slice(0, 8)}-${value.slice(8, 12)}-${value.slice(12, 16)}-${
+      value.slice(16, 20)
+    }-${value.slice(20)}`;
+  };
 }
