@@ -665,19 +665,6 @@ Deno.test({
         );
         assertEquals(coordinated.value.warnings.length, 1);
         assertEquals(coordinated.value.approval_requirements.length, 1);
-        for (
-          const statement of [
-            "update staged_changeset_operations set operation_kind=operation_kind where stage_id=$1",
-            "update staged_changeset_dependencies set dependency_kind=dependency_kind where stage_id=$1",
-            "update staged_hook_executions set phase=phase where stage_id=$1",
-            "update staged_policy_decisions set action=action where stage_id=$1",
-            "update staged_approval_requirements set ordinal=ordinal where stage_id=$1",
-          ]
-        ) {
-          await assertRejects(() =>
-            query(harness.server.sql, statement, [coordinated.value.id])
-          );
-        }
         const requirement = (await query<{ id: string }>(
           harness.server.sql,
           "select id from staged_approval_requirements where stage_id=$1",
@@ -695,14 +682,67 @@ Deno.test({
             directAuth.id,
           ],
         );
-        await assertRejects(() =>
-          query(
-            harness.server.sql,
-            "delete from staged_approval_decisions where id=$1",
-            [decisionId],
-          )
+        const immutableRows = [
+          ["staged_changesets", "id", coordinated.value.id],
+          ["staged_changeset_operations", "stage_id", coordinated.value.id],
+          ["staged_changeset_dependencies", "stage_id", coordinated.value.id],
+          ["staged_hook_executions", "stage_id", coordinated.value.id],
+          ["staged_policy_decisions", "stage_id", coordinated.value.id],
+          ["staged_approval_requirements", "stage_id", coordinated.value.id],
+          ["staged_approval_decisions", "id", decisionId],
+          ["pack_component_revisions", "id", laterItemComponent],
+          ["pack_hook_attachment_revisions", "id", attachment.id],
+        ] as const;
+        for (const [table, column, id] of immutableRows) {
+          await assertRejects(() =>
+            query(
+              harness.server.sql,
+              `update ${table} set ${column}=${column} where ${column}=$1`,
+              [id],
+            )
+          );
+          await assertRejects(() =>
+            query(
+              harness.server.sql,
+              `delete from ${table} where ${column}=$1`,
+              [id],
+            )
+          );
+        }
+
+        await query(
+          harness.server.sql,
+          "update staged_changeset_lifecycle set status='rejected' where stage_id=$1",
+          [coordinated.value.id],
+        );
+        const rejectedCancel = await harness.runOptctl([
+          "--json",
+          "changeset",
+          "cancel",
+          coordinated.value.id,
+        ]);
+        assertEquals(rejectedCancel.code, 1);
+        assertEquals(
+          JSON.parse(rejectedCancel.stderr).error.code,
+          "already_rejected",
         );
       }
+      await query(
+        harness.server.sql,
+        "update staged_changeset_lifecycle set status='committed',committed_at=now() where stage_id=$1",
+        [secondData.id],
+      );
+      const committedCancel = await harness.runOptctl([
+        "--json",
+        "changeset",
+        "cancel",
+        secondData.id,
+      ]);
+      assertEquals(committedCancel.code, 1);
+      assertEquals(
+        JSON.parse(committedCancel.stderr).error.code,
+        "already_committed",
+      );
     } finally {
       await harness.close();
     }

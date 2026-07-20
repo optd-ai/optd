@@ -96,7 +96,18 @@ export type StageEvidence = {
 export async function stageDigest(evidence: StageEvidence): Promise<string> {
   return `sha256:${await canonicalSha256({
     schema: "changeset.stage-evidence.v1",
-    ...evidence,
+    operation_graph_digest: evidence.operation_graph_digest,
+    projects: evidence.projects,
+    pack_revisions: evidence.pack_revisions,
+    operations: evidence.operations,
+    dependencies: evidence.dependencies,
+    hook_executions: evidence.hook_executions,
+    policy_decisions: evidence.policy_decisions,
+    approval_requirements: evidence.approval_requirements,
+    required_capabilities: evidence.required_capabilities,
+    effects: evidence.effects,
+    planned_events: evidence.planned_events,
+    planned_deliveries: evidence.planned_deliveries,
   })}`;
 }
 
