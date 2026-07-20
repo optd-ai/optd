@@ -959,6 +959,42 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
     const delegatedPage = await delegatedBaseline.json();
     assertEquals(delegatedPage.meta.total, 11);
     const delegatedCursor = String(delegatedPage.meta.next_cursor);
+    const alternateRoot = uuidV7();
+    await harness.server.sql.begin(async (sql) => {
+      await query(
+        sql,
+        `insert into agent_authorizations(
+        id,agent_user_id,human_user_id,parent_authorization_id,
+        root_authorization_id,approved_by_auth_context_id)
+        select $1,agent_user_id,human_user_id,null,$1,approved_by_auth_context_id
+        from agent_authorizations where id=$2`,
+        [alternateRoot, rootAuthorizationId],
+      );
+      await query(
+        sql,
+        `update agent_authorizations set parent_authorization_id=$1,
+        root_authorization_id=$1 where id=$2`,
+        [alternateRoot, delegated.authorization],
+      );
+    });
+    const changedRootCursor = await fetchAgentQuery(
+      harness,
+      delegated.token,
+      { ...agentRequest, cursor: delegatedCursor },
+    );
+    assertEquals(changedRootCursor.status, 400);
+    assertEquals((await changedRootCursor.json()).error.code, "invalid_cursor");
+    await harness.server.sql.begin(async (sql) => {
+      await query(
+        sql,
+        `update agent_authorizations set parent_authorization_id=$1,
+        root_authorization_id=$1 where id=$2`,
+        [rootAuthorizationId, delegated.authorization],
+      );
+      await query(sql, "delete from agent_authorizations where id=$1", [
+        alternateRoot,
+      ]);
+    });
     await query(
       harness.server.sql,
       "update agent_authorizations set superseded_at=now() where id=$1",
