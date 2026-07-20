@@ -3,7 +3,7 @@ import {
   assertNotEquals,
   assertRejects,
 } from "jsr:@std/assert@1";
-import { join } from "jsr:@std/path@1";
+import { join } from "jsr:@std/path";
 import {
   query,
   quoteIdentifier,
