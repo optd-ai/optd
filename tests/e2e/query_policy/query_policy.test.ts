@@ -157,6 +157,95 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
     assertEquals(relationItem.fields, { role: "buyer", primary: true });
     assert(relationItem.from && relationItem.to);
 
+    const firstPage = await runJson(harness, [
+      "--project",
+      "query-sales",
+      "query",
+      "operant/crm:lead",
+      "--where",
+      'name == "Typed Lead"',
+      "--sort",
+      "score:asc",
+      "--sort",
+      "updated_at:desc",
+      "--limit",
+      "1",
+      "--include-total",
+    ]);
+    assertEquals(firstPage.data.items instanceof Array, true);
+    assertEquals((firstPage.data.items as unknown[]).length, 1);
+    assertEquals(firstPage.meta.has_more, true);
+    assertEquals(firstPage.meta.total, 3);
+    const cursor = String(firstPage.meta.next_cursor);
+    const firstId = (firstPage.data.items as Array<{ id: string }>)[0].id;
+    const secondPage = await runJson(harness, [
+      "--project",
+      "query-sales",
+      "query",
+      "operant/crm:lead",
+      "--where",
+      'name == "Typed Lead"',
+      "--sort",
+      "score:asc",
+      "--sort",
+      "updated_at:desc",
+      "--limit",
+      "1",
+      "--include-total",
+      "--cursor",
+      cursor,
+    ]);
+    assertEquals(secondPage.meta.total, 3);
+    assert((secondPage.data.items as Array<{ id: string }>)[0].id !== firstId);
+    for (
+      const [changedArgs, expected] of [
+        [["--where", 'name == "Other"'], "invalid_cursor"],
+        [["--fields", "name"], "invalid_cursor"],
+        [["--limit", "2"], "invalid_cursor"],
+      ] as const
+    ) {
+      const failed = await harness.runOptctl([
+        "--json",
+        "--project",
+        "query-sales",
+        "query",
+        "operant/crm:lead",
+        "--sort",
+        "score:asc",
+        "--sort",
+        "updated_at:desc",
+        "--limit",
+        "1",
+        "--include-total",
+        "--cursor",
+        cursor,
+        ...changedArgs,
+      ]);
+      assert(failed.code !== 0);
+      assertStringIncludes(failed.stderr, expected);
+    }
+    const forged = `${cursor.slice(0, -1)}${cursor.endsWith("A") ? "B" : "A"}`;
+    const forgedResult = await harness.runOptctl([
+      "--json",
+      "--project",
+      "query-sales",
+      "query",
+      "operant/crm:lead",
+      "--where",
+      'name == "Typed Lead"',
+      "--sort",
+      "score:asc",
+      "--sort",
+      "updated_at:desc",
+      "--limit",
+      "1",
+      "--include-total",
+      "--cursor",
+      forged,
+    ]);
+    assert(forgedResult.code !== 0);
+    assertStringIncludes(forgedResult.stderr, "invalid_cursor");
+
     const toon = await harness.runOptctl([
       "--project",
       "query-sales",
@@ -215,6 +304,24 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       assert(failed.code !== 0, failed.stderr);
     }
     await harness.restart();
+    const restartPage = await runJson(harness, [
+      "--project",
+      "query-sales",
+      "query",
+      "operant/crm:lead",
+      "--where",
+      'name == "Typed Lead"',
+      "--sort",
+      "score:asc",
+      "--sort",
+      "updated_at:desc",
+      "--limit",
+      "1",
+      "--include-total",
+      "--cursor",
+      cursor,
+    ]);
+    assert((restartPage.data.items as Array<{ id: string }>)[0].id !== firstId);
     const afterRestart = await runJson(harness, [
       "--project",
       "query-sales",
