@@ -1133,6 +1133,95 @@ export const platformMigrations: PlatformMigration[] = [
       alter table staged_hook_executions alter column attachment_id drop default;
     `,
   },
+  {
+    id: "1021_immutable_hook_attachment_revisions",
+    sql: `
+      create unique index pack_component_revision_candidate_id_unique
+        on pack_component_revisions(candidate_revision_id,id);
+      create table pack_hook_attachment_revisions (
+        id uuid primary key check(uuid_extract_version(id)=7),
+        candidate_revision_id uuid not null references pack_candidate_revisions(id),
+        hook_revision_id uuid not null,
+        hook_identity text not null check(hook_identity ~ '^[a-z][a-z0-9_]{0,62}/[a-z][a-z0-9_]{0,62}:[a-z][a-z0-9_]{0,62}$'),
+        component_revision_id uuid,
+        phase text not null check(phase in ('changeset.before_stage','action.stage','changeset.validate','event.after_commit')),
+        ordinal integer not null check(ordinal between 0 and 2147483647),
+        declaration_digest text not null check(declaration_digest ~ '^sha256:[0-9a-f]{64}$'),
+        declaration_spec jsonb not null check(jsonb_typeof(declaration_spec)='object'),
+        foreign key(candidate_revision_id,hook_revision_id)
+          references pack_component_revisions(candidate_revision_id,id),
+        foreign key(candidate_revision_id,component_revision_id)
+          references pack_component_revisions(candidate_revision_id,id),
+        check(declaration_spec ?& array['hook','phase','resource','action','event','order','condition','input'] and
+          declaration_spec - array['hook','phase','resource','action','event','order','condition','input'] = '{}'::jsonb),
+        check(declaration_spec->>'hook'=hook_identity),
+        check(declaration_spec->>'phase'=phase),
+        check((declaration_spec->>'order')::integer=ordinal),
+        check(((declaration_spec->'resource' = 'null'::jsonb) and
+          (declaration_spec->'action' = 'null'::jsonb)) = (component_revision_id is null))
+      );
+      create unique index pack_hook_attachment_identity_unique
+        on pack_hook_attachment_revisions(candidate_revision_id,hook_revision_id,declaration_digest);
+      insert into pack_hook_attachment_revisions(
+        id,candidate_revision_id,hook_revision_id,hook_identity,component_revision_id,
+        phase,ordinal,declaration_digest,declaration_spec
+      )
+      select uuidv7(),candidate.id,hook_component.id,
+        candidate.publisher||'/'||candidate.pack_name||':'||hook_entry.key,
+        resource_component.id,attachment.value->>'phase',
+        coalesce((attachment.value->>'order')::integer,0),
+        'sha256:'||encode(digest(convert_to(operant_canonical_jsonb(spec.value),'UTF8'),'sha256'),'hex'),spec.value
+      from pack_candidate_revisions candidate
+      cross join lateral jsonb_each(coalesce(candidate.normalized->'hooks','{}'::jsonb)) hook_entry
+      join pack_component_revisions hook_component
+        on hook_component.candidate_revision_id=candidate.id
+       and hook_component.definition_kind='hook' and hook_component.definition_name=hook_entry.key
+      cross join lateral jsonb_array_elements(coalesce(hook_entry.value->'spec'->'attachments','[]'::jsonb)) attachment(value)
+      cross join lateral (select jsonb_build_object(
+        'hook',candidate.publisher||'/'||candidate.pack_name||':'||hook_entry.key,
+        'phase',attachment.value->>'phase',
+        'resource',coalesce(attachment.value->'resource','null'::jsonb),
+        'action',coalesce(attachment.value->'action','null'::jsonb),
+        'event',coalesce(attachment.value->'event','null'::jsonb),
+        'order',coalesce((attachment.value->>'order')::integer,0),
+        'condition',coalesce(attachment.value->'condition','null'::jsonb),
+        'input',attachment.value->'input'
+      ) value) spec
+      left join pack_component_revisions resource_component
+        on resource_component.candidate_revision_id=candidate.id
+       and resource_component.definition_kind=case
+         when attachment.value ? 'resource' then 'resource' else 'action' end
+       and resource_component.definition_name=split_part(
+         coalesce(attachment.value->>'resource',attachment.value->>'action'),':',2
+       );
+
+      create function operant_reject_hook_attachment_mutation() returns trigger language plpgsql as $$
+      begin raise exception 'pack hook attachment revisions are immutable'; end $$;
+      create trigger pack_hook_attachment_revisions_immutable before update or delete on pack_hook_attachment_revisions
+        for each row execute function operant_reject_hook_attachment_mutation();
+
+      alter table staged_hook_executions disable trigger staged_hooks_immutable;
+      with ranked_executions as (
+        select id,pack_revision_id,hook_revision_id,phase,
+          row_number() over(partition by stage_id,hook_revision_id,phase order by ordinal) attachment_rank
+        from staged_hook_executions
+      ), ranked_attachments as (
+        select id,candidate_revision_id,hook_revision_id,phase,
+          row_number() over(partition by candidate_revision_id,hook_revision_id,phase order by ordinal,id) attachment_rank
+        from pack_hook_attachment_revisions
+      )
+      update staged_hook_executions execution set attachment_id=attachment.id
+      from ranked_executions ranked
+      join ranked_attachments attachment
+        on attachment.candidate_revision_id=ranked.pack_revision_id
+       and attachment.hook_revision_id=ranked.hook_revision_id
+       and attachment.phase=ranked.phase and attachment.attachment_rank=ranked.attachment_rank
+      where execution.id=ranked.id;
+      alter table staged_hook_executions enable trigger staged_hooks_immutable;
+      alter table staged_hook_executions add constraint staged_hook_attachment_revision_fk
+        foreign key(attachment_id) references pack_hook_attachment_revisions(id);
+    `,
+  },
 ];
 
 export async function applyPlatformMigrations(

@@ -8,7 +8,7 @@ import {
   query,
   quoteIdentifier,
 } from "../../../src/adapters/outbound/postgres/client.ts";
-import { uuidV7 } from "../../../src/domain/ids/uuid_v7.ts";
+import { isUuidV7, uuidV7 } from "../../../src/domain/ids/uuid_v7.ts";
 import { canonicalSha256 } from "../../../src/domain/ids/canonical_json.ts";
 import { makeStageChangesetService } from "../../../src/application/services/changesets/stage_changesets.ts";
 import { PostgresStageRepository } from "../../../src/adapters/outbound/postgres/stage_repository.ts";
@@ -530,6 +530,25 @@ Deno.test({
            and pc.definition_kind='resource' and pc.definition_name='item'`,
       )).rows[0].id;
       assertNotEquals(laterItemComponent, initialItemComponent);
+      const attachment = (await query<{
+        id: string;
+        declaration_digest: string;
+      }>(
+        harness.server.sql,
+        "select id,declaration_digest from pack_hook_attachment_revisions order by id limit 1",
+      )).rows[0];
+      assertEquals(isUuidV7(attachment.id), true);
+      assertEquals(
+        /^sha256:[0-9a-f]{64}$/.test(attachment.declaration_digest),
+        true,
+      );
+      await assertRejects(() =>
+        query(
+          harness.server.sql,
+          "update pack_hook_attachment_revisions set ordinal=ordinal where id=$1",
+          [attachment.id],
+        )
+      );
       const beforeHookFailure = (await query<{ count: string }>(
         harness.server.sql,
         "select count(*)::text count from staged_changesets",
@@ -579,14 +598,27 @@ Deno.test({
         {
           async coordinate(input) {
             const declaration = input.hook_declarations[0];
-            const output = { warnings: [] };
-            return {
+            const output = {
               added_operations: [],
               patch_outputs: [],
               read_dependencies: [{
-                kind: "policy",
-                digest: `sha256:${"4".repeat(64)}`,
+                kind: "policy" as const,
+                project_id: projectId,
+                definition: "testpub/strict:allow_create",
+                query_digest: `sha256:${"4".repeat(64)}`,
               }],
+              warnings: [{
+                path: "/",
+                code: "coordinated",
+                message: "validated",
+              }],
+              approval_requirements: [{ id: uuidV7(), capability: "review" }],
+              required_capabilities: ["review"],
+              effects: ["validated"],
+              planned_events: [{ id: "event:validated" }],
+              planned_deliveries: [],
+            };
+            return {
               hook_executions: [{
                 id: uuidV7(),
                 attachment_id: declaration.attachment_id,
@@ -601,23 +633,15 @@ Deno.test({
                   pack_revisions: input.pack_revisions,
                   proposed_states: input.proposed_states,
                   base_states: input.base_states,
+                  grant_snapshot: input.grant_snapshot,
+                  previous_output_digest: null,
                 })}`,
                 output_digest: `sha256:${await canonicalSha256(output)}`,
                 output,
                 stderr: "",
                 duration_ms: 1,
-                grant_snapshot: {},
+                grant_snapshot: input.grant_snapshot,
               }],
-              warnings: [{
-                path: "/",
-                code: "coordinated",
-                message: "validated",
-              }],
-              approval_requirements: [{ id: uuidV7(), capability: "review" }],
-              required_capabilities: ["review"],
-              effects: ["validated"],
-              planned_events: [{ id: "event:validated" }],
-              planned_deliveries: [],
             };
           },
         },
@@ -634,6 +658,11 @@ Deno.test({
       if (coordinated.ok) {
         assertEquals(coordinated.value.status, "awaiting_approval");
         assertEquals(coordinated.value.hook_executions.length, 1);
+        assertEquals(
+          (coordinated.value.hook_executions[0] as Record<string, unknown>)
+            .attachment_id,
+          attachment.id,
+        );
         assertEquals(coordinated.value.warnings.length, 1);
         assertEquals(coordinated.value.approval_requirements.length, 1);
         for (

@@ -18,6 +18,27 @@ export type StageHookDeclaration = Readonly<{
   resource: string | null;
   order: number;
   script_digest: string;
+  declaration_digest: string;
+}>;
+export type HookGrantSnapshot = Readonly<{
+  principal_id: string;
+  auth_context_id: string;
+  assignment_digest: string;
+  policy_digest: string;
+}>;
+export type StageHookOutput = Readonly<{
+  added_operations: readonly AuthoredOperation[];
+  patch_outputs: readonly Readonly<{
+    operation_key: string;
+    output: PatchOutput;
+  }>[];
+  read_dependencies: readonly StageReadDependency[];
+  warnings: readonly ValidationMessage[];
+  approval_requirements: readonly ApprovalRequirement[];
+  required_capabilities: readonly string[];
+  effects: readonly string[];
+  planned_events: readonly PlannedIdentity[];
+  planned_deliveries: readonly PlannedIdentity[];
 }>;
 export type StageHookExecution = Readonly<{
   id: string;
@@ -27,10 +48,10 @@ export type StageHookExecution = Readonly<{
   phase: "changeset.before_stage" | "changeset.validate";
   input_digest: string;
   output_digest: string;
-  output: Readonly<Record<string, unknown>>;
+  output: StageHookOutput;
   stderr: string;
   duration_ms: number;
-  grant_snapshot: Readonly<Record<string, unknown>>;
+  grant_snapshot: HookGrantSnapshot;
 }>;
 export type StageReadDependency = Readonly<{
   kind:
@@ -42,7 +63,9 @@ export type StageReadDependency = Readonly<{
   project_id?: string;
   object_id?: string;
   expected_version_id?: string;
+  definition?: string;
   digest?: string;
+  query_digest?: string;
 }>;
 export type ApprovalRequirement = Readonly<{
   id: string;
@@ -82,25 +105,19 @@ export type StageHookInput = Readonly<{
   projects: readonly unknown[];
   pack_revisions: readonly unknown[];
   hook_declarations: readonly StageHookDeclaration[];
+  grant_snapshot: HookGrantSnapshot;
   proposed_states: Readonly<Record<string, Record<string, unknown>>>;
   base_states: Readonly<Record<string, Record<string, unknown> | null>>;
 }>;
-export type StageHookResult = Readonly<{
-  added_operations: readonly AuthoredOperation[];
-  patch_outputs: readonly Readonly<{
-    operation_key: string;
-    output: PatchOutput;
-  }>[];
-  read_dependencies: readonly StageReadDependency[];
+export type StageHookResult =
+  & StageHookOutput
+  & Readonly<{
+    hook_executions: readonly StageHookExecution[];
+  }>;
+export type StageHookCoordinatorResult = Readonly<{
   hook_executions: readonly StageHookExecution[];
-  warnings: readonly ValidationMessage[];
-  approval_requirements: readonly ApprovalRequirement[];
-  required_capabilities: readonly string[];
-  effects: readonly string[];
-  planned_events: readonly PlannedIdentity[];
-  planned_deliveries: readonly PlannedIdentity[];
 }>;
 /** Implemented by trusted hook coordination; absence must fail closed for matching attachments. */
 export interface StageHookCoordinator {
-  coordinate(input: StageHookInput): Promise<StageHookResult>;
+  coordinate(input: StageHookInput): Promise<StageHookCoordinatorResult>;
 }

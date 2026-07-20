@@ -139,6 +139,110 @@ async function projectComponentRevisions(
       }
     }
   }
+  await projectHookAttachmentRevisions(sql, pack, candidateRevisionId);
+}
+
+async function projectHookAttachmentRevisions(
+  sql: Queryable,
+  pack: LoadedPack,
+  candidateRevisionId: string,
+): Promise<void> {
+  for (
+    const [hookName, hook] of Object.entries(pack.hooks).sort(([a], [b]) =>
+      a.localeCompare(b)
+    )
+  ) {
+    const hookComponent = (await query<{ id: string }>(
+      sql,
+      `select id from pack_component_revisions
+       where candidate_revision_id=$1 and definition_kind='hook' and definition_name=$2`,
+      [candidateRevisionId, hookName],
+    )).rows[0];
+    if (!hookComponent) {
+      throw new Error("hook component revision is unavailable");
+    }
+    const attachments = Array.isArray(hook.spec.attachments)
+      ? hook.spec.attachments
+      : [];
+    for (const value of attachments) {
+      if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+      const attachment = value as Record<string, unknown>;
+      const phase = String(attachment.phase);
+      if (
+        ![
+          "changeset.before_stage",
+          "action.stage",
+          "changeset.validate",
+          "event.after_commit",
+        ].includes(phase)
+      ) throw new Error("hook attachment phase is invalid");
+      const resource = typeof attachment.resource === "string"
+        ? attachment.resource
+        : null;
+      const action = typeof attachment.action === "string"
+        ? attachment.action
+        : null;
+      let componentRevisionId: string | null = null;
+      if (resource !== null || action !== null) {
+        const componentIdentity = resource ?? action!;
+        const componentKind = resource !== null ? "resource" : "action";
+        const componentName = componentIdentity.split(":")[1];
+        const component = (await query<{ id: string }>(
+          sql,
+          `select id from pack_component_revisions
+           where candidate_revision_id=$1 and definition_kind=$2 and definition_name=$3`,
+          [candidateRevisionId, componentKind, componentName],
+        )).rows[0];
+        if (!component) {
+          throw new Error("hook attachment component revision is unavailable");
+        }
+        componentRevisionId = component.id;
+      }
+      const declarationSpec = {
+        hook: `${pack.publisher}/${pack.name}:${hookName}`,
+        phase,
+        resource,
+        action,
+        event: typeof attachment.event === "string" ? attachment.event : null,
+        order: typeof attachment.order === "number" ? attachment.order : 0,
+        condition: typeof attachment.condition === "string"
+          ? attachment.condition
+          : null,
+        input: attachment.input,
+      };
+      const declarationDigest = `sha256:${await canonicalSha256(
+        declarationSpec,
+      )}`;
+      await query(
+        sql,
+        `insert into pack_hook_attachment_revisions(
+           id,candidate_revision_id,hook_revision_id,hook_identity,component_revision_id,
+           phase,ordinal,declaration_digest,declaration_spec
+         ) values($1,$2,$3,$4,$5,$6,$7,$8,$9::text::jsonb)
+         on conflict(candidate_revision_id,hook_revision_id,declaration_digest) do nothing`,
+        [
+          uuidV7(),
+          candidateRevisionId,
+          hookComponent.id,
+          declarationSpec.hook,
+          componentRevisionId,
+          declarationSpec.phase,
+          declarationSpec.order,
+          declarationDigest,
+          JSON.stringify(declarationSpec),
+        ],
+      );
+      const stored = (await query<{ declaration_digest: string }>(
+        sql,
+        `select declaration_digest from pack_hook_attachment_revisions
+         where candidate_revision_id=$1 and hook_revision_id=$2 and declaration_digest=$3`,
+        [candidateRevisionId, hookComponent.id, declarationDigest],
+      )).rows[0];
+      if (!stored || stored.declaration_digest !== declarationDigest) {
+        throw new Error("hook attachment revision digest conflict");
+      }
+    }
+  }
 }
 
 export async function countPackRevisions(sql: Queryable): Promise<number> {

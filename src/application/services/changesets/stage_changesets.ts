@@ -62,6 +62,12 @@ export function makeStageChangesetService(
                 projects: [],
                 pack_revisions: [],
                 hook_declarations: [],
+                grant_snapshot: {
+                  principal_id: auth.principalId,
+                  auth_context_id: auth.id,
+                  assignment_digest: `sha256:${"0".repeat(64)}`,
+                  policy_digest: `sha256:${"0".repeat(64)}`,
+                },
                 proposed_states: {},
                 base_states: {},
               },
@@ -75,9 +81,9 @@ export function makeStageChangesetService(
             hookWorkingStates = structuredClone(
               pinned.value.proposed_states ?? {},
             );
-            hookResult = await hookCoordinator.coordinate(pinned.value);
-            await validateHookResult(
-              hookResult,
+            const coordinated = await hookCoordinator.coordinate(pinned.value);
+            hookResult = await validateHookResult(
+              coordinated,
               pinned.value,
             );
             hookWarnings = [...hookResult.warnings];
@@ -268,10 +274,11 @@ async function validateHookResult(
     projects: readonly unknown[];
     pack_revisions: readonly unknown[];
     hook_declarations: readonly StageHookDeclaration[];
+    grant_snapshot: Readonly<Record<string, unknown>>;
     proposed_states: Readonly<Record<string, Record<string, unknown>>>;
     base_states: Readonly<Record<string, Record<string, unknown> | null>>;
   }>,
-): Promise<void> {
+): Promise<StageHookResult> {
   const reject = (path: string, message: string): never => {
     throw new OperationError("hook_rejected", path, message);
   };
@@ -279,37 +286,28 @@ async function validateHookResult(
     reject("/", "hook coordinator returned a non-object result");
   }
   const result = value as Record<string, unknown>;
-  const expectedKeys = [
+  if (
+    !isExactRecord(result, ["hook_executions"]) ||
+    !Array.isArray(result.hook_executions)
+  ) {
+    reject("/", "hook coordinator result has missing or unknown fields");
+  }
+  const declarations = hookInput.hook_declarations;
+  const executions = result.hook_executions as unknown[];
+  const outputFields = [
     "added_operations",
     "patch_outputs",
     "read_dependencies",
-    "hook_executions",
     "warnings",
     "approval_requirements",
     "required_capabilities",
     "effects",
     "planned_events",
     "planned_deliveries",
-  ].sort();
-  if (Object.keys(result).sort().join("\0") !== expectedKeys.join("\0")) {
-    reject("/", "hook coordinator result has missing or unknown fields");
-  }
-  for (const field of expectedKeys) {
-    if (!Array.isArray(result[field])) {
-      reject(`/${field}`, "hook coordinator field must be an array");
-    }
-  }
-  for (const [index, batch] of (result.patch_outputs as unknown[]).entries()) {
-    if (
-      !isExactRecord(batch, ["operation_key", "output"]) ||
-      typeof batch.operation_key !== "string" ||
-      !patchOutputContract.check(batch.output)
-    ) {
-      reject(`/patch_outputs/${index}`, "patch output is malformed");
-    }
-  }
-  const declarations = hookInput.hook_declarations;
-  const executions = result.hook_executions as unknown[];
+  ];
+  const flattened: Record<string, unknown[]> = Object.fromEntries(
+    outputFields.map((field) => [field, []]),
+  );
   if (executions.length !== declarations.length) {
     reject(
       "/hook_executions",
@@ -317,6 +315,7 @@ async function validateHookResult(
     );
   }
   const executionIds = new Set<string>();
+  const patchPaths = new Set<string>();
   for (let index = 0; index < executions.length; index++) {
     const execution = isRecord(executions[index])
       ? executions[index] as Record<string, unknown>
@@ -339,11 +338,30 @@ async function validateHookResult(
       !isExactRecord(execution, keys) || !isUuidV7(execution.id) ||
       !isUuidV7(execution.attachment_id) ||
       !isUuidV7(execution.hook_revision_id) ||
-      !isUuidV7(execution.pack_revision_id) || !isRecord(execution.output) ||
-      !isRecord(execution.grant_snapshot) ||
+      !isUuidV7(execution.pack_revision_id) ||
+      !isExactRecord(execution.output, outputFields) ||
+      !outputFields.every((field) =>
+        Array.isArray((execution.output as Record<string, unknown>)[field])
+      ) ||
+      !isExactRecord(execution.grant_snapshot, [
+        "principal_id",
+        "auth_context_id",
+        "assignment_digest",
+        "policy_digest",
+      ]) ||
+      !isUuidV7(execution.grant_snapshot.principal_id) ||
+      !isUuidV7(execution.grant_snapshot.auth_context_id) ||
+      !/^sha256:[0-9a-f]{64}$/.test(
+        String(execution.grant_snapshot.assignment_digest),
+      ) ||
+      !/^sha256:[0-9a-f]{64}$/.test(
+        String(execution.grant_snapshot.policy_digest),
+      ) ||
       typeof execution.stderr !== "string" ||
+      new TextEncoder().encode(execution.stderr).byteLength > 65_536 ||
       !Number.isSafeInteger(execution.duration_ms) ||
       Number(execution.duration_ms) < 0 ||
+      Number(execution.duration_ms) > 86_400_000 ||
       !/^sha256:[0-9a-f]{64}$/.test(String(execution.input_digest)) ||
       !/^sha256:[0-9a-f]{64}$/.test(String(execution.output_digest))
     ) {
@@ -376,11 +394,24 @@ async function validateHookResult(
       pack_revisions: hookInput.pack_revisions,
       proposed_states: hookInput.proposed_states,
       base_states: hookInput.base_states,
+      grant_snapshot: hookInput.grant_snapshot,
+      previous_output_digest: index === 0 ? null : String(
+        (executions[index - 1] as Record<string, unknown>).output_digest,
+      ),
     })}`;
     if (execution.input_digest !== expectedInputDigest) {
       reject(
         `/hook_executions/${index}/input_digest`,
         "hook input digest does not match pinned input",
+      );
+    }
+    if (
+      await canonicalSha256(execution.grant_snapshot) !==
+        await canonicalSha256(hookInput.grant_snapshot)
+    ) {
+      reject(
+        `/hook_executions/${index}/grant_snapshot`,
+        "grant snapshot does not match pinned authority",
       );
     }
     const outputDigest = `sha256:${await canonicalSha256(execution.output)}`;
@@ -390,8 +421,52 @@ async function validateHookResult(
         "hook output digest does not match canonical output",
       );
     }
+    const output = execution.output as Record<string, unknown>;
+    for (
+      const [patchIndex, batch] of (output.patch_outputs as unknown[]).entries()
+    ) {
+      if (
+        !isExactRecord(batch, ["operation_key", "output"]) ||
+        typeof batch.operation_key !== "string" ||
+        !patchOutputContract.check(batch.output)
+      ) {
+        reject(
+          `/hook_executions/${index}/output/patch_outputs/${patchIndex}`,
+          "patch output is malformed",
+        );
+      }
+      const validBatch = batch as {
+        operation_key: string;
+        output: { patches: readonly { path: string }[] };
+      };
+      for (const patch of validBatch.output.patches) {
+        const identity = `${validBatch.operation_key}\0${patch.path}`;
+        if (patchPaths.has(identity)) {
+          reject(
+            `/hook_executions/${index}/output/patch_outputs/${patchIndex}`,
+            "duplicate hook patch path",
+          );
+        }
+        patchPaths.add(identity);
+      }
+    }
+    deepFreeze(execution.output);
+    for (const field of outputFields) {
+      flattened[field].push(...output[field] as unknown[]);
+    }
   }
-  for (const [index, warning] of (result.warnings as unknown[]).entries()) {
+  for (const field of outputFields) {
+    if (flattened[field].length > 10_000) {
+      reject(`/${field}`, "hook evidence limit exceeded");
+    }
+  }
+  const resultEvidence = {
+    ...flattened,
+    hook_executions: executions,
+  } as unknown as StageHookResult;
+  for (
+    const [index, warning] of (resultEvidence.warnings as unknown[]).entries()
+  ) {
     if (
       !isRecord(warning) || Object.keys(warning).some((key) =>
         !["path", "code", "message", "details"].includes(key)
@@ -404,31 +479,50 @@ async function validateHookResult(
       reject(`/warnings/${index}`, "warning is malformed");
     }
   }
+  const readIdentities = new Set<string>();
   for (
-    const [index, dependency] of (result.read_dependencies as unknown[])
-      .entries()
+    const [index, dependencyValue]
+      of (resultEvidence.read_dependencies as unknown[])
+        .entries()
   ) {
+    const dependency = isRecord(dependencyValue) ? dependencyValue : {};
+    const objectRead = dependency.kind === "object_version" ||
+      dependency.kind === "relationship";
+    const expected = objectRead
+      ? [
+        "kind",
+        "project_id",
+        "definition",
+        "object_id",
+        "expected_version_id",
+        "digest",
+      ]
+      : ["kind", "project_id", "definition", "query_digest"];
     if (
-      !isRecord(dependency) || Object.keys(dependency).some((key) =>
-        !["kind", "project_id", "object_id", "expected_version_id", "digest"]
-          .includes(key)
-      ) ||
+      !isExactRecord(dependency, expected) ||
       !["object_version", "relationship", "policy", "assignment", "uniqueness"]
         .includes(String(dependency.kind)) ||
-      (dependency.project_id !== undefined &&
-        !isUuidV7(dependency.project_id)) ||
-      (dependency.object_id !== undefined && !isUuidV7(dependency.object_id)) ||
-      (dependency.expected_version_id !== undefined &&
-        !isUuidV7(dependency.expected_version_id)) ||
-      (dependency.digest !== undefined &&
-        !/^sha256:[0-9a-f]{64}$/.test(String(dependency.digest)))
-    ) {
-      reject(`/read_dependencies/${index}`, "read dependency is malformed");
+      !isUuidV7(dependency.project_id) ||
+      typeof dependency.definition !== "string" ||
+      !/^[a-z][a-z0-9_]{0,62}\/[a-z][a-z0-9_]{0,62}:[a-z][a-z0-9_]{0,62}$/.test(
+        dependency.definition,
+      ) ||
+      (objectRead && (!isUuidV7(dependency.object_id) ||
+        !isUuidV7(dependency.expected_version_id) ||
+        !/^sha256:[0-9a-f]{64}$/.test(String(dependency.digest)))) ||
+      (!objectRead &&
+        !/^sha256:[0-9a-f]{64}$/.test(String(dependency.query_digest)))
+    ) reject(`/read_dependencies/${index}`, "read dependency is malformed");
+    const readIdentity = await canonicalSha256(dependency);
+    if (readIdentities.has(readIdentity)) {
+      reject(`/read_dependencies/${index}`, "duplicate read dependency");
     }
+    readIdentities.add(readIdentity);
   }
+  const requirementIds = new Set<string>();
   for (
     const [index, requirementValue]
-      of (result.approval_requirements as unknown[])
+      of (resultEvidence.approval_requirements as unknown[])
         .entries()
   ) {
     const requirement = isRecord(requirementValue) ? requirementValue : {};
@@ -449,9 +543,21 @@ async function validateHookResult(
         "approval requirement is malformed",
       );
     }
+    if (requirementIds.has(String(requirement.id))) {
+      reject(
+        `/approval_requirements/${index}/id`,
+        "duplicate approval requirement id",
+      );
+    }
+    requirementIds.add(String(requirement.id));
   }
   for (const field of ["planned_events", "planned_deliveries"]) {
-    for (const [index, item] of (result[field] as unknown[]).entries()) {
+    const identities = new Set<string>();
+    for (
+      const [index, item]
+        of (resultEvidence as unknown as Record<string, unknown[]>)[field]
+          .entries()
+    ) {
       if (
         !isRecord(item) || Object.keys(item).some((key) =>
           !["id", "kind"].includes(key)
@@ -462,15 +568,33 @@ async function validateHookResult(
       ) {
         reject(`/${field}/${index}`, "planned identity is malformed");
       }
+      const identity = String((item as Record<string, unknown>).id);
+      if (identities.has(identity)) {
+        reject(`/${field}/${index}/id`, "duplicate planned identity");
+      }
+      identities.add(identity);
     }
   }
   for (const field of ["required_capabilities", "effects"]) {
+    const values =
+      (resultEvidence as unknown as Record<string, unknown[]>)[field];
     if (
-      (result[field] as unknown[]).some((item) =>
+      values.some((item) =>
         typeof item !== "string" || !/^[a-z][a-z0-9_.:-]{0,255}$/.test(item)
-      )
-    ) reject(`/${field}`, "hook vocabulary is malformed");
+      ) || new Set(values).size !== values.length
+    ) reject(`/${field}`, "hook vocabulary is malformed or duplicated");
   }
+  return deepFreeze(resultEvidence);
+}
+
+function deepFreeze<T>(value: T): T {
+  if (value !== null && typeof value === "object" && !Object.isFrozen(value)) {
+    for (const child of Object.values(value as Record<string, unknown>)) {
+      deepFreeze(child);
+    }
+    Object.freeze(value);
+  }
+  return value;
 }
 
 function isExactRecord(

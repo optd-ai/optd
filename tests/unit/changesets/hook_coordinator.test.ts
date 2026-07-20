@@ -5,6 +5,7 @@ import type { AuthContext } from "../../../src/domain/auth/model.ts";
 import type {
   StageHookDeclaration,
   StageHookInput,
+  StageHookOutput,
 } from "../../../src/domain/changesets/stage.ts";
 import { canonicalSha256 } from "../../../src/domain/ids/canonical_json.ts";
 import { ok } from "../../../src/domain/errors/result.ts";
@@ -19,6 +20,7 @@ const declaration: StageHookDeclaration = {
   resource: "operant/crm:lead",
   order: 0,
   script_digest: `sha256:${"3".repeat(64)}`,
+  declaration_digest: `sha256:${"2".repeat(64)}`,
 };
 const auth: AuthContext = Object.freeze({
   id: "019b7a2e-7c10-7000-8000-000000000002",
@@ -30,6 +32,12 @@ const auth: AuthContext = Object.freeze({
   roles: [],
   createdAt: "2026-01-01T00:00:00Z",
 });
+const grantSnapshot = {
+  principal_id: auth.principalId,
+  auth_context_id: auth.id,
+  assignment_digest: `sha256:${"5".repeat(64)}`,
+  policy_digest: `sha256:${"6".repeat(64)}`,
+};
 
 Deno.test("injected stage coordinator runs once and ordered patches reach persistence", async () => {
   let calls = 0;
@@ -38,8 +46,7 @@ Deno.test("injected stage coordinator runs once and ordered patches reach persis
   const service = makeStageChangesetService(repository, {
     async coordinate(input) {
       calls++;
-      const output = { patches: 2 };
-      return {
+      const output: StageHookOutput = {
         added_operations: [{
           op: "create",
           key: "child",
@@ -61,10 +68,11 @@ Deno.test("injected stage coordinator runs once and ordered patches reach persis
           },
         }],
         read_dependencies: [{
-          kind: "policy",
-          digest: `sha256:${"4".repeat(64)}`,
+          kind: "policy" as const,
+          project_id: project,
+          definition: "operant/crm:lead_policy",
+          query_digest: `sha256:${"4".repeat(64)}`,
         }],
-        hook_executions: [await executionEvidence(input, output)],
         warnings: [{ path: "/name", code: "normalized", message: "changed" }],
         approval_requirements: [{
           id: "019b7a2e-7c10-7000-8000-000000000009",
@@ -75,6 +83,7 @@ Deno.test("injected stage coordinator runs once and ordered patches reach persis
         planned_events: [{ id: "event:lead" }],
         planned_deliveries: [],
       };
+      return { hook_executions: [await executionEvidence(input, output)] };
     },
   });
   const result = await service.stage({
@@ -103,8 +112,7 @@ Deno.test("malformed or failing coordinator patch never reaches persistence", as
   const repository = fakeRepository(() => persisted = true);
   const service = makeStageChangesetService(repository, {
     async coordinate(input) {
-      const output = { test: "fails" };
-      return {
+      const output: StageHookOutput = {
         added_operations: [],
         patch_outputs: [{
           operation_key: "lead",
@@ -113,7 +121,6 @@ Deno.test("malformed or failing coordinator patch never reaches persistence", as
           },
         }],
         read_dependencies: [],
-        hook_executions: [await executionEvidence(input, output)],
         warnings: [],
         approval_requirements: [],
         required_capabilities: [],
@@ -121,6 +128,7 @@ Deno.test("malformed or failing coordinator patch never reaches persistence", as
         planned_events: [],
         planned_deliveries: [],
       };
+      return { hook_executions: [await executionEvidence(input, output)] };
     },
   });
   const result = await service.stage({
@@ -139,7 +147,7 @@ Deno.test("malformed or failing coordinator patch never reaches persistence", as
 
 async function executionEvidence(
   input: StageHookInput,
-  output: Record<string, unknown>,
+  output: StageHookOutput,
 ) {
   return {
     id: "019b7a2e-7c10-7000-8000-000000000010",
@@ -155,12 +163,14 @@ async function executionEvidence(
       pack_revisions: input.pack_revisions,
       proposed_states: input.proposed_states,
       base_states: input.base_states,
+      grant_snapshot: input.grant_snapshot,
+      previous_output_digest: null,
     })}`,
     output_digest: `sha256:${await canonicalSha256(output)}`,
     output,
     stderr: "",
     duration_ms: 1,
-    grant_snapshot: {},
+    grant_snapshot: grantSnapshot,
   };
 }
 
@@ -175,6 +185,7 @@ function fakeRepository(
         projects: [{ project_id: project }],
         pack_revisions: [{ revision_id: declaration.pack_revision_id }],
         hook_declarations: [declaration],
+        grant_snapshot: grantSnapshot,
         proposed_states: { lead: { name: "A" } },
         base_states: { lead: null },
       });
