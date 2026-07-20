@@ -126,6 +126,24 @@ Deno.test("atomic pack apply activates globally, is idempotent, and rolls back i
         )).rows[0].count,
       ) > 1,
     );
+    const projection = (await query<{
+      roles: string;
+      policies: string;
+      rules: string;
+      defaults: string;
+    }>(
+      sql,
+      `select
+      (select count(*)::text from role_definition_versions where candidate_revision_id=$1 and active) roles,
+      (select count(*)::text from policy_definition_versions where candidate_revision_id=$1 and active) policies,
+      (select count(*)::text from policy_rules pr join policy_definition_versions pd on pd.id=pr.policy_definition_version_id where pd.candidate_revision_id=$1) rules,
+      (select count(*)::text from policy_assignments pa join policy_definition_versions pd on pd.id=pa.policy_definition_version_id where pd.candidate_revision_id=$1 and pa.active and pa.source='pack_default') defaults`,
+      [first.plan.to_pack_revision_id],
+    )).rows[0];
+    assert(Number(projection.roles) > 0);
+    assert(Number(projection.policies) > 0);
+    assert(Number(projection.rules) > 0);
+    assert(Number(projection.defaults) > 0);
     const activeDefinition = await getDefinition(
       sql,
       "resources",

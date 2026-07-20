@@ -152,7 +152,10 @@ export type HttpDependencies = {
     sql(id: string, auth: AuthVariables["auth"]): Promise<Result<unknown>>;
   };
   queries: {
-    query(input: QueryObjectsRequest): Promise<Result<QueryObjectsDto>>;
+    query(
+      input: QueryObjectsRequest,
+      auth: AuthVariables["auth"],
+    ): Promise<Result<QueryObjectsDto>>;
   };
   actions: {
     preview(
@@ -445,11 +448,24 @@ export function makeHttpApp(
     }
   });
 
-  app.post(
-    "/queries",
-    async (c) =>
-      resultJson(c, await deps.queries.query(await authenticatedJson(c))),
-  );
+  app.post("/api/v1/queries", async (c) => {
+    const result = await deps.queries.query(
+      await authenticatedJson(c),
+      c.get("auth"),
+    );
+    if (!result.ok) return resultJson(c, result);
+    const value = result.value;
+    return c.json(successEnvelope({
+      items: value.items,
+      resolved_fields: value.resolved_fields,
+      resolved_sort: value.resolved_sort,
+    }, {
+      next_cursor: value.next_cursor,
+      has_more: value.has_more,
+      total: value.total,
+      policy_context_digest: value.policy_context_digest,
+    }));
+  });
 
   app.post(
     "/actions/:namespace/:action/preview",

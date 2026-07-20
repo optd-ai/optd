@@ -4,400 +4,715 @@ import {
   type Result,
   validationError,
 } from "../../domain/errors/result.ts";
+import type { AuthContext } from "../../domain/auth/model.ts";
 import {
+  ExpressionError,
   type FieldSpec,
-  type FieldType,
-  lowerCelToSql,
-} from "../../domain/queries/expression_lowerer.ts";
+  lowerExpression,
+} from "../../domain/expressions/cel.ts";
+import { canonicalJson } from "../../domain/ids/canonical_json.ts";
+import { QueryCursorSigner } from "../../domain/queries/cursor.ts";
+import {
+  type QueryRequest,
+  queryRequestContract,
+  type QueryResponse,
+  type ResolvedSort,
+} from "../../schemas/queries/query.ts";
 import {
   query,
   type Queryable,
   quoteIdentifier,
+  type Sql,
 } from "../../adapters/outbound/postgres/client.ts";
-import {
-  actorExpressionFields,
-  auditPolicy,
-  compilePolicyPredicate,
-  normalizeActor,
-} from "../../domain/policies/policy_engine.ts";
+import { lockReadAuthority } from "../../adapters/outbound/postgres/object_read_boundary.ts";
+import { ObjectReadAuthorityInvalidError } from "../ports/object_reader.ts";
 
-export type QuerySort = { field: string; direction?: "asc" | "desc" };
-export type QueryActor = string | {
-  id?: string;
-  roles?: string[];
-  [key: string]: unknown;
+export type QueryObjectsRequest = QueryRequest;
+export type QueryObjectsDto = QueryResponse;
+type Definition = {
+  revisionId: string;
+  table: string;
+  document: Record<string, unknown>;
+  fields: Record<string, FieldSpec>;
+  packFields: string[];
+  identity: string;
 };
-export type QueryObjectsRequest = {
-  actor?: QueryActor;
+type PolicyRow = {
+  id: string;
+  rule_name: string;
+  role_id: string;
+  capability: string;
   resource: string;
-  fields?: string[];
-  where?: string;
-  sort?: QuerySort[];
-  limit?: number;
-  cursor?: string | null;
-  include_archived?: boolean;
+  predicate: string | null;
+  relation_relationship: string | null;
+  relation_object_side: "from" | "to" | null;
+  relation_subject_side: "from" | "to" | null;
+  relation_subject: "actor.id" | "actor.human_user_id" | null;
+  policy_id: string;
+  policy_version_id: string;
+  policy_version: number;
+  assignment_id: string;
+  assignment_version: number;
 };
-export type QueryObjectsDto = {
-  resource: string;
-  items: Record<string, unknown>[];
-  page: {
-    limit: number;
-    returned: number;
-    has_more: boolean;
-    next_cursor: string | null;
-    sort: Required<QuerySort>[];
-  };
-  fields: { source: "request" | "axi" | "default"; selected: string[] };
-  filter: { where: string | null };
-  policy: { digest: string; summary: string };
-};
+class QueryFailure extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+    readonly details?: unknown,
+  ) {
+    super(message);
+  }
+}
 
-type ResourceMeta = {
-  namespace: string;
-  name: string;
-  revision: string;
-  tableName: string;
-  fields: Record<string, { type?: string; required?: boolean }>;
-  axiFields: string[];
-};
-type CursorPayload = { v: 1; digest: string; values: Record<string, unknown> };
-
-const PLATFORM_FIELDS: Record<string, FieldSpec> = {
-  id: { type: "string" },
-  version: { type: "integer" },
-  archived_at: { type: "timestamp", nullable: true },
-  archived_by: { type: "string", nullable: true },
-  current_object_version_id: { type: "string", nullable: true },
-  created_at: { type: "timestamp" },
-  updated_at: { type: "timestamp" },
-};
-
-export function makeQueryObjectsService(deps: { sql: Queryable }) {
+export function makeQueryObjectsService(
+  deps: { sql: Sql; cursors?: () => QueryCursorSigner },
+) {
+  let cursor: QueryCursorSigner | undefined;
   return {
-    async query(input: QueryObjectsRequest): Promise<Result<QueryObjectsDto>> {
+    async query(
+      input: unknown,
+      auth?: AuthContext,
+    ): Promise<Result<QueryResponse>> {
       try {
-        return ok(await runQuery(deps.sql, input));
+        if (!auth) {
+          throw new QueryFailure(
+            "authentication_required",
+            "authentication is required",
+          );
+        }
+        const issues = queryRequestContract.issues(input);
+        if (issues.length) {
+          throw new QueryFailure("bad_request", "query request is invalid", {
+            issues,
+          });
+        }
+        const request = input as QueryRequest;
+        return ok(
+          await deps.sql.begin(async (tx) => {
+            await lockReadAuthority(tx, auth, request.project_id);
+            return await execute(
+              tx,
+              request,
+              auth,
+              deps.cursors?.() ??
+                (cursor ??= QueryCursorSigner.fromEnvironment()),
+            );
+          }) as QueryResponse,
+        );
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        const code = error instanceof QueryError ? error.code : "bad_query";
-        return err(validationError(code, message));
+        const failure = error instanceof QueryFailure
+          ? error
+          : error instanceof ExpressionError
+          ? new QueryFailure("bad_request", "query expression is invalid", {
+            issues: [{
+              path: "/where",
+              code: error.code,
+              message: error.message,
+              ...error.details,
+            }],
+          })
+          : error instanceof ObjectReadAuthorityInvalidError
+          ? new QueryFailure(
+            "credential_invalid",
+            "credential authority is no longer valid",
+          )
+          : new QueryFailure("internal_error", "query could not be completed");
+        return err({
+          ...validationError(failure.code, failure.message, failure.details),
+          severity: failure.code === "not_found"
+            ? "not_found"
+            : failure.code === "authentication_required" ||
+                failure.code === "credential_invalid"
+            ? "authentication"
+            : failure.code === "internal_error"
+            ? "internal"
+            : "validation",
+        });
       }
     },
   };
 }
 
-export async function runQuery(
+async function execute(
   sql: Queryable,
-  input: QueryObjectsRequest,
-): Promise<QueryObjectsDto> {
-  if (!input || typeof input !== "object") {
-    throw new QueryError("bad_request", "query body must be an object");
-  }
-  const meta = await getResourceMeta(sql, input.resource);
-  if (!meta) {
-    throw new QueryError(
-      "unknown_resource",
-      `resource ${input.resource} not found`,
-    );
-  }
-  const selectable = fieldContext(meta);
-  const selected = selectFields(input.fields, meta, selectable);
-  const sort = normalizeSort(input.sort, selectable);
-  const limit = normalizeLimit(input.limit);
-  const actor = normalizeActor(input.actor);
-  if (input.include_archived && !actor.roles.includes("super_admin")) {
-    throw new QueryError(
-      "include_archived_denied",
-      "include_archived requires super_admin",
-    );
-  }
-
-  const whereParts: string[] = [];
-  const params: unknown[] = [];
-  if (input.where?.trim()) {
-    const lowered = lowerCelToSql(input.where, {
-      fields: selectable,
-      actor: actorExpressionFields(actor),
-      allowSelfAlias: true,
-      maxNodes: 80,
-      maxLength: 1_000,
-    });
-    whereParts.push(offsetParams(lowered.sql, params.length));
-    params.push(...lowered.params);
-  }
-  if (!input.include_archived) whereParts.push(`${qi("archived_at")} is null`);
-  const policy = await compilePolicyPredicate(sql, {
-    actor,
-    resource: input.resource,
-    action: "read",
-    fields: selectable,
-  });
-  whereParts.push(offsetParams(policy.sql, params.length));
-  params.push(...policy.params);
-  if (policy.decision.bypassed) {
-    await auditPolicy(
+  request: QueryRequest,
+  auth: AuthContext,
+  cursors: QueryCursorSigner,
+): Promise<QueryResponse> {
+  const project = await query(
+    sql,
+    "select id from projects where id=$1 for share",
+    [request.project_id],
+  );
+  if (!project.rows.length) throw hidden();
+  const definition = await resolveDefinition(sql, request);
+  if (!definition) throw hidden();
+  const fields = resolveFields(request.fields, definition);
+  const sort = resolveSort(request.sort, definition);
+  const roles = await effectiveRoles(sql, auth, request.project_id);
+  const superAdmin = roles.some((role) =>
+    role.role_id === "system:super_admin" && role.boundary_type === "system"
+  );
+  const readRules = superAdmin ? [] : await policyRows(
+    sql,
+    roles.map((r) => r.role_id),
+    request.project_id,
+    definition.identity,
+    "read",
+  );
+  if (!superAdmin && !readRules.length) throw hidden();
+  let archivedRules: PolicyRow[] = [];
+  if (request.include_archived && !superAdmin) {
+    archivedRules = await policyRows(
       sql,
-      { actor, resource: input.resource, action: "read" },
-      policy.decision,
+      roles.map((r) => r.role_id),
+      request.project_id,
+      definition.identity,
+      "read_archived",
     );
+    if (!archivedRules.length) throw hidden();
   }
 
-  const digest = await queryDigest({
-    resource: input.resource,
-    where: input.where?.trim() || null,
-    sort,
-    fields: selected,
-    actor_policy: policy.decision.digest,
-    include_archived: input.include_archived === true,
+  const params: unknown[] = [request.project_id];
+  const user = lowerExpression(request.where ?? "true", {
+    fields: definition.fields,
+    alias: "q",
+    parameterOffset: params.length,
   });
-  const cursor = input.cursor ? decodeCursor(input.cursor) : null;
-  if (cursor && cursor.digest !== digest) {
-    throw new QueryError(
-      "cursor_mismatch",
-      "cursor does not match query filter/sort/projection/actor-policy context",
-    );
+  params.push(...user.params);
+  const readPredicate = superAdmin ? "true" : await compilePolicy(
+    sql,
+    readRules,
+    definition,
+    auth,
+    request.project_id,
+    params,
+  );
+  const archivePredicate = request.include_archived
+    ? (superAdmin ? "true" : await compilePolicy(
+      sql,
+      archivedRules,
+      definition,
+      auth,
+      request.project_id,
+      params,
+    ))
+    : `q."archived_at" is null`;
+  const policyContext = {
+    principal: auth.principalId,
+    leaf: auth.authorizationId ?? null,
+    root: (await lockReadAuthority(sql, auth, request.project_id))
+      .authorizationRootId,
+    roles: roles.map((r) => [
+      r.role_id,
+      r.version_id,
+      r.version,
+      r.boundary_type,
+    ]),
+    assignments: [...readRules, ...archivedRules].map((
+      r,
+    ) => [
+      r.assignment_id,
+      r.assignment_version,
+      r.policy_version_id,
+      r.policy_version,
+      r.id,
+    ]).sort(),
+    super_admin: superAdmin,
+  };
+  const policyDigest = await digest(policyContext);
+  const shapeDigest = await digest({
+    project_id: request.project_id,
+    definition: request.definition,
+    revision_id: definition.revisionId,
+    where: user.normalized,
+    fields,
+    sort,
+    limit: request.limit ?? 50,
+    include_archived: request.include_archived ?? false,
+    include_total: request.include_total ?? false,
+  });
+  let position: { values: unknown[]; id: string } | null = null;
+  if (request.cursor) {
+    try {
+      position = await cursors.decode(
+        request.cursor,
+        shapeDigest,
+        policyDigest,
+      );
+    } catch {
+      throw new QueryFailure(
+        "invalid_cursor",
+        "query cursor is invalid or stale",
+      );
+    }
+    if (position.values.length !== sort.length) {
+      throw new QueryFailure(
+        "invalid_cursor",
+        "query cursor is invalid or stale",
+      );
+    }
   }
-  if (cursor) whereParts.push(keysetPredicate(sort, cursor.values, params));
-
-  const orderBy = sort.map((s) => `${qi(s.field)} ${s.direction}`).join(", ");
-  const sqlText = `select ${selected.map(qi).join(", ")} from ${
-    qi(meta.tableName)
-  }${
-    whereParts.length
-      ? ` where ${whereParts.map((p) => `(${p})`).join(" and ")}`
-      : ""
-  } order by ${orderBy} limit $${params.length + 1}`;
-  const result = await query<Record<string, unknown>>(sql, sqlText, [
-    ...params,
-    limit + 1,
-  ]);
-  const pageRows = result.rows.slice(0, limit);
-  const hasMore = result.rows.length > limit;
+  const keyset = position
+    ? keysetSql(sort, position.values, params, request.definition.kind)
+    : "true";
+  const order = sort.map((item) =>
+    `q.${qi(column(item.field, request.definition.kind))} ${item.direction} ${
+      item.direction === "asc" ? "nulls last" : "nulls first"
+    }`
+  ).join(",");
+  params.push((request.limit ?? 50) + 1);
+  const overrides = Object.entries(definition.fields).filter(([, spec]) =>
+    spec.type === "decimal" || spec.type === "integer"
+  ).flatMap(([field]) => [
+    `'${column(field, request.definition.kind)}'`,
+    `page.${qi(column(field, request.definition.kind))}::text`,
+  ]).join(",");
+  const rowJson = overrides
+    ? `to_jsonb(page) || jsonb_build_object(${overrides})`
+    : "to_jsonb(page)";
+  const statement = `with eligible as materialized (
+    select q.* from ${
+    qi(definition.table)
+  } q where q.project_id=$1 and (${user.sql}) and (${archivePredicate}) and (${readPredicate})
+  ), tally as (select count(*)::bigint total from eligible), page as (
+    select q.* from eligible q where ${keyset} order by ${order} limit $${params.length}
+  ) select ${rowJson} row_data,tally.total::text total from tally left join page on true order by ${
+    order.replaceAll("q.", "page.")
+  }`;
+  const result = await query<
+    { row_data: Record<string, unknown> | string | null; total: string }
+  >(sql, statement, params);
+  const rows = result.rows.map((r) => record(r.row_data)).filter((r) =>
+    Object.keys(r).length
+  );
+  const limit = request.limit ?? 50;
+  const hasMore = rows.length > limit;
+  const page = rows.slice(0, limit);
+  const items = page.map((row) => dto(row, request, definition, fields));
+  let next: string | null = null;
+  if (hasMore) {
+    const last = page[page.length - 1];
+    next = await cursors.encode(shapeDigest, policyDigest, {
+      values: sort.map((s) =>
+        value(last, column(s.field, request.definition.kind))
+      ),
+      id: String(last.id),
+    });
+  }
   return {
-    resource: input.resource,
-    items: pageRows,
-    page: {
-      limit,
-      returned: pageRows.length,
-      has_more: hasMore,
-      next_cursor: hasMore
-        ? encodeCursor({
-          v: 1,
-          digest,
-          values: cursorValues(pageRows[pageRows.length - 1], sort),
-        })
-        : null,
-      sort,
-    },
-    fields: {
-      source: input.fields?.length
-        ? "request"
-        : meta.axiFields.length
-        ? "axi"
-        : "default",
-      selected,
-    },
-    filter: { where: input.where?.trim() || null },
-    policy: {
-      digest: policy.decision.digest,
-      summary: policy.decision.reason,
-    },
+    items,
+    resolved_fields: fields,
+    resolved_sort: sort,
+    next_cursor: next,
+    has_more: hasMore,
+    total: request.include_total ? Number(result.rows[0]?.total ?? 0) : null,
+    policy_context_digest: policyDigest,
   };
 }
 
-async function getResourceMeta(
+async function resolveDefinition(
   sql: Queryable,
-  id: string,
-): Promise<ResourceMeta | null> {
-  const [namespace, name] = splitId(id);
-  if (!namespace || !name) return null;
-  const rows = await query<
-    {
-      namespace: string;
-      name: string;
-      revision: string;
-      spec: unknown;
-      table_name: string;
-    }
+  request: QueryRequest,
+): Promise<Definition | null> {
+  const section = request.definition.kind === "resource"
+    ? "resources"
+    : "relationships";
+  const found = await query<
+    { revision_id: string; table_name: string; document: unknown }
   >(
     sql,
-    `select r.namespace,r.name,r.revision,r.spec,g.table_name from resource_definitions r join generated_sql_objects g on g.revision=r.revision and g.namespace=r.namespace and g.name=r.name and g.kind='resource_table' where r.namespace=$1 and r.name=$2 and r.revision=(select revision from pack_revisions where namespace=$1 and active=true order by created_at desc limit 1)`,
-    [namespace, name],
+    `select ar.candidate_revision_id revision_id,rt.table_name,jsonb_extract_path(cr.normalized,$4::text,$5::text) document
+    from pack_active_revisions ar join pack_candidate_revisions cr on cr.id=ar.candidate_revision_id
+    join pack_runtime_tables rt on rt.publisher=ar.publisher and rt.pack_name=ar.pack_name and rt.definition_kind=$3 and rt.definition_name=$5
+    where ar.publisher=$1 and ar.pack_name=$2 for share of ar,cr,rt`,
+    [
+      request.definition.publisher,
+      request.definition.pack,
+      request.definition.kind,
+      section,
+      request.definition.name,
+    ],
   );
-  const row = rows.rows[0];
-  if (!row) return null;
-  const spec = asRecord(row.spec);
-  const axi = asRecord(spec.axi);
-  const list = asRecord(axi.list);
+  const row = found.rows[0];
+  if (!row || !row.document) return null;
+  const document = record(row.document),
+    spec = record(document.spec),
+    descriptors = record(spec.fields);
+  const fields: Record<string, FieldSpec> = {
+    id: { type: "string" },
+    created_at: { type: "timestamp" },
+    updated_at: { type: "timestamp" },
+    archived_at: { type: "timestamp", nullable: true },
+  };
+  if (request.definition.kind === "relationship") {
+    fields.from = { type: "string", column: "from_object_id" };
+    fields.to = { type: "string", column: "to_object_id" };
+  }
+  for (const [name, d] of Object.entries(descriptors)) {
+    const desc = record(d);
+    fields[name] = {
+      type: fieldType(desc.type),
+      nullable: desc.required !== true,
+    };
+  }
   return {
-    namespace,
-    name,
-    revision: row.revision,
-    tableName: row.table_name,
-    fields: asRecord(spec.fields) as ResourceMeta["fields"],
-    axiFields: Array.isArray(list.fields) &&
-        list.fields.every((f) => typeof f === "string")
-      ? list.fields
-      : [],
+    revisionId: row.revision_id,
+    table: row.table_name,
+    document,
+    fields,
+    packFields: Object.keys(descriptors).sort(),
+    identity:
+      `${request.definition.publisher}/${request.definition.pack}:${request.definition.name}`,
   };
 }
-
-function fieldContext(meta: ResourceMeta): Record<string, FieldSpec> {
-  const fields: Record<string, FieldSpec> = { ...PLATFORM_FIELDS };
-  for (const [name, spec] of Object.entries(meta.fields)) {
-    fields[name] = { type: mapFieldType(spec.type), nullable: !spec.required };
-  }
-  return fields;
-}
-function mapFieldType(type: unknown): FieldType {
-  if (
-    type === "integer" || type === "decimal" || type === "boolean" ||
-    type === "timestamp" || type === "date"
-  ) return type;
-  return "string";
-}
-function selectFields(
+function resolveFields(
   requested: string[] | undefined,
-  meta: ResourceMeta,
-  fields: Record<string, FieldSpec>,
-): string[] {
-  const selected = requested?.length
-    ? requested
-    : meta.axiFields.length
-    ? meta.axiFields
-    : ["id", ...Object.keys(meta.fields).slice(0, 4)];
-  const seen = new Set<string>();
-  for (const field of selected) {
-    if (!fields[field]) {
-      throw new QueryError(
-        "unknown_projection_field",
-        `unknown projection field ${field}`,
+  definition: Definition,
+) {
+  if (requested) {
+    duplicates(requested, "projection");
+    for (const f of requested) {
+      if (!definition.packFields.includes(f)) {
+        throw new QueryFailure("bad_request", `unknown projection field ${f}`);
+      }
+    }
+    return requested;
+  }
+  const list = record(record(record(definition.document.spec).axi).list);
+  const axi = Array.isArray(list.fields)
+    ? list.fields.map(String).filter((f) =>
+      f !== "id" && definition.packFields.includes(f)
+    )
+    : [];
+  return (axi.length ? axi : definition.packFields.slice(0, 20));
+}
+function resolveSort(
+  input: QueryRequest["sort"],
+  definition: Definition,
+): ResolvedSort[] {
+  const raw = input ?? [{ field: "updated_at", direction: "desc" as const }];
+  duplicates(raw.map((s) => s.field), "sort");
+  for (const s of raw) {
+    if (s.field === "id") {
+      throw new QueryFailure(
+        "bad_request",
+        "id is an implicit sort tie-breaker",
       );
     }
-    seen.add(field);
-  }
-  return [...seen];
-}
-function normalizeSort(
-  input: QuerySort[] | undefined,
-  fields: Record<string, FieldSpec>,
-): Required<QuerySort>[] {
-  const sort = input?.length
-    ? input
-    : [{ field: "updated_at", direction: "desc" as const }];
-  const normalized = sort.map((s) => {
-    if (!fields[s.field]) {
-      throw new QueryError(
-        "unknown_sort_field",
-        `unknown sort field ${s.field}`,
-      );
+    if (!definition.fields[s.field]) {
+      throw new QueryFailure("bad_request", `unknown sort field ${s.field}`);
     }
-    const direction = s.direction ?? "asc";
-    if (direction !== "asc" && direction !== "desc") {
-      throw new QueryError("bad_sort", `bad sort direction ${direction}`);
-    }
-    return { field: s.field, direction };
-  });
-  if (!normalized.some((s) => s.field === "id")) {
-    normalized.push({
-      field: "id",
-      direction: normalized[0]?.direction ?? "asc",
-    });
   }
-  return normalized;
-}
-function normalizeLimit(limit: unknown): number {
-  const value = limit === undefined ? 25 : Number(limit);
-  if (!Number.isInteger(value) || value < 1) {
-    throw new QueryError("bad_limit", "limit must be a positive integer");
+  const out = [...raw];
+  if (!out.some((s) => s.field === "id")) {
+    out.push({ field: "id", direction: out[out.length - 1].direction });
   }
-  return Math.min(value, 100);
+  return out;
 }
-function keysetPredicate(
-  sort: Required<QuerySort>[],
-  values: Record<string, unknown>,
+async function effectiveRoles(
+  sql: Queryable,
+  auth: AuthContext,
+  project: string,
+) {
+  return (await query<{
+    role_id: string;
+    version_id: string;
+    version: number;
+    boundary_type: "system" | "all_projects" | "project";
+  }>(
+    sql,
+    auth.authorizationId
+      ? `select ar.role_id,rv.id version_id,rv.version,ar.boundary_type from agent_authorization_roles ar join role_definition_versions rv on rv.role_id=ar.role_id and rv.active where ar.authorization_id=$1 and (ar.boundary_type in ('system','all_projects') or ar.project_id=$2) order by ar.role_id`
+      : `select ra.role_id,rv.id version_id,rv.version,ra.boundary_type from role_assignments ra join role_definition_versions rv on rv.role_id=ra.role_id and rv.active where ra.principal_id=$1 and ra.active and (ra.boundary_type in ('system','all_projects') or ra.project_id=$2) order by ra.role_id`,
+    [auth.authorizationId ?? auth.principalId, project],
+  )).rows;
+}
+async function policyRows(
+  sql: Queryable,
+  roles: string[],
+  project: string,
+  resource: string,
+  action: string,
+) {
+  if (!roles.length) return [];
+  return (await query<PolicyRow>(
+    sql,
+    `select pr.id,pr.rule_name,pr.role_id,pr.capability,pr.resource,pr.predicate,pr.relation_relationship,pr.relation_object_side,pr.relation_subject_side,pr.relation_subject,
+ pd.policy_id,pd.id policy_version_id,pd.version policy_version,pa.id assignment_id,pa.version assignment_version
+ from policy_rules pr join policy_definition_versions pd on pd.id=pr.policy_definition_version_id and pd.active
+ join policy_assignments pa on pa.policy_definition_version_id=pd.id and pa.active
+ left join pack_active_revisions ar on ar.candidate_revision_id=pd.candidate_revision_id
+ where pr.role_id=any($1::text[]) and pr.capability=$2 and pr.resource=$3 and (pa.boundary_type in ('system','all_projects') or pa.project_id=$4)
+ and (pd.candidate_revision_id is null or ar.candidate_revision_id is not null) order by pd.policy_id,pr.rule_name,pr.id`,
+    [roles, action, resource, project],
+  )).rows;
+}
+
+async function compilePolicy(
+  sql: Queryable,
+  rules: PolicyRow[],
+  definition: Definition,
+  auth: AuthContext,
+  project: string,
   params: unknown[],
-): string {
+): Promise<string> {
+  const candidates: string[] = [];
+  for (const rule of rules) {
+    const parts: string[] = [];
+    if (rule.predicate) {
+      let lowered;
+      try {
+        lowered = lowerExpression(rule.predicate, {
+          fields: definition.fields,
+          alias: "q",
+          parameterOffset: params.length,
+          actor: {
+            id: { type: "string", value: auth.principalId },
+            principal_type: { type: "string", value: auth.principalType },
+            human_user_id: { type: "string", value: auth.humanUserId },
+          },
+        });
+      } catch {
+        throw hidden();
+      }
+      params.push(...lowered.params);
+      parts.push(lowered.sql);
+    }
+    if (rule.relation_relationship) {
+      parts.push(
+        await relationSql(sql, rule, definition, auth, project, params),
+      );
+    }
+    candidates.push(parts.length ? `(${parts.join(" and ")})` : "true");
+  }
+  return candidates.length ? `(${candidates.join(" or ")})` : "false";
+}
+async function relationSql(
+  sql: Queryable,
+  rule: PolicyRow,
+  definition: Definition,
+  auth: AuthContext,
+  project: string,
+  params: unknown[],
+): Promise<string> {
+  if (
+    !rule.relation_object_side || !rule.relation_subject_side ||
+    rule.relation_object_side === rule.relation_subject_side ||
+    !rule.relation_subject
+  ) throw new QueryFailure("not_found", "requested definition was not found");
+  const parsed =
+    /^([a-z][a-z0-9-]{0,62})\/([a-z][a-z0-9_]{0,62}):([a-z][a-z0-9_]{0,62})$/
+      .exec(rule.relation_relationship!);
+  if (!parsed) throw hidden();
+  const rel = await query<{ table_name: string; document: unknown }>(
+    sql,
+    `select rt.table_name,jsonb_extract_path(cr.normalized,'relationships',$3) document from pack_active_revisions ar join pack_candidate_revisions cr on cr.id=ar.candidate_revision_id join pack_runtime_tables rt on rt.publisher=ar.publisher and rt.pack_name=ar.pack_name and rt.definition_kind='relationship' and rt.definition_name=$3 where ar.publisher=$1 and ar.pack_name=$2`,
+    [parsed[1], parsed[2], parsed[3]],
+  );
+  const found = rel.rows[0];
+  if (!found) throw hidden();
+  const spec = record(record(found.document).spec);
+  const objectEndpoint = String(
+    record(spec[rule.relation_object_side]).resource,
+  );
+  const subjectEndpoint = String(
+    record(spec[rule.relation_subject_side]).resource,
+  );
+  if (
+    objectEndpoint !== definition.identity ||
+    subjectEndpoint !== "system:principal"
+  ) throw hidden();
+  const actor = rule.relation_subject === "actor.id"
+    ? auth.principalId
+    : auth.humanUserId;
+  if (!actor) return "false";
+  params.push(project, actor);
+  const objectCol = rule.relation_object_side === "from"
+      ? "from_object_id"
+      : "to_object_id",
+    subjectCol = rule.relation_subject_side === "from"
+      ? "from_object_id"
+      : "to_object_id";
+  return `exists(select 1 from ${
+    qi(found.table_name)
+  } rel where rel.project_id=$${params.length - 1} and rel.${
+    qi(objectCol)
+  }=q.id and rel.${
+    qi(subjectCol)
+  }=$${params.length}::uuid and rel.archived_at is null)`;
+}
+function keysetSql(
+  sort: ResolvedSort[],
+  values: unknown[],
+  params: unknown[],
+  kind: "resource" | "relationship",
+) {
   const clauses: string[] = [];
   for (let i = 0; i < sort.length; i++) {
-    const equals = sort.slice(0, i).map((s) => {
-      params.push(values[s.field]);
-      return `${qi(s.field)} = $${params.length}`;
-    });
-    const s = sort[i];
-    params.push(values[s.field]);
-    const op = s.direction === "desc" ? "<" : ">";
-    clauses.push(
-      `(${
-        [...equals, `${qi(s.field)} ${op} $${params.length}`].join(" and ")
-      })`,
-    );
+    const equal: string[] = [];
+    for (let j = 0; j < i; j++) {
+      params.push(values[j]);
+      equal.push(
+        `q.${
+          qi(column(sort[j].field, kind))
+        } is not distinct from $${params.length}`,
+      );
+    }
+    params.push(values[i]);
+    const p = `$${params.length}`,
+      col = `q.${qi(column(sort[i].field, kind))}`,
+      after = sort[i].direction === "asc"
+        ? (values[i] === null ? "false" : `(${col}>${p} or ${col} is null)`)
+        : (values[i] === null ? `${col} is not null` : `${col}<${p}`);
+    clauses.push(`(${[...equal, after].join(" and ")})`);
   }
-  return clauses.join(" or ");
+  return `(${clauses.join(" or ")})`;
 }
-function cursorValues(
+function dto(
   row: Record<string, unknown>,
-  sort: Required<QuerySort>[],
-) {
-  const values: Record<string, unknown> = {};
-  for (const s of sort) values[s.field] = row[s.field];
-  return values;
+  request: QueryRequest,
+  definition: Definition,
+  fields: string[],
+): Record<string, unknown> {
+  const common = {
+    id: String(row.id),
+    project_id: String(row.project_id),
+    version: Number(row.version),
+    object_version_id: String(row.current_object_version_id),
+    archived_at: timestamp(row.archived_at),
+    created_at: timestamp(row.created_at),
+    updated_at: timestamp(row.updated_at),
+  };
+  const identity = {
+    publisher: request.definition.publisher,
+    pack: request.definition.pack,
+    name: request.definition.name,
+    revision_id: definition.revisionId,
+  };
+  const projected = Object.fromEntries(fields.map((f) => [
+    f,
+    typedValue(row, f, definition.fields[f]),
+  ]));
+  return request.definition.kind === "resource"
+    ? { kind: "object", ...common, resource: identity, data: projected }
+    : {
+      kind: "relationship",
+      ...common,
+      relationship: identity,
+      from: String(row.from_object_id),
+      to: String(row.to_object_id),
+      fields: projected,
+    };
 }
-function encodeCursor(payload: CursorPayload): string {
-  return btoa(JSON.stringify(payload)).replaceAll("+", "-").replaceAll("/", "_")
-    .replaceAll("=", "");
+function column(field: string, kind: "resource" | "relationship") {
+  return kind === "relationship" && field === "from"
+    ? "from_object_id"
+    : kind === "relationship" && field === "to"
+    ? "to_object_id"
+    : field;
 }
-function decodeCursor(value: string): CursorPayload {
-  try {
-    const json = atob(
-      value.replaceAll("-", "+").replaceAll("_", "/") +
-        "===".slice((value.length + 3) % 4),
-    );
-    const payload = JSON.parse(json);
+function value(row: Record<string, unknown>, field: string) {
+  const v = row[field];
+  if (typeof v === "bigint") return Number(v);
+  if (v instanceof Date) return v.toISOString();
+  return v;
+}
+function typedValue(
+  row: Record<string, unknown>,
+  field: string,
+  spec: FieldSpec | undefined,
+): unknown {
+  const found = value(row, field);
+  if (spec?.type === "decimal") return canonicalDecimal(found);
+  if (spec?.type === "integer" && found !== null) {
+    if (typeof found !== "string" || !/^-?[0-9]+$/.test(found)) {
+      throw new QueryFailure(
+        "internal_error",
+        "database integer was not returned as text",
+      );
+    }
+    const integer = BigInt(found);
     if (
-      payload?.v !== 1 || typeof payload.digest !== "string" ||
-      !payload.values || typeof payload.values !== "object"
-    ) throw new Error("bad cursor");
-    return payload;
-  } catch {
-    throw new QueryError(
-      "bad_cursor",
-      "cursor is not a valid Operant query cursor",
+      integer > BigInt(Number.MAX_SAFE_INTEGER) ||
+      integer < BigInt(Number.MIN_SAFE_INTEGER)
+    ) {
+      throw new QueryFailure(
+        "internal_error",
+        "database integer exceeds JSON-safe range",
+      );
+    }
+    return Number(integer);
+  }
+  return found;
+}
+function canonicalDecimal(value: unknown): unknown {
+  if (value === null) return null;
+  if (typeof value !== "string") {
+    throw new QueryFailure(
+      "internal_error",
+      "database decimal was not returned as text",
+    );
+  }
+  const source = value;
+  if (!/^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$/.test(source)) {
+    throw new QueryFailure(
+      "internal_error",
+      "database returned a non-canonical decimal",
+    );
+  }
+  const [integer, fraction = ""] = source.split(".");
+  const trimmed = fraction.replace(/0+$/, "");
+  const normalized = trimmed ? `${integer}.${trimmed}` : integer;
+  return /^-0(?:\.0*)?$/.test(normalized) ? "0" : normalized;
+}
+function timestamp(v: unknown) {
+  return v == null ? null : v instanceof Date ? v.toISOString() : String(v);
+}
+function fieldType(v: unknown): FieldSpec["type"] {
+  return ["integer", "decimal", "boolean", "date", "timestamp"].includes(
+      String(v),
+    )
+    ? String(v) as FieldSpec["type"]
+    : "string";
+}
+function duplicates(values: string[], kind: string) {
+  if (new Set(values).size !== values.length) {
+    throw new QueryFailure(
+      "bad_request",
+      `${kind} fields must not contain duplicates`,
     );
   }
 }
-async function queryDigest(value: unknown): Promise<string> {
-  const bytes = new TextEncoder().encode(JSON.stringify(value));
-  const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
-  return Array.from(hash).map((b) => b.toString(16).padStart(2, "0")).join("");
+function qi(v: string) {
+  return quoteIdentifier(v);
 }
-function offsetParams(sql: string, offset: number) {
-  return sql.replace(/\$(\d+)/g, (_, n) => `$${Number(n) + offset}`);
-}
-function splitId(id: string): [string | null, string | null] {
-  const parts = String(id).split(".");
-  return parts.length === 2 ? [parts[0], parts[1]] : [null, null];
-}
-function asRecord(value: unknown): Record<string, unknown> {
-  if (typeof value === "string") {
+function record(v: unknown): Record<string, any> {
+  if (typeof v === "string") {
     try {
-      const parsed = JSON.parse(value);
-      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-        ? parsed as Record<string, unknown>
-        : {};
+      v = JSON.parse(v);
     } catch {
       return {};
     }
   }
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
+  return v && typeof v === "object" && !Array.isArray(v)
+    ? v as Record<string, unknown>
     : {};
 }
-function qi(identifier: string): string {
-  return quoteIdentifier(identifier);
+function hidden() {
+  return new QueryFailure(
+    "not_found",
+    "requested project or definition was not found",
+  );
 }
-class QueryError extends Error {
-  constructor(public code: string, message: string) {
-    super(message);
-  }
+async function digest(value: unknown) {
+  const bytes = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(canonicalJson(value)),
+  );
+  return `sha256:${
+    [...new Uint8Array(bytes)].map((v) => v.toString(16).padStart(2, "0")).join(
+      "",
+    )
+  }`;
 }

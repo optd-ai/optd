@@ -32,7 +32,7 @@ export class PostgresObjectReadBoundary implements ObjectReadBoundary {
     ) => Promise<T>,
   ): Promise<T> {
     return await this.sql.begin(async (tx) => {
-      const anchor = await lockAuthority(tx, auth, address.projectId);
+      const anchor = await lockReadAuthority(tx, auth, address.projectId);
       return await work(
         new PostgresObjectReader(tx),
         new PostgresAuthorizationRepository(tx as unknown as Sql),
@@ -42,7 +42,7 @@ export class PostgresObjectReadBoundary implements ObjectReadBoundary {
   }
 }
 
-async function lockAuthority(
+export async function lockReadAuthority(
   sql: Queryable,
   auth: AuthContext,
   projectId: string,

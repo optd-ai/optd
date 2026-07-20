@@ -88,7 +88,7 @@ export function makeApplication(
           resource: "system:migration",
         }),
     }),
-    queries: makeQueryObjectsService({ sql: sql as Queryable }),
+    queries: makeQueryObjectsService({ sql }),
     outbox: makeProcessOutboxService({
       sql: sql as Queryable,
       tx,

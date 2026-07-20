@@ -921,6 +921,45 @@ export const platformMigrations: PlatformMigration[] = [
         deferrable initially deferred for each row execute function operant_validate_version_chain();
     `,
   },
+  {
+    id: "1017_pack_policy_projection",
+    sql: `
+      alter table role_definition_versions
+        add column candidate_revision_id uuid references pack_candidate_revisions(id),
+        add column definition_name text;
+      alter table policy_definition_versions
+        add column candidate_revision_id uuid references pack_candidate_revisions(id),
+        add column definition_name text;
+      do $$ declare constraint_name text; begin
+        select conname into constraint_name from pg_constraint
+         where conrelid='policy_rules'::regclass and contype='u'
+           and array_length(conkey,1)=3 limit 1;
+        if constraint_name is not null then
+          execute format('alter table policy_rules drop constraint %I',constraint_name);
+        end if;
+      end $$;
+      alter table policy_rules
+        add column rule_name text,
+        add column relation_relationship text,
+        add column relation_object_side text check(relation_object_side in ('from','to')),
+        add column relation_subject_side text check(relation_subject_side in ('from','to')),
+        add column relation_subject text check(relation_subject in ('actor.id','actor.human_user_id'));
+      create unique index role_definition_candidate_name_idx
+        on role_definition_versions(candidate_revision_id,definition_name) where candidate_revision_id is not null;
+      create unique index policy_definition_candidate_name_idx
+        on policy_definition_versions(candidate_revision_id,definition_name) where candidate_revision_id is not null;
+      create unique index policy_rule_stable_name_idx
+        on policy_rules(policy_definition_version_id,rule_name,role_id,capability,resource)
+        where rule_name is not null;
+      create unique index policy_rule_legacy_identity_idx
+        on policy_rules(policy_definition_version_id,role_id,capability,resource)
+        where rule_name is null;
+      create index policy_definition_candidate_active_idx
+        on policy_definition_versions(candidate_revision_id) where active;
+      create index role_definition_candidate_active_idx
+        on role_definition_versions(candidate_revision_id) where active;
+    `,
+  },
 ];
 
 export async function applyPlatformMigrations(

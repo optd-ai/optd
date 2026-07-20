@@ -8,43 +8,51 @@ const context = {
   fields: {
     id: { type: "string" as const },
     status: { type: "string" as const },
-    email: { type: "string" as const, nullable: true },
-    score: { type: "integer" as const, nullable: true },
+    score: { type: "integer" as const },
+    amount: { type: "decimal" as const },
+    due: { type: "date" as const },
+    at: { type: "timestamp" as const },
     archived_at: { type: "timestamp" as const, nullable: true },
-    contacted: { type: "boolean" as const, nullable: true },
   },
-  actor: { id: { type: "string" as const, value: "actor_1" } },
-  allowSelfAlias: true,
   maxNodes: 80,
   maxLength: 1000,
 };
-
-Deno.test("CEL lowerer parameterizes filters and archive helpers", () => {
+Deno.test("one CEL lowerer parameterizes and types the frozen subset", () => {
   const lowered = lowerCelToSql(
-    'status == "new" && active() && email == "x\'; drop table res_lead; --"',
+    'status == "x\';drop table lead;--" && amount >= 10 && due < "2027-01-01" && active()',
     context,
   );
-  assertStringIncludes(lowered.sql, '"status" = $1');
-  assertStringIncludes(lowered.sql, '"archived_at" is null');
-  assertStringIncludes(lowered.sql, '"email" = $2');
-  assertEquals(lowered.params, ["new", "x'; drop table res_lead; --"]);
+  assertEquals(lowered.params, ["x';drop table lead;--", 10, "2027-01-01"]);
+  assertStringIncludes(lowered.sql, '"amount" >= ($2)::numeric');
+  assertStringIncludes(lowered.sql, "($3)::date");
 });
-
-Deno.test("CEL lowerer rejects unsupported and unsafe expressions", () => {
-  expectCode("matches(email, '.*')", "unsupported_function");
-  expectCode("secret_field == true", "unknown_field");
-  expectCode("status > 5", "type_mismatch");
-  expectCode("status", "non_boolean_root");
-  expectCode('status == "new"', "expression_too_complex", {
-    ...context,
-    maxNodes: 1,
-  });
+Deno.test("CEL lowerer fails closed on forbidden forms", () => {
+  for (
+    const [source, code] of [
+      ["null == null", "expression_unsupported"],
+      ["amount > 1.2", "expression_unsupported"],
+      ["status in []", "expression_array_empty"],
+      ['status in ["x", 1]', "expression_array_heterogeneous"],
+      ["actor.ids[0] == id", "expression_unsupported"],
+      ['matches(status, "x")', "expression_unsupported"],
+      ["status", "expression_type"],
+      ["secret == true", "expression_unknown_symbol"],
+    ]
+  ) expect(source, code);
 });
-
-function expectCode(expression: string, code: string, ctx = context) {
+Deno.test("CEL syntax preserves safe location", () => {
   try {
-    lowerCelToSql(expression, ctx);
-    throw new Error(`expected ${code}`);
+    lowerCelToSql("status ==", context);
+  } catch (error) {
+    if (!(error instanceof ExpressionLoweringError)) throw error;
+    assertEquals(error.code, "expression_syntax");
+    assertEquals(error.details.line, 1);
+  }
+});
+function expect(source: string, code: string) {
+  try {
+    lowerCelToSql(source, context);
+    throw new Error("expected rejection");
   } catch (error) {
     if (!(error instanceof ExpressionLoweringError)) throw error;
     assertEquals(error.code, code);

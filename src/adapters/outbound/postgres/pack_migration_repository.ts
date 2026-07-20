@@ -583,6 +583,7 @@ export async function applyMigrationPlan(
     tokenId = found.id;
   }
   for (const index of statementOrder(plan)) await query(sql, statements[index]);
+  await projectPackAuthorization(sql, plan.to_pack_revision_id);
   if (testFault === "after_sql") {
     throw new Error("injected migration failure after SQL");
   }
@@ -675,6 +676,222 @@ export async function recordMigrationAttempt(
       JSON.stringify({ error_code: outcome }),
     ],
   );
+}
+
+async function projectPackAuthorization(
+  sql: Queryable,
+  candidateRevisionId: string,
+): Promise<void> {
+  const candidate = await query<
+    {
+      publisher: string;
+      pack_name: string;
+      normalized: Record<string, unknown> | string;
+    }
+  >(
+    sql,
+    `select publisher,pack_name,normalized from pack_candidate_revisions where id=$1 for share`,
+    [candidateRevisionId],
+  );
+  const row = candidate.rows[0];
+  if (!row) {
+    throw new MigrationApplyError(
+      "migration_plan_invalid",
+      "candidate authorization projection is missing",
+    );
+  }
+  const normalized = typeof row.normalized === "string"
+    ? JSON.parse(row.normalized) as Record<string, unknown>
+    : row.normalized;
+  const roles = definitions(normalized, "roles");
+  const policies = definitions(normalized, "policies");
+  const prefix = `${row.publisher}/${row.pack_name}:`;
+
+  await query(
+    sql,
+    `update policy_assignments pa set active=false,disabled_at=now(),version=pa.version+1
+    from policy_definition_versions pd where pa.policy_definition_version_id=pd.id and pa.active
+      and pa.source='pack_default' and pd.policy_id like $1 and pd.candidate_revision_id is distinct from $2`,
+    [`${prefix}%`, candidateRevisionId],
+  );
+  for (
+    const [name, document] of Object.entries(roles).sort(([a], [b]) =>
+      a.localeCompare(b)
+    )
+  ) {
+    const spec = asRecord(document.spec);
+    await query(
+      sql,
+      `insert into system_roles(id,display_name,active,description,axi_summary) values($1,$2,true,$3,$4)
+      on conflict(id) do update set display_name=excluded.display_name,active=true,description=excluded.description,axi_summary=excluded.axi_summary`,
+      [
+        `${prefix}${name}`,
+        String(spec.display_name),
+        String(spec.description),
+        asRecord(spec.axi).summary ?? null,
+      ],
+    );
+  }
+  await query(
+    sql,
+    `update role_definition_versions set active=false where active and role_id like $1 and candidate_revision_id is distinct from $2`,
+    [`${prefix}%`, candidateRevisionId],
+  );
+  await query(
+    sql,
+    `update policy_definition_versions set active=false where active and policy_id like $1 and candidate_revision_id is distinct from $2`,
+    [`${prefix}%`, candidateRevisionId],
+  );
+
+  for (
+    const [name] of Object.entries(roles).sort(([a], [b]) => a.localeCompare(b))
+  ) {
+    const roleId = `${prefix}${name}`;
+    const id = await stableProjectionId(candidateRevisionId, `role:${name}`);
+    const version = await nextDefinitionVersion(
+      sql,
+      "role_definition_versions",
+      "role_id",
+      roleId,
+    );
+    await query(
+      sql,
+      `insert into role_definition_versions(id,role_id,version,active,candidate_revision_id,definition_name)
+      values($1,$2,$3,true,$4,$5) on conflict(candidate_revision_id,definition_name) where candidate_revision_id is not null do nothing`,
+      [id, roleId, version, candidateRevisionId, name],
+    );
+  }
+
+  for (
+    const [name, document] of Object.entries(policies).sort(([a], [b]) =>
+      a.localeCompare(b)
+    )
+  ) {
+    const spec = asRecord(document.spec);
+    const policyId = `${prefix}${name}`;
+    const definitionId = await stableProjectionId(
+      candidateRevisionId,
+      `policy:${name}`,
+    );
+    const version = await nextDefinitionVersion(
+      sql,
+      "policy_definition_versions",
+      "policy_id",
+      policyId,
+    );
+    await query(
+      sql,
+      `insert into policy_definition_versions(id,policy_id,version,active,candidate_revision_id,definition_name)
+      values($1,$2,$3,true,$4,$5) on conflict(candidate_revision_id,definition_name) where candidate_revision_id is not null do nothing`,
+      [definitionId, policyId, version, candidateRevisionId, name],
+    );
+    const rules = Array.isArray(spec.rules) ? spec.rules : [];
+    for (const ruleValue of rules) {
+      const rule = asRecord(ruleValue);
+      const relation = rule.relation === undefined
+        ? null
+        : asRecord(rule.relation);
+      if (
+        relation &&
+        (relation.object_side === relation.subject_side ||
+          !["from", "to"].includes(String(relation.object_side)) ||
+          !["from", "to"].includes(String(relation.subject_side)))
+      ) {
+        throw new MigrationApplyError(
+          "migration_plan_invalid",
+          "policy relation sides must be opposite endpoints",
+        );
+      }
+      const roleIds = Array.isArray(rule.roles) ? rule.roles.map(String) : [];
+      const actions = Array.isArray(rule.actions)
+        ? rule.actions.map(String)
+        : [];
+      const resources = Array.isArray(rule.resources)
+        ? rule.resources.map(String)
+        : [];
+      for (const roleId of roleIds) {
+        for (const action of actions) {
+          for (const resource of resources) {
+            const key = `${name}:${
+              String(rule.name)
+            }:${roleId}:${action}:${resource}`;
+            await query(
+              sql,
+              `insert into policy_rules(id,policy_definition_version_id,role_id,capability,resource,condition_kind,summary,predicate,rule_name,
+          relation_relationship,relation_object_side,relation_subject_side,relation_subject)
+          values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) on conflict do nothing`,
+              [
+                await stableProjectionId(candidateRevisionId, `rule:${key}`),
+                definitionId,
+                roleId,
+                action,
+                resource,
+                relation ? "rebac" : rule.where ? "abac" : "unconditional",
+                asRecord(rule.axi).summary ?? null,
+                rule.where ?? null,
+                String(rule.name),
+                relation?.relationship ?? null,
+                relation?.object_side ?? null,
+                relation?.subject_side ?? null,
+                relation?.subject ?? null,
+              ],
+            );
+          }
+        }
+      }
+    }
+    if (spec.default_assignment === "all_projects") {
+      await query(
+        sql,
+        `insert into policy_assignments(id,policy_definition_version_id,boundary_type,project_id,active,source)
+        values($1,$2,'all_projects',null,true,'pack_default') on conflict do nothing`,
+        [
+          await stableProjectionId(candidateRevisionId, `default:${name}`),
+          definitionId,
+        ],
+      );
+    }
+  }
+}
+
+async function nextDefinitionVersion(
+  sql: Queryable,
+  table: string,
+  column: string,
+  identity: string,
+): Promise<number> {
+  if (
+    !/^(?:role|policy)_definition_versions$/.test(table) ||
+    !/^(?:role|policy)_id$/.test(column)
+  ) throw new Error("unsafe definition table");
+  const result = await query<{ version: number }>(
+    sql,
+    `select coalesce(max(version),0)+1 version from ${table} where ${column}=$1`,
+    [identity],
+  );
+  return Number(result.rows[0]?.version ?? 1);
+}
+
+async function stableProjectionId(
+  candidate: string,
+  identity: string,
+): Promise<string> {
+  const bytes = new Uint8Array(
+    await crypto.subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(
+        `operant.pack.policy.v1\0${candidate}\0${identity}`,
+      ),
+    ),
+  );
+  bytes[6] = (bytes[6] & 0x0f) | 0x70;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = [...bytes.slice(0, 16)].map((v) =>
+    v.toString(16).padStart(2, "0")
+  ).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${
+    hex.slice(16, 20)
+  }-${hex.slice(20)}`;
 }
 
 async function existingApplication(
