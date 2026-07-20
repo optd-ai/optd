@@ -7,7 +7,8 @@ import { makeQueryObjectsService } from "./services/query_objects.ts";
 import { makeMigrationServices } from "./services/migration_services.ts";
 import { makeProcessOutboxService } from "./services/process_outbox.ts";
 import { DenoHookRunner } from "../adapters/outbound/deno-hooks/hook_runner.ts";
-import { makeSecretService } from "./services/manage_secret.ts";
+import { makeSecretsService } from "./services/secrets/manage_secrets.ts";
+import { makeHookSecretGrantService } from "./services/secrets/manage_grants.ts";
 import { OPERANT_VERSION } from "../config/runtime.ts";
 import type { Queryable, Sql } from "../adapters/outbound/postgres/client.ts";
 import { PostgresTransactionManager } from "../adapters/outbound/postgres/transaction_manager.ts";
@@ -38,10 +39,18 @@ export function makeApplication(
 ) {
   const clock = new SystemClock();
   const tx = new PostgresTransactionManager(sql);
-  const secrets = makeSecretService({ sql: sql as Queryable, tx });
-  const hookRunner = new DenoHookRunner({
-    secretResolver: (name) => secrets.resolveSecret(name),
+  const authorizationRepository = new PostgresAuthorizationRepository(sql);
+  const secrets = makeSecretsService({
+    sql: sql as Queryable,
+    tx,
+    authorization: authorizationRepository,
   });
+  const hookSecretGrants = makeHookSecretGrantService({
+    sql: sql as Queryable,
+    tx,
+    authorization: authorizationRepository,
+  });
+  const hookRunner = new DenoHookRunner();
   const changesets = makeStageChangesetService(
     new PostgresStageRepository(sql),
     options.stageHookCoordinator,
@@ -55,7 +64,6 @@ export function makeApplication(
     maximumHashes,
   );
   const passwordPolicy = loadPasswordPolicy();
-  const authorizationRepository = new PostgresAuthorizationRepository(sql);
   let historyCursors: HistoryCursorSigner | undefined;
   const authorization = makeAuthorizationService(authorizationRepository);
   return {
@@ -93,6 +101,7 @@ export function makeApplication(
           resource: "system:migration",
         }),
     }),
+    hookSecretGrants,
     queries: makeQueryObjectsService({ sql }),
     expressions: makeExpressionService(sql as Queryable),
     outbox: makeProcessOutboxService({

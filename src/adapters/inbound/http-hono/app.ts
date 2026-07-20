@@ -186,9 +186,16 @@ export type HttpDependencies = {
     retry(id: string): Promise<Result<unknown>>;
   };
   secrets: {
-    list(input?: { actor?: unknown }): Promise<Result<unknown>>;
-    set(input: unknown): Promise<Result<unknown>>;
-    delete(name: string, input?: unknown): Promise<Result<unknown>>;
+    list(input: { auth: AuthVariables["auth"] }): Promise<Result<unknown>>;
+    create(input: unknown): Promise<Result<unknown>>;
+    rotate(id: string, input: unknown): Promise<Result<unknown>>;
+    disable(id: string, input: unknown): Promise<Result<unknown>>;
+  };
+  hookSecretGrants: {
+    list(input: { auth: AuthVariables["auth"] }): Promise<Result<unknown>>;
+    create(input: unknown): Promise<Result<unknown>>;
+    replace(id: string, input: unknown): Promise<Result<unknown>>;
+    revoke(id: string, input: unknown): Promise<Result<unknown>>;
   };
   health: {
     inspect(): Promise<Record<string, unknown>>;
@@ -621,24 +628,69 @@ export function makeHttpApp(
   app.get(
     "/secrets",
     async (c) =>
+      resultJson(c, await deps.secrets.list({ auth: c.get("auth") })),
+  );
+  app.post("/secrets", async (c) => {
+    const body = await strictAuthenticatedJson(c, [
+      "name",
+      "description",
+      "value",
+    ]);
+    return resultJson(c, await deps.secrets.create(body));
+  });
+  app.post("/secrets/:id/rotate", async (c) => {
+    const body = await strictAuthenticatedJson(c, ["value"]);
+    return resultJson(c, await deps.secrets.rotate(c.req.param("id"), body));
+  });
+  app.post("/secrets/:id/disable", async (c) => {
+    const body = await strictAuthenticatedJson(c, []);
+    return resultJson(c, await deps.secrets.disable(c.req.param("id"), body));
+  });
+  app.get(
+    "/hook-secret-grants",
+    async (c) =>
+      resultJson(c, await deps.hookSecretGrants.list({ auth: c.get("auth") })),
+  );
+  app.post(
+    "/hook-secret-grants",
+    async (c) =>
       resultJson(
         c,
-        await deps.secrets.list({
-          actor: serverActor(c.get("auth")),
-        }),
+        await deps.hookSecretGrants.create(
+          await strictAuthenticatedJson(c, [
+            "hook_revision_id",
+            "expected_security_digest",
+            "slot",
+            "secret_id",
+          ]),
+        ),
       ),
   );
   app.post(
-    "/secrets",
+    "/hook-secret-grants/:id/replace",
     async (c) =>
-      resultJson(c, await deps.secrets.set(await authenticatedJson(c))),
+      resultJson(
+        c,
+        await deps.hookSecretGrants.replace(
+          c.req.param("id"),
+          await strictAuthenticatedJson(c, [
+            "expected_current_grant_id",
+            "secret_id",
+          ]),
+        ),
+      ),
   );
-  app.delete("/secrets/:name", async (c) => {
-    const body = await authenticatedJson(c).catch(() => ({
-      actor_context: serverActor(c.get("auth")),
-    }));
-    return resultJson(c, await deps.secrets.delete(c.req.param("name"), body));
-  });
+  app.post(
+    "/hook-secret-grants/:id/revoke",
+    async (c) =>
+      resultJson(
+        c,
+        await deps.hookSecretGrants.revoke(
+          c.req.param("id"),
+          await strictAuthenticatedJson(c, ["reason"]),
+        ),
+      ),
+  );
 
   app.notFound((c) =>
     c.json(
@@ -676,6 +728,22 @@ async function requestJson(c: {
     throw new SyntaxError("request body must be a JSON object");
   }
   return body as Record<string, unknown>;
+}
+
+async function strictAuthenticatedJson(c: {
+  req: { json(): Promise<unknown> };
+  get(key: "auth"): AuthVariables["auth"];
+}, allowed: string[]): Promise<Record<string, unknown>> {
+  const body = await c.req.json();
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw new SyntaxError("request body must be a JSON object");
+  }
+  const input = stripAuthority(body) as Record<string, unknown>;
+  const keys = Object.keys(input);
+  if (keys.some((key) => !allowed.includes(key))) {
+    throw new SyntaxError("request body contains unknown fields");
+  }
+  return { ...input, auth: c.get("auth") };
 }
 
 export async function authenticatedJson<T extends Record<string, unknown>>(c: {

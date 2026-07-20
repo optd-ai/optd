@@ -122,19 +122,53 @@ async function projectComponentRevisions(
       const definitionDigest = `sha256:${await canonicalSha256(
         canonicalDefinition,
       )}`;
+      const hook = kind === "hook"
+        ? definition as LoadedPack["hooks"][string]
+        : null;
+      const scriptContent = hook === null
+        ? null
+        : pack.scripts[`hooks/${hook.script}`]?.content;
+      if (hook !== null && scriptContent === undefined) {
+        throw new Error("hook script content is unavailable");
+      }
       await query(
         sql,
-        `insert into pack_component_revisions(id,candidate_revision_id,definition_kind,definition_name,definition_digest)
-         values($1,$2,$3,$4,$5) on conflict(candidate_revision_id,definition_kind,definition_name) do nothing`,
-        [uuidV7(), candidateRevisionId, kind, name, definitionDigest],
+        `insert into pack_component_revisions(
+           id,candidate_revision_id,definition_kind,definition_name,definition_digest,
+           hook_security_digest,hook_script_digest,hook_normalized_config,hook_script_content
+         ) values($1,$2,$3,$4,$5,$6,$7,$8::text::jsonb,$9)
+         on conflict(candidate_revision_id,definition_kind,definition_name) do nothing`,
+        [
+          uuidV7(),
+          candidateRevisionId,
+          kind,
+          name,
+          definitionDigest,
+          hook?.securityDigest ?? null,
+          hook?.scriptDigest ?? null,
+          hook === null ? null : JSON.stringify(hook.spec),
+          scriptContent ?? null,
+        ],
       );
-      const stored = (await query<{ definition_digest: string }>(
+      const stored = (await query<{
+        definition_digest: string;
+        hook_security_digest: string | null;
+        hook_script_digest: string | null;
+        hook_script_content: string | null;
+      }>(
         sql,
-        `select definition_digest from pack_component_revisions
+        `select definition_digest,hook_security_digest,hook_script_digest,hook_script_content
+         from pack_component_revisions
          where candidate_revision_id=$1 and definition_kind=$2 and definition_name=$3`,
         [candidateRevisionId, kind, name],
       )).rows[0];
-      if (!stored || stored.definition_digest !== definitionDigest) {
+      if (
+        !stored || stored.definition_digest !== definitionDigest ||
+        (hook !== null &&
+          (stored.hook_security_digest !== hook.securityDigest ||
+            stored.hook_script_digest !== hook.scriptDigest ||
+            stored.hook_script_content !== scriptContent))
+      ) {
         throw new Error("pack component revision digest conflict");
       }
     }
@@ -204,7 +238,7 @@ async function projectHookAttachmentRevisions(
         resource,
         action,
         event: typeof attachment.event === "string" ? attachment.event : null,
-        order: typeof attachment.order === "number" ? attachment.order : 0,
+        order: typeof attachment.order === "number" ? attachment.order : 1000,
         condition: typeof attachment.condition === "string"
           ? attachment.condition
           : null,

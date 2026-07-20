@@ -4,6 +4,7 @@ import {
   schemaByKind,
   validatePackDocument,
 } from "../../../schemas/packs/pack_schemas.ts";
+import { validateHookContract } from "../../../schemas/hooks/hook_contract.ts";
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | {
   [key: string]: JsonValue;
@@ -40,7 +41,11 @@ export type LoadedPack = {
   actions: Record<string, NormalizedDefinition>;
   hooks: Record<
     string,
-    NormalizedDefinition & { script: string; scriptDigest: string }
+    NormalizedDefinition & {
+      script: string;
+      scriptDigest: string;
+      securityDigest: string;
+    }
   >;
   roles: Record<string, NormalizedDefinition>;
   policies: Record<string, NormalizedDefinition>;
@@ -206,10 +211,19 @@ export async function loadPackFromFiles(
           `${file.path}: referenced hook script ${script} is missing`,
         );
       }
+      const security = await validateHookContract(
+        def.identity,
+        spec,
+        scriptFile.digest,
+        scriptFile.content,
+      );
+      document.spec = security.normalized as JsonValue;
+      def.spec = security.normalized as Record<string, JsonValue>;
       pack.hooks[objectName] = {
         ...def,
         script,
         scriptDigest: scriptFile.digest,
+        securityDigest: security.securityDigest,
       };
     } else {
       definitionMap(pack, expectedKind)[objectName] = def;

@@ -13,7 +13,7 @@ import {
   type MigrationApplyResult,
   type MigrationStatus,
 } from "./adapters/outbound/postgres/migrations.ts";
-import { assertSecretSubsystemReady } from "./application/services/manage_secret.ts";
+import { assertSecretSubsystemReady } from "./application/services/secrets/manage_secrets.ts";
 import {
   type PostgresRuntime,
   startPostgresRuntime,
@@ -59,6 +59,7 @@ export async function createFetchHandler() {
     changesets: application.changesets,
     outbox: application.outbox,
     secrets: application.secrets,
+    hookSecretGrants: application.hookSecretGrants,
     health: makeHealthService(sql, postgresRuntime, migrationResult),
     version: OPERANT_VERSION,
   });

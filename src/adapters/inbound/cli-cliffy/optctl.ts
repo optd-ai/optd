@@ -401,26 +401,34 @@ async function resolveActionPayload(
   return payload;
 }
 
-async function parseSecretSetPayload(
+async function parseSecretValuePayload(
   args: string[],
+  allowDescription: boolean,
 ): Promise<Record<string, unknown>> {
   const payload: Record<string, unknown> = {};
+  let stdin = false;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     const next = () => args[++i] ?? "";
-    if (arg === "--value") payload.value = next();
-    else if (arg.startsWith("--value=")) {
-      payload.value = arg.slice("--value=".length);
-    } else if (arg === "--value-file") {
-      payload.value = await Deno.readTextFile(next());
-    } else if (arg.startsWith("--value-file=")) {
-      payload.value = await Deno.readTextFile(
-        arg.slice("--value-file=".length),
-      );
-    } else if (arg === "--description") payload.description = next();
-    else if (arg.startsWith("--description=")) {
+    if (arg === "--stdin") stdin = true;
+    else if (allowDescription && arg === "--description") {
+      payload.description = next();
+    } else if (allowDescription && arg.startsWith("--description=")) {
       payload.description = arg.slice("--description=".length);
     } else throw usageError(`unknown secret option ${arg}`);
+  }
+  if (stdin) {
+    payload.value = (await new Response(Deno.stdin.readable).text()).replace(
+      /\r?\n$/,
+      "",
+    );
+  } else {
+    if (!Deno.stdin.isTerminal() || !Deno.stderr.isTerminal()) {
+      throw interactiveInputError(
+        "secret value requires a terminal or --stdin",
+      );
+    }
+    payload.value = await promptSecret("Secret value: ");
   }
   return payload;
 }
@@ -1590,24 +1598,53 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       );
     } else if (cmd === "secret" && sub === "list") {
       result = await getJson(`${parsed.server}/secrets`);
-    } else if (cmd === "secret" && sub === "set" && value) {
+    } else if (cmd === "secret" && sub === "create" && value) {
       result = await postJson(`${parsed.server}/secrets`, {
         name: value,
-        ...await parseSecretSetPayload(parsed.positional.slice(3)),
+        ...await parseSecretValuePayload(parsed.positional.slice(3), true),
       });
-    } else if (cmd === "secret" && sub === "delete" && value) {
-      result = await decodeJsonResponse(
-        await fetch(
-          `${parsed.server}/secrets/${encodeURIComponent(value)}`,
-          {
-            method: "DELETE",
-            headers: {
-              "content-type": "application/json",
-              ...await credentialHeaders(parsed.server),
-            },
-            body: JSON.stringify({}),
-          },
-        ),
+    } else if (cmd === "secret" && sub === "rotate" && value) {
+      const listed = await getJson(`${parsed.server}/secrets`) as {
+        data?: { secrets?: Array<{ id: string; name: string }> };
+      };
+      const secret = listed.data?.secrets?.find((item) => item.name === value);
+      if (!secret) throw usageError(`unknown secret ${value}`);
+      result = await postJson(
+        `${parsed.server}/secrets/${secret.id}/rotate`,
+        await parseSecretValuePayload(parsed.positional.slice(3), false),
+      );
+    } else if (cmd === "secret" && sub === "disable" && value) {
+      const listed = await getJson(`${parsed.server}/secrets`) as {
+        data?: { secrets?: Array<{ id: string; name: string }> };
+      };
+      const secret = listed.data?.secrets?.find((item) => item.name === value);
+      if (!secret) throw usageError(`unknown secret ${value}`);
+      result = await postJson(
+        `${parsed.server}/secrets/${secret.id}/disable`,
+        {},
+      );
+    } else if (cmd === "secret" && sub === "grants") {
+      result = await getJson(`${parsed.server}/hook-secret-grants`);
+    } else if (cmd === "secret" && sub === "replace-grant" && value) {
+      const option = parsed.positional.slice(3);
+      if (option.length !== 2 || option[0] !== "--secret") {
+        throw usageError("replace-grant requires --secret <name>");
+      }
+      const listed = await getJson(`${parsed.server}/secrets`) as {
+        data?: { secrets?: Array<{ id: string; name: string }> };
+      };
+      const secret = listed.data?.secrets?.find((item) =>
+        item.name === option[1]
+      );
+      if (!secret) throw usageError(`unknown secret ${option[1]}`);
+      result = await postJson(
+        `${parsed.server}/hook-secret-grants/${value}/replace`,
+        { expected_current_grant_id: value, secret_id: secret.id },
+      );
+    } else if (cmd === "secret" && sub === "revoke-grant" && value) {
+      result = await postJson(
+        `${parsed.server}/hook-secret-grants/${value}/revoke`,
+        {},
       );
     } else if (cmd === "outbox" && sub === "status") {
       result = await getJson(`${parsed.server}/outbox`);
@@ -1788,7 +1825,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       );
     } else {
       throw usageError(
-        "usage: optctl status live/ready/bootstrap | bootstrap init | home | project list/create/view/update/archive/select | context set-project | pack preview <dir> | pack apply <dir> [--safe|--reviewed] [--timeout duration] | metadata [packs] | metadata pack <publisher/pack> | metadata resource/relationship/lifecycle/action/hook/role/policy/seed <publisher/pack:name> | secret list/set/delete | action preview/commit <namespace.action> --input '{...}' | outbox status/drain/retry | migration inspect <id> [--sql|--violations] | migration validate <id> | migration apply <id> (--safe|--reviewed|--confirm-token <token>) [--timeout duration] | query <namespace.resource> [--where expr] [--fields a,b] [--sort field:desc] [--limit n] [--cursor c] | changeset stage <json-file> | changeset inspect <stage-id> | changeset cancel <stage-id> [--reason text] | --project <selector> view publisher/pack:name <uuid> | --project <selector> history publisher/pack:name <uuid> [--limit n] [--cursor c] | --project <selector> view relationship publisher/pack:name <uuid> | --project <selector> history relationship publisher/pack:name <uuid> [--limit n] [--cursor c]",
+        "usage: optctl status live/ready/bootstrap | bootstrap init | home | project list/create/view/update/archive/select | context set-project | pack preview <dir> | pack apply <dir> [--safe|--reviewed] [--timeout duration] | metadata [packs] | metadata pack <publisher/pack> | metadata resource/relationship/lifecycle/action/hook/role/policy/seed <publisher/pack:name> | secret list/create/rotate/disable/grants/grant/replace-grant/revoke-grant | action preview/commit <namespace.action> --input '{...}' | outbox status/drain/retry | migration inspect <id> [--sql|--violations] | migration validate <id> | migration apply <id> (--safe|--reviewed|--confirm-token <token>) [--timeout duration] | query <namespace.resource> [--where expr] [--fields a,b] [--sort field:desc] [--limit n] [--cursor c] | changeset stage <json-file> | changeset inspect <stage-id> | changeset cancel <stage-id> [--reason text] | --project <selector> view publisher/pack:name <uuid> | --project <selector> history publisher/pack:name <uuid> [--limit n] [--cursor c] | --project <selector> view relationship publisher/pack:name <uuid> | --project <selector> history relationship publisher/pack:name <uuid> [--limit n] [--cursor c]",
       );
     }
     const output = parsed.verbose

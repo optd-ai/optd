@@ -588,6 +588,12 @@ export async function applyMigrationPlan(
     plan.to_pack_revision_id,
     authContextId,
   );
+  await carryEquivalentHookSecretGrants(
+    sql,
+    plan.from_pack_revision_id,
+    plan.to_pack_revision_id,
+    authContextId,
+  );
   if (testFault === "after_sql") {
     throw new Error("injected migration failure after SQL");
   }
@@ -680,6 +686,61 @@ export async function recordMigrationAttempt(
       JSON.stringify({ error_code: outcome }),
     ],
   );
+}
+
+async function carryEquivalentHookSecretGrants(
+  sql: Queryable,
+  fromRevisionId: string | null,
+  toRevisionId: string,
+  authContextId: string,
+): Promise<void> {
+  if (fromRevisionId === null) return;
+  const rows = (await query<{
+    grant_id: string;
+    new_hook_revision_id: string;
+    hook_security_digest: string;
+    slot: string;
+    secret_id: string;
+  }>(
+    sql,
+    `select g.id as grant_id,new_hook.id as new_hook_revision_id,
+            new_hook.hook_security_digest,g.slot,g.secret_id
+       from hook_secret_grants g
+       join pack_component_revisions old_hook on old_hook.id=g.hook_revision_id
+       join pack_component_revisions new_hook
+         on new_hook.candidate_revision_id=$2
+        and new_hook.definition_kind='hook'
+        and new_hook.definition_name=old_hook.definition_name
+        and new_hook.hook_security_digest=old_hook.hook_security_digest
+       join platform_secrets s on s.id=g.secret_id and s.status='active'
+      where old_hook.candidate_revision_id=$1
+        and not exists(select 1 from hook_secret_grant_revocations r where r.grant_id=g.id)
+        and not exists(select 1 from hook_secret_grants successor where successor.supersedes_grant_id=g.id)
+        and exists(
+          select 1 from jsonb_array_elements(new_hook.hook_normalized_config->'secrets') slot
+           where slot->>'slot'=g.slot
+        )
+      order by new_hook.definition_name,g.slot,g.id`,
+    [fromRevisionId, toRevisionId],
+  )).rows;
+  for (const row of rows) {
+    await query(
+      sql,
+      `insert into hook_secret_grants(
+         id,hook_revision_id,hook_security_digest,slot,secret_id,
+         created_auth_context_id,inherited_from_grant_id
+       ) values($1,$2,$3,$4,$5,$6,$7)`,
+      [
+        uuidV7(),
+        row.new_hook_revision_id,
+        row.hook_security_digest,
+        row.slot,
+        row.secret_id,
+        authContextId,
+        row.grant_id,
+      ],
+    );
+  }
 }
 
 async function projectPackAuthorization(

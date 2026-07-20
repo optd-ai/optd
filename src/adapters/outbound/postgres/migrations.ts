@@ -1161,6 +1161,58 @@ export const platformMigrations: PlatformMigration[] = [
         ) nulls not distinct;
     `,
   },
+  {
+    id: "1024_trusted_hook_secrets",
+    sql: `
+      alter table platform_secrets add column id uuid;
+      alter table platform_secrets add column value_version bigint not null default 1 check(value_version > 0);
+      alter table platform_secrets add column status text not null default 'active' check(status in ('active','disabled'));
+      alter table platform_secrets add column created_auth_context_id uuid references auth_contexts(id);
+      alter table platform_secrets add column updated_auth_context_id uuid references auth_contexts(id);
+      alter table platform_secrets add column disabled_at timestamptz;
+      alter table platform_secrets add column disabled_auth_context_id uuid references auth_contexts(id);
+      alter table platform_secrets drop column created_by;
+      alter table platform_secrets drop column updated_by;
+      alter table platform_secrets drop constraint platform_secrets_pkey;
+      alter table platform_secrets alter column id set not null;
+      alter table platform_secrets add primary key(id);
+      alter table platform_secrets add constraint platform_secrets_name_unique unique(name);
+      alter table platform_secrets add constraint platform_secrets_nonce_96_bit check(octet_length(nonce)=12);
+
+      alter table pack_component_revisions add column hook_security_digest text;
+      alter table pack_component_revisions add column hook_script_digest text;
+      alter table pack_component_revisions add column hook_normalized_config jsonb;
+      alter table pack_component_revisions add column hook_script_content text;
+      alter table pack_component_revisions add constraint hook_revision_security_facts check(
+        (definition_kind='hook') =
+        (hook_security_digest is not null and hook_script_digest is not null and
+         hook_normalized_config is not null and hook_script_content is not null)
+      );
+
+      create table hook_secret_grants(
+        id uuid primary key,
+        hook_revision_id uuid not null references pack_component_revisions(id),
+        hook_security_digest text not null,
+        slot text not null,
+        secret_id uuid not null references platform_secrets(id),
+        created_auth_context_id uuid not null references auth_contexts(id),
+        inherited_from_grant_id uuid references hook_secret_grants(id),
+        supersedes_grant_id uuid unique references hook_secret_grants(id),
+        created_at timestamptz not null default now(),
+        check(slot ~ '^[a-z][a-z0-9_]{0,62}$')
+      );
+      create table hook_secret_grant_revocations(
+        id uuid primary key,
+        grant_id uuid not null unique references hook_secret_grants(id),
+        revoked_auth_context_id uuid not null references auth_contexts(id),
+        reason text,
+        revoked_at timestamptz not null default now(),
+        check(reason is null or char_length(reason) between 1 and 1000)
+      );
+      create index hook_secret_grants_hook_slot_idx on hook_secret_grants(hook_revision_id,slot,created_at desc);
+      create index hook_secret_grants_secret_idx on hook_secret_grants(secret_id);
+    `,
+  },
 ];
 
 async function backfillComponentRevisions(sql: Queryable): Promise<void> {
