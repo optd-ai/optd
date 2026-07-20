@@ -2,9 +2,24 @@ import { assertEquals } from "jsr:@std/assert@1";
 import { makeStageChangesetService } from "../../../src/application/services/changesets/stage_changesets.ts";
 import type { StageRepository } from "../../../src/application/ports/stage_repository.ts";
 import type { AuthContext } from "../../../src/domain/auth/model.ts";
+import type {
+  StageHookDeclaration,
+  StageHookInput,
+} from "../../../src/domain/changesets/stage.ts";
+import { canonicalSha256 } from "../../../src/domain/ids/canonical_json.ts";
 import { ok } from "../../../src/domain/errors/result.ts";
 
 const project = "019b7a2e-7c10-7000-8000-000000000001";
+const declaration: StageHookDeclaration = {
+  attachment_id: "019b7a2e-7c10-7000-8000-000000000006",
+  hook_revision_id: "019b7a2e-7c10-7000-8000-000000000007",
+  pack_revision_id: "019b7a2e-7c10-7000-8000-000000000008",
+  hook: "operant/crm:normalize",
+  phase: "changeset.validate",
+  resource: "operant/crm:lead",
+  order: 0,
+  script_digest: `sha256:${"3".repeat(64)}`,
+};
 const auth: AuthContext = Object.freeze({
   id: "019b7a2e-7c10-7000-8000-000000000002",
   principalId: "019b7a2e-7c10-7000-8000-000000000003",
@@ -22,10 +37,19 @@ Deno.test("injected stage coordinator runs once and ordered patches reach persis
   const repository = fakeRepository((input) => persisted = input);
   const service = makeStageChangesetService(repository, {
     async coordinate(input) {
-      await Promise.resolve();
       calls++;
+      const output = { patches: 2 };
       return {
-        operations: structuredClone(input.operations) as never,
+        added_operations: [{
+          op: "create",
+          key: "child",
+          project_id: project,
+          resource: "operant/crm:lead",
+          fields: {
+            name: "child",
+            parent_id: { $ref: "lead.object_id" },
+          },
+        }],
         patch_outputs: [{
           operation_key: "lead",
           output: {
@@ -36,10 +60,16 @@ Deno.test("injected stage coordinator runs once and ordered patches reach persis
             warnings: [],
           },
         }],
-        dependencies: [{ kind: "policy", fake_read: true }],
-        hook_executions: [executionEvidence()],
+        read_dependencies: [{
+          kind: "policy",
+          digest: `sha256:${"4".repeat(64)}`,
+        }],
+        hook_executions: [await executionEvidence(input, output)],
         warnings: [{ path: "/name", code: "normalized", message: "changed" }],
-        approval_requirements: [{ id: "019b7a2e-7c10-7000-8000-000000000006" }],
+        approval_requirements: [{
+          id: "019b7a2e-7c10-7000-8000-000000000009",
+          capability: "lead.review",
+        }],
         required_capabilities: ["lead.update"],
         effects: ["lead.changed"],
         planned_events: [{ id: "event:lead" }],
@@ -59,7 +89,13 @@ Deno.test("injected stage coordinator runs once and ordered patches reach persis
   assertEquals(calls, 1);
   assertEquals(result.ok, true);
   assertEquals(persisted?.operations[0].fields, { name: "B", score: 2 });
+  assertEquals(persisted?.operations.length, 2);
+  assertEquals(
+    (persisted?.operations[1].fields as Record<string, unknown>).parent_id,
+    persisted?.operations[0].object_id,
+  );
   assertEquals(persisted?.hookResult?.warnings.length, 1);
+  assertEquals(persisted?.hookDeclarations, [declaration]);
 });
 
 Deno.test("malformed or failing coordinator patch never reaches persistence", async () => {
@@ -67,17 +103,17 @@ Deno.test("malformed or failing coordinator patch never reaches persistence", as
   const repository = fakeRepository(() => persisted = true);
   const service = makeStageChangesetService(repository, {
     async coordinate(input) {
-      await Promise.resolve();
+      const output = { test: "fails" };
       return {
-        operations: structuredClone(input.operations) as never,
+        added_operations: [],
         patch_outputs: [{
           operation_key: "lead",
           output: {
             patches: [{ op: "test", path: "/name", value: "wrong" }],
           },
         }],
-        dependencies: [],
-        hook_executions: [executionEvidence()],
+        read_dependencies: [],
+        hook_executions: [await executionEvidence(input, output)],
         warnings: [],
         approval_requirements: [],
         required_capabilities: [],
@@ -101,14 +137,27 @@ Deno.test("malformed or failing coordinator patch never reaches persistence", as
   assertEquals(persisted, false);
 });
 
-function executionEvidence() {
+async function executionEvidence(
+  input: StageHookInput,
+  output: Record<string, unknown>,
+) {
   return {
-    phase: "changeset.validate",
-    pack_revision_id: "019b7a2e-7c10-7000-8000-000000000007",
-    hook_revision_id: "019b7a2e-7c10-7000-8000-000000000008",
-    input_digest: `sha256:${"1".repeat(64)}`,
-    output_digest: `sha256:${"2".repeat(64)}`,
-    output: {},
+    id: "019b7a2e-7c10-7000-8000-000000000010",
+    attachment_id: declaration.attachment_id,
+    phase: declaration.phase,
+    pack_revision_id: declaration.pack_revision_id,
+    hook_revision_id: declaration.hook_revision_id,
+    input_digest: `sha256:${await canonicalSha256({
+      schema: "changeset.hook-input.v1",
+      declaration,
+      operations: input.operations,
+      projects: input.projects,
+      pack_revisions: input.pack_revisions,
+      proposed_states: input.proposed_states,
+      base_states: input.base_states,
+    })}`,
+    output_digest: `sha256:${await canonicalSha256(output)}`,
+    output,
     stderr: "",
     duration_ms: 1,
     grant_snapshot: {},
@@ -124,7 +173,10 @@ function fakeRepository(
       return ok({
         operations,
         projects: [{ project_id: project }],
-        pack_revisions: [{ matching_hooks: [{ hook: "normalize" }] }],
+        pack_revisions: [{ revision_id: declaration.pack_revision_id }],
+        hook_declarations: [declaration],
+        proposed_states: { lead: { name: "A" } },
+        base_states: { lead: null },
       });
     },
     async create(input) {

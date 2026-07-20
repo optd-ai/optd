@@ -12,6 +12,7 @@ import {
   normalizeOperations,
   OperationError,
 } from "../../../src/domain/changesets/operations.ts";
+import { stageDigest } from "../../../src/domain/changesets/stage.ts";
 import {
   applyPatches,
   compilePatchedMutation,
@@ -277,6 +278,32 @@ Deno.test("normalization enforces all operational limits", async () => {
     () => normalizeOperations(request, undefined, limits(2, 2, 1000, 100)),
     OperationError,
   );
+});
+
+Deno.test("stage digest binds every required evidence category", async () => {
+  const base = {
+    operation_graph_digest: `sha256:${"1".repeat(64)}`,
+    projects: [{ project_id: project, version: 1, status: "active" }],
+    pack_revisions: [{ revision_id: generated[0] }],
+    operations: [],
+    dependencies: [{ kind: "policy", digest: `sha256:${"2".repeat(64)}` }],
+    hook_executions: [],
+    policy_decisions: [{ allowed: true }],
+    approval_requirements: [],
+    required_capabilities: ["create"],
+    effects: ["resource:create"],
+    planned_events: [],
+    planned_deliveries: [],
+  };
+  const original = await stageDigest(base);
+  for (const key of Object.keys(base) as Array<keyof typeof base>) {
+    const changed = structuredClone(base);
+    if (Array.isArray(changed[key])) {
+      (changed[key] as unknown[]).push({ changed: key });
+    } else changed.operation_graph_digest = `sha256:${"3".repeat(64)}`;
+    assertNotEquals(await stageDigest(changed), original, key);
+  }
+  assertEquals(await stageDigest(structuredClone(base)), original);
 });
 
 Deno.test("patch failures and canonical recompilation are deterministic", () => {

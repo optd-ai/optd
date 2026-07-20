@@ -1069,6 +1069,70 @@ export const platformMigrations: PlatformMigration[] = [
       alter table staged_changeset_dependencies add column component_digest text;
     `,
   },
+  {
+    id: "1020_immutable_pack_component_revisions",
+    sql: `
+      create extension if not exists pgcrypto;
+      create function operant_canonical_jsonb(value jsonb) returns text
+      language plpgsql immutable strict as $$
+      declare result text;
+      begin
+        case jsonb_typeof(value)
+          when 'object' then
+            select '{'||coalesce(string_agg(to_jsonb(entry.key)::text||':'||operant_canonical_jsonb(entry.value),',' order by entry.key collate "C"),'')||'}'
+              into result from jsonb_each(value) entry;
+          when 'array' then
+            select '['||coalesce(string_agg(operant_canonical_jsonb(entry.value),',' order by entry.ordinality),'')||']'
+              into result from jsonb_array_elements(value) with ordinality entry(value,ordinality);
+          when 'number' then result := trim_scale((value #>> '{}')::numeric)::text;
+          else result := value::text;
+        end case;
+        return result;
+      end $$;
+      create table pack_component_revisions (
+        id uuid primary key,
+        candidate_revision_id uuid not null references pack_candidate_revisions(id),
+        definition_kind text not null check(definition_kind in ('resource','relationship','lifecycle','action','hook','role','policy','seed')),
+        definition_name text not null check(definition_name ~ '^[a-z][a-z0-9_]{0,62}$'),
+        definition_digest text not null check(definition_digest ~ '^sha256:[0-9a-f]{64}$'),
+        unique(candidate_revision_id,definition_kind,definition_name)
+      );
+      insert into pack_component_revisions(id,candidate_revision_id,definition_kind,definition_name,definition_digest)
+      select uuidv7(),candidate_id,kind,name,
+        'sha256:'||encode(digest(convert_to(operant_canonical_jsonb(definition),'UTF8'),'sha256'),'hex')
+      from (
+        select cr.id candidate_id,parts.kind,entry.key name,entry.value definition
+        from pack_candidate_revisions cr
+        cross join lateral (values
+          ('resource','resources'),('relationship','relationships'),('lifecycle','lifecycles'),
+          ('action','actions'),('hook','hooks'),('role','roles'),('policy','policies'),('seed','seeds')
+        ) parts(kind,section)
+        cross join lateral jsonb_each(coalesce(cr.normalized->parts.section,'{}'::jsonb)) entry
+      ) components;
+      create function operant_reject_pack_component_mutation() returns trigger language plpgsql as $$
+      begin raise exception 'pack component revisions are immutable'; end $$;
+      create trigger pack_component_revisions_immutable before update or delete on pack_component_revisions
+        for each row execute function operant_reject_pack_component_mutation();
+
+      alter table staged_changeset_operations
+        add column component_revision_id uuid references pack_component_revisions(id);
+      alter table staged_changeset_operations disable trigger staged_operations_immutable;
+      update staged_changeset_operations operation set
+        component_revision_id=component.id,
+        component_digest=component.definition_digest
+      from pack_component_revisions component
+      where component.candidate_revision_id=operation.pack_revision_id
+        and component.definition_kind=case when operation.canonical_operation_json ? 'relationship' then 'relationship' else 'resource' end
+        and component.definition_name=split_part(coalesce(operation.canonical_operation_json->>'resource',operation.canonical_operation_json->>'relationship'),':',2);
+      alter table staged_changeset_operations enable trigger staged_operations_immutable;
+      alter table staged_changeset_operations alter column component_revision_id set not null;
+      alter table staged_changeset_dependencies
+        add column component_revision_id uuid references pack_component_revisions(id);
+      alter table staged_hook_executions
+        add column attachment_id uuid not null default uuidv7();
+      alter table staged_hook_executions alter column attachment_id drop default;
+    `,
+  },
 ];
 
 export async function applyPlatformMigrations(

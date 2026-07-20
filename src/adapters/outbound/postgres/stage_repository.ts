@@ -6,6 +6,8 @@ import type { AuthContext } from "../../../domain/auth/model.ts";
 import type { CanonicalOperation } from "../../../domain/changesets/operations.ts";
 import {
   stageDigest,
+  type StageHookDeclaration,
+  type StageHookInput,
   type StageHookResult,
 } from "../../../domain/changesets/stage.ts";
 import {
@@ -39,6 +41,7 @@ type Prepared = {
     {
       operationId: string;
       revisionId: string;
+      componentRevisionId: string;
       componentDigest: string;
       operation: CanonicalOperation;
     }
@@ -51,13 +54,7 @@ export class PostgresStageRepository implements StageRepository {
   async hookInput(
     operations: CanonicalOperation[],
     auth: AuthContext,
-  ): Promise<
-    Result<{
-      operations: readonly CanonicalOperation[];
-      projects: readonly unknown[];
-      pack_revisions: readonly unknown[];
-    }>
-  > {
+  ): Promise<Result<StageHookInput>> {
     try {
       return await this.sql.begin(async (tx) => {
         const projects: Record<string, unknown>[] = [];
@@ -87,6 +84,7 @@ export class PostgresStageRepository implements StageRepository {
           });
         }
         const revisions: Record<string, unknown>[] = [];
+        const hookDeclarations: StageHookDeclaration[] = [];
         const packs = [
           ...new Set(operations.map((operation) => {
             const identity = parseIdentity(componentIdentity(operation));
@@ -96,10 +94,15 @@ export class PostgresStageRepository implements StageRepository {
         for (const pack of packs) {
           const [publisher, packName] = pack.split("/");
           const revision = (await query<
-            { id: string; content_digest: string; normalized: unknown }
+            {
+              id: string;
+              content_digest: string;
+              normalized: unknown;
+              source_files: unknown;
+            }
           >(
             tx,
-            `select cr.id,cr.content_digest,cr.normalized from pack_active_revisions ar join pack_candidate_revisions cr on cr.id=ar.candidate_revision_id where ar.publisher=$1 and ar.pack_name=$2 for share of ar,cr`,
+            `select cr.id,cr.content_digest,cr.normalized,cr.source_files from pack_active_revisions ar join pack_candidate_revisions cr on cr.id=ar.candidate_revision_id where ar.publisher=$1 and ar.pack_name=$2 for share of ar,cr`,
             [publisher, packName],
           )).rows[0];
           if (!revision) {
@@ -109,15 +112,49 @@ export class PostgresStageRepository implements StageRepository {
               "validation",
             );
           }
+          const normalized = record(revision.normalized);
+          const matching = matchingStageHooks(normalized, operations);
+          const sourceFiles = array(revision.source_files).map(record);
+          for (const declaration of matching) {
+            const hookName = String(declaration.hook);
+            const hookDefinition = record(record(normalized.hooks)[hookName]);
+            const hookComponent = await loadComponentRevision(
+              tx,
+              revision.id,
+              "hook",
+              hookName,
+              hookDefinition,
+            );
+            const script = String(record(hookDefinition.spec).script);
+            const scriptFile = sourceFiles.find((file) =>
+              file.path === `hooks/${script}`
+            );
+            const scriptDigest = String(scriptFile?.digest ?? "");
+            if (!/^sha256:[0-9a-f]{64}$/.test(scriptDigest)) {
+              throw domain(
+                "validation_failed",
+                "Pinned hook script digest is unavailable",
+                "validation",
+              );
+            }
+            hookDeclarations.push({
+              attachment_id: uuidV7(),
+              hook_revision_id: hookComponent.id,
+              pack_revision_id: revision.id,
+              hook: `${publisher}/${packName}:${hookName}`,
+              phase: declaration.phase as StageHookDeclaration["phase"],
+              resource: declaration.resource === null
+                ? null
+                : String(declaration.resource),
+              order: Number(declaration.order),
+              script_digest: scriptDigest,
+            });
+          }
           revisions.push({
             publisher,
             pack: packName,
             revision_id: revision.id,
             content_digest: revision.content_digest,
-            matching_hooks: matchingStageHooks(
-              record(revision.normalized),
-              operations,
-            ),
           });
         }
         const proposedStates: Record<string, Record<string, unknown>> = {};
@@ -137,14 +174,11 @@ export class PostgresStageRepository implements StageRepository {
           operations,
           projects,
           pack_revisions: revisions,
+          hook_declarations: hookDeclarations.sort(compareHookDeclarations),
           proposed_states: proposedStates,
           base_states: baseStates,
         });
-      }) as Result<{
-        operations: readonly CanonicalOperation[];
-        projects: readonly unknown[];
-        pack_revisions: readonly unknown[];
-      }>;
+      }) as Result<StageHookInput>;
     } catch (error) {
       return mapError(error);
     }
@@ -155,6 +189,7 @@ export class PostgresStageRepository implements StageRepository {
       operations: CanonicalOperation[];
       operationGraphDigest: string;
       hookResult?: StageHookResult;
+      hookDeclarations?: readonly StageHookDeclaration[];
     },
     auth: AuthContext,
   ): Promise<Result<StageDto>> {
@@ -164,7 +199,7 @@ export class PostgresStageRepository implements StageRepository {
           tx,
           input.operations,
           auth,
-          input.hookResult !== undefined,
+          input.hookDeclarations ?? [],
         );
         const operationGraphDigest = `sha256:${await canonicalSha256({
           schema: "changeset.operations.v1",
@@ -197,7 +232,7 @@ export class PostgresStageRepository implements StageRepository {
         }
         const dependencies: Record<string, unknown>[] = [
           ...prepared.dependencies,
-          ...(hook?.dependencies ?? []).map(record),
+          ...(hook?.read_dependencies ?? []).map(record),
           ...(hook?.required_capabilities ?? []).map((capability) => ({
             kind: "policy",
             required_capability: capability,
@@ -297,14 +332,15 @@ export class PostgresStageRepository implements StageRepository {
           const row = prepared.operationRows[ordinal];
           await query(
             tx,
-            `insert into staged_changeset_operations(stage_id,ordinal,operation_id,project_id,pack_revision_id,resource_revision_id,component_digest,operation_kind,object_id,canonical_operation_json)
-            values($1,$2,$3,$4,$5,null,$6,$7,$8,$9::jsonb)`,
+            `insert into staged_changeset_operations(stage_id,ordinal,operation_id,project_id,pack_revision_id,resource_revision_id,component_revision_id,component_digest,operation_kind,object_id,canonical_operation_json)
+            values($1,$2,$3,$4,$5,null,$6,$7,$8,$9,$10::jsonb)`,
             [
               id,
               ordinal,
               row.operationId,
               row.operation.project_id,
               row.revisionId,
+              row.componentRevisionId,
               row.componentDigest,
               row.operation.op,
               operationObjectId(row.operation),
@@ -320,8 +356,8 @@ export class PostgresStageRepository implements StageRepository {
           const dep = dependencies[ordinal];
           await query(
             tx,
-            `insert into staged_changeset_dependencies(stage_id,ordinal,dependency_kind,project_id,pack_revision_id,resource_revision_id,component_digest,object_id,expected_version_id,dependency_json)
-            values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)`,
+            `insert into staged_changeset_dependencies(stage_id,ordinal,dependency_kind,project_id,pack_revision_id,resource_revision_id,component_revision_id,component_digest,object_id,expected_version_id,dependency_json)
+            values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb)`,
             [
               id,
               ordinal,
@@ -329,6 +365,7 @@ export class PostgresStageRepository implements StageRepository {
               dep.project_id ?? null,
               dep.pack_revision_id ?? null,
               dep.resource_revision_id ?? null,
+              dep.component_revision_id ?? null,
               dep.component_digest ?? null,
               dep.object_id ?? null,
               dep.expected_version_id ?? null,
@@ -360,20 +397,21 @@ export class PostgresStageRepository implements StageRepository {
           const execution = record(hook!.hook_executions[ordinal]);
           await query(
             tx,
-            `insert into staged_hook_executions(id,stage_id,ordinal,phase,pack_revision_id,hook_revision_id,input_digest,output_digest,output_json,stderr_text,duration_ms,grant_snapshot_json)
-             values($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11,$12::jsonb)`,
+            `insert into staged_hook_executions(id,stage_id,ordinal,attachment_id,phase,pack_revision_id,hook_revision_id,input_digest,output_digest,output_json,stderr_text,duration_ms,grant_snapshot_json)
+             values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13::jsonb)`,
             [
-              String(execution.id ?? uuidV7()),
+              execution.id,
               id,
               ordinal,
+              execution.attachment_id,
               execution.phase,
               execution.pack_revision_id,
               execution.hook_revision_id,
               execution.input_digest,
               execution.output_digest,
-              record(execution.output),
-              String(execution.stderr ?? ""),
-              Number(execution.duration_ms ?? 0),
+              execution.output,
+              execution.stderr,
+              execution.duration_ms,
               record(execution.grant_snapshot),
             ],
           );
@@ -387,7 +425,7 @@ export class PostgresStageRepository implements StageRepository {
           await query(
             tx,
             `insert into staged_approval_requirements(id,stage_id,ordinal,requirement_json) values($1,$2,$3,$4::jsonb)`,
-            [String(requirement.id ?? uuidV7()), id, ordinal, requirement],
+            [requirement.id, id, ordinal, requirement],
           );
         }
         await query(
@@ -472,7 +510,7 @@ async function prepare(
   sql: Queryable,
   operations: CanonicalOperation[],
   auth: AuthContext,
-  coordinatorSupplied: boolean,
+  pinnedHookDeclarations: readonly StageHookDeclaration[],
 ): Promise<Prepared> {
   const projectIds = [
     ...new Set(operations.map((operation) => operation.project_id)),
@@ -566,19 +604,45 @@ async function prepare(
       revision.normalized,
       revisionOperations,
     );
-    for (const declaration of matchingDeclarations) {
-      const pinnedDeclaration = {
-        ...declaration,
-        pack_revision_id: revision.id,
-      };
-      hookDeclarations.push(pinnedDeclaration);
+    const pinnedForRevision = pinnedHookDeclarations.filter((declaration) =>
+      declaration.pack_revision_id === revision.id
+    );
+    if (
+      pinnedHookDeclarations.length &&
+      pinnedForRevision.length !== matchingDeclarations.length
+    ) {
+      throw domain(
+        "hook_rejected",
+        "Pinned hook declarations no longer match active metadata",
+        "validation",
+      );
+    }
+    for (let index = 0; index < pinnedForRevision.length; index++) {
+      const pinned = pinnedForRevision[index];
+      const current = matchingDeclarations[index];
+      if (
+        pinned.hook !==
+          `${revision.publisher}/${revision.pack}:${current.hook}` ||
+        pinned.phase !== current.phase ||
+        pinned.resource !== current.resource || pinned.order !== current.order
+      ) {
+        throw domain(
+          "hook_rejected",
+          "Pinned hook attachment changed before persistence",
+          "validation",
+        );
+      }
+    }
+    for (const declaration of pinnedForRevision) {
+      hookDeclarations.push({ ...declaration });
       dependencies.push({
         kind: "resource",
         pack_revision_id: revision.id,
-        hook_declaration: pinnedDeclaration,
+        component_revision_id: declaration.hook_revision_id,
+        hook_declaration: declaration,
       });
     }
-    if (matchingDeclarations.length && !coordinatorSupplied) {
+    if (matchingDeclarations.length && !pinnedHookDeclarations.length) {
       throw domain(
         "hook_coordinator_unavailable",
         "A required stage hook coordinator is unavailable",
@@ -594,6 +658,11 @@ async function prepare(
       op,
     ) => [String(op.object_id), String(op.resource)]),
   );
+  const stagedArchives = new Set(
+    operations.filter((op) => op.op === "archive").map((op) =>
+      String(op.object_id)
+    ),
+  );
   for (const operation of operations) {
     const identity = componentIdentity(operation),
       parsed = parseIdentity(identity);
@@ -603,12 +672,14 @@ async function prepare(
         revision.normalized[operationDefinitionKind(operation)],
       )[parsed.name],
     );
-    const componentDigest = `sha256:${await canonicalSha256({
-      candidate_revision_id: revision.id,
-      definition_kind: operationDefinitionKind(operation),
-      definition_name: parsed.name,
+    const component = await loadComponentRevision(
+      sql,
+      revision.id,
+      operation.relationship ? "relationship" : "resource",
+      parsed.name,
       definition,
-    })}`;
+    );
+    const componentDigest = component.digest;
     if (operation.op === "create") {
       const lifecycle = Object.values(record(revision.normalized.lifecycles))
         .map(record).find((candidate) =>
@@ -627,18 +698,22 @@ async function prepare(
           );
         }
         operation.fields = { ...fields, [field]: initial };
+        const lifecycleName = String(
+          record(lifecycle.metadata).name ?? "lifecycle",
+        );
+        const lifecycleComponent = await loadComponentRevision(
+          sql,
+          revision.id,
+          "lifecycle",
+          lifecycleName,
+          lifecycle,
+        );
         dependencies.push({
           kind: "lifecycle",
           project_id: operation.project_id,
           pack_revision_id: revision.id,
-          component_digest: `sha256:${await canonicalSha256({
-            candidate_revision_id: revision.id,
-            definition_kind: "lifecycles",
-            definition_name: String(
-              record(lifecycle.metadata).name ?? "lifecycle",
-            ),
-            definition: lifecycle,
-          })}`,
+          component_revision_id: lifecycleComponent.id,
+          component_digest: lifecycleComponent.digest,
           initial,
           field,
         });
@@ -745,6 +820,7 @@ async function prepare(
       project_id: operation.project_id,
       pack_revision_id: revision.id,
       resource_revision_id: null,
+      component_revision_id: component.id,
       component_digest: componentDigest,
       identity,
     });
@@ -755,6 +831,8 @@ async function prepare(
       revision,
       dependencies,
       creates,
+      stagedArchives,
+      component.id,
       componentDigest,
       auth,
     );
@@ -765,12 +843,14 @@ async function prepare(
       parsed,
       definition,
       revision,
+      component.id,
       componentDigest,
       dependencies,
     );
     operationRows.push({
       operationId: uuidV7(),
       revisionId: revision.id,
+      componentRevisionId: component.id,
       componentDigest,
       operation,
     });
@@ -793,6 +873,8 @@ async function validateCurrent(
   revision: Revision,
   dependencies: Record<string, unknown>[],
   creates: Map<string, string>,
+  stagedArchives: Set<string>,
+  componentRevisionId: string,
   componentDigest: string,
   auth: AuthContext,
 ): Promise<void> {
@@ -817,6 +899,13 @@ async function validateCurrent(
           }
           continue;
         }
+        if (stagedArchives.has(endpoint)) {
+          throw domain(
+            "operation_conflict",
+            "Relationship endpoint is archived by this stage",
+            "conflict",
+          );
+        }
         if (expectedResource === "system:principal") {
           const principal = (await query<{ id: string }>(
             sql,
@@ -831,43 +920,69 @@ async function validateCurrent(
             );
           }
         } else {
-          const row = (await query<
-            {
-              id: string;
-              resource_identity: string;
-              expected_version_id: string;
-            }
-          >(
+          const endpointIdentity = parseIdentity(expectedResource);
+          const active = (await query<{
+            candidate_revision_id: string;
+            normalized: unknown;
+            table_name: string;
+          }>(
             sql,
-            "select object_id id,resource_identity,id expected_version_id from object_versions where project_id=$1 and object_id=$2 order by version desc limit 1 for share",
-            [operation.project_id, endpoint],
+            `select ar.candidate_revision_id,cr.normalized,rt.table_name
+             from pack_active_revisions ar
+             join pack_candidate_revisions cr on cr.id=ar.candidate_revision_id
+             join pack_runtime_tables rt on rt.publisher=ar.publisher and rt.pack_name=ar.pack_name
+              and rt.definition_kind='resource' and rt.definition_name=$3
+             where ar.publisher=$1 and ar.pack_name=$2 for share of ar,cr,rt`,
+            [
+              endpointIdentity.publisher,
+              endpointIdentity.pack,
+              endpointIdentity.name,
+            ],
           )).rows[0];
-          if (!row || row.resource_identity !== expectedResource) {
+          const endpointDefinition = record(
+            record(record(active?.normalized).resources)[endpointIdentity.name],
+          );
+          if (!active || !Object.keys(endpointDefinition).length) {
             throw domain(
               "validation_failed",
-              "Relationship endpoint does not satisfy its definition",
+              "Relationship endpoint definition is not active",
               "validation",
             );
           }
-          const endpointIdentity = parseIdentity(expectedResource);
-          const endpointDefinition = record(
-            record(revision.normalized.resources)[endpointIdentity.name],
+          const row = (await query<{
+            id: string;
+            current_object_version_id: string;
+          }>(
+            sql,
+            `select id,current_object_version_id from ${
+              quoteIdentifier(active.table_name)
+            } where project_id=$1 and id=$2 and archived_at is null for share`,
+            [operation.project_id, endpoint],
+          )).rows[0];
+          if (!row?.current_object_version_id) {
+            throw domain(
+              "validation_failed",
+              "Relationship endpoint is absent, archived, in another Project, or has the wrong definition",
+              "validation",
+            );
+          }
+          const endpointComponent = await loadComponentRevision(
+            sql,
+            active.candidate_revision_id,
+            "resource",
+            endpointIdentity.name,
+            endpointDefinition,
           );
-          const endpointComponentDigest = `sha256:${await canonicalSha256({
-            candidate_revision_id: revision.id,
-            definition_kind: "resources",
-            definition_name: endpointIdentity.name,
-            definition: endpointDefinition,
-          })}`;
           dependencies.push({
             kind: "relationship",
             project_id: operation.project_id,
-            pack_revision_id: revision.id,
-            component_digest: endpointComponentDigest,
+            pack_revision_id: active.candidate_revision_id,
+            component_revision_id: endpointComponent.id,
+            component_digest: endpointComponent.digest,
             object_id: endpoint,
-            expected_version_id: row.expected_version_id,
+            expected_version_id: row.current_object_version_id,
             endpoint: side,
-            resource_identity: row.resource_identity,
+            resource_identity: expectedResource,
           });
         }
       }
@@ -910,6 +1025,7 @@ async function validateCurrent(
           kind: "uniqueness",
           project_id: operation.project_id,
           pack_revision_id: revision.id,
+          component_revision_id: componentRevisionId,
           component_digest: componentDigest,
           fields: unique,
           values: params.slice(1),
@@ -949,6 +1065,7 @@ async function validateCurrent(
       project_id: operation.project_id,
       pack_revision_id: revision.id,
       resource_revision_id: null,
+      component_revision_id: componentRevisionId,
       component_digest: componentDigest,
       object_id: objectId,
       expected_version_id: null,
@@ -1173,17 +1290,23 @@ async function validateCurrent(
         );
       }
     }
+    const lifecycleName = String(
+      record(lifecycle.metadata).name ?? "lifecycle",
+    );
+    const lifecycleComponent = await loadComponentRevision(
+      sql,
+      revision.id,
+      "lifecycle",
+      lifecycleName,
+      lifecycle,
+    );
     dependencies.push({
       kind: "lifecycle",
       project_id: operation.project_id,
       pack_revision_id: revision.id,
       resource_revision_id: null,
-      component_digest: `sha256:${await canonicalSha256({
-        candidate_revision_id: revision.id,
-        definition_kind: "lifecycles",
-        definition_name: String(record(lifecycle.metadata).name ?? "lifecycle"),
-        definition: lifecycle,
-      })}`,
+      component_revision_id: lifecycleComponent.id,
+      component_digest: lifecycleComponent.digest,
       identity: String(
         lifecycle.identity ?? record(lifecycle.metadata).name ?? "lifecycle",
       ),
@@ -1223,6 +1346,7 @@ async function validateCurrent(
     project_id: operation.project_id,
     pack_revision_id: revision.id,
     resource_revision_id: null,
+    component_revision_id: componentRevisionId,
     component_digest: componentDigest,
     object_id: objectId,
     expected_version_id: row.current_object_version_id,
@@ -1521,6 +1645,7 @@ async function validateUniqueness(
   parsed: ReturnType<typeof parseIdentity>,
   definition: Record<string, unknown>,
   revision: Revision,
+  componentRevisionId: string,
   componentDigest: string,
   dependencies: Record<string, unknown>[],
 ): Promise<void> {
@@ -1683,6 +1808,7 @@ async function validateUniqueness(
       kind: "uniqueness",
       project_id: operation.project_id,
       pack_revision_id: revision.id,
+      component_revision_id: componentRevisionId,
       component_digest: componentDigest,
       fields,
       values: fields.map((field) => proposed[field]),
@@ -1778,7 +1904,7 @@ async function load(sql: Queryable, id: string): Promise<StageDto | null> {
   )).rows.map((item) => record(item.decision_json));
   const hooks = (await query<Record<string, unknown>>(
     sql,
-    `select id,phase,pack_revision_id,hook_revision_id,input_digest,output_digest,
+    `select id,attachment_id,phase,pack_revision_id,hook_revision_id,input_digest,output_digest,
       output_json output,stderr_text stderr,duration_ms,grant_snapshot_json grant_snapshot,created_at
      from staged_hook_executions where stage_id=$1 order by ordinal`,
     [id],
@@ -1867,9 +1993,22 @@ function matchingStageHooks(
     }
   }
   return declarations.sort((a, b) =>
+    phaseOrder(String(a.phase)) - phaseOrder(String(b.phase)) ||
     Number(a.order) - Number(b.order) ||
     String(a.hook).localeCompare(String(b.hook))
   );
+}
+
+function compareHookDeclarations(
+  left: StageHookDeclaration,
+  right: StageHookDeclaration,
+): number {
+  return phaseOrder(left.phase) - phaseOrder(right.phase) ||
+    left.order - right.order || left.hook.localeCompare(right.hook);
+}
+
+function phaseOrder(phase: string): number {
+  return phase === "changeset.before_stage" ? 0 : 1;
 }
 function validateDeclaredFields(
   operation: CanonicalOperation,
@@ -2064,6 +2203,30 @@ function parseIdentity(identity: string) {
   }
   return { publisher: match[1], pack: match[2], name: match[3] };
 }
+async function loadComponentRevision(
+  sql: Queryable,
+  candidateRevisionId: string,
+  definitionKind: string,
+  definitionName: string,
+  definition: Record<string, unknown>,
+): Promise<{ id: string; digest: string }> {
+  const expected = `sha256:${await canonicalSha256(definition)}`;
+  const component = (await query<{ id: string; definition_digest: string }>(
+    sql,
+    `select id,definition_digest from pack_component_revisions
+     where candidate_revision_id=$1 and definition_kind=$2 and definition_name=$3 for share`,
+    [candidateRevisionId, definitionKind, definitionName],
+  )).rows[0];
+  if (!component || component.definition_digest !== expected) {
+    throw domain(
+      "validation_failed",
+      "Active component revision evidence is unavailable or inconsistent",
+      "validation",
+    );
+  }
+  return { id: component.id, digest: component.definition_digest };
+}
+
 function publicRevision(revision: Revision) {
   return {
     publisher: revision.publisher,

@@ -104,6 +104,77 @@ export async function normalizeOperations(
   };
 }
 
+export function resolveAddedOperations(
+  base: CanonicalOperation[],
+  added: AuthoredOperation[],
+  allocate: () => string = uuidV7,
+): CanonicalOperation[] {
+  const produced = new Map<
+    string,
+    { property: string; id: string; project_id: string }
+  >();
+  for (const operation of base) {
+    const property = operation.op === "create"
+      ? "object_id"
+      : operation.op === "link"
+      ? "relationship_id"
+      : operation.op === "comment"
+      ? "comment_id"
+      : undefined;
+    if (property) {
+      produced.set(operation.key, {
+        property,
+        id: String(operation[property]),
+        project_id: operation.project_id,
+      });
+    }
+  }
+  const entries = added.map((source, ordinal) => ({
+    source,
+    ordinal: base.length + ordinal,
+    key: source.key ??
+      `op_${String(base.length + ordinal + 1).padStart(6, "0")}`,
+    project_id: source.project_id ?? "",
+  }));
+  for (const entry of entries) {
+    if (!entry.project_id) {
+      throw new OperationError(
+        "project_required",
+        `/operations/${entry.ordinal}/project_id`,
+        "coordinator-added operations require explicit project_id",
+      );
+    }
+    if (
+      produced.has(entry.key) ||
+      base.some((operation) => operation.key === entry.key)
+    ) {
+      throw new OperationError(
+        "duplicate_key",
+        `/operations/${entry.ordinal}/key`,
+        "operation key must be unique",
+      );
+    }
+    const property = entry.source.op === "create"
+      ? "object_id"
+      : entry.source.op === "link"
+      ? "relationship_id"
+      : entry.source.op === "comment"
+      ? "comment_id"
+      : undefined;
+    if (property) {
+      produced.set(entry.key, {
+        property,
+        id: allocate(),
+        project_id: entry.project_id,
+      });
+    }
+  }
+  return [
+    ...structuredClone(base),
+    ...entries.map((entry) => resolveEntry(entry, produced)),
+  ];
+}
+
 export async function canonicalizeResolvedOperations(
   operations: CanonicalOperation[],
   limits: OperationLimits = DEFAULT_OPERATION_LIMITS,

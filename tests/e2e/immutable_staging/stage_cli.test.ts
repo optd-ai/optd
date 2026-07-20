@@ -9,6 +9,7 @@ import {
   quoteIdentifier,
 } from "../../../src/adapters/outbound/postgres/client.ts";
 import { uuidV7 } from "../../../src/domain/ids/uuid_v7.ts";
+import { canonicalSha256 } from "../../../src/domain/ids/canonical_json.ts";
 import { makeStageChangesetService } from "../../../src/application/services/changesets/stage_changesets.ts";
 import { PostgresStageRepository } from "../../../src/adapters/outbound/postgres/stage_repository.ts";
 import type { AuthContext } from "../../../src/domain/auth/model.ts";
@@ -119,6 +120,20 @@ Deno.test({
         "--safe",
       ]);
       assertEquals(apply.code, 0, apply.stderr);
+      const initialItemComponent = (await query<{ id: string }>(
+        harness.server.sql,
+        `select pc.id from pack_component_revisions pc
+         join pack_active_revisions ar on ar.candidate_revision_id=pc.candidate_revision_id
+         where ar.publisher='testpub' and ar.pack_name='strict'
+           and pc.definition_kind='resource' and pc.definition_name='item'`,
+      )).rows[0].id;
+      await assertRejects(() =>
+        query(
+          harness.server.sql,
+          "update pack_component_revisions set definition_digest=definition_digest where id=$1",
+          [initialItemComponent],
+        )
+      );
       const facts = await seedCurrentFacts(harness, projectId, betaProjectId);
       const prerequisiteStageCount = Number(
         (await query<{ count: string }>(
@@ -309,8 +324,51 @@ Deno.test({
           "validation_failed",
         );
       }
+      const itemTable = (await query<{ table_name: string }>(
+        harness.server.sql,
+        "select table_name from pack_runtime_tables where publisher='testpub' and pack_name='strict' and definition_kind='resource' and definition_name='item'",
+      )).rows[0].table_name;
+      await query(
+        harness.server.sql,
+        `update ${
+          quoteIdentifier(itemTable)
+        } set archived_at=now() where id=$1`,
+        [facts.betaFromId],
+      );
       for (
         const invalid of [
+          {
+            project_id: betaProjectId,
+            operations: [{
+              op: "link",
+              relationship: "testpub/strict:item_link",
+              from: facts.betaFromId,
+              to: facts.betaThirdId,
+            }],
+          },
+          {
+            project_id: projectId,
+            operations: [{
+              op: "link",
+              relationship: "testpub/strict:item_link",
+              from: facts.betaToId,
+              to: facts.betaThirdId,
+            }],
+          },
+          {
+            operations: [{
+              op: "archive",
+              project_id: betaProjectId,
+              resource: "testpub/strict:item",
+              object_id: facts.betaToId,
+            }, {
+              op: "link",
+              project_id: betaProjectId,
+              relationship: "testpub/strict:item_link",
+              from: facts.betaToId,
+              to: facts.betaThirdId,
+            }],
+          },
           {
             project_id: projectId,
             operations: [{
@@ -464,6 +522,14 @@ Deno.test({
         "--safe",
       ]);
       assertEquals(hookApply.code, 0, hookApply.stderr);
+      const laterItemComponent = (await query<{ id: string }>(
+        harness.server.sql,
+        `select pc.id from pack_component_revisions pc
+         join pack_active_revisions ar on ar.candidate_revision_id=pc.candidate_revision_id
+         where ar.publisher='testpub' and ar.pack_name='strict'
+           and pc.definition_kind='resource' and pc.definition_name='item'`,
+      )).rows[0].id;
+      assertNotEquals(laterItemComponent, initialItemComponent);
       const beforeHookFailure = (await query<{ count: string }>(
         harness.server.sql,
         "select count(*)::text count from staged_changesets",
@@ -511,18 +577,33 @@ Deno.test({
       const injected = makeStageChangesetService(
         new PostgresStageRepository(harness.server.sql),
         {
-          coordinate(input) {
-            const revision = input.pack_revisions[0] as Record<string, unknown>;
-            return Promise.resolve({
-              operations: structuredClone(input.operations) as never,
-              dependencies: [{ kind: "policy", coordinator_read: true }],
+          async coordinate(input) {
+            const declaration = input.hook_declarations[0];
+            const output = { warnings: [] };
+            return {
+              added_operations: [],
+              patch_outputs: [],
+              read_dependencies: [{
+                kind: "policy",
+                digest: `sha256:${"4".repeat(64)}`,
+              }],
               hook_executions: [{
-                phase: "changeset.validate",
-                pack_revision_id: revision.revision_id,
-                hook_revision_id: uuidV7(),
-                input_digest: `sha256:${"1".repeat(64)}`,
-                output_digest: `sha256:${"2".repeat(64)}`,
-                output: { warnings: [] },
+                id: uuidV7(),
+                attachment_id: declaration.attachment_id,
+                phase: declaration.phase,
+                pack_revision_id: declaration.pack_revision_id,
+                hook_revision_id: declaration.hook_revision_id,
+                input_digest: `sha256:${await canonicalSha256({
+                  schema: "changeset.hook-input.v1",
+                  declaration,
+                  operations: input.operations,
+                  projects: input.projects,
+                  pack_revisions: input.pack_revisions,
+                  proposed_states: input.proposed_states,
+                  base_states: input.base_states,
+                })}`,
+                output_digest: `sha256:${await canonicalSha256(output)}`,
+                output,
                 stderr: "",
                 duration_ms: 1,
                 grant_snapshot: {},
@@ -537,7 +618,7 @@ Deno.test({
               effects: ["validated"],
               planned_events: [{ id: "event:validated" }],
               planned_deliveries: [],
-            });
+            };
           },
         },
       );
@@ -622,6 +703,7 @@ async function seedCurrentFacts(
     archiveId: uuidV7(),
     betaFromId: uuidV7(),
     betaToId: uuidV7(),
+    betaThirdId: uuidV7(),
     relationshipId: uuidV7(),
   };
   const objects = [
@@ -629,6 +711,7 @@ async function seedCurrentFacts(
     [alpha, ids.archiveId, "Archive"],
     [beta, ids.betaFromId, "From"],
     [beta, ids.betaToId, "To"],
+    [beta, ids.betaThirdId, "Third"],
   ] as const;
   for (const [project, objectId, name] of objects) {
     const commitId = await prerequisiteCommit(

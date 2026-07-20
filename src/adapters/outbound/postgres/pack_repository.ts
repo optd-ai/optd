@@ -1,6 +1,7 @@
 import { query, type Queryable } from "./client.ts";
 import type { LoadedPack } from "../yaml/pack_loader.ts";
 import { uuidV7 } from "../../../domain/ids/uuid_v7.ts";
+import { canonicalSha256 } from "../../../domain/ids/canonical_json.ts";
 
 export type PackSummary = {
   publisher: string;
@@ -58,7 +59,10 @@ export async function storeOrReuseCandidate(
     "select id from pack_candidate_revisions where publisher=$1 and pack_name=$2 and source_digest=$3",
     [pack.publisher, pack.name, pack.sourceDigest],
   );
-  if (existing.rows[0]) return { id: existing.rows[0].id, reused: true };
+  if (existing.rows[0]) {
+    await projectComponentRevisions(sql, pack, existing.rows[0].id);
+    return { id: existing.rows[0].id, reused: true };
+  }
   const id = uuidV7();
   const inserted = await query<{ id: string }>(
     sql,
@@ -75,7 +79,10 @@ export async function storeOrReuseCandidate(
       JSON.stringify(pack.sourceFiles),
     ],
   );
-  if (inserted.rows[0]) return { id: inserted.rows[0].id, reused: false };
+  if (inserted.rows[0]) {
+    await projectComponentRevisions(sql, pack, inserted.rows[0].id);
+    return { id: inserted.rows[0].id, reused: false };
+  }
   const raced = await query<{ id: string }>(
     sql,
     "select id from pack_candidate_revisions where publisher=$1 and pack_name=$2 and source_digest=$3",
@@ -84,7 +91,54 @@ export async function storeOrReuseCandidate(
   if (!raced.rows[0]) {
     throw new Error("candidate revision conflict could not be resolved");
   }
+  await projectComponentRevisions(sql, pack, raced.rows[0].id);
   return { id: raced.rows[0].id, reused: true };
+}
+
+async function projectComponentRevisions(
+  sql: Queryable,
+  pack: LoadedPack,
+  candidateRevisionId: string,
+): Promise<void> {
+  const sections = [
+    ["resource", pack.resources],
+    ["relationship", pack.relationships],
+    ["lifecycle", pack.lifecycles],
+    ["action", pack.actions],
+    ["hook", pack.hooks],
+    ["role", pack.roles],
+    ["policy", pack.policies],
+    ["seed", pack.seeds],
+  ] as const;
+  for (const [kind, definitions] of sections) {
+    for (
+      const [name, definition] of Object.entries(definitions).sort(([a], [b]) =>
+        a.localeCompare(b)
+      )
+    ) {
+      const canonicalDefinition = "document" in definition
+        ? definition.document
+        : definition;
+      const definitionDigest = `sha256:${await canonicalSha256(
+        canonicalDefinition,
+      )}`;
+      await query(
+        sql,
+        `insert into pack_component_revisions(id,candidate_revision_id,definition_kind,definition_name,definition_digest)
+         values($1,$2,$3,$4,$5) on conflict(candidate_revision_id,definition_kind,definition_name) do nothing`,
+        [uuidV7(), candidateRevisionId, kind, name, definitionDigest],
+      );
+      const stored = (await query<{ definition_digest: string }>(
+        sql,
+        `select definition_digest from pack_component_revisions
+         where candidate_revision_id=$1 and definition_kind=$2 and definition_name=$3`,
+        [candidateRevisionId, kind, name],
+      )).rows[0];
+      if (!stored || stored.definition_digest !== definitionDigest) {
+        throw new Error("pack component revision digest conflict");
+      }
+    }
+  }
 }
 
 export async function countPackRevisions(sql: Queryable): Promise<number> {
