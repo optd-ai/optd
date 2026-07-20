@@ -11,6 +11,7 @@ import { getDefinition } from "../../src/adapters/outbound/postgres/pack_reposit
 import { PostgresTransactionManager } from "../../src/adapters/outbound/postgres/transaction_manager.ts";
 import { PostgresAuthorizationRepository } from "../../src/adapters/outbound/postgres/authorization_repository.ts";
 import { makeMigrationServices } from "../../src/application/services/migration_services.ts";
+import type { AuthorizationRepository } from "../../src/application/ports/authorization.ts";
 import {
   findPostgresBins,
   startPostgresRuntime,
@@ -223,9 +224,7 @@ Deno.test("atomic pack apply activates globally, is idempotent, and rolls back i
     const revokedServices = makeMigrationServices({
       sql,
       tx: new PostgresTransactionManager(sql),
-      authorization: {
-        authorize: async () => ({ ok: true, value: {} }),
-      } as any,
+      authorization: allowAuthorization(),
       authorizeApplyInTransaction: (lockedSql, currentAuth) =>
         new PostgresAuthorizationRepository(lockedSql as Sql).authorize({
           auth: currentAuth,
@@ -533,9 +532,11 @@ Deno.test("atomic pack apply activates globally, is idempotent, and rolls back i
       validateMigrationPlan(tx, noRetryPlan.plan.id, auth)
     );
     let attempts = 0;
-    const busyServices = migrationServices(sql, async () => {
+    const busyServices = migrationServices(sql, () => {
       attempts++;
-      throw Object.assign(new Error("injected timeout"), { code: "55P03" });
+      return Promise.reject(
+        Object.assign(new Error("injected timeout"), { code: "55P03" }),
+      );
     });
     const busyResult = await busyServices.apply(noRetryPlan.plan.id, {
       acknowledgement: "safe",
@@ -562,8 +563,9 @@ Deno.test("atomic pack apply activates globally, is idempotent, and rolls back i
       "0",
     );
     let acknowledgementAttempts = 0;
-    const acknowledgementServices = migrationServices(sql, async () => {
+    const acknowledgementServices = migrationServices(sql, () => {
       acknowledgementAttempts++;
+      return Promise.resolve();
     });
     const acknowledgementResult = await acknowledgementServices.apply(
       noRetryPlan.plan.id,
@@ -583,19 +585,12 @@ Deno.test("atomic pack apply activates globally, is idempotent, and rolls back i
     const deniedServices = makeMigrationServices({
       sql,
       tx: new PostgresTransactionManager(sql),
-      authorization: {
-        authorize: async () => ({
-          ok: false,
-          error: {
-            code: "policy_denied",
-            message: "denied",
-            severity: "authorization" as const,
-          },
-        }),
-      } as any,
-      authorizeApplyInTransaction: async () => ({ ok: true, value: {} }),
-      beforeApplyAttempt: async () => {
+      authorization: denyAuthorization(),
+      authorizeApplyInTransaction: () =>
+        Promise.resolve({ ok: true as const, value: {} }),
+      beforeApplyAttempt: () => {
         deniedAttempts++;
+        return Promise.resolve();
       },
     });
     assertEquals(
@@ -629,11 +624,13 @@ Deno.test("atomic pack apply activates globally, is idempotent, and rolls back i
       validateMigrationPlan(tx, exhaustedPlan.plan.id, auth)
     );
     let exhaustedAttempts = 0;
-    const exhaustedServices = migrationServices(sql, async () => {
+    const exhaustedServices = migrationServices(sql, () => {
       exhaustedAttempts++;
-      throw Object.assign(new Error("injected exhausted deadlock"), {
-        code: "40P01",
-      });
+      return Promise.reject(
+        Object.assign(new Error("injected exhausted deadlock"), {
+          code: "40P01",
+        }),
+      );
     });
     const exhaustedResult = await exhaustedServices.apply(
       exhaustedPlan.plan.id,
@@ -694,8 +691,9 @@ Deno.test("atomic pack apply activates globally, is idempotent, and rolls back i
       }, auth)
     );
     let staleAttempts = 0;
-    const staleServices = migrationServices(sql, async () => {
+    const staleServices = migrationServices(sql, () => {
       staleAttempts++;
+      return Promise.resolve();
     });
     const staleResult = await staleServices.apply(stalePlan.plan.id, {
       acknowledgement: "safe",
@@ -716,9 +714,11 @@ Deno.test("atomic pack apply activates globally, is idempotent, and rolls back i
       string,
       unknown
     >).fields as Record<string, unknown>).phone;
-    delete ((((destructive.normalized.resources as Record<string, any>).lead
-      .spec as Record<string, unknown>).fields) as Record<string, unknown>)
-      .phone;
+    const normalizedResources = destructive.normalized.resources as Record<
+      string,
+      { spec: { fields: Record<string, unknown> } }
+    >;
+    delete normalizedResources.lead.spec.fields.phone;
     const removal = await createPackMigrationPlan(sql, destructive, auth);
     const confirmed = await sql.begin((tx) =>
       validateMigrationPlan(tx, removal.plan.id, auth)
@@ -735,8 +735,9 @@ Deno.test("atomic pack apply activates globally, is idempotent, and rolls back i
       false,
     );
     let tokenAttempts = 0;
-    const tokenServices = migrationServices(sql, async () => {
+    const tokenServices = migrationServices(sql, () => {
       tokenAttempts++;
+      return Promise.resolve();
     });
     const wrongTokenResult = await tokenServices.apply(
       removal.plan.id,
@@ -809,9 +810,11 @@ Deno.test("atomic pack apply activates globally, is idempotent, and rolls back i
     const actionName = Object.keys(risky.actions).sort()[0];
     (risky.actions[actionName].document.spec as Record<string, unknown>)
       .description = "reviewed behavior change";
-    ((risky.normalized.actions as Record<string, any>)[actionName]
-      .spec as Record<string, unknown>).description =
-        "reviewed behavior change";
+    const normalizedActions = risky.normalized.actions as Record<
+      string,
+      { spec: Record<string, unknown> }
+    >;
+    normalizedActions[actionName].spec.description = "reviewed behavior change";
     const riskyPlan = await createPackMigrationPlan(sql, risky, auth);
     assertEquals(riskyPlan.plan.class, "risky");
     const riskyValidation = await sql.begin((tx) =>
@@ -897,6 +900,26 @@ function authContext(
   });
 }
 
+function allowAuthorization(): AuthorizationRepository {
+  return {
+    authorize: () => Promise.resolve({ ok: true as const, value: {} }),
+  } as unknown as AuthorizationRepository;
+}
+
+function denyAuthorization(): AuthorizationRepository {
+  return {
+    authorize: () =>
+      Promise.resolve({
+        ok: false as const,
+        error: {
+          code: "policy_denied",
+          message: "denied",
+          severity: "authorization" as const,
+        },
+      }),
+  } as unknown as AuthorizationRepository;
+}
+
 function migrationServices(
   sql: ReturnType<typeof createPostgresClient>,
   beforeApplyAttempt: (sql: Queryable, attempt: number) => Promise<void>,
@@ -905,8 +928,9 @@ function migrationServices(
   return makeMigrationServices({
     sql,
     tx: new PostgresTransactionManager(sql),
-    authorization: { authorize: async () => ({ ok: true, value: {} }) } as any,
-    authorizeApplyInTransaction: async () => ({ ok: true, value: {} }),
+    authorization: allowAuthorization(),
+    authorizeApplyInTransaction: () =>
+      Promise.resolve({ ok: true as const, value: {} }),
     beforeApplyAttempt,
     applyTestFault,
   });
