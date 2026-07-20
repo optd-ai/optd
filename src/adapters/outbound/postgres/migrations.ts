@@ -1,8 +1,13 @@
 import { query, type Queryable } from "./client.ts";
+import { canonicalSha256 } from "../../../domain/ids/canonical_json.ts";
+import { uuidV7 } from "../../../domain/ids/uuid_v7.ts";
 
 export type PlatformMigration = {
   id: string;
   sql: string;
+  migrate?: (sql: Queryable) => Promise<void>;
+  applicationChecksum?: string;
+  finalSql?: string;
 };
 
 export type MigrationApplyResult = {
@@ -1072,23 +1077,6 @@ export const platformMigrations: PlatformMigration[] = [
   {
     id: "1020_immutable_pack_component_revisions",
     sql: `
-      create extension if not exists pgcrypto;
-      create function operant_canonical_jsonb(value jsonb) returns text
-      language plpgsql immutable strict as $$
-      declare result text;
-      begin
-        case jsonb_typeof(value)
-          when 'object' then
-            select '{'||coalesce(string_agg(to_jsonb(entry.key)::text||':'||operant_canonical_jsonb(entry.value),',' order by entry.key collate "C"),'')||'}'
-              into result from jsonb_each(value) entry;
-          when 'array' then
-            select '['||coalesce(string_agg(operant_canonical_jsonb(entry.value),',' order by entry.ordinality),'')||']'
-              into result from jsonb_array_elements(value) with ordinality entry(value,ordinality);
-          when 'number' then result := trim_scale((value #>> '{}')::numeric)::text;
-          else result := value::text;
-        end case;
-        return result;
-      end $$;
       create table pack_component_revisions (
         id uuid primary key,
         candidate_revision_id uuid not null references pack_candidate_revisions(id),
@@ -1097,40 +1085,20 @@ export const platformMigrations: PlatformMigration[] = [
         definition_digest text not null check(definition_digest ~ '^sha256:[0-9a-f]{64}$'),
         unique(candidate_revision_id,definition_kind,definition_name)
       );
-      insert into pack_component_revisions(id,candidate_revision_id,definition_kind,definition_name,definition_digest)
-      select uuidv7(),candidate_id,kind,name,
-        'sha256:'||encode(digest(convert_to(operant_canonical_jsonb(definition),'UTF8'),'sha256'),'hex')
-      from (
-        select cr.id candidate_id,parts.kind,entry.key name,entry.value definition
-        from pack_candidate_revisions cr
-        cross join lateral (values
-          ('resource','resources'),('relationship','relationships'),('lifecycle','lifecycles'),
-          ('action','actions'),('hook','hooks'),('role','roles'),('policy','policies'),('seed','seeds')
-        ) parts(kind,section)
-        cross join lateral jsonb_each(coalesce(cr.normalized->parts.section,'{}'::jsonb)) entry
-      ) components;
+      alter table staged_changeset_operations
+        add column component_revision_id uuid references pack_component_revisions(id);
+      alter table staged_changeset_dependencies
+        add column component_revision_id uuid references pack_component_revisions(id);
+      alter table staged_hook_executions add column attachment_id uuid;
+    `,
+    migrate: backfillComponentRevisions,
+    applicationChecksum: "rfc8785-component-backfill-v1",
+    finalSql: `
       create function operant_reject_pack_component_mutation() returns trigger language plpgsql as $$
       begin raise exception 'pack component revisions are immutable'; end $$;
       create trigger pack_component_revisions_immutable before update or delete on pack_component_revisions
         for each row execute function operant_reject_pack_component_mutation();
-
-      alter table staged_changeset_operations
-        add column component_revision_id uuid references pack_component_revisions(id);
-      alter table staged_changeset_operations disable trigger staged_operations_immutable;
-      update staged_changeset_operations operation set
-        component_revision_id=component.id,
-        component_digest=component.definition_digest
-      from pack_component_revisions component
-      where component.candidate_revision_id=operation.pack_revision_id
-        and component.definition_kind=case when operation.canonical_operation_json ? 'relationship' then 'relationship' else 'resource' end
-        and component.definition_name=split_part(coalesce(operation.canonical_operation_json->>'resource',operation.canonical_operation_json->>'relationship'),':',2);
-      alter table staged_changeset_operations enable trigger staged_operations_immutable;
       alter table staged_changeset_operations alter column component_revision_id set not null;
-      alter table staged_changeset_dependencies
-        add column component_revision_id uuid references pack_component_revisions(id);
-      alter table staged_hook_executions
-        add column attachment_id uuid not null default uuidv7();
-      alter table staged_hook_executions alter column attachment_id drop default;
     `,
   },
   {
@@ -1162,62 +1130,16 @@ export const platformMigrations: PlatformMigration[] = [
       );
       create unique index pack_hook_attachment_identity_unique
         on pack_hook_attachment_revisions(candidate_revision_id,hook_revision_id,declaration_digest);
-      insert into pack_hook_attachment_revisions(
-        id,candidate_revision_id,hook_revision_id,hook_identity,component_revision_id,
-        phase,ordinal,declaration_digest,declaration_spec
-      )
-      select uuidv7(),candidate.id,hook_component.id,
-        candidate.publisher||'/'||candidate.pack_name||':'||hook_entry.key,
-        resource_component.id,attachment.value->>'phase',
-        coalesce((attachment.value->>'order')::integer,0),
-        'sha256:'||encode(digest(convert_to(operant_canonical_jsonb(spec.value),'UTF8'),'sha256'),'hex'),spec.value
-      from pack_candidate_revisions candidate
-      cross join lateral jsonb_each(coalesce(candidate.normalized->'hooks','{}'::jsonb)) hook_entry
-      join pack_component_revisions hook_component
-        on hook_component.candidate_revision_id=candidate.id
-       and hook_component.definition_kind='hook' and hook_component.definition_name=hook_entry.key
-      cross join lateral jsonb_array_elements(coalesce(hook_entry.value->'spec'->'attachments','[]'::jsonb)) attachment(value)
-      cross join lateral (select jsonb_build_object(
-        'hook',candidate.publisher||'/'||candidate.pack_name||':'||hook_entry.key,
-        'phase',attachment.value->>'phase',
-        'resource',coalesce(attachment.value->'resource','null'::jsonb),
-        'action',coalesce(attachment.value->'action','null'::jsonb),
-        'event',coalesce(attachment.value->'event','null'::jsonb),
-        'order',coalesce((attachment.value->>'order')::integer,0),
-        'condition',coalesce(attachment.value->'condition','null'::jsonb),
-        'input',attachment.value->'input'
-      ) value) spec
-      left join pack_component_revisions resource_component
-        on resource_component.candidate_revision_id=candidate.id
-       and resource_component.definition_kind=case
-         when attachment.value ? 'resource' then 'resource' else 'action' end
-       and resource_component.definition_name=split_part(
-         coalesce(attachment.value->>'resource',attachment.value->>'action'),':',2
-       );
-
+    `,
+    migrate: backfillHookAttachmentRevisions,
+    applicationChecksum: "rfc8785-hook-attachment-backfill-v1",
+    finalSql: `
       create function operant_reject_hook_attachment_mutation() returns trigger language plpgsql as $$
       begin raise exception 'pack hook attachment revisions are immutable'; end $$;
       create trigger pack_hook_attachment_revisions_immutable before update or delete on pack_hook_attachment_revisions
         for each row execute function operant_reject_hook_attachment_mutation();
 
-      alter table staged_hook_executions disable trigger staged_hooks_immutable;
-      with ranked_executions as (
-        select id,pack_revision_id,hook_revision_id,phase,
-          row_number() over(partition by stage_id,hook_revision_id,phase order by ordinal) attachment_rank
-        from staged_hook_executions
-      ), ranked_attachments as (
-        select id,candidate_revision_id,hook_revision_id,phase,
-          row_number() over(partition by candidate_revision_id,hook_revision_id,phase order by ordinal,id) attachment_rank
-        from pack_hook_attachment_revisions
-      )
-      update staged_hook_executions execution set attachment_id=attachment.id
-      from ranked_executions ranked
-      join ranked_attachments attachment
-        on attachment.candidate_revision_id=ranked.pack_revision_id
-       and attachment.hook_revision_id=ranked.hook_revision_id
-       and attachment.phase=ranked.phase and attachment.attachment_rank=ranked.attachment_rank
-      where execution.id=ranked.id;
-      alter table staged_hook_executions enable trigger staged_hooks_immutable;
+      alter table staged_hook_executions alter column attachment_id set not null;
       alter table staged_hook_executions add constraint staged_hook_attachment_revision_fk
         foreign key(attachment_id) references pack_hook_attachment_revisions(id);
     `,
@@ -1240,6 +1162,188 @@ export const platformMigrations: PlatformMigration[] = [
     `,
   },
 ];
+
+async function backfillComponentRevisions(sql: Queryable): Promise<void> {
+  const candidates = (await query<{
+    id: string;
+    normalized: Record<string, unknown>;
+  }>(sql, "select id,normalized from pack_candidate_revisions order by id"))
+    .rows;
+  const sections = [
+    ["resource", "resources"],
+    ["relationship", "relationships"],
+    ["lifecycle", "lifecycles"],
+    ["action", "actions"],
+    ["hook", "hooks"],
+    ["role", "roles"],
+    ["policy", "policies"],
+    ["seed", "seeds"],
+  ] as const;
+  for (const candidate of candidates) {
+    for (const [kind, section] of sections) {
+      const definitions = asRecord(candidate.normalized[section]);
+      for (const name of Object.keys(definitions).sort()) {
+        const definition = definitions[name];
+        await query(
+          sql,
+          `insert into pack_component_revisions(
+             id,candidate_revision_id,definition_kind,definition_name,definition_digest
+           ) values($1,$2,$3,$4,$5)`,
+          [
+            uuidV7(),
+            candidate.id,
+            kind,
+            name,
+            `sha256:${await canonicalSha256(definition)}`,
+          ],
+        );
+      }
+    }
+  }
+  await query(
+    sql,
+    "alter table staged_changeset_operations disable trigger staged_operations_immutable",
+  );
+  try {
+    await query(
+      sql,
+      `update staged_changeset_operations operation set
+         component_revision_id=component.id,
+         component_digest=component.definition_digest
+       from pack_component_revisions component
+       where component.candidate_revision_id=operation.pack_revision_id
+         and component.definition_kind=case when operation.canonical_operation_json ? 'relationship' then 'relationship' else 'resource' end
+         and component.definition_name=split_part(coalesce(operation.canonical_operation_json->>'resource',operation.canonical_operation_json->>'relationship'),':',2)`,
+    );
+  } finally {
+    await query(
+      sql,
+      "alter table staged_changeset_operations enable trigger staged_operations_immutable",
+    );
+  }
+}
+
+async function backfillHookAttachmentRevisions(sql: Queryable): Promise<void> {
+  const candidates = (await query<{
+    id: string;
+    publisher: string;
+    pack_name: string;
+    normalized: Record<string, unknown>;
+  }>(
+    sql,
+    "select id,publisher,pack_name,normalized from pack_candidate_revisions order by id",
+  )).rows;
+  for (const candidate of candidates) {
+    const hooks = asRecord(candidate.normalized.hooks);
+    for (const hookName of Object.keys(hooks).sort()) {
+      const hook = asRecord(hooks[hookName]);
+      const hookComponent = (await query<{ id: string }>(
+        sql,
+        `select id from pack_component_revisions where candidate_revision_id=$1
+         and definition_kind='hook' and definition_name=$2`,
+        [candidate.id, hookName],
+      )).rows[0];
+      if (!hookComponent) {
+        throw new Error("migrated hook component is unavailable");
+      }
+      const attachments = asRecord(hook.spec).attachments;
+      if (!Array.isArray(attachments)) continue;
+      for (const value of attachments) {
+        const attachment = asRecord(value);
+        const resource = typeof attachment.resource === "string"
+          ? attachment.resource
+          : null;
+        const action = typeof attachment.action === "string"
+          ? attachment.action
+          : null;
+        let componentRevisionId: string | null = null;
+        if (resource !== null || action !== null) {
+          const identity = resource ?? action!;
+          const component = (await query<{ id: string }>(
+            sql,
+            `select id from pack_component_revisions where candidate_revision_id=$1
+             and definition_kind=$2 and definition_name=$3`,
+            [
+              candidate.id,
+              resource !== null ? "resource" : "action",
+              identity.split(":")[1],
+            ],
+          )).rows[0];
+          if (!component) {
+            throw new Error("migrated attachment component is unavailable");
+          }
+          componentRevisionId = component.id;
+        }
+        const spec = {
+          hook: `${candidate.publisher}/${candidate.pack_name}:${hookName}`,
+          phase: String(attachment.phase),
+          resource,
+          action,
+          event: typeof attachment.event === "string" ? attachment.event : null,
+          order: typeof attachment.order === "number" ? attachment.order : 0,
+          condition: typeof attachment.condition === "string"
+            ? attachment.condition
+            : null,
+          input: attachment.input,
+        };
+        await query(
+          sql,
+          `insert into pack_hook_attachment_revisions(
+             id,candidate_revision_id,hook_revision_id,hook_identity,component_revision_id,
+             phase,ordinal,declaration_digest,declaration_spec
+           ) values($1,$2,$3,$4,$5,$6,$7,$8,$9::text::jsonb)`,
+          [
+            uuidV7(),
+            candidate.id,
+            hookComponent.id,
+            spec.hook,
+            componentRevisionId,
+            spec.phase,
+            spec.order,
+            `sha256:${await canonicalSha256(spec)}`,
+            JSON.stringify(spec),
+          ],
+        );
+      }
+    }
+  }
+  await query(
+    sql,
+    "alter table staged_hook_executions disable trigger staged_hooks_immutable",
+  );
+  try {
+    await query(
+      sql,
+      `with ranked_executions as (
+         select id,pack_revision_id,hook_revision_id,phase,
+           row_number() over(partition by stage_id,hook_revision_id,phase order by ordinal) attachment_rank
+         from staged_hook_executions
+       ), ranked_attachments as (
+         select id,candidate_revision_id,hook_revision_id,phase,
+           row_number() over(partition by candidate_revision_id,hook_revision_id,phase order by ordinal,id) attachment_rank
+         from pack_hook_attachment_revisions
+       )
+       update staged_hook_executions execution set attachment_id=attachment.id
+       from ranked_executions ranked join ranked_attachments attachment
+         on attachment.candidate_revision_id=ranked.pack_revision_id
+        and attachment.hook_revision_id=ranked.hook_revision_id
+        and attachment.phase=ranked.phase
+        and attachment.attachment_rank=ranked.attachment_rank
+       where execution.id=ranked.id`,
+    );
+  } finally {
+    await query(
+      sql,
+      "alter table staged_hook_executions enable trigger staged_hooks_immutable",
+    );
+  }
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
 
 export async function applyPlatformMigrations(
   sql: Queryable,
@@ -1277,7 +1381,16 @@ export async function applyPlatformMigrations(
 
   const applied: string[] = [];
   for (const migration of migrations) {
-    const checksum = await digest(migration.sql);
+    if (Boolean(migration.migrate) !== Boolean(migration.applicationChecksum)) {
+      throw new Error(
+        `platform migration callback checksum is missing or unused: ${migration.id}`,
+      );
+    }
+    const checksum = await digest(
+      `${migration.sql}\n-- application migration: ${
+        migration.applicationChecksum ?? "none"
+      }\n${migration.finalSql ?? ""}`,
+    );
     const existing = await query<{ checksum: string }>(
       sql,
       "select checksum from platform_schema_migrations where id = $1",
@@ -1291,6 +1404,8 @@ export async function applyPlatformMigrations(
     }
 
     await query(sql, migration.sql);
+    await migration.migrate?.(sql);
+    if (migration.finalSql) await query(sql, migration.finalSql);
     await query(
       sql,
       "insert into platform_schema_migrations(id, checksum) values ($1, $2)",

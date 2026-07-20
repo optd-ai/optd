@@ -56,7 +56,14 @@ Deno.test({
         stage = uuidV7(),
         operation = uuidV7();
       const definitions: Record<string, Record<string, unknown>> = {
-        resources: { thing: { kind: "Resource", spec: { fields: {} } } },
+        resources: {
+          thing: {
+            kind: "Resource",
+            spec: { fields: {} },
+            "\u{10000}": 1e-7,
+            "\uE000": 1e30,
+          },
+        },
         relationships: { sibling: { kind: "Relationship", spec: {} } },
         lifecycles: { flow: { kind: "Lifecycle", spec: {} } },
         actions: { run: { kind: "Action", spec: {} } },
@@ -68,7 +75,7 @@ Deno.test({
                 {
                   phase: "changeset.before_stage",
                   resource: "test/upgrade:thing",
-                  input: {},
+                  input: { "\u{10000}": 1e-7, "\uE000": 1e30 },
                 },
                 {
                   phase: "action.stage",
@@ -152,6 +159,45 @@ Deno.test({
         );
       });
 
+      for (const failAt of ["callback", "finalization"] as const) {
+        const failedMigration = {
+          id: `test_application_migration_${failAt}_rollback`,
+          sql:
+            `create table test_application_migration_${failAt}_rollback(value text)`,
+          applicationChecksum: `test-${failAt}-v1`,
+          async migrate(tx: Parameters<typeof applyPlatformMigrations>[0]) {
+            await query(
+              tx,
+              `insert into test_application_migration_${failAt}_rollback values('partial')`,
+            );
+            if (failAt === "callback") {
+              throw new Error("injected callback failure");
+            }
+          },
+          finalSql: failAt === "finalization"
+            ? "select missing_finalization_function()"
+            : "select 1",
+        };
+        await assertRejects(() =>
+          sql!.begin((tx) => applyPlatformMigrations(tx, [failedMigration]))
+        );
+        assertEquals(
+          (await query<{ table_name: string | null }>(
+            sql,
+            `select to_regclass('test_application_migration_${failAt}_rollback')::text table_name`,
+          )).rows[0].table_name,
+          null,
+        );
+        assertEquals(
+          (await query<{ count: string }>(
+            sql,
+            "select count(*)::text count from platform_schema_migrations where id=$1",
+            [failedMigration.id],
+          )).rows[0].count,
+          "0",
+        );
+      }
+
       assertEquals(
         (await sql.begin((tx) => applyPlatformMigrations(tx, [migration1020])))
           .applied,
@@ -202,6 +248,13 @@ Deno.test({
         "select is_nullable from information_schema.columns where table_name='staged_changeset_operations' and column_name='component_revision_id'",
       )).rows[0];
       assertEquals(nullable.is_nullable, "NO");
+      assertEquals(
+        (await query<{ exists: boolean }>(
+          sql,
+          "select to_regprocedure('operant_canonical_jsonb(jsonb)') is not null exists",
+        )).rows[0].exists,
+        false,
+      );
 
       assertEquals(
         (await sql.begin((tx) => applyPlatformMigrations(tx, [migration1021])))
@@ -237,7 +290,7 @@ Deno.test({
           event: null,
           order: 0,
           condition: null,
-          input: {},
+          input: { "\u{10000}": 1e-7, "\uE000": 1e30 },
         },
         {
           hook: "test/upgrade:guard",

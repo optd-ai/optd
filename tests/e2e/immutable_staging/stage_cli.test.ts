@@ -88,6 +88,9 @@ Deno.test({
                 maxLength: 8,
                 unique: true,
               },
+              enabled: { type: "boolean" },
+              website: { type: "string", format: "uri" },
+              external_id: { type: "string", format: "uuid" },
               email: { type: "string", format: "email" },
               amount: {
                 type: "decimal",
@@ -207,7 +210,14 @@ Deno.test({
           op: "create",
           key: "item",
           resource: "testpub/strict:item",
-          fields: { name: "AA", state: "new" },
+          fields: {
+            name: "AA",
+            state: "new",
+            enabled: true,
+            website: "https://example.test/items/aa",
+            external_id: uuidV7(),
+            ref_id: facts.archiveId,
+          },
         }, {
           op: "update",
           project_id: projectId,
@@ -512,6 +522,9 @@ Deno.test({
             { name: "high-int", state: "new", score: 11 },
             { name: "forbidden", state: "new", score: 9 },
             { name: "duplicate", state: "new", code: "taken" },
+            { name: "boolean", state: "new", enabled: "true" },
+            { name: "uri", state: "new", website: "not a uri" },
+            { name: "uuid", state: "new", external_id: "not-a-uuid" },
             { name: "email", state: "new", email: "invalid" },
             { name: "decimal", state: "new", amount: "01.0" },
             { name: "precision", state: "new", amount: "1234.56" },
@@ -622,7 +635,11 @@ Deno.test({
           `${JSON.stringify(invalid)}\n${rejected.stderr}`,
         );
         const error = JSON.parse(rejected.stderr).error;
-        assertEquals(typeof error.code, "string");
+        assertEquals(
+          error.code,
+          expectedSemanticError(invalid, facts),
+          JSON.stringify(invalid),
+        );
         assertEquals(typeof error.message, "string");
         assertEquals(
           /select |pack_runtime|res_testpub/i.test(rejected.stderr),
@@ -836,6 +853,35 @@ Deno.test({
           },
         },
       );
+      const beforeMalformedCoordinator = await stageEvidenceCounts(harness);
+      const malformedInjected = makeStageChangesetService(
+        new PostgresStageRepository(harness.server.sql),
+        {
+          coordinate() {
+            return Promise.resolve({
+              hook_executions: [],
+              warnings: [],
+            } as never);
+          },
+        },
+      );
+      const malformedCoordinator = await malformedInjected.stage({
+        project_id: projectId,
+        operations: [{
+          op: "create",
+          resource: "testpub/strict:item",
+          fields: { name: "malformed coordinator" },
+        }],
+      }, directAuth);
+      assertEquals(malformedCoordinator.ok, false);
+      if (!malformedCoordinator.ok) {
+        assertEquals(malformedCoordinator.error.code, "hook_rejected");
+      }
+      assertEquals(
+        await stageEvidenceCounts(harness),
+        beforeMalformedCoordinator,
+      );
+
       const coordinated = await injected.stage({
         project_id: projectId,
         operations: [{
@@ -1002,6 +1048,36 @@ Deno.test({
     }
   },
 });
+
+function expectedSemanticError(
+  request: Record<string, unknown>,
+  facts: { conditionId: string },
+): string {
+  const operations = request.operations as Record<string, unknown>[];
+  if (operations.length > 1) return "operation_conflict";
+  const operation = operations[0];
+  if (operation.op === "link") return "validation_failed";
+  if (operation.op === "create") {
+    const fields = operation.fields as Record<string, unknown>;
+    return fields.state === "invalid" || fields.code === "taken"
+      ? "operation_conflict"
+      : "validation_failed";
+  }
+  if (operation.op === "transition") {
+    return operation.object_id === facts.conditionId || operation.to === "new"
+      ? "operation_conflict"
+      : "validation_failed";
+  }
+  if (operation.expected_version === 2) return "object_version_conflict";
+  if (isRecord(operation.set) && operation.set.name === "Transition") {
+    return "no_changes";
+  }
+  return "validation_failed";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
 
 async function stageEvidenceCounts(harness: LiveHarness) {
   return (await query<Record<string, string>>(

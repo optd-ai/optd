@@ -22,6 +22,13 @@ const declaration: StageHookDeclaration = {
   script_digest: `sha256:${"3".repeat(64)}`,
   declaration_digest: `sha256:${"2".repeat(64)}`,
 };
+const secondDeclaration: StageHookDeclaration = {
+  ...declaration,
+  attachment_id: "019b7a2e-7c10-7000-8000-000000000011",
+  hook_revision_id: "019b7a2e-7c10-7000-8000-000000000012",
+  hook: "operant/crm:validate",
+  order: 1,
+};
 const auth: AuthContext = Object.freeze({
   id: "019b7a2e-7c10-7000-8000-000000000002",
   principalId: "019b7a2e-7c10-7000-8000-000000000003",
@@ -107,6 +114,248 @@ Deno.test("injected stage coordinator runs once and ordered patches reach persis
   assertEquals(persisted?.hookDeclarations, [declaration]);
 });
 
+Deno.test("ordered multi-hook evidence reaches the real stage service", async () => {
+  let persisted = false;
+  const repository = fakeRepository(
+    () => persisted = true,
+    [declaration, secondDeclaration],
+  );
+  const service = makeStageChangesetService(repository, {
+    async coordinate(input) {
+      const first = await executionEvidence(input, emptyOutput(), declaration);
+      const second = await executionEvidence(
+        input,
+        emptyOutput(),
+        secondDeclaration,
+        first.output_digest,
+      );
+      second.id = "019b7a2e-7c10-7000-8000-000000000013";
+      return { hook_executions: [first, second] };
+    },
+  });
+  const result = await service.stage(stageRequest(), auth);
+  assertEquals(result.ok, true);
+  assertEquals(persisted, true);
+});
+
+Deno.test("coordinator rejects duplicate and reordered multi-hook evidence", async () => {
+  for (const mode of ["duplicate", "reordered"] as const) {
+    let persisted = false;
+    const repository = fakeRepository(
+      () => persisted = true,
+      [declaration, secondDeclaration],
+    );
+    const service = makeStageChangesetService(repository, {
+      async coordinate(input) {
+        const first = await executionEvidence(
+          input,
+          emptyOutput(),
+          declaration,
+        );
+        const second = mode === "duplicate"
+          ? structuredClone(first)
+          : await executionEvidence(input, emptyOutput(), secondDeclaration);
+        if (mode === "reordered") {
+          return { hook_executions: [second, first] };
+        }
+        return { hook_executions: [first, second] };
+      },
+    });
+    const result = await service.stage(stageRequest(), auth);
+    assertEquals(result.ok, false, mode);
+    if (!result.ok) assertEquals(result.error.code, "hook_rejected", mode);
+    assertEquals(persisted, false, mode);
+  }
+});
+
+Deno.test("coordinator rejects malformed immutable evidence without persistence", async () => {
+  type Mutation = (result: Record<string, unknown>) => void;
+  const digest = `sha256:${"9".repeat(64)}`;
+  const cases: Array<[string, Mutation, boolean]> = [
+    ["missing execution", (result) => result.hook_executions = [], true],
+    ["extra execution", (result) => {
+      const executions = result.hook_executions as unknown[];
+      executions.push(structuredClone(executions[0]));
+    }, true],
+    [
+      "aggregate supplied independently",
+      (result) => result.warnings = [],
+      true,
+    ],
+    ["invalid execution UUID", (result) => execution(result).id = "bad", true],
+    [
+      "wrong attachment",
+      (result) => execution(result).attachment_id = auth.id,
+      true,
+    ],
+    [
+      "wrong hook",
+      (result) => execution(result).hook_revision_id = auth.id,
+      true,
+    ],
+    ["wrong phase", (result) => execution(result).phase = "action.stage", true],
+    [
+      "invalid input digest",
+      (result) => execution(result).input_digest = digest,
+      true,
+    ],
+    [
+      "invalid output digest",
+      (result) => execution(result).output_digest = digest,
+      false,
+    ],
+    ["unknown output key", (result) => output(result).unknown = [], false],
+    ["missing output key", (result) => delete output(result).effects, false],
+    ["malformed stderr", (result) => execution(result).stderr = 1, true],
+    [
+      "malformed duration",
+      (result) => execution(result).duration_ms = -1,
+      true,
+    ],
+    ["arbitrary grant", (result) =>
+      execution(result).grant_snapshot = {
+        ...grantSnapshot,
+        secret: "must-not-persist",
+      }, true],
+    ["secret-bearing grant", (result) =>
+      execution(result).grant_snapshot = {
+        ...grantSnapshot,
+        policy_digest: "secret",
+      }, true],
+    ["duplicate reads", (result) =>
+      output(result).read_dependencies = [
+        validRead(),
+        validRead(),
+      ], false],
+    [
+      "malformed read",
+      (result) => output(result).read_dependencies = [{}],
+      false,
+    ],
+    ["malformed warning", (result) => output(result).warnings = [{}], false],
+    ["duplicate approvals", (result) => {
+      const requirement = {
+        id: declaration.attachment_id,
+        capability: "review",
+      };
+      output(result).approval_requirements = [requirement, requirement];
+    }, false],
+    [
+      "malformed capability",
+      (result) => output(result).required_capabilities = ["BAD"],
+      false,
+    ],
+    [
+      "duplicate effect",
+      (result) => output(result).effects = ["valid", "valid"],
+      false,
+    ],
+    [
+      "duplicate event",
+      (result) => output(result).planned_events = [{ id: "x" }, { id: "x" }],
+      false,
+    ],
+    [
+      "malformed delivery",
+      (result) => output(result).planned_deliveries = [{}],
+      false,
+    ],
+    ["patch conflict", (result) =>
+      output(result).patch_outputs = [{
+        operation_key: "lead",
+        output: {
+          patches: [
+            { op: "replace", path: "/name", value: "B" },
+            { op: "replace", path: "/name", value: "C" },
+          ],
+        },
+      }], false],
+    ["patch platform path", (result) =>
+      output(result).patch_outputs = [{
+        operation_key: "lead",
+        output: {
+          patches: [{ op: "add", path: "/object_id", value: auth.id }],
+        },
+      }], false],
+    ["patch test failure", (result) =>
+      output(result).patch_outputs = [{
+        operation_key: "lead",
+        output: { patches: [{ op: "test", path: "/name", value: "wrong" }] },
+      }], false],
+  ];
+  for (const [name, mutate, preserveDigest] of cases) {
+    let persisted = false;
+    const repository = fakeRepository(() => persisted = true);
+    const service = makeStageChangesetService(repository, {
+      async coordinate(input) {
+        const empty = emptyOutput();
+        const result: Record<string, unknown> = {
+          hook_executions: [await executionEvidence(input, empty)],
+        };
+        mutate(result);
+        if (!preserveDigest && execution(result).output_digest !== digest) {
+          execution(result).output_digest = `sha256:${await canonicalSha256(
+            execution(result).output,
+          )}`;
+        }
+        return result as never;
+      },
+    });
+    const result = await service.stage(stageRequest(), auth);
+    assertEquals(result.ok, false, name);
+    if (!result.ok) assertEquals(result.error.code, "hook_rejected", name);
+    assertEquals(persisted, false, name);
+  }
+});
+
+Deno.test("coordinator-added operations fail closed before persistence", async () => {
+  const additions: Array<[string, unknown[], string]> = [
+    ["schema", [{}], "validation_failed"],
+    ["bad ref", [{
+      op: "create",
+      key: "child",
+      project_id: project,
+      resource: "operant/crm:lead",
+      fields: { parent_id: { $ref: "missing.object_id" } },
+    }], "invalid_reference"],
+    ["conflict", [{
+      op: "create",
+      key: "lead",
+      project_id: project,
+      resource: "operant/crm:lead",
+      fields: { name: "duplicate" },
+    }], "duplicate_key"],
+    ["limit", Array.from({ length: 10_001 }, () => ({})), "hook_rejected"],
+  ];
+  for (const [name, addedOperations, expectedCode] of additions) {
+    let persisted = false;
+    const service = makeStageChangesetService(
+      fakeRepository(() => persisted = true),
+      {
+        async coordinate(input) {
+          const hookOutput = emptyOutput() as unknown as Record<
+            string,
+            unknown
+          >;
+          hookOutput.added_operations = addedOperations;
+          return {
+            hook_executions: [
+              await executionEvidence(
+                input,
+                hookOutput as unknown as StageHookOutput,
+              ),
+            ],
+          };
+        },
+      },
+    );
+    const result = await service.stage(stageRequest(), auth);
+    assertEquals(result.ok, false, name);
+    if (!result.ok) assertEquals(result.error.code, expectedCode, name);
+    assertEquals(persisted, false, name);
+  }
+});
+
 Deno.test("malformed or failing coordinator patch never reaches persistence", async () => {
   let persisted = false;
   const repository = fakeRepository(() => persisted = true);
@@ -145,26 +394,71 @@ Deno.test("malformed or failing coordinator patch never reaches persistence", as
   assertEquals(persisted, false);
 });
 
+function stageRequest() {
+  return {
+    project_id: project,
+    operations: [{
+      op: "create" as const,
+      key: "lead",
+      resource: "operant/crm:lead",
+      fields: { name: "A" },
+    }],
+  };
+}
+
+function emptyOutput(): StageHookOutput {
+  return {
+    added_operations: [],
+    patch_outputs: [],
+    read_dependencies: [],
+    warnings: [],
+    approval_requirements: [],
+    required_capabilities: [],
+    effects: [],
+    planned_events: [],
+    planned_deliveries: [],
+  };
+}
+
+function execution(result: Record<string, unknown>): Record<string, unknown> {
+  return (result.hook_executions as Record<string, unknown>[])[0];
+}
+
+function output(result: Record<string, unknown>): Record<string, unknown> {
+  return execution(result).output as Record<string, unknown>;
+}
+
+function validRead() {
+  return {
+    kind: "policy",
+    project_id: project,
+    definition: "operant/crm:lead_policy",
+    query_digest: `sha256:${"4".repeat(64)}`,
+  };
+}
+
 async function executionEvidence(
   input: StageHookInput,
   output: StageHookOutput,
+  pinnedDeclaration: StageHookDeclaration = declaration,
+  previousOutputDigest: string | null = null,
 ) {
   return {
     id: "019b7a2e-7c10-7000-8000-000000000010",
-    attachment_id: declaration.attachment_id,
-    phase: declaration.phase,
-    pack_revision_id: declaration.pack_revision_id,
-    hook_revision_id: declaration.hook_revision_id,
+    attachment_id: pinnedDeclaration.attachment_id,
+    phase: pinnedDeclaration.phase,
+    pack_revision_id: pinnedDeclaration.pack_revision_id,
+    hook_revision_id: pinnedDeclaration.hook_revision_id,
     input_digest: `sha256:${await canonicalSha256({
       schema: "changeset.hook-input.v1",
-      declaration,
+      declaration: pinnedDeclaration,
       operations: input.operations,
       projects: input.projects,
       pack_revisions: input.pack_revisions,
       proposed_states: input.proposed_states,
       base_states: input.base_states,
       grant_snapshot: input.grant_snapshot,
-      previous_output_digest: null,
+      previous_output_digest: previousOutputDigest,
     })}`,
     output_digest: `sha256:${await canonicalSha256(output)}`,
     output,
@@ -176,6 +470,7 @@ async function executionEvidence(
 
 function fakeRepository(
   onCreate: (input: Parameters<StageRepository["create"]>[0]) => void,
+  declarations: StageHookDeclaration[] = [declaration],
 ): StageRepository {
   return {
     async hookInput(operations) {
@@ -184,7 +479,7 @@ function fakeRepository(
         operations,
         projects: [{ project_id: project }],
         pack_revisions: [{ revision_id: declaration.pack_revision_id }],
-        hook_declarations: [declaration],
+        hook_declarations: declarations,
         grant_snapshot: grantSnapshot,
         proposed_states: { lead: { name: "A" } },
         base_states: { lead: null },
