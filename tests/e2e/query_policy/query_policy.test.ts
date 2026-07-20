@@ -9,6 +9,7 @@ import { seedObjectHistoryFixture } from "../../support/object_history_fixtures.
 import { parseYamlJsonObject } from "../../../src/adapters/outbound/yaml/pack_loader.ts";
 import {
   type CliLauncher,
+  type LiveHarness,
   startLiveHarness,
 } from "../../support/live_harness.ts";
 import { uuidV7 } from "../../../src/domain/ids/uuid_v7.ts";
@@ -28,6 +29,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       password: "Query-Admin-Password-42!",
     });
     assertEquals(boot.code, 0, boot.stderr);
+    const adminState = await storedAuthState(harness);
     const pack = join(harness.rootDir, "query-pack");
     await copyDirectory("prototypes/crm-default-pack", pack);
     const manifestPath = join(pack, "pack.yaml");
@@ -527,6 +529,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       password: ordinaryPassword,
     });
     assertEquals(ordinaryProcess.result.code, 0, ordinaryProcess.result.stderr);
+    const ordinaryState = await storedAuthState(harness);
     const ordinaryIdentity = (await query<{
       principal_id: string;
       human_user_id: string;
@@ -783,6 +786,136 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
         [assignment],
       );
     }
+    await seedQueryAgentDecidePolicy(harness, project);
+    await query(
+      harness.server.sql,
+      `insert into role_assignments(
+      id,principal_id,role_id,boundary_type,project_id,active)
+      values($1,$2,'operant/crm:sales_manager','project',$3,true)`,
+      [uuidV7(), ordinaryIdentity.principal_id, project],
+    );
+    const requestOnlyAgent = await harness.createProcessTreeLauncher(
+      "request_only",
+    );
+    const rootAgent = await harness.createProcessTreeLauncher("agent");
+    const delegatedAgent = await harness.createProcessTreeLauncher("agent");
+    await selectStoredCredential(harness, {
+      token: undefined,
+      requestToken: ordinaryState.requestToken,
+    });
+    const rootRequest = await requestOnlyAgent.runOptctl([
+      "--json",
+      "auth",
+      "request",
+      "--role",
+      "operant/crm:sales_rep",
+      "--role",
+      "operant/crm:sales_manager",
+      "--project",
+      project,
+      "--reason",
+      "bounded query root",
+    ]);
+    assertEquals(rootRequest.code, 0, rootRequest.stderr);
+    const rootRequestId = String(JSON.parse(rootRequest.stdout).data.id);
+    await selectStoredCredential(harness, {
+      token: ordinaryState.token,
+      requestToken: undefined,
+    });
+    const rootApproval = await ordinaryProcess.launcher.runOptctl([
+      "--json",
+      "auth",
+      "approve",
+      rootRequestId,
+      "--yes",
+      "--agent-name",
+      "query-root-agent",
+    ]);
+    assertEquals(rootApproval.code, 0, rootApproval.stderr);
+    await selectStoredCredential(harness, {
+      token: undefined,
+      requestToken: ordinaryState.requestToken,
+    });
+    const rootWait = await rootAgent.runOptctl([
+      "--json",
+      "auth",
+      "wait",
+      rootRequestId,
+    ]);
+    assertEquals(rootWait.code, 0, rootWait.stderr);
+    const rootState = await storedAuthState(harness);
+    const rootAuthorizationId = await authorizationForRequest(
+      harness,
+      rootRequestId,
+    );
+    const rootIdentity = (await query<{
+      principal_id: string;
+      human_user_id: string | null;
+      parent_authorization_id: string | null;
+      root_authorization_id: string;
+    }>(
+      harness.server.sql,
+      `select au.principal_id,hu.id human_user_id,aa.parent_authorization_id,
+      aa.root_authorization_id from agent_authorizations aa
+      join agent_users au on au.id=aa.agent_user_id
+      left join human_users hu on hu.principal_id=au.principal_id where aa.id=$1`,
+      [rootAuthorizationId],
+    )).rows[0];
+    assertEquals(rootIdentity.human_user_id, null);
+    assertEquals(rootIdentity.parent_authorization_id, null);
+    assertEquals(rootIdentity.root_authorization_id, rootAuthorizationId);
+    await query(
+      harness.server.sql,
+      `insert into ${quoteIdentifier(viewerTable)}
+      (id,project_id,from_object_id,to_object_id,created_by,updated_by)
+      values($1,$2,$3,$4,$5,$5)`,
+      [uuidV7(), project, ids.object, rootIdentity.principal_id, auth],
+    );
+
+    await query(
+      harness.server.sql,
+      "update policy_assignments set active=true where id=any($1::uuid[])",
+      [[modeAssignments.get("actor")!, modeAssignments.get("human")!]],
+    );
+    await selectStoredCredential(harness, {
+      token: rootState.token,
+      requestToken: undefined,
+    });
+    const agentVisible = await runJson(
+      harness,
+      ordinaryArgs,
+      rootAgent,
+    );
+    assertEquals(
+      (agentVisible.data.items as Array<{ id: string }>).map((item) => item.id)
+        .sort(),
+      [ids.object],
+    );
+    assertEquals(agentVisible.meta.total, 1);
+    assert(
+      !(agentVisible.data.items as Array<{ id: string }>).some((item) =>
+        item.id === matrixRows[1].id
+      ),
+      "human-only poisoned edge must not match an agent with null human_user_id",
+    );
+    await query(
+      harness.server.sql,
+      "update policy_assignments set active=false where id=any($1::uuid[])",
+      [[modeAssignments.get("actor")!, modeAssignments.get("human")!]],
+    );
+
+    const delegated = await createDelegatedQueryAgent({
+      harness,
+      requester: requestOnlyAgent,
+      approver: rootAgent,
+      redeemer: delegatedAgent,
+      requestToken: ordinaryState.requestToken,
+      approverToken: rootState.token,
+      project,
+      name: "query-delegated-agent",
+    });
+    assertEquals(delegated.parent, rootAuthorizationId);
+    assertEquals(delegated.root, rootAuthorizationId);
     const unconditionalAssignment = modeAssignments.get("unconditional")!;
     await query(
       harness.server.sql,
@@ -803,6 +936,67 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       ordinaryProcess.launcher,
     );
     assertEquals(allProjectsAllowed.meta.total, 11);
+
+    const agentRequest = {
+      project_id: project,
+      definition: {
+        kind: "resource",
+        publisher: "operant",
+        pack: "crm",
+        name: "lead",
+      },
+      fields: ["name", "score"],
+      sort: [{ field: "created_at", direction: "asc" }],
+      limit: 1,
+      include_total: true,
+    };
+    const delegatedBaseline = await fetchAgentQuery(
+      harness,
+      delegated.token,
+      agentRequest,
+    );
+    assertEquals(delegatedBaseline.status, 200);
+    const delegatedPage = await delegatedBaseline.json();
+    assertEquals(delegatedPage.meta.total, 11);
+    const delegatedCursor = String(delegatedPage.meta.next_cursor);
+    await query(
+      harness.server.sql,
+      "update agent_authorizations set superseded_at=now() where id=$1",
+      [rootAuthorizationId],
+    );
+    const replacedCursor = await fetchAgentQuery(
+      harness,
+      delegated.token,
+      { ...agentRequest, cursor: delegatedCursor },
+    );
+    assertEquals(replacedCursor.status, 401);
+    assertEquals(
+      (await replacedCursor.json()).error.code,
+      "credential_invalid",
+    );
+    await query(
+      harness.server.sql,
+      "update agent_authorizations set superseded_at=null where id=$1",
+      [rootAuthorizationId],
+    );
+
+    for (const mutation of ["revoked_at", "superseded_at"] as const) {
+      await proveAgentMutationBeforeQueryAuthority(
+        harness,
+        delegated.token,
+        rootAuthorizationId,
+        agentRequest,
+        mutation,
+      );
+      await proveAgentMutationAfterQueryLocks(
+        harness,
+        delegated.token,
+        rootAuthorizationId,
+        table,
+        agentRequest,
+        mutation,
+      );
+    }
     await query(
       harness.server.sql,
       `update ${
@@ -976,6 +1170,253 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       set archived_at=null where id=$1`,
       [ids.object],
     );
+    await selectStoredCredential(harness, {
+      token: ordinaryState.token,
+      requestToken: undefined,
+    });
+    const policyCursorPage = await runJson(harness, [
+      ...ordinaryArgs,
+      "--sort",
+      "created_at:asc",
+      "--limit",
+      "1",
+    ], ordinaryProcess.launcher);
+    const policyCursor = String(policyCursorPage.meta.next_cursor);
+    const oldUnconditionalVersion = (await query<{
+      id: string;
+      policy_id: string;
+      version: number;
+    }>(
+      harness.server.sql,
+      `select pd.id,pd.policy_id,pd.version from policy_definition_versions pd
+      join policy_rules pr on pr.policy_definition_version_id=pd.id where pr.id=$1`,
+      [modeRules.get("unconditional")!],
+    )).rows[0];
+    const nextPolicyVersion = uuidV7(), nextPolicyAssignment = uuidV7();
+    await harness.server.sql.begin(async (sql) => {
+      await query(
+        sql,
+        "update policy_definition_versions set active=false where id=$1",
+        [oldUnconditionalVersion.id],
+      );
+      await query(
+        sql,
+        `insert into policy_definition_versions(id,policy_id,version,active)
+        values($1,$2,$3,true)`,
+        [
+          nextPolicyVersion,
+          oldUnconditionalVersion.policy_id,
+          oldUnconditionalVersion.version + 1,
+        ],
+      );
+      await query(
+        sql,
+        `insert into policy_rules(
+        id,policy_definition_version_id,role_id,capability,resource,condition_kind,rule_name)
+        values($1,$2,'operant/crm:sales_rep','read','operant/crm:lead','unconditional','unconditional-v2')`,
+        [uuidV7(), nextPolicyVersion],
+      );
+      await query(
+        sql,
+        "update policy_assignments set active=false where id=$1",
+        [unconditionalAssignment],
+      );
+      await query(
+        sql,
+        `insert into policy_assignments(
+        id,policy_definition_version_id,boundary_type,project_id,active,source)
+        values($1,$2,'project',$3,true,'operator')`,
+        [nextPolicyAssignment, nextPolicyVersion, project],
+      );
+    });
+    await expectInvalidOrdinaryCursor(
+      ordinaryProcess.launcher,
+      ordinaryArgs,
+      policyCursor,
+    );
+
+    const beforeSuperAdmin = await runJson(harness, [
+      ...ordinaryArgs,
+      "--sort",
+      "created_at:asc",
+      "--limit",
+      "1",
+    ], ordinaryProcess.launcher);
+    const superAdminAssignment = uuidV7();
+    await query(
+      harness.server.sql,
+      `insert into role_assignments(
+      id,principal_id,role_id,boundary_type,active)
+      values($1,$2,'system:super_admin','system',true)`,
+      [superAdminAssignment, ordinaryIdentity.principal_id],
+    );
+    await expectInvalidOrdinaryCursor(
+      ordinaryProcess.launcher,
+      ordinaryArgs,
+      String(beforeSuperAdmin.meta.next_cursor),
+    );
+    const withSuperAdmin = await runJson(harness, [
+      ...ordinaryArgs,
+      "--sort",
+      "created_at:asc",
+      "--limit",
+      "1",
+    ], ordinaryProcess.launcher);
+    const activeSuperAdminVersion =
+      (await query<{ id: string; version: number }>(
+        harness.server.sql,
+        `select id,version from role_definition_versions
+      where role_id='system:super_admin' and active`,
+      )).rows[0];
+    await harness.server.sql.begin(async (sql) => {
+      await query(
+        sql,
+        "update role_definition_versions set active=false where id=$1",
+        [activeSuperAdminVersion.id],
+      );
+      await query(
+        sql,
+        `insert into role_definition_versions(id,role_id,version,active)
+        values($1,'system:super_admin',$2,true)`,
+        [uuidV7(), activeSuperAdminVersion.version + 1],
+      );
+    });
+    await expectInvalidOrdinaryCursor(
+      ordinaryProcess.launcher,
+      ordinaryArgs,
+      String(withSuperAdmin.meta.next_cursor),
+    );
+    const withNextSuperAdminVersion = await runJson(harness, [
+      ...ordinaryArgs,
+      "--sort",
+      "created_at:asc",
+      "--limit",
+      "1",
+    ], ordinaryProcess.launcher);
+    await query(
+      harness.server.sql,
+      "update role_assignments set active=false where id=$1",
+      [superAdminAssignment],
+    );
+    await expectInvalidOrdinaryCursor(
+      ordinaryProcess.launcher,
+      ordinaryArgs,
+      String(withNextSuperAdminVersion.meta.next_cursor),
+    );
+
+    const packCursorPage = await runJson(harness, [
+      ...ordinaryArgs,
+      "--sort",
+      "created_at:asc",
+      "--limit",
+      "1",
+    ], ordinaryProcess.launcher);
+    const upgradedManifest = parseYamlJsonObject(
+      await Deno.readTextFile(manifestPath),
+      manifestPath,
+    ) as Record<string, unknown>;
+    (upgradedManifest.metadata as Record<string, unknown>).version = "9.0.1";
+    await Deno.writeTextFile(
+      manifestPath,
+      JSON.stringify(upgradedManifest, null, 2),
+    );
+    await selectStoredCredential(harness, {
+      token: adminState.token,
+      requestToken: adminState.requestToken,
+    });
+    const strictPreview = await harness.runOptctl([
+      "--json",
+      "pack",
+      "preview",
+      pack,
+    ]);
+    assertEquals(strictPreview.code, 0, strictPreview.stderr);
+    const strictApply = await harness.runOptctl([
+      "--json",
+      "pack",
+      "apply",
+      pack,
+      "--safe",
+    ]);
+    assertEquals(strictApply.code, 0, strictApply.stderr);
+    await selectStoredCredential(harness, {
+      token: ordinaryState.token,
+      requestToken: undefined,
+    });
+    await expectInvalidOrdinaryCursor(
+      ordinaryProcess.launcher,
+      ordinaryArgs,
+      String(packCursorPage.meta.next_cursor),
+    );
+
+    const projectVersion = (await query<{ version: number }>(
+      harness.server.sql,
+      "select version from projects where id=$1",
+      [project],
+    )).rows[0].version;
+    await selectStoredCredential(harness, {
+      token: adminState.token,
+      requestToken: adminState.requestToken,
+    });
+    const archivedProject = await harness.runOptctl([
+      "--json",
+      "project",
+      "archive",
+      project,
+      "--expected-version",
+      String(projectVersion),
+    ]);
+    assertEquals(archivedProject.code, 0, archivedProject.stderr);
+    await selectStoredCredential(harness, {
+      token: ordinaryState.token,
+      requestToken: undefined,
+    });
+    const archivedProjectResponse = await fetch(
+      `${harness.baseUrl}/api/v1/queries`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${ordinaryState.token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          project_id: project,
+          definition: {
+            kind: "resource",
+            publisher: "operant",
+            pack: "crm",
+            name: "lead",
+          },
+          fields: ["name", "score"],
+          include_total: true,
+        }),
+      },
+    );
+    assertEquals(archivedProjectResponse.status, 200);
+    const archivedProjectQuery = await archivedProjectResponse.json();
+    assertEquals(archivedProjectQuery.meta.total, 11);
+    await selectStoredCredential(harness, {
+      token: adminState.token,
+      requestToken: adminState.requestToken,
+    });
+    const restartBaseline = await runJson(harness, [
+      "--project",
+      project,
+      "query",
+      "operant/crm:lead",
+      "--where",
+      'name == "Typed Lead"',
+      "--sort",
+      "score:asc",
+      "--sort",
+      "updated_at:desc",
+      "--limit",
+      "1",
+      "--include-total",
+    ]);
+    const restartCursor = String(restartBaseline.meta.next_cursor);
+    const restartFirstId =
+      (restartBaseline.data.items as Array<{ id: string }>)[0].id;
     await ordinaryProcess.launcher.close();
 
     await harness.restart();
@@ -994,9 +1435,12 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       "1",
       "--include-total",
       "--cursor",
-      cursor,
+      restartCursor,
     ]);
-    assert((restartPage.data.items as Array<{ id: string }>)[0].id !== firstId);
+    assert(
+      (restartPage.data.items as Array<{ id: string }>)[0].id !==
+        restartFirstId,
+    );
     const afterRestart = await runJson(harness, [
       "--project",
       "query-sales",
@@ -1010,6 +1454,270 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
     await harness.close();
   }
 });
+
+type StoredAuthState = {
+  token: string;
+  requestToken: string;
+  authorizationNonces: Record<string, string>;
+};
+
+async function storedAuthState(harness: LiveHarness): Promise<StoredAuthState> {
+  const store = JSON.parse(
+    await Deno.readTextFile(
+      join(harness.rootDir, "xdg-config", "operant", "auth.json"),
+    ),
+  );
+  return store.origins[new URL(harness.baseUrl).origin];
+}
+
+async function selectStoredCredential(
+  harness: LiveHarness,
+  update: { token?: string; requestToken?: string },
+): Promise<void> {
+  const path = join(harness.rootDir, "xdg-config", "operant", "auth.json");
+  const store = JSON.parse(await Deno.readTextFile(path));
+  const origin = new URL(harness.baseUrl).origin;
+  store.origins[origin] = { ...store.origins[origin], ...update };
+  if (update.token === undefined) delete store.origins[origin].token;
+  if (update.requestToken === undefined) {
+    delete store.origins[origin].requestToken;
+  }
+  await Deno.writeTextFile(path, JSON.stringify(store));
+}
+
+async function authorizationForRequest(
+  harness: LiveHarness,
+  requestId: string,
+): Promise<string> {
+  return (await query<{ authorization_id: string }>(
+    harness.server.sql,
+    "select authorization_id from agent_authorization_requests where id=$1",
+    [requestId],
+  )).rows[0].authorization_id;
+}
+
+async function authorizationLineage(
+  harness: LiveHarness,
+  authorizationId: string,
+): Promise<{ parent: string | null; root: string }> {
+  const row = (await query<{
+    parent_authorization_id: string | null;
+    root_authorization_id: string;
+  }>(
+    harness.server.sql,
+    `select parent_authorization_id,root_authorization_id
+    from agent_authorizations where id=$1`,
+    [authorizationId],
+  )).rows[0];
+  return {
+    parent: row.parent_authorization_id,
+    root: row.root_authorization_id,
+  };
+}
+
+async function seedQueryAgentDecidePolicy(
+  harness: LiveHarness,
+  project: string,
+): Promise<void> {
+  const version = uuidV7();
+  await query(
+    harness.server.sql,
+    `insert into policy_definition_versions(id,policy_id,version,active)
+    values($1,'system:query_agent_decider',1,true)`,
+    [version],
+  );
+  await query(
+    harness.server.sql,
+    `insert into policy_rules(id,policy_definition_version_id,role_id,capability)
+    values($1,$2,'operant/crm:sales_rep','auth.request.decide')`,
+    [uuidV7(), version],
+  );
+  await query(
+    harness.server.sql,
+    `insert into policy_assignments(
+    id,policy_definition_version_id,boundary_type,project_id,active)
+    values($1,$2,'project',$3,true)`,
+    [uuidV7(), version, project],
+  );
+}
+
+async function createDelegatedQueryAgent(input: {
+  harness: LiveHarness;
+  requester: CliLauncher;
+  approver: CliLauncher;
+  redeemer: CliLauncher;
+  requestToken: string;
+  approverToken: string;
+  project: string;
+  name: string;
+}): Promise<
+  { token: string; authorization: string; parent: string | null; root: string }
+> {
+  await selectStoredCredential(input.harness, {
+    token: undefined,
+    requestToken: input.requestToken,
+  });
+  const requested = await input.requester.runOptctl([
+    "--json",
+    "auth",
+    "request",
+    "--role",
+    "operant/crm:sales_rep",
+    "--project",
+    input.project,
+    "--reason",
+    "delegated bounded query",
+  ]);
+  assertEquals(requested.code, 0, requested.stderr);
+  const requestId = String(JSON.parse(requested.stdout).data.id);
+  await selectStoredCredential(input.harness, {
+    token: input.approverToken,
+    requestToken: undefined,
+  });
+  const approved = await input.approver.runOptctl([
+    "--json",
+    "auth",
+    "approve",
+    requestId,
+    "--yes",
+    "--agent-name",
+    input.name,
+  ]);
+  assertEquals(approved.code, 0, approved.stderr);
+  await selectStoredCredential(input.harness, {
+    token: undefined,
+    requestToken: input.requestToken,
+  });
+  const redeemed = await input.redeemer.runOptctl([
+    "--json",
+    "auth",
+    "wait",
+    requestId,
+  ]);
+  assertEquals(redeemed.code, 0, redeemed.stderr);
+  const token = (await storedAuthState(input.harness)).token;
+  const authorization = await authorizationForRequest(input.harness, requestId);
+  return {
+    token,
+    authorization,
+    ...await authorizationLineage(input.harness, authorization),
+  };
+}
+
+async function fetchAgentQuery(
+  harness: LiveHarness,
+  token: string,
+  request: Record<string, unknown>,
+): Promise<Response> {
+  return await fetch(`${harness.baseUrl}/api/v1/queries`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(request),
+  });
+}
+
+async function proveAgentMutationBeforeQueryAuthority(
+  harness: LiveHarness,
+  token: string,
+  authorizationId: string,
+  request: Record<string, unknown>,
+  mutation: "revoked_at" | "superseded_at",
+): Promise<void> {
+  let release!: () => void;
+  let ready!: () => void;
+  const releaseWait = new Promise<void>((resolve) => release = resolve);
+  const readyWait = new Promise<void>((resolve) => ready = resolve);
+  const blocker = harness.server.sql.begin(async (tx) => {
+    await query(tx, "lock table auth_contexts in access exclusive mode");
+    ready();
+    await releaseWait;
+  });
+  await readyWait;
+  const response = fetchAgentQuery(harness, token, request);
+  await waitForQueryLock(harness, "%insert into auth_contexts%", 1);
+  await query(
+    harness.server.sql,
+    `update agent_authorizations set ${mutation}=now() where id=$1`,
+    [authorizationId],
+  );
+  release();
+  await blocker;
+  const denied = await response;
+  assertEquals(denied.status, 401);
+  assertEquals((await denied.json()).error.code, "credential_invalid");
+  await query(
+    harness.server.sql,
+    `update agent_authorizations set ${mutation}=null where id=$1`,
+    [authorizationId],
+  );
+}
+
+async function proveAgentMutationAfterQueryLocks(
+  harness: LiveHarness,
+  token: string,
+  authorizationId: string,
+  table: string,
+  request: Record<string, unknown>,
+  mutation: "revoked_at" | "superseded_at",
+): Promise<void> {
+  let release!: () => void;
+  let ready!: () => void;
+  const releaseWait = new Promise<void>((resolve) => release = resolve);
+  const readyWait = new Promise<void>((resolve) => ready = resolve);
+  const blocker = harness.server.sql.begin(async (tx) => {
+    await query(
+      tx,
+      `lock table ${quoteIdentifier(table)} in access exclusive mode`,
+    );
+    ready();
+    await releaseWait;
+  });
+  await readyWait;
+  const response = fetchAgentQuery(harness, token, request);
+  await waitForQueryLock(harness, `%${table}%`, 1);
+  const changed = query(
+    harness.server.sql,
+    `update agent_authorizations set ${mutation}=now() where id=$1`,
+    [authorizationId],
+  );
+  await waitForQueryLock(
+    harness,
+    `%update agent_authorizations set ${mutation}=now()%`,
+    1,
+  );
+  release();
+  await blocker;
+  const disclosed = await response;
+  assertEquals(disclosed.status, 200);
+  assertEquals((await disclosed.json()).meta.total, 11);
+  await changed;
+  await query(
+    harness.server.sql,
+    `update agent_authorizations set ${mutation}=null where id=$1`,
+    [authorizationId],
+  );
+}
+
+async function waitForQueryLock(
+  harness: LiveHarness,
+  pattern: string,
+  minimum: number,
+): Promise<void> {
+  for (let attempt = 0; attempt < 250; attempt++) {
+    const waiting = (await query<{ count: number }>(
+      harness.server.sql,
+      `select count(*)::int count from pg_stat_activity
+      where pid<>pg_backend_pid() and wait_event_type='Lock' and query ilike $1`,
+      [pattern],
+    )).rows[0].count;
+    if (waiting >= minimum) return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(`query did not reach deterministic lock barrier: ${pattern}`);
+}
 
 async function copyDirectory(
   source: string,
@@ -1034,6 +1742,28 @@ async function runJson(
   const body = JSON.parse(result.stdout) as Envelope;
   assertEquals(body.ok, true);
   return body;
+}
+
+async function expectInvalidOrdinaryCursor(
+  launcher: CliLauncher,
+  args: string[],
+  cursor: string,
+): Promise<void> {
+  const result = await launcher.runOptctl([
+    "--json",
+    ...args,
+    "--sort",
+    "created_at:asc",
+    "--limit",
+    "1",
+    "--cursor",
+    cursor,
+  ]);
+  assert(result.code !== 0, result.stdout);
+  assertEquals(result.stdout, "");
+  const body = JSON.parse(result.stderr) as Envelope;
+  assertEquals(body.error?.code, "invalid_cursor");
+  assert(!result.stderr.toLowerCase().includes("select "));
 }
 
 async function collectCliPages(

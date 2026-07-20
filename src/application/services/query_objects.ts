@@ -484,7 +484,12 @@ async function compilePolicy(
           actor: {
             id: { type: "string", value: auth.principalId },
             principal_type: { type: "string", value: auth.principalType },
-            human_user_id: { type: "string", value: auth.humanUserId },
+            human_user_id: {
+              type: "string",
+              value: auth.principalType === "agent_user"
+                ? null
+                : auth.humanUserId,
+            },
           },
         });
       } catch {
@@ -539,6 +544,8 @@ async function relationSql(
   ) throw hidden();
   const actor = rule.relation_subject === "actor.id"
     ? auth.principalId
+    : auth.principalType === "agent_user"
+    ? null
     : auth.humanUserId;
   if (!actor) return "false";
   params.push(project, actor);
