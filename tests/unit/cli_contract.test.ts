@@ -33,7 +33,7 @@ async function withMockServer(
       entry.body = await req.json();
     }
     seen.push(entry);
-    if (url.pathname === "/metadata/resources/default/missing") {
+    if (url.pathname === "/metadata/packs/operant/crm/resources/missing") {
       return error(
         404,
         "resource_not_found",
@@ -56,57 +56,28 @@ async function withMockServer(
   }
 }
 
-Deno.test("optctl maps every MVP command group to stable HTTP API URLs", async () => {
+Deno.test("optctl maps current strict commands to canonical HTTP URLs", async () => {
   await withMockServer(async (baseUrl, seen) => {
+    const stageId = "019b7a2e-7c10-7000-8000-000000000011";
     const commands: string[][] = [
       ["home"],
       ["metadata"],
       ["metadata", "packs"],
-      ["metadata", "pack", "default.crm"],
-      ["metadata", "resource", "default.lead"],
-      ["metadata", "action", "default.convert_lead"],
-      ["metadata", "hook", "default.validate_lead"],
-      ["metadata", "policy", "default.crm_sales"],
-      [
-        "query",
-        "default.lead",
-        "--where",
-        "active()",
-        "--fields",
-        "id,email",
-        "--limit",
-        "2",
-      ],
-      ["view", "default.lead", "lead_1"],
-      ["history", "default.lead", "lead_1"],
-      ["changeset", "preview", "--input", '{"operations":[]}'],
-      ["changeset", "commit", "--input", '{"operations":[]}'],
-      [
-        "action",
-        "preview",
-        "default.convert_lead",
-        "--input",
-        '{"lead_id":"lead_1"}',
-      ],
-      [
-        "action",
-        "commit",
-        "default.convert_lead",
-        "--input",
-        '{"lead_id":"lead_1"}',
-      ],
+      ["metadata", "pack", "operant/crm"],
+      ["metadata", "resource", "operant/crm:lead"],
+      ["metadata", "relationship", "operant/crm:contact_company"],
+      ["metadata", "action", "operant/crm:convert_lead"],
+      ["metadata", "hook", "operant/crm:validate_lead"],
+      ["metadata", "policy", "operant/crm:crm_sales"],
+      ["changeset", "inspect", stageId],
+      ["changeset", "commit", stageId],
+      ["changeset", "commit", stageId, "--timeout", "250ms"],
+      ["changeset", "approvals", stageId],
+      ["changeset", "cancel", stageId, "--reason", "obsolete"],
       ["outbox", "status"],
       ["outbox", "drain", "--limit", "1"],
-      ["outbox", "retry", "outbox_1"],
-      ["migration", "inspect", "mig_1"],
-      ["migration", "apply", "mig_1"],
-      ["migration", "apply", "mig_1", "--stage"],
-      ["migration", "confirm", "mig_1", "--token", "confirm:sha256:abc"],
-      ["secret", "list"],
-      ["secret", "set", "api_key", "--value", "secret"],
-      ["secret", "delete", "api_key"],
+      ["outbox", "retry", stageId],
     ];
-
     for (const command of commands) {
       const result = await runOptctl([
         "--server",
@@ -121,42 +92,58 @@ Deno.test("optctl maps every MVP command group to stable HTTP API URLs", async (
       );
       assertEquals(JSON.parse(result.stdout).ok, true);
     }
-
-    assertEquals(seen.map((r) => `${r.method} ${r.path}`), [
+    assertEquals(seen.map((request) => `${request.method} ${request.path}`), [
       "GET /metadata/home",
       "GET /metadata/packs",
       "GET /metadata/packs",
-      "GET /metadata/packs/default/crm",
-      "GET /metadata/resources/default/lead",
-      "GET /metadata/actions/default/convert_lead",
-      "GET /metadata/hooks/default/validate_lead",
-      "GET /metadata/policies/default/crm_sales",
-      "POST /queries",
-      "GET /objects/default/lead/lead_1",
-      "GET /history/default/lead/lead_1",
-      "POST /changesets/preview",
-      "POST /changesets/commit",
-      "POST /actions/default/convert_lead/preview",
-      "POST /actions/default/convert_lead/commit",
+      "GET /metadata/packs/operant/crm",
+      "GET /metadata/packs/operant/crm/resources/lead",
+      "GET /metadata/packs/operant/crm/relationships/contact_company",
+      "GET /metadata/packs/operant/crm/actions/convert_lead",
+      "GET /metadata/packs/operant/crm/hooks/validate_lead",
+      "GET /metadata/packs/operant/crm/policies/crm_sales",
+      `GET /api/v1/changesets/${stageId}`,
+      `POST /api/v1/changesets/${stageId}/commit`,
+      `POST /api/v1/changesets/${stageId}/commit`,
+      `GET /api/v1/changesets/${stageId}/approvals`,
+      `POST /api/v1/changesets/${stageId}/cancel`,
       "GET /outbox",
       "POST /outbox/drain",
-      "POST /outbox/outbox_1/retry",
-      "GET /migrations/mig_1",
-      "POST /migrations/mig_1/apply",
-      "POST /migrations/mig_1/apply",
-      "POST /migrations/mig_1/confirm",
-      "GET /secrets",
-      "POST /secrets",
-      "DELETE /secrets/api_key",
+      `/POST /outbox/${stageId}/retry`.slice(1),
     ]);
+    const commitBodies = seen.filter((request) =>
+      request.path.endsWith("/commit")
+    );
+    assertEquals(commitBodies.map((request) => request.body), [
+      {},
+      { lock_timeout: "250ms" },
+    ]);
+  });
+});
 
-    const query = seen.find((r) => r.path === "/queries")?.body as Record<
-      string,
-      unknown
-    >;
-    assertEquals(query.resource, "default.lead");
-    assertEquals(query.fields, ["id", "email"]);
-    assertEquals(query.limit, 2);
+Deno.test("optctl rejects legacy aliases and noncanonical commit forms", async () => {
+  await withMockServer(async (baseUrl, seen) => {
+    for (
+      const command of [
+        ["metadata", "pack", "default.crm"],
+        ["metadata", "resource", "default.lead"],
+        ["changeset", "commit", "--input", '{"operations":[]}'],
+        ["changeset", "preview", "--input", '{"operations":[]}'],
+      ]
+    ) {
+      const result = await runOptctl([
+        "--server",
+        baseUrl,
+        "--json",
+        ...command,
+      ]);
+      assertEquals(
+        result.code,
+        2,
+        `${command.join(" ")} unexpectedly accepted`,
+      );
+    }
+    assertEquals(seen.length, 0);
   });
 });
 
@@ -173,7 +160,7 @@ Deno.test("optctl emits TOON by default and stable JSON error envelopes", async 
       "--json",
       "metadata",
       "resource",
-      "default.missing",
+      "operant/crm:missing",
     ]);
     assertEquals(missing.code, 1);
     const envelope = JSON.parse(missing.stderr);

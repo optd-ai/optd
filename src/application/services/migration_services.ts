@@ -98,6 +98,24 @@ export function makeMigrationServices(
         return err(authorized.error);
       }
       let transientFailures = 0;
+      const maximumRetries = boundedEnvironmentInteger(
+        "OPERANT_PACK_APPLY_MAX_RETRIES",
+        2,
+        0,
+        10,
+      );
+      const jitterMinimum = boundedEnvironmentInteger(
+        "OPERANT_PACK_APPLY_RETRY_JITTER_MIN_MS",
+        1,
+        0,
+        1_000,
+      );
+      const jitterMaximum = boundedEnvironmentInteger(
+        "OPERANT_PACK_APPLY_RETRY_JITTER_MAX_MS",
+        25,
+        jitterMinimum,
+        5_000,
+      );
       while (true) {
         const attempt = transientFailures + 1;
         try {
@@ -131,10 +149,15 @@ export function makeMigrationServices(
             : "";
           if (
             (sqlState === "40P01" || sqlState === "40001") &&
-            transientFailures < 2
+            transientFailures < maximumRetries
           ) {
             transientFailures++;
             await recordFailedAttempt(id, auth.id, sqlState);
+            await retryJitter(
+              transientFailures,
+              jitterMinimum,
+              jitterMaximum,
+            );
             continue;
           }
           const code = error instanceof MigrationApplyError
@@ -168,4 +191,28 @@ export function makeMigrationServices(
       return statements ? ok({ migration_id: id, statements }) : missing(id);
     },
   };
+}
+
+function boundedEnvironmentInteger(
+  name: string,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+): number {
+  const value = Number(Deno.env.get(name) ?? fallback);
+  return Number.isInteger(value) && value >= minimum && value <= maximum
+    ? value
+    : fallback;
+}
+
+async function retryJitter(
+  attempt: number,
+  minimum: number,
+  maximum: number,
+): Promise<void> {
+  const ceiling = Math.min(maximum, Math.max(minimum, minimum * attempt));
+  const span = ceiling - minimum + 1;
+  const delay = minimum +
+    (span > 1 ? crypto.getRandomValues(new Uint32Array(1))[0] % span : 0);
+  await new Promise((resolve) => setTimeout(resolve, delay));
 }

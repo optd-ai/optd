@@ -190,8 +190,10 @@ export class PostgresStageRepository implements StageRepository {
               return { slot: String(slot.slot), env: String(slot.env) };
             });
             const matchingOperations = operations.filter((operation) =>
-              declaration.resource === null ||
-              componentIdentity(operation) === String(declaration.resource)
+              (attachment.phase !== "changeset.before_stage" ||
+                ["create", "update", "transition"].includes(operation.op)) &&
+              (declaration.resource === null ||
+                componentIdentity(operation) === String(declaration.resource))
             );
             const operationKeys = declaration.resource === null
               ? [null]
@@ -237,7 +239,10 @@ export class PostgresStageRepository implements StageRepository {
         const proposedStates: Record<string, Record<string, unknown>> = {};
         const baseStates: Record<string, Record<string, unknown> | null> = {};
         for (const operation of operations) {
-          if (!["create", "update", "transition"].includes(operation.op)) {
+          if (
+            !["create", "update", "transition", "archive", "comment"]
+              .includes(operation.op)
+          ) {
             continue;
           }
           const key = String(operation.key);
@@ -993,6 +998,13 @@ async function prepare(
       const spec = record(attachment.declaration_spec);
       if (spec.condition === "false") return false;
       const resource = spec.resource;
+      if (
+        attachment.phase === "changeset.before_stage" &&
+        !revisionOperations.some((operation) =>
+          ["create", "update", "transition"].includes(operation.op) &&
+          (resource === null || componentIdentity(operation) === resource)
+        )
+      ) return false;
       return resource === null || resourceIdentities.has(String(resource));
     });
     const pinnedForRevision = pinnedHookDeclarations.filter((declaration) =>

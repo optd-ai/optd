@@ -63,27 +63,6 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
       resourceData: { name: "Fixture Lead", status: "new" },
       relationshipFields: { role: "buyer", primary: true },
     });
-    const relationshipTable = (await query<{ table_name: string }>(
-      harness.server.sql,
-      "select table_name from pack_runtime_tables where publisher='operant' and pack_name='crm' and definition_kind='relationship' and definition_name='contact_company'",
-    )).rows[0].table_name;
-    await query(
-      harness.server.sql,
-      `insert into ${
-        quoteIdentifier(relationshipTable)
-      }(id,project_id,from_object_id,to_object_id,created_by,updated_by,${
-        quoteIdentifier("role")
-      },${quoteIdentifier("primary")}) values($1,$2,$3,$4,$5,$5,$6,$7)`,
-      [
-        uuidV7(),
-        projectOne,
-        ids.object,
-        ids.otherObject,
-        auth,
-        "replacement",
-        false,
-      ],
-    );
     const object = await harness.runOptctl([
       "--json",
       "--project",

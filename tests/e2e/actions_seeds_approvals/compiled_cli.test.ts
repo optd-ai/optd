@@ -29,7 +29,10 @@ for (const trace of [false, true]) {
         body: { ok: true },
       }, { kind: "success", body: { ok: true } }]);
       const harness = await startLiveHarness({
-        environment: trace ? { OPERANT_LOG_LEVEL: "trace" } : {},
+        environment: {
+          ...(trace ? { OPERANT_LOG_LEVEL: "trace" } : {}),
+          OPERANT_COMMIT_LOCK_TIMEOUT: "100ms",
+        },
       });
       const pack = await Deno.makeTempDir({
         prefix: "operant-actions-seeds-e2e-",
@@ -282,6 +285,255 @@ for (const trace of [false, true]) {
           JSON.parse(rejectedCommit.stderr).error.code,
           "constraint_conflict",
         );
+
+        const sameStageProject = await harness.runOptctl([
+          "--json",
+          "project",
+          "create",
+          `same-stage-${trace ? "trace" : "default"}`,
+          "--display-name",
+          "Same Stage Commit Project",
+        ]);
+        assertEquals(sameStageProject.code, 0, sameStageProject.stderr);
+        const sameStageProjectId = JSON.parse(sameStageProject.stdout).data.id;
+        const sameStage = await actor!.runOptctl([
+          "--json",
+          "--project",
+          sameStageProjectId,
+          "seed",
+          "stage",
+          "test/actionproof",
+          "--seed",
+          "targets",
+        ]);
+        assertEquals(sameStage.code, 0, sameStage.stderr);
+        const sameStageId = JSON.parse(sameStage.stdout).data.stage.id;
+        const sameStageCommits = await Promise.all(
+          [0, 1].map(() =>
+            actor!.runOptctl([
+              "--json",
+              "changeset",
+              "commit",
+              sameStageId,
+            ])
+          ),
+        );
+        assertEquals(sameStageCommits.map((result) => result.code), [0, 0]);
+        assertEquals(
+          JSON.parse(sameStageCommits[0].stdout).data,
+          JSON.parse(sameStageCommits[1].stdout).data,
+        );
+
+        const retryProject = await harness.runOptctl([
+          "--json",
+          "project",
+          "create",
+          `retry-${trace ? "trace" : "default"}`,
+          "--display-name",
+          "Commit Retry Project",
+        ]);
+        assertEquals(retryProject.code, 0, retryProject.stderr);
+        const retryProjectId = JSON.parse(retryProject.stdout).data.id;
+        const retryStage = await actor!.runOptctl([
+          "--json",
+          "--project",
+          retryProjectId,
+          "seed",
+          "stage",
+          "test/actionproof",
+          "--seed",
+          "targets",
+        ]);
+        assertEquals(retryStage.code, 0, retryStage.stderr);
+        const retryStageId = JSON.parse(retryStage.stdout).data.stage.id;
+        const hookFactsBeforeRetry = Number(
+          (await query<{ count: string }>(
+            harness.server.sql,
+            "select count(*)::text count from staged_hook_executions",
+          )).rows[0].count,
+        );
+        await query(
+          harness.server.sql,
+          "create sequence commit_retry_fault_sequence",
+        );
+        await query(
+          harness.server.sql,
+          `create function inject_commit_serialization_failure() returns trigger language plpgsql as $$
+           begin
+             if nextval('commit_retry_fault_sequence') <= 1 then
+               raise exception 'injected serialization failure' using errcode='40001';
+             end if;
+             return new;
+           end $$`,
+        );
+        await query(
+          harness.server.sql,
+          `create trigger inject_commit_serialization_failure before insert on changeset_commits
+           for each row execute function inject_commit_serialization_failure()`,
+        );
+        const retriedCommit = await actor!.runOptctl([
+          "--json",
+          "changeset",
+          "commit",
+          retryStageId,
+        ]);
+        assertEquals(retriedCommit.code, 0, retriedCommit.stderr);
+        assertEquals(
+          Number(
+            (await query<{ count: string }>(
+              harness.server.sql,
+              "select count(*)::text count from staged_hook_executions",
+            )).rows[0].count,
+          ),
+          hookFactsBeforeRetry,
+        );
+        const exhaustedProject = await harness.runOptctl([
+          "--json",
+          "project",
+          "create",
+          `retry-exhausted-${trace ? "trace" : "default"}`,
+          "--display-name",
+          "Commit Retry Exhaustion Project",
+        ]);
+        assertEquals(exhaustedProject.code, 0, exhaustedProject.stderr);
+        const exhaustedProjectId = JSON.parse(exhaustedProject.stdout).data.id;
+        const exhaustedStage = await actor!.runOptctl([
+          "--json",
+          "--project",
+          exhaustedProjectId,
+          "seed",
+          "stage",
+          "test/actionproof",
+          "--seed",
+          "targets",
+        ]);
+        assertEquals(exhaustedStage.code, 0, exhaustedStage.stderr);
+        const exhaustedStageId =
+          JSON.parse(exhaustedStage.stdout).data.stage.id;
+        const hookFactsBeforeExhaustion = Number(
+          (await query<{ count: string }>(
+            harness.server.sql,
+            "select count(*)::text count from staged_hook_executions",
+          )).rows[0].count,
+        );
+        await query(
+          harness.server.sql,
+          "select setval('commit_retry_fault_sequence',1,false)",
+        );
+        await query(
+          harness.server.sql,
+          `create or replace function inject_commit_serialization_failure() returns trigger language plpgsql as $$
+           begin
+             if nextval('commit_retry_fault_sequence') <= 100 then
+               raise exception 'injected serialization failure' using errcode='40001';
+             end if;
+             return new;
+           end $$`,
+        );
+        const exhaustedCommit = await actor!.runOptctl([
+          "--json",
+          "changeset",
+          "commit",
+          exhaustedStageId,
+        ]);
+        assertEquals(exhaustedCommit.code, 1);
+        const exhaustedError = JSON.parse(exhaustedCommit.stderr).error;
+        assertEquals(exhaustedError.code, "commit_retry_exhausted");
+        assertEquals(exhaustedError.details.attempts, 4);
+        assertEquals(
+          (await query<{ count: string }>(
+            harness.server.sql,
+            "select count(*)::text count from changeset_commits where stage_id=$1",
+            [exhaustedStageId],
+          )).rows[0].count,
+          "0",
+        );
+        assertEquals(
+          Number(
+            (await query<{ count: string }>(
+              harness.server.sql,
+              "select count(*)::text count from staged_hook_executions",
+            )).rows[0].count,
+          ),
+          hookFactsBeforeExhaustion,
+        );
+        await query(
+          harness.server.sql,
+          "drop trigger inject_commit_serialization_failure on changeset_commits",
+        );
+        await query(
+          harness.server.sql,
+          "drop function inject_commit_serialization_failure()",
+        );
+        await query(
+          harness.server.sql,
+          "drop sequence commit_retry_fault_sequence",
+        );
+
+        const timeoutProject = await harness.runOptctl([
+          "--json",
+          "project",
+          "create",
+          `timeout-${trace ? "trace" : "default"}`,
+          "--display-name",
+          "Commit Timeout Project",
+        ]);
+        assertEquals(timeoutProject.code, 0, timeoutProject.stderr);
+        const timeoutProjectId = JSON.parse(timeoutProject.stdout).data.id;
+        const timeoutStage = await actor!.runOptctl([
+          "--json",
+          "--project",
+          timeoutProjectId,
+          "seed",
+          "stage",
+          "test/actionproof",
+          "--seed",
+          "targets",
+        ]);
+        assertEquals(timeoutStage.code, 0, timeoutStage.stderr);
+        const timeoutStageId = JSON.parse(timeoutStage.stdout).data.stage.id;
+        let releaseLifecycle!: () => void;
+        let lifecycleLocked!: () => void;
+        const release = new Promise<void>((resolve) =>
+          releaseLifecycle = resolve
+        );
+        const locked = new Promise<void>((resolve) =>
+          lifecycleLocked = resolve
+        );
+        const blocker = harness.server.sql.begin(async (tx) => {
+          await query(
+            tx,
+            "select stage_id from staged_changeset_lifecycle where stage_id=$1 for update",
+            [timeoutStageId],
+          );
+          lifecycleLocked();
+          await release;
+        });
+        await locked;
+        const defaultTimeout = await actor!.runOptctl([
+          "--json",
+          "changeset",
+          "commit",
+          timeoutStageId,
+        ]);
+        assertEquals(defaultTimeout.code, 1);
+        assertEquals(
+          JSON.parse(defaultTimeout.stderr).error.code,
+          "commit_busy",
+        );
+        const longCommit = actor!.runOptctl([
+          "--json",
+          "changeset",
+          "commit",
+          timeoutStageId,
+          "--timeout",
+          "2s",
+        ]);
+        await observeBlockedCommit(harness.server.sql);
+        releaseLifecycle();
+        await blocker;
+        const longResult = await longCommit;
+        assertEquals(longResult.code, 0, longResult.stderr);
 
         const multiProject = await harness.runOptctl([
           "--json",
@@ -561,6 +813,21 @@ async function stageCount(sql: Parameters<typeof query>[0]) {
     )).rows[0].count,
   );
 }
+async function observeBlockedCommit(sql: Sql): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const blocked = (await query<{ present: boolean }>(
+      sql,
+      `select exists(select 1 from pg_stat_activity
+       where cardinality(pg_blocking_pids(pid))>0
+         and query like '%staged_changeset_lifecycle%') present`,
+    )).rows[0]?.present;
+    if (blocked) return;
+    await Promise.resolve();
+  }
+  throw new Error("bounded lifecycle waiter observation failed");
+}
+
 async function runtimeTable(sql: Sql, name: string) {
   return (await query<{ table_name: string }>(
     sql,

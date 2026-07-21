@@ -11,6 +11,9 @@ export function makeCommitChangesetService(repository: CommitRepository) {
   const configured = durationMs(
     Deno.env.get("OPERANT_COMMIT_LOCK_TIMEOUT") ?? "10s",
   ) ?? DEFAULT_COMMIT_LOCK_TIMEOUT_MS;
+  const safetyMaximum = Deno.env.get("OPERANT_COMMIT_LOCK_TIMEOUT_MAX")
+    ? durationMs(Deno.env.get("OPERANT_COMMIT_LOCK_TIMEOUT_MAX")!)
+    : null;
   return {
     async commit(
       stageId: string,
@@ -29,7 +32,10 @@ export function makeCommitChangesetService(repository: CommitRepository) {
         : typeof input.lock_timeout === "string"
         ? durationMs(input.lock_timeout)
         : null;
-      if (timeout === null) return err(invalid());
+      if (
+        timeout === null ||
+        (safetyMaximum !== null && timeout > safetyMaximum)
+      ) return err(invalid());
       return await repository.commit(stageId, auth, { lockTimeoutMs: timeout });
     },
   };

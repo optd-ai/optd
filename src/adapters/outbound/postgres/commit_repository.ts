@@ -7,6 +7,10 @@ import type {
 import type { CanonicalOperation } from "../../../domain/changesets/operations.ts";
 import { stageDigest } from "../../../domain/changesets/stage.ts";
 import { canonicalSha256 } from "../../../domain/ids/canonical_json.ts";
+import {
+  type FieldSpec,
+  lowerCelToSql,
+} from "../../../domain/queries/expression_lowerer.ts";
 import { uuidV7 } from "../../../domain/ids/uuid_v7.ts";
 import { err, ok, type Result } from "../../../domain/errors/result.ts";
 import { query, type Queryable, quoteIdentifier, type Sql } from "./client.ts";
@@ -67,6 +71,18 @@ export class PostgresCommitRepository implements CommitRepository {
       0,
       10,
     );
+    const jitterMin = boundedInt(
+      Deno.env.get("OPERANT_COMMIT_RETRY_JITTER_MIN_MS"),
+      1,
+      0,
+      1_000,
+    );
+    const jitterMax = boundedInt(
+      Deno.env.get("OPERANT_COMMIT_RETRY_JITTER_MAX_MS"),
+      25,
+      jitterMin,
+      5_000,
+    );
     for (let attempt = 0; attempt <= retries; attempt++) {
       try {
         return ok(
@@ -77,7 +93,7 @@ export class PostgresCommitRepository implements CommitRepository {
       } catch (error) {
         const state = sqlState(error);
         if ((state === "40P01" || state === "40001") && attempt < retries) {
-          await jitter(attempt);
+          await jitter(attempt, jitterMin, jitterMax);
           continue;
         }
         if (state === "40P01" || state === "40001") {
@@ -86,6 +102,7 @@ export class PostgresCommitRepository implements CommitRepository {
               "commit_retry_exhausted",
               "commit could not complete after bounded transaction retries",
               "conflict",
+              { attempts: attempt + 1 },
             ),
           );
         }
@@ -148,7 +165,12 @@ async function attemptCommit(
   )).rows[0];
   if (!lifecycle) throw new CommitFailure("not_found", "not_found");
   const prior = await loadCommit(tx, stageId);
-  if (prior) return prior;
+  if (prior) {
+    if (!await authorizeExistingCommit(tx, stageId, auth)) {
+      throw new CommitFailure("not_found", "not_found");
+    }
+    return prior;
+  }
   if (lifecycle.status === "cancelled") {
     throw new CommitFailure("stage_cancelled", "conflict");
   }
@@ -190,27 +212,37 @@ async function attemptCommit(
   await verifyStageDigest(tx, stageId, stage, operations, dependencies);
 
   const runtimes = await discoverRuntimes(tx, operations, dependencies);
-  for (const runtime of runtimes) {
-    try {
+  await query(tx, "savepoint commit_runtime_locks");
+  try {
+    for (const runtime of runtimes) {
       await query(
         tx,
         `lock table ${
           quoteIdentifier(runtime.table_name)
         } in row exclusive mode`,
       );
-    } catch (error) {
-      if (sqlState(error) === "42P01") {
-        throw new CommitFailure("stage_stale", "conflict", {
-          reason: "pack_revision_changed",
-        });
-      }
-      throw error;
     }
+    await query(tx, "release savepoint commit_runtime_locks");
+  } catch (error) {
+    if (sqlState(error) !== "42P01") throw error;
+    await query(tx, "rollback to savepoint commit_runtime_locks");
+    await rereadRuntimeMetadata(tx, array(stage.pack_revisions_json), runtimes);
+    throw new CommitFailure("stage_stale", "conflict", {
+      reason: "pack_revision_changed",
+    });
   }
   await validateRevisions(tx, array(stage.pack_revisions_json));
   await validateProjects(tx, array(stage.projects_json));
   await lockAndValidateDependencies(tx, dependencies, operations, runtimes);
-  const cutoff = await authorizationCutoff(tx, stageId, stage, auth);
+  const cutoff = await authorizationCutoff(
+    tx,
+    stageId,
+    stage,
+    auth,
+    operations,
+    operationRows,
+    runtimes,
+  );
 
   const commitId = uuidV7();
   const committedAt = timestamp(
@@ -222,7 +254,32 @@ async function attemptCommit(
     `insert into changeset_commits(id,stage_id,committed_auth_context_id,authorization_cutoff_at,operation_graph_digest,committed_at) values($1,$2,$3,$4,$5,$6)`,
     [commitId, stageId, auth.id, cutoff, graphDigest, committedAt],
   );
-  const produced = new Map<string, string>();
+  const plannedVersionIds = new Map(
+    operations.filter((operation) => operation.op !== "comment").map((
+      operation,
+    ) => [
+      String(operation.object_id ?? operation.relationship_id),
+      uuidV7(),
+    ]),
+  );
+  const createdVersions = new Map(
+    operations.filter((operation) => operation.op === "create").map((
+      operation,
+    ) => [
+      String(operation.object_id),
+      plannedVersionIds.get(String(operation.object_id))!,
+    ]),
+  );
+  const stagedTargetVersions = new Map(
+    dependencies.filter((dependency) =>
+      typeof dependency.project_id === "string" &&
+      typeof dependency.object_id === "string" &&
+      typeof dependency.expected_version_id === "string"
+    ).map((dependency) => [
+      `${dependency.project_id}:${dependency.object_id}`,
+      String(dependency.expected_version_id),
+    ]),
+  );
   for (let index = 0; index < operations.length; index++) {
     await applyOperation(
       tx,
@@ -231,7 +288,10 @@ async function attemptCommit(
       runtimes,
       commitId,
       auth.id,
-      produced,
+      createdVersions,
+      stagedTargetVersions,
+      plannedVersionIds,
+      cutoff,
     );
   }
   await writeCommitFacts(tx, stageId, commitId, auth.id, operations, cutoff);
@@ -248,6 +308,99 @@ async function attemptCommit(
     operation_graph_digest: graphDigest,
     committed_at: committedAt,
   };
+}
+
+async function authorizeExistingCommit(
+  tx: Queryable,
+  stageId: string,
+  auth: AuthContext,
+): Promise<boolean> {
+  const row = (await query<{ allowed: boolean }>(
+    tx,
+    `with recursive lineage as (
+       select a.id,a.parent_authorization_id,a.root_authorization_id,a.human_user_id,
+              u.principal_id,a.revoked_at,a.superseded_at
+         from agent_authorizations a join agent_users u on u.id=a.agent_user_id
+        where a.id=$4::uuid
+       union all
+       select a.id,a.parent_authorization_id,a.root_authorization_id,a.human_user_id,
+              u.principal_id,a.revoked_at,a.superseded_at
+         from agent_authorizations a join agent_users u on u.id=a.agent_user_id
+         join lineage child on child.parent_authorization_id=a.id
+     ), actor as (
+       select s.principal_id,s.human_user_id,s.authorization_id
+       from auth_sessions s join principals p on p.id=s.principal_id and p.active
+       join human_users h on h.id=s.human_user_id and h.status='active'
+       where s.id=$1 and s.principal_id=$2 and s.human_user_id=$3 and s.revoked_at is null
+     ), lineage_valid as (
+       select $4::uuid is null or (
+         exists(select 1 from lineage where id=$4 and principal_id=$2) and
+         not exists(select 1 from lineage where revoked_at is not null or superseded_at is not null or human_user_id<>$3) and
+         (select count(*) from lineage where parent_authorization_id is null)=1 and
+         not exists(select 1 from lineage where root_authorization_id<>(select id from lineage where parent_authorization_id is null))
+       ) value
+     ), affected_projects as (
+       select distinct o.project_id from staged_changeset_operations o where o.stage_id=$5
+     ), roles as (
+       select ra.role_id,ra.boundary_type,ra.project_id from actor a join role_assignments ra
+         on a.authorization_id is null and ra.principal_id=a.principal_id and ra.active
+       union all
+       select ar.role_id,ar.boundary_type,ar.project_id from actor a join agent_authorization_roles ar
+         on ar.authorization_id=a.authorization_id
+     ), superadmin as (
+       select exists(select 1 from roles r join system_roles sr on sr.id=r.role_id and sr.active
+         join role_definition_versions rv on rv.role_id=sr.id and rv.active
+         where r.role_id='system:super_admin' and r.boundary_type='system') value
+     ), visible as (
+       select not exists(select 1 from affected_projects x left join projects p on p.id=x.project_id and p.status='active' where p.id is null) value
+     ), other_allowed as (
+       select $2::uuid=(select created_principal_id from staged_changesets where id=$5) or
+         (select value from superadmin) or not exists(
+           select 1 from affected_projects x where not exists(
+             select 1 from roles r join system_roles sr on sr.id=r.role_id and sr.active
+             join role_definition_versions rv on rv.role_id=sr.id and rv.active
+             join policy_rules pr on pr.role_id=r.role_id and pr.capability='changeset.commit_others'
+               and pr.condition_kind='unconditional' and pr.resource in ('*','changeset','system:changeset')
+             join policy_definition_versions pd on pd.id=pr.policy_definition_version_id and pd.active
+             join policy_assignments pa on pa.policy_definition_version_id=pd.id and pa.active
+             where (r.boundary_type in ('system','all_projects') or r.project_id=x.project_id)
+               and (pa.boundary_type in ('system','all_projects') or pa.project_id=x.project_id)
+           )
+         ) value
+     )
+     select exists(select 1 from actor) and (select value from lineage_valid)
+       and (select value from visible) and (select value from other_allowed) allowed`,
+    [
+      auth.sessionId,
+      auth.principalId,
+      auth.humanUserId,
+      auth.authorizationId ?? null,
+      stageId,
+    ],
+  )).rows[0];
+  return row?.allowed === true;
+}
+
+async function rereadRuntimeMetadata(
+  tx: Queryable,
+  revisions: unknown[],
+  discovered: Runtime[],
+) {
+  await validateRevisions(tx, revisions);
+  for (const runtime of discovered) {
+    const current = (await query<{ table_name: string }>(
+      tx,
+      `select table_name from pack_runtime_tables where publisher=$1 and pack_name=$2
+       and definition_kind=$3 and definition_name=$4`,
+      [
+        runtime.publisher,
+        runtime.pack_name,
+        runtime.definition_kind,
+        runtime.definition_name,
+      ],
+    )).rows[0];
+    if (!current || current.table_name !== runtime.table_name) return;
+  }
 }
 
 async function verifyStageDigest(
@@ -318,16 +471,41 @@ async function discoverRuntimes(
   dependencies: Record<string, unknown>[],
 ): Promise<Runtime[]> {
   const identities = new Set(operations.map(identity));
+  const dependencyKinds = new Map<string, "resource" | "relationship">();
   const expected = dependencies.flatMap((dep) =>
     typeof dep.expected_version_id === "string" ? [dep.expected_version_id] : []
   );
   if (expected.length) {
-    const rows = await query<{ resource_identity: string }>(
+    const rows = await query<{
+      resource_identity: string;
+      definition_kind: "resource" | "relationship";
+    }>(
       tx,
-      "select distinct resource_identity from object_versions where id=any($1::uuid[])",
+      "select distinct resource_identity,definition_kind from object_versions where id=any($1::uuid[])",
       [expected],
     );
-    rows.rows.forEach((row) => identities.add(row.resource_identity));
+    rows.rows.forEach((row) => {
+      identities.add(row.resource_identity);
+      dependencyKinds.set(row.resource_identity, row.definition_kind);
+    });
+  }
+  const referencedPacks = new Set(
+    operations.map((operation) => {
+      const parsed = parseIdentity(identity(operation));
+      return `${parsed.publisher}/${parsed.pack}`;
+    }),
+  );
+  const relationPolicies = (await query<{ relation_relationship: string }>(
+    tx,
+    `select distinct relation_relationship from policy_rules
+     where relation_relationship is not null order by relation_relationship`,
+  )).rows;
+  for (const policy of relationPolicies) {
+    const parsed = parseIdentity(policy.relation_relationship);
+    if (referencedPacks.has(`${parsed.publisher}/${parsed.pack}`)) {
+      identities.add(policy.relation_relationship);
+      dependencyKinds.set(policy.relation_relationship, "relationship");
+    }
   }
   for (const dep of dependencies) {
     for (const key of ["resource_identity", "definition"]) {
@@ -341,13 +519,23 @@ async function discoverRuntimes(
       }
     }
   }
-  const parsed = [...identities].map(parseIdentity);
+  const parsed = [...identities].map((value) => ({
+    ...parseIdentity(value),
+    kind:
+      operations.some((operation) =>
+          identity(operation) === value && operation.relationship !== undefined
+        )
+        ? "relationship"
+        : dependencyKinds.get(value),
+  }));
   const rows: Runtime[] = [];
   for (const item of parsed) {
     const row = (await query<Runtime>(
       tx,
-      `select publisher,pack_name,definition_kind,definition_name,table_name from pack_runtime_tables where publisher=$1 and pack_name=$2 and definition_name=$3`,
-      [item.publisher, item.pack, item.name],
+      `select publisher,pack_name,definition_kind,definition_name,table_name
+       from pack_runtime_tables where publisher=$1 and pack_name=$2 and definition_name=$3
+         and ($4::text is null or definition_kind=$4)`,
+      [item.publisher, item.pack, item.name, item.kind ?? null],
     )).rows[0];
     if (!row) {
       throw new CommitFailure("stage_stale", "conflict", {
@@ -436,6 +624,9 @@ async function lockAndValidateDependencies(
       [[...byVersion.keys()]],
     )).rows
     : [];
+  if (versionRows.length !== byVersion.size) {
+    throw new CommitFailure("internal_error", "internal");
+  }
   const order = new Map(
     runtimes.map((
       runtime,
@@ -503,64 +694,417 @@ async function lockAndValidateDependencies(
   }
 }
 
+type CutoffRule = {
+  id: string;
+  capability: string;
+  resource: string;
+  predicate: string | null;
+  relation_relationship: string | null;
+  relation_object_side: "from" | "to" | null;
+  relation_subject_side: "from" | "to" | null;
+  relation_subject: "actor.id" | "actor.human_user_id" | null;
+};
+
+async function buildCutoffStatement(
+  tx: Queryable,
+  stageId: string,
+  stage: Stage,
+  auth: AuthContext,
+  operations: CanonicalOperation[],
+  operationRows: OperationRow[],
+  runtimes: Runtime[],
+): Promise<{ sql: string; params: unknown[] }> {
+  const decisions = (await query<{
+    operation_key: string;
+    action: string;
+    resource_identity: string;
+  }>(
+    tx,
+    `select decision_json->>'operation_key' operation_key,action,resource_identity
+     from staged_policy_decisions where stage_id=$1 order by ordinal`,
+    [stageId],
+  )).rows;
+  const decisionByKey = new Map(decisions.map((decision) => [
+    decision.operation_key,
+    decision,
+  ]));
+  const rules = (await query<CutoffRule>(
+    tx,
+    `select id,capability,resource,predicate,relation_relationship,
+            relation_object_side,relation_subject_side,relation_subject
+       from policy_rules order by id`,
+  )).rows;
+  const params: unknown[] = [
+    auth.sessionId,
+    auth.principalId,
+    auth.humanUserId,
+    auth.authorizationId ?? null,
+    stageId,
+    stage.created_principal_id,
+  ];
+  const requestedRows: string[] = [];
+  const proposed: Array<{
+    operation: CanonicalOperation;
+    fields: Record<string, FieldSpec>;
+  }> = [];
+  for (let index = 0; index < operations.length; index++) {
+    const operation = operations[index];
+    const decision = decisionByKey.get(String(operation.key));
+    if (!decision) throw new CommitFailure("internal_error", "internal");
+    const prepared = await policyProposedState(
+      tx,
+      operation,
+      operationRows[index],
+      runtimes,
+    );
+    proposed.push({ operation, fields: prepared.fields });
+    const values = [
+      index,
+      operation.project_id,
+      decision.action,
+      decision.resource_identity,
+      prepared.value,
+    ];
+    const placeholders = values.map((value) => {
+      params.push(value);
+      return `$${params.length}`;
+    });
+    requestedRows.push(
+      `(${placeholders[0]}::integer,${placeholders[1]}::uuid,${
+        placeholders[2]
+      }::text,${placeholders[3]}::text,${placeholders[4]}::jsonb)`,
+    );
+  }
+  const conditionCases: string[] = [];
+  for (let index = 0; index < proposed.length; index++) {
+    const request = proposed[index];
+    for (const rule of rules) {
+      const decision = decisionByKey.get(String(request.operation.key))!;
+      if (
+        rule.capability !== decision.action ||
+        (rule.resource !== "*" && rule.resource !== decision.resource_identity)
+      ) continue;
+      params.push(rule.id);
+      const identityPredicate =
+        `req.ordinal=${index} and pr.id=$${params.length}::uuid`;
+      let predicate = "true";
+      if (rule.predicate) {
+        const names = Object.keys(request.fields).sort();
+        const columns = names.map((name) =>
+          `(req.proposed->>${sqlLiteral(name)})::${
+            fieldSqlType(request.fields[name].type)
+          } as ${quoteIdentifier(name)}`
+        );
+        const lowered = lowerCelToSql(rule.predicate, {
+          fields: request.fields,
+          actor: {
+            id: { type: "string", value: auth.principalId },
+            human_user_id: {
+              type: "string",
+              value: auth.principalType === "agent_user"
+                ? null
+                : auth.humanUserId,
+            },
+          },
+          alias: "proposed",
+          parameterOffset: params.length,
+          maxNodes: 80,
+          maxLength: 1000,
+        });
+        params.push(...lowered.params);
+        predicate = `coalesce((select (${lowered.sql}) from (select ${
+          columns.join(",")
+        }) proposed),false)`;
+      }
+      if (
+        rule.relation_relationship && rule.relation_object_side &&
+        rule.relation_subject_side && rule.relation_subject &&
+        rule.relation_object_side !== rule.relation_subject_side
+      ) {
+        const runtime = runtimes.find((candidate) =>
+          candidate.definition_kind === "relationship" &&
+          `${candidate.publisher}/${candidate.pack_name}:${candidate.definition_name}` ===
+            rule.relation_relationship
+        );
+        if (!runtime) {
+          predicate = "false";
+        } else {
+          const objectColumn = rule.relation_object_side === "from"
+            ? "from_object_id"
+            : "to_object_id";
+          const subjectColumn = rule.relation_subject_side === "from"
+            ? "from_object_id"
+            : "to_object_id";
+          const subject = rule.relation_subject === "actor.id"
+            ? "$2::uuid"
+            : "case when $4::uuid is null then $3::uuid else null::uuid end";
+          const relation = `exists(select 1 from ${
+            quoteIdentifier(runtime.table_name)
+          } relation
+            where relation.project_id=req.project_id and relation.archived_at is null
+              and relation.${
+            quoteIdentifier(objectColumn)
+          }=(req.proposed->>'id')::uuid
+              and relation.${quoteIdentifier(subjectColumn)}=${subject})`;
+          predicate = `(${predicate}) and (${relation})`;
+        }
+      }
+      conditionCases.push(`when ${identityPredicate} then (${predicate})`);
+    }
+  }
+  const conditionSql = conditionCases.length
+    ? `case ${conditionCases.join(" ")} else false end`
+    : "false";
+  const sql = `
+with recursive caller_lineage as (
+  select a.id,a.parent_authorization_id,a.root_authorization_id,a.human_user_id,
+         u.principal_id,a.revoked_at,a.superseded_at
+    from agent_authorizations a join agent_users u on u.id=a.agent_user_id
+   where a.id=$4::uuid
+  union all
+  select a.id,a.parent_authorization_id,a.root_authorization_id,a.human_user_id,
+         u.principal_id,a.revoked_at,a.superseded_at
+    from agent_authorizations a join agent_users u on u.id=a.agent_user_id
+    join caller_lineage child on child.parent_authorization_id=a.id
+), actor as (
+  select s.principal_id,s.human_user_id,s.authorization_id
+    from auth_sessions s join principals p on p.id=s.principal_id and p.active
+    join human_users h on h.id=s.human_user_id and h.status='active'
+   where s.id=$1 and s.principal_id=$2 and s.human_user_id=$3
+     and s.authorization_id is not distinct from $4::uuid and s.revoked_at is null
+), caller_lineage_valid as (
+  select $4::uuid is null or (
+    exists(select 1 from caller_lineage where id=$4 and principal_id=$2) and
+    not exists(select 1 from caller_lineage where revoked_at is not null or superseded_at is not null or human_user_id<>$3) and
+    (select count(*) from caller_lineage where parent_authorization_id is null)=1 and
+    not exists(select 1 from caller_lineage where root_authorization_id<>(select id from caller_lineage where parent_authorization_id is null))
+  ) value
+), requested(ordinal,project_id,action,resource,proposed) as (
+  values ${requestedRows.join(",")}
+), roles as (
+  select ra.role_id,ra.boundary_type,ra.project_id from actor a
+    join role_assignments ra on a.authorization_id is null and ra.principal_id=a.principal_id and ra.active
+    join system_roles sr on sr.id=ra.role_id and sr.active
+    join role_definition_versions rv on rv.role_id=sr.id and rv.active
+  union all
+  select ar.role_id,ar.boundary_type,ar.project_id from actor a
+    join agent_authorization_roles ar on ar.authorization_id=a.authorization_id
+    join system_roles sr on sr.id=ar.role_id and sr.active
+    join role_definition_versions rv on rv.role_id=sr.id and rv.active
+), superadmin as (
+  select exists(select 1 from roles where role_id='system:super_admin' and boundary_type='system') value
+), applicable as (
+  select req.ordinal,pr.id,(${conditionSql}) condition_allowed
+    from requested req join roles role
+      on role.boundary_type in ('system','all_projects') or role.project_id=req.project_id
+    join policy_rules pr on pr.role_id=role.role_id and pr.capability=req.action
+      and (pr.resource='*' or pr.resource=req.resource)
+    join policy_definition_versions pd on pd.id=pr.policy_definition_version_id and pd.active
+    join policy_assignments pa on pa.policy_definition_version_id=pd.id and pa.active
+      and (pa.boundary_type in ('system','all_projects') or pa.project_id=req.project_id)
+), operation_authority as (
+  select req.ordinal,(select value from superadmin) or exists(
+    select 1 from applicable a where a.ordinal=req.ordinal and a.condition_allowed
+  ) allowed from requested req
+), approval_sessions as (
+  select distinct ds.authorization_id leaf_id from staged_approval_decisions d
+    join auth_contexts dc on dc.id=d.decided_auth_context_id
+    join auth_sessions ds on ds.id=dc.session_id
+   where d.stage_id=$5 and ds.authorization_id is not null
+), approval_lineage(leaf_id,id,parent_authorization_id,root_authorization_id,human_user_id,principal_id,revoked_at,superseded_at) as (
+  select s.leaf_id,a.id,a.parent_authorization_id,a.root_authorization_id,a.human_user_id,
+         u.principal_id,a.revoked_at,a.superseded_at
+    from approval_sessions s join agent_authorizations a on a.id=s.leaf_id
+    join agent_users u on u.id=a.agent_user_id
+  union all
+  select child.leaf_id,a.id,a.parent_authorization_id,a.root_authorization_id,a.human_user_id,
+         u.principal_id,a.revoked_at,a.superseded_at
+    from approval_lineage child join agent_authorizations a on a.id=child.parent_authorization_id
+    join agent_users u on u.id=a.agent_user_id
+), valid_approvals as (
+  select d.requirement_id,d.principal_id,d.decision
+    from staged_approval_decisions d
+    join staged_approval_requirements req on req.id=d.requirement_id and req.stage_id=$5
+    join principals principal on principal.id=d.principal_id and principal.active
+    join auth_contexts dc on dc.id=d.decided_auth_context_id and dc.principal_id=d.principal_id
+    join auth_sessions ds on ds.id=dc.session_id and ds.principal_id=d.principal_id and ds.revoked_at is null
+    join human_users human on human.id=ds.human_user_id and human.status='active'
+   where (req.requirement_json->'principal_types') ? principal.type
+     and ((req.requirement_json->>'allow_initiator')::boolean or d.principal_id<>$6::uuid)
+     and (ds.authorization_id is null or (
+       exists(select 1 from approval_lineage l where l.leaf_id=ds.authorization_id and l.id=ds.authorization_id and l.principal_id=d.principal_id) and
+       not exists(select 1 from approval_lineage l where l.leaf_id=ds.authorization_id and (l.revoked_at is not null or l.superseded_at is not null or l.human_user_id<>ds.human_user_id)) and
+       (select count(*) from approval_lineage l where l.leaf_id=ds.authorization_id and l.parent_authorization_id is null)=1 and
+       not exists(select 1 from approval_lineage l where l.leaf_id=ds.authorization_id and l.root_authorization_id<>(select root.id from approval_lineage root where root.leaf_id=ds.authorization_id and root.parent_authorization_id is null))
+     ))
+     and (exists(select 1 from role_assignments ra join system_roles sr on sr.id=ra.role_id and sr.active
+           join role_definition_versions rv on rv.role_id=sr.id and rv.active
+           where ds.authorization_id is null and ra.principal_id=d.principal_id and ra.active
+             and ra.role_id=req.requirement_json->>'role'
+             and (ra.boundary_type='system' or ra.boundary_type='all_projects' or
+               (ra.boundary_type='project' and ra.project_id=(req.requirement_json->'boundary'->>'project_id')::uuid)))
+       or exists(select 1 from agent_authorization_roles ar join system_roles sr on sr.id=ar.role_id and sr.active
+           join role_definition_versions rv on rv.role_id=sr.id and rv.active
+           where ar.authorization_id=ds.authorization_id and ar.role_id=req.requirement_json->>'role'
+             and (ar.boundary_type='system' or ar.boundary_type='all_projects' or
+               (ar.boundary_type='project' and ar.project_id=(req.requirement_json->'boundary'->>'project_id')::uuid))))
+), approvals_valid as (
+  select not exists(select 1 from staged_approval_requirements req where req.stage_id=$5 and (
+    (req.requirement_json->>'expires_at') is not null and (req.requirement_json->>'expires_at')::timestamptz<=statement_timestamp()
+    or exists(select 1 from staged_approval_decisions rejected where rejected.requirement_id=req.id and rejected.decision='reject')
+    or (select count(distinct approved.principal_id) from valid_approvals approved where approved.requirement_id=req.id and approved.decision='approve') < (req.requirement_json->>'minimum')::integer
+  )) value
+), commit_other as (
+  select $2::uuid=$6::uuid or (select value from superadmin) or not exists(
+    select 1 from (select distinct project_id from requested) project where not exists(
+      select 1 from roles role join policy_rules pr on pr.role_id=role.role_id
+      join policy_definition_versions pd on pd.id=pr.policy_definition_version_id and pd.active
+      join policy_assignments pa on pa.policy_definition_version_id=pd.id and pa.active
+      where pr.capability='changeset.commit_others' and pr.resource in ('*','changeset','system:changeset')
+        and pr.condition_kind='unconditional'
+        and (role.boundary_type in ('system','all_projects') or role.project_id=project.project_id)
+        and (pa.boundary_type in ('system','all_projects') or pa.project_id=project.project_id)
+    )
+  ) value
+)
+select statement_timestamp()::text cutoff,exists(select 1 from actor) actor_valid,
+  (select value from caller_lineage_valid) ancestry_valid,
+  (select value from commit_other) commit_other,
+  coalesce((select bool_and(allowed) from operation_authority),false) operations_allowed,
+  (select value from approvals_valid) approvals_valid`;
+  return { sql, params };
+}
+
+async function policyProposedState(
+  tx: Queryable,
+  operation: CanonicalOperation,
+  evidence: OperationRow,
+  runtimes: Runtime[],
+): Promise<
+  { value: Record<string, unknown>; fields: Record<string, FieldSpec> }
+> {
+  const parsed = parseIdentity(identity(operation));
+  const revision = (await query<{ normalized: unknown }>(
+    tx,
+    "select normalized from pack_candidate_revisions where id=$1",
+    [evidence.pack_revision_id],
+  )).rows[0];
+  const section = operation.relationship ? "relationships" : "resources";
+  const definition = record(
+    record(record(revision?.normalized)[section])[parsed.name],
+  );
+  const fields = Object.fromEntries(
+    Object.entries(record(record(definition.spec).fields)).map(
+      ([name, value]) => {
+        const spec = record(value);
+        return [name, {
+          type: String(spec.type) as FieldSpec["type"],
+          ...(spec.required !== true ? { nullable: true } : {}),
+          ...(spec.format === "uuid" || spec.ref
+            ? { format: "uuid" as const }
+            : {}),
+        }];
+      },
+    ),
+  );
+  if (operation.op === "create") {
+    return {
+      value: {
+        ...record(operation.fields),
+        id: operation.object_id,
+        project_id: operation.project_id,
+      },
+      fields,
+    };
+  }
+  if (operation.op === "link") {
+    return {
+      value: {
+        ...record(operation.fields),
+        id: operation.relationship_id,
+        project_id: operation.project_id,
+        from: operation.from,
+        to: operation.to,
+      },
+      fields,
+    };
+  }
+  const kind = operation.op === "unlink" ? "relationship" : "resource";
+  const runtime = runtimes.find((candidate) =>
+    candidate.definition_kind === kind &&
+    `${candidate.publisher}/${candidate.pack_name}:${candidate.definition_name}` ===
+      identity(operation)
+  );
+  if (!runtime) throw new CommitFailure("internal_error", "internal");
+  const objectId = operation.op === "unlink"
+    ? operation.relationship_id
+    : operation.object_id;
+  const current = (await query<Record<string, unknown>>(
+    tx,
+    `select * from ${
+      quoteIdentifier(runtime.table_name)
+    } where project_id=$1 and id=$2`,
+    [operation.project_id, objectId],
+  )).rows[0];
+  const value = { ...current, ...record(operation.set) };
+  for (const field of array(operation.unset).map(String)) delete value[field];
+  if (operation.op === "transition") {
+    const effects = await transitionEffects(
+      tx,
+      evidence.pack_revision_id,
+      identity(operation),
+      current,
+      String(operation.to),
+    );
+    Object.assign(value, effects.set, { [effects.field]: operation.to });
+    for (const field of effects.unset) delete value[field];
+  }
+  return { value, fields };
+}
+
+function fieldSqlType(type: FieldSpec["type"]): string {
+  return type === "integer"
+    ? "bigint"
+    : type === "decimal"
+    ? "numeric"
+    : type === "boolean"
+    ? "boolean"
+    : type === "date"
+    ? "date"
+    : type === "timestamp"
+    ? "timestamptz"
+    : "text";
+}
+function sqlLiteral(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`;
+}
+
 async function authorizationCutoff(
   tx: Queryable,
   stageId: string,
   stage: Stage,
   auth: AuthContext,
+  operations: CanonicalOperation[],
+  operationRows: OperationRow[],
+  runtimes: Runtime[],
 ): Promise<string> {
-  const row = (await query<
-    {
-      cutoff: string;
-      actor_valid: boolean;
-      ancestry_valid: boolean;
-      commit_other: boolean;
-      operations_allowed: boolean;
-      approvals_valid: boolean;
-    }
-  >(
+  const generated = await buildCutoffStatement(
     tx,
-    `
-with recursive lineage(id,parent_authorization_id,valid) as (
- select a.id,a.parent_authorization_id,(a.revoked_at is null and a.superseded_at is null) from agent_authorizations a where a.id=$4::uuid
- union all select a.id,a.parent_authorization_id,(a.revoked_at is null and a.superseded_at is null) from agent_authorizations a join lineage l on a.id=l.parent_authorization_id
-), actor as (
- select s.principal_id,s.authorization_id from auth_sessions s join principals p on p.id=s.principal_id and p.active join human_users h on h.id=s.human_user_id and h.status='active'
- where s.id=$1 and s.principal_id=$2 and s.human_user_id=$3 and s.revoked_at is null
-), requested as (
- select project_id,action,resource_identity resource
- from staged_policy_decisions where stage_id=$5
-),
-roles as (
- select ra.role_id,ra.boundary_type,ra.project_id from actor a join role_assignments ra on a.authorization_id is null and ra.principal_id=a.principal_id and ra.active
- union all select ar.role_id,ar.boundary_type,ar.project_id from actor a join agent_authorization_roles ar on ar.authorization_id=a.authorization_id
-), superadmin as (select exists(select 1 from roles where role_id='system:super_admin' and boundary_type='system') value),
-allowed as (select r.*,exists(select 1 from superadmin where value) or exists(select 1 from roles er join policy_rules pr on pr.role_id=er.role_id join policy_definition_versions pd on pd.id=pr.policy_definition_version_id and pd.active join policy_assignments pa on pa.policy_definition_version_id=pd.id and pa.active where pr.capability=r.action and (pr.resource='*' or pr.resource=r.resource) and er.boundary_type in ('system','all_projects','project') and (er.boundary_type<>'project' or er.project_id=r.project_id) and pa.boundary_type in ('system','all_projects','project') and (pa.boundary_type<>'project' or pa.project_id=r.project_id)) ok from requested r),
-approvals as (select not exists(select 1 from staged_approval_requirements req where req.stage_id=$5 and (((req.requirement_json->>'expires_at') is not null and (req.requirement_json->>'expires_at')::timestamptz<=statement_timestamp()) or (select count(distinct d.principal_id)
- from staged_approval_decisions d
- join principals p on p.id=d.principal_id and p.active
- join auth_contexts dc on dc.id=d.decided_auth_context_id
- join auth_sessions ds on ds.id=dc.session_id and ds.revoked_at is null
- where d.requirement_id=req.id and d.decision='approve'
-   and (req.requirement_json->'principal_types') ? p.type
-   and ((req.requirement_json->>'allow_initiator')::boolean or d.principal_id<>$6::uuid)
-   and (exists(select 1 from role_assignments ra where ds.authorization_id is null and ra.principal_id=d.principal_id and ra.active and ra.role_id=req.requirement_json->>'role'
-         and (ra.boundary_type in ('system','all_projects') or ra.project_id=(req.requirement_json->'boundary'->>'project_id')::uuid))
-     or exists(select 1 from agent_authorization_roles ar join agent_authorizations aa on aa.id=ar.authorization_id and aa.revoked_at is null and aa.superseded_at is null
-         where ar.authorization_id=ds.authorization_id and ar.role_id=req.requirement_json->>'role'
-         and (ar.boundary_type in ('system','all_projects') or ar.project_id=(req.requirement_json->'boundary'->>'project_id')::uuid)))) < (req.requirement_json->>'minimum')::int or exists(select 1 from staged_approval_decisions d where d.requirement_id=req.id and d.decision='reject'))) valid)
-select statement_timestamp()::text cutoff,exists(select 1 from actor) actor_valid,coalesce((select bool_and(valid) from lineage),true) ancestry_valid,
- $2::uuid=$6::uuid or (select value from superadmin) or exists(select 1 from roles er join policy_rules pr on pr.role_id=er.role_id join policy_definition_versions pd on pd.id=pr.policy_definition_version_id and pd.active join policy_assignments pa on pa.policy_definition_version_id=pd.id and pa.active where pr.capability='changeset.commit_others' and (pr.resource='*' or pr.resource='system:changeset')) commit_other,
- coalesce((select bool_and(ok) from allowed),false) operations_allowed,(select valid from approvals) approvals_valid`,
-    [
-      auth.sessionId,
-      auth.principalId,
-      auth.humanUserId,
-      auth.authorizationId ?? null,
-      stageId,
-      stage.created_principal_id,
-    ],
-  )).rows[0];
+    stageId,
+    stage,
+    auth,
+    operations,
+    operationRows,
+    runtimes,
+  );
+  const row = (await query<{
+    cutoff: string;
+    actor_valid: boolean;
+    ancestry_valid: boolean;
+    commit_other: boolean;
+    operations_allowed: boolean;
+    approvals_valid: boolean;
+  }>(tx, generated.sql, generated.params)).rows[0];
   if (!row?.actor_valid) {
     throw new CommitFailure("authorization_changed", "authorization");
   }
@@ -583,7 +1127,10 @@ async function applyOperation(
   runtimes: Runtime[],
   commitId: string,
   authId: string,
-  produced: Map<string, string>,
+  createdVersions: Map<string, string>,
+  stagedTargetVersions: Map<string, string>,
+  plannedVersionIds: Map<string, string>,
+  cutoff: string,
 ) {
   const kind = operation.relationship ? "relationship" : "resource";
   const runtime = runtimes.find((item) =>
@@ -599,14 +1146,8 @@ async function applyOperation(
   const table = quoteIdentifier(runtime.table_name),
     project = operation.project_id;
   if (operation.op === "comment") {
-    let targetVersion = produced.get(String(operation.object_id));
-    if (!targetVersion) {
-      targetVersion = (await query<{ current_object_version_id: string }>(
-        tx,
-        `select current_object_version_id from ${table} where project_id=$1 and id=$2`,
-        [project, operation.object_id],
-      )).rows[0]?.current_object_version_id;
-    }
+    const targetVersion = createdVersions.get(String(operation.object_id)) ??
+      stagedTargetVersions.get(`${project}:${String(operation.object_id)}`);
     if (!targetVersion) {
       throw new CommitFailure("stage_stale", "conflict", {
         reason: "object_version_changed",
@@ -636,13 +1177,29 @@ async function applyOperation(
       String(operation.object_id),
       {},
     );
+    await query(
+      tx,
+      `insert into audit_events(id,changeset_commit_id,object_version_id,auth_context_id,event_type,project_id,resource_identity,object_id,action,decision,policy_summary_json)
+       values($1,$2,$3,$4,'comment.added',$5,$6,$7,'comment','committed',$8::jsonb)`,
+      [
+        uuidV7(),
+        commitId,
+        targetVersion,
+        authId,
+        project,
+        identity(operation),
+        operation.object_id,
+        { authorization_cutoff_at: cutoff },
+      ],
+    );
     return;
   }
   const objectId = String(operation.object_id ?? operation.relationship_id);
   let version = 1,
     previous: string | null = null,
     snapshot: Record<string, unknown>,
-    changed: string[];
+    changed: string[],
+    transitionFrom: unknown = null;
   if (operation.op === "create" || operation.op === "link") {
     const values = operation.op === "create"
       ? record(operation.fields)
@@ -668,21 +1225,22 @@ async function applyOperation(
       authId,
       ...columns.map((key) => values[key]),
     ];
-    await query(
+    const inserted = (await query<Record<string, unknown>>(
       tx,
       `insert into ${table}(${
         [...baseColumns, ...columns].map(quoteIdentifier).join(",")
-      }) values(${params.map((_, i) => `$${i + 1}`).join(",")})`,
+      }) values(${params.map((_, i) => `$${i + 1}`).join(",")}) returning *`,
       params,
-    );
+    )).rows[0];
+    const persistedFields = projectionData(inserted);
     snapshot = operation.op === "link"
       ? {
-        from: operation.from,
-        to: operation.to,
-        fields: values,
+        from: inserted.from_object_id,
+        to: inserted.to_object_id,
+        fields: persistedFields,
         archived_at: null,
       }
-      : { data: values, archived_at: null };
+      : { data: persistedFields, archived_at: null };
     changed = columns;
   } else {
     const current = (await query<Record<string, unknown>>(
@@ -697,15 +1255,33 @@ async function applyOperation(
           : "object_version_changed",
       });
     }
+    if (current.archived_at !== null && current.archived_at !== undefined) {
+      throw new CommitFailure("constraint_conflict", "conflict");
+    }
     version = Number(current.version) + 1;
     previous = String(current.current_object_version_id);
-    const set = record(operation.set),
-      unset = array(operation.unset).map(String),
-      assignments: string[] = [
-        "version=$3",
-        "updated_at=now()",
-        "updated_by=$4",
-      ];
+    let set = record(operation.set);
+    let unset = array(operation.unset).map(String);
+    let transitionField: string | null = null;
+    if (operation.op === "transition") {
+      const transition = await transitionEffects(
+        tx,
+        evidence.pack_revision_id,
+        identity(operation),
+        current,
+        String(operation.to),
+      );
+      transitionField = transition.field;
+      set = { ...set, ...transition.set };
+      unset = [...new Set([...unset, ...transition.unset])].filter((field) =>
+        !Object.hasOwn(set, field)
+      );
+    }
+    const assignments: string[] = [
+      "version=$3",
+      "updated_at=now()",
+      "updated_by=$4",
+    ];
     const params: unknown[] = [project, objectId, version, authId];
     for (const key of Object.keys(set).sort()) {
       params.push(set[key]);
@@ -714,14 +1290,12 @@ async function applyOperation(
     for (const key of unset.sort()) {
       assignments.push(`${quoteIdentifier(key)}=null`);
     }
-    if (operation.op === "transition") {
-      const lifecycle = await lifecycleField(
-        tx,
-        evidence.pack_revision_id,
-        identity(operation),
-      );
+    if (transitionField) {
+      transitionFrom = current[transitionField];
       params.push(operation.to);
-      assignments.push(`${quoteIdentifier(lifecycle)}=$${params.length}`);
+      assignments.push(
+        `${quoteIdentifier(transitionField)}=$${params.length}`,
+      );
     }
     if (operation.op === "archive" || operation.op === "unlink") {
       assignments.push("archived_at=now()", `archived_by=$4`);
@@ -746,22 +1320,15 @@ async function applyOperation(
       ...new Set([
         ...Object.keys(set),
         ...unset,
-        ...(operation.op === "transition"
-          ? [
-            await lifecycleField(
-              tx,
-              evidence.pack_revision_id,
-              identity(operation),
-            ),
-          ]
-          : []),
+        ...(transitionField ? [transitionField] : []),
         ...(operation.op === "archive" || operation.op === "unlink"
           ? ["archived_at"]
           : []),
       ]),
     ].sort();
   }
-  const versionId = uuidV7();
+  const versionId = plannedVersionIds.get(objectId);
+  if (!versionId) throw new CommitFailure("internal_error", "internal");
   await query(
     tx,
     `insert into object_versions(id,project_id,definition_kind,resource_identity,object_id,version,previous_version_id,changeset_commit_id,operation,resource_revision,snapshot_json,changed_fields,auth_context_id) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13)`,
@@ -786,7 +1353,6 @@ async function applyOperation(
     `update ${table} set current_object_version_id=$3 where project_id=$1 and id=$2`,
     [project, objectId, versionId],
   );
-  produced.set(objectId, versionId);
   const eventType = operation.op === "link"
     ? "relationship.created"
     : operation.op === "unlink"
@@ -802,7 +1368,13 @@ async function applyOperation(
     eventType,
     identity(operation),
     objectId,
-    { changed_fields: changed },
+    operation.op === "transition"
+      ? {
+        changed_fields: changed,
+        from_state: transitionFrom,
+        to_state: operation.to,
+      }
+      : { changed_fields: changed },
   );
   await audit(
     tx,
@@ -814,6 +1386,7 @@ async function applyOperation(
     identity(operation),
     objectId,
     operation.op,
+    cutoff,
   );
 }
 
@@ -825,10 +1398,25 @@ async function writeCommitFacts(
   operations: CanonicalOperation[],
   cutoff: string,
 ) {
+  const hookExecutionIds = (await query<{ ids: string[] }>(
+    tx,
+    `select coalesce(array_agg(id order by ordinal),'{}'::uuid[]) ids
+     from staged_hook_executions where stage_id=$1`,
+    [stageId],
+  )).rows[0].ids;
   await query(
     tx,
-    `insert into audit_events(id,stage_id,changeset_commit_id,auth_context_id,event_type,action,decision,policy_summary_json) values($1,$2,$3,$4,'changeset.committed','changeset.commit','committed',$5::jsonb)`,
-    [uuidV7(), stageId, commitId, authId, { authorization_cutoff_at: cutoff }],
+    `insert into audit_events(id,stage_id,changeset_commit_id,auth_context_id,event_type,action,decision,policy_summary_json,validation_summary_json,hook_execution_ids)
+     values($1,$2,$3,$4,'changeset.committed','changeset.commit','committed',$5::jsonb,$6::jsonb,$7)`,
+    [
+      uuidV7(),
+      stageId,
+      commitId,
+      authId,
+      { authorization_cutoff_at: cutoff },
+      { operation_count: operations.length },
+      hookExecutionIds,
+    ],
   );
   await event(tx, commitId, null, null, "changeset.committed", null, null, {
     operation_count: operations.length,
@@ -860,10 +1448,11 @@ async function audit(
   resource: string,
   objectId: string,
   action: string,
+  cutoff: string,
 ) {
   await query(
     tx,
-    `insert into audit_events(id,changeset_commit_id,object_version_id,auth_context_id,event_type,project_id,resource_identity,object_id,action,decision) values($1,$2,$3,$4,$5,$6,$7,$8,$9,'committed')`,
+    `insert into audit_events(id,changeset_commit_id,object_version_id,auth_context_id,event_type,project_id,resource_identity,object_id,action,decision,policy_summary_json) values($1,$2,$3,$4,$5,$6,$7,$8,$9,'committed',$10::jsonb)`,
     [
       uuidV7(),
       commitId,
@@ -874,30 +1463,44 @@ async function audit(
       resource,
       objectId,
       action,
+      { authorization_cutoff_at: cutoff },
     ],
   );
 }
-async function lifecycleField(
+async function transitionEffects(
   tx: Queryable,
   revision: string,
   resource: string,
-): Promise<string> {
+  current: Record<string, unknown>,
+  to: string,
+): Promise<{ field: string; set: Record<string, unknown>; unset: string[] }> {
   const row = (await query<{ normalized: unknown }>(
     tx,
     "select normalized from pack_candidate_revisions where id=$1",
     [revision],
   )).rows[0];
-  const lifecycles = Object.values(record(record(row?.normalized).lifecycles))
-    .map(record);
-  const found = lifecycles.find((item) =>
-    record(item.spec).resource === resource
-  );
+  const found = Object.values(record(record(row?.normalized).lifecycles))
+    .map(record).find((item) => record(item.spec).resource === resource);
   if (!found) {
     throw new CommitFailure("stage_stale", "conflict", {
       reason: "pack_revision_changed",
     });
   }
-  return String(record(found.spec).field);
+  const spec = record(found.spec);
+  const field = String(spec.field);
+  const edge = array(spec.transitions).map(record).find((candidate) =>
+    candidate.to === to && array(candidate.from).includes(current[field])
+  );
+  if (!edge) {
+    throw new CommitFailure("stage_stale", "conflict", {
+      reason: "object_version_changed",
+    });
+  }
+  return {
+    field,
+    set: record(edge.set),
+    unset: array(edge.unset).map(String),
+  };
 }
 async function loadCommit(
   tx: Queryable,
@@ -983,14 +1586,12 @@ function boundedInt(
   const n = Number(value ?? fallback);
   return Number.isInteger(n) && n >= min && n <= max ? n : fallback;
 }
-async function jitter(attempt: number) {
-  const max = Math.min(50, 5 * (attempt + 1));
-  await new Promise((resolve) =>
-    setTimeout(
-      resolve,
-      crypto.getRandomValues(new Uint32Array(1))[0] % (max + 1),
-    )
-  );
+async function jitter(attempt: number, minimum: number, maximum: number) {
+  const ceiling = Math.min(maximum, Math.max(minimum, minimum * (attempt + 1)));
+  const span = ceiling - minimum + 1;
+  const delay = minimum +
+    (span > 1 ? crypto.getRandomValues(new Uint32Array(1))[0] % span : 0);
+  await new Promise((resolve) => setTimeout(resolve, delay));
 }
 function safeMessage(code: string) {
   return ({

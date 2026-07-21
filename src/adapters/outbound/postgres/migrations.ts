@@ -1332,6 +1332,30 @@ export const platformMigrations: PlatformMigration[] = [
       create index changeset_commits_committed_at_idx on changeset_commits(committed_at,id);
     `,
   },
+  {
+    id: "1027_canonical_commit_fact_constraints",
+    sql: `
+      alter table audit_events add constraint audit_events_canonical_complete check(
+        case when changeset_commit_id is not null then
+          auth_context_id is not null and actor_id is null and
+          id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' and
+          ((event_type='changeset.committed' and stage_id is not null and object_version_id is null) or
+           (event_type<>'changeset.committed' and project_id is not null and resource_identity is not null and object_id is not null))
+        else true end
+      );
+      alter table events add constraint events_canonical_complete check(
+        case when changeset_commit_id is not null then
+          id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' and
+          schema_version=1 and
+          ((event_type='changeset.committed' and project_id is null and object_version_id is null and resource_identity is null and object_id is null) or
+           (event_type<>'changeset.committed' and project_id is not null and resource_identity is not null and object_id is not null))
+        else true end
+      );
+      alter table comments add constraint comments_uuidv7 check(uuid_extract_version(id)=7);
+      create index comments_commit_idx on comments(changeset_commit_id,created_at,id);
+      create index object_versions_commit_idx on object_versions(changeset_commit_id,created_at,id);
+    `,
+  },
 ];
 
 async function backfillTrustedHookSecurity(sql: Queryable): Promise<void> {
