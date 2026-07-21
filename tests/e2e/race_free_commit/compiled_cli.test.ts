@@ -1,5 +1,9 @@
 import { assertEquals } from "jsr:@std/assert";
-import { query } from "../../../src/adapters/outbound/postgres/client.ts";
+import {
+  query,
+  quoteIdentifier,
+  type Sql,
+} from "../../../src/adapters/outbound/postgres/client.ts";
 import { startLiveHarness } from "../../support/live_harness.ts";
 
 for (const trace of [false, true]) {
@@ -236,12 +240,129 @@ for (const trace of [false, true]) {
           )).rows[0].count,
           "8",
         );
+
+        const runtimeTable = (await query<{ table_name: string }>(
+          harness.server.sql,
+          `select table_name from pack_runtime_tables where publisher='test'
+           and pack_name='commitproof' and definition_kind='resource' and definition_name='item'`,
+        )).rows[0].table_name;
+        for (const point of ["object_versions", "audit_events"] as const) {
+          const failureStage = await stageFile(harness, pack, {
+            operations: [{
+              op: "create",
+              project_id: projectId,
+              resource: "test/commitproof:item",
+              fields: { name: `failure-${point}-${trace}`, status: "new" },
+            }],
+          });
+          const failedObjectId = failureStage.operations[0].object_id;
+          await installFailureTrigger(harness.server.sql, point);
+          const failed = await harness.runOptctl([
+            "--json",
+            "changeset",
+            "commit",
+            failureStage.id,
+          ]);
+          assertEquals(failed.code, 1);
+          assertEquals(JSON.parse(failed.stderr).error.code, "internal_error");
+          await removeFailureTrigger(harness.server.sql, point);
+          assertEquals(
+            (await query<{ count: string }>(
+              harness.server.sql,
+              `select count(*)::text count from ${
+                quoteIdentifier(runtimeTable)
+              } where id=$1`,
+              [failedObjectId],
+            )).rows[0].count,
+            "0",
+          );
+          assertEquals(
+            (await query<{ count: string }>(
+              harness.server.sql,
+              "select count(*)::text count from changeset_commits where stage_id=$1",
+              [failureStage.id],
+            )).rows[0].count,
+            "0",
+          );
+        }
+        const commentFailureStage = await stageFile(harness, pack, {
+          operations: [{
+            op: "comment",
+            project_id: projectId,
+            resource: "test/commitproof:item",
+            object_id: e,
+            body: "must roll back",
+          }],
+        });
+        const commentsBefore = (await query<{ count: string }>(
+          harness.server.sql,
+          "select count(*)::text count from comments where object_id=$1",
+          [e],
+        )).rows[0].count;
+        await installFailureTrigger(
+          harness.server.sql,
+          "events",
+          "comment.added",
+        );
+        const failedComment = await harness.runOptctl([
+          "--json",
+          "changeset",
+          "commit",
+          commentFailureStage.id,
+        ]);
+        assertEquals(failedComment.code, 1);
+        await removeFailureTrigger(harness.server.sql, "events");
+        assertEquals(
+          (await query<{ count: string }>(
+            harness.server.sql,
+            "select count(*)::text count from comments where object_id=$1",
+            [e],
+          )).rows[0].count,
+          commentsBefore,
+        );
       } finally {
         await harness.close();
         await Deno.remove(pack, { recursive: true }).catch(() => undefined);
       }
     },
   });
+}
+
+async function installFailureTrigger(
+  sql: Sql,
+  table: "object_versions" | "audit_events" | "events",
+  eventType?: string,
+) {
+  await query(
+    sql,
+    `create function test_commit_failure_point() returns trigger language plpgsql as $$
+     begin
+       ${eventType ? `if new.event_type=${sqlString(eventType)} then` : ""}
+       raise exception 'injected commit failure';
+       ${eventType ? "end if;" : ""}
+       return new;
+     end $$`,
+  );
+  await query(
+    sql,
+    `create trigger test_commit_failure_point before insert on ${
+      quoteIdentifier(table)
+    }
+     for each row execute function test_commit_failure_point()`,
+  );
+}
+async function removeFailureTrigger(
+  sql: Sql,
+  table: "object_versions" | "audit_events" | "events",
+) {
+  await query(
+    sql,
+    `drop trigger test_commit_failure_point on ${quoteIdentifier(table)}`,
+  );
+  await query(sql, "drop function test_commit_failure_point()");
+}
+function sqlString(value: string) {
+  return `'${value.replaceAll("'", "''")}'`;
 }
 
 async function stageFile(
