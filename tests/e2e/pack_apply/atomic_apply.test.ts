@@ -1,3 +1,4 @@
+// deno-lint-ignore-file no-import-prefix no-unversioned-import no-explicit-any
 import { assert, assertEquals } from "jsr:@std/assert";
 import { join } from "jsr:@std/path";
 import {
@@ -69,6 +70,15 @@ Deno.test("compiled optctl completes safe, destructive, stale, timeout, risky, a
       field: string,
     ) => field !== "phone");
     await Deno.writeTextFile(leadPath, JSON.stringify(lead, null, 2));
+    const actionPath = join(destructiveDir, "actions", "convert_lead.yaml");
+    const action = parseYamlJsonObject(
+      await Deno.readTextFile(actionPath),
+      actionPath,
+    ) as Record<string, any>;
+    action.spec.reads.lead.fields = action.spec.reads.lead.fields.filter((
+      field: string,
+    ) => field !== "phone");
+    await Deno.writeTextFile(actionPath, JSON.stringify(action, null, 2));
 
     const destructiveStart = await runOk(
       harness,

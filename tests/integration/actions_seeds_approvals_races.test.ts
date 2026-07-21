@@ -201,6 +201,79 @@ Deno.test({
         "ready",
       );
 
+      const approvalFirst = await insertApprovalStage(
+        harness.server.sql,
+        auth,
+        1,
+      );
+      const approvalHold = holdLifecycle(
+        harness.server.sql,
+        approvalFirst.stageId,
+      );
+      await approvalHold.locked;
+      const queuedApproval = repository.decideApproval(
+        approvalFirst.stageId,
+        approvalFirst.requirementId,
+        { decision: "approve", reason: null },
+        auth,
+      );
+      await waitForLifecycleWaiters(harness.server.sql, 1);
+      const queuedCancel = repository.cancel(
+        approvalFirst.stageId,
+        "after approval",
+        auth,
+      );
+      await waitForLifecycleWaiters(harness.server.sql, 2);
+      approvalHold.release();
+      await Promise.all([queuedApproval, queuedCancel, approvalHold.done]);
+      assertEquals(
+        (await lifecycle(harness.server.sql, approvalFirst.stageId)).status,
+        "cancelled",
+      );
+      assertEquals(
+        await scalar(
+          harness.server.sql,
+          "select count(*) from staged_approval_decisions where stage_id=$1",
+          [approvalFirst.stageId],
+        ),
+        "1",
+      );
+
+      const cancelFirst = await insertApprovalStage(
+        harness.server.sql,
+        auth,
+        1,
+      );
+      const cancelHold = holdLifecycle(harness.server.sql, cancelFirst.stageId);
+      await cancelHold.locked;
+      const firstCancel = repository.cancel(
+        cancelFirst.stageId,
+        "cancel first",
+        auth,
+      );
+      await waitForLifecycleWaiters(harness.server.sql, 1);
+      const laterApproval = repository.decideApproval(
+        cancelFirst.stageId,
+        cancelFirst.requirementId,
+        { decision: "approve", reason: null },
+        auth,
+      );
+      await waitForLifecycleWaiters(harness.server.sql, 2);
+      cancelHold.release();
+      await Promise.all([firstCancel, laterApproval, cancelHold.done]);
+      assertEquals(
+        (await lifecycle(harness.server.sql, cancelFirst.stageId)).status,
+        "cancelled",
+      );
+      assertEquals(
+        await scalar(
+          harness.server.sql,
+          "select count(*) from staged_approval_decisions where stage_id=$1",
+          [cancelFirst.stageId],
+        ),
+        "0",
+      );
+
       const race = await insertApprovalStage(harness.server.sql, auth, 1);
       const raced = await Promise.all([
         repository.decideApproval(race.stageId, race.requirementId, {
@@ -263,6 +336,42 @@ Deno.test({
     }
   },
 });
+
+function holdLifecycle(sql: Parameters<typeof query>[0], stageId: string) {
+  let unlock!: () => void, lockedResolve!: () => void;
+  const locked = new Promise<void>((resolve) => lockedResolve = resolve);
+  const release = new Promise<void>((resolve) => unlock = resolve);
+  const done =
+    (sql as import("../../src/adapters/outbound/postgres/client.ts").Sql).begin(
+      async (tx) => {
+        await query(
+          tx,
+          "select stage_id from staged_changeset_lifecycle where stage_id=$1 for update",
+          [stageId],
+        );
+        lockedResolve();
+        await release;
+      },
+    );
+  return { locked, release: unlock, done };
+}
+async function waitForLifecycleWaiters(
+  sql: Parameters<typeof query>[0],
+  minimum: number,
+) {
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    const count = Number(
+      (await query<{ count: string }>(
+        sql,
+        `select count(*)::text count from pg_stat_activity where wait_event_type='Lock' and query like '%staged_changeset_lifecycle%'`,
+      )).rows[0].count,
+    );
+    if (count >= minimum) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`expected ${minimum} lifecycle lock waiters`);
+}
 
 async function currentAuth(
   sql: Parameters<typeof query>[0],

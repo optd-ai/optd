@@ -417,6 +417,10 @@ export async function writePack(
     `kind: Seed\napiVersion: operant.dev/v1\nmetadata: { name: targets }\nspec:\n  resource: target\n  key: name\n  mode: changeset\n  rows:\n    - { name: Seeded Target, status: ready }\n  axi: {}\n`,
   );
   await Deno.writeTextFile(
+    `${root}/seeds/targets_alt.yaml`,
+    `kind: Seed\napiVersion: operant.dev/v1\nmetadata: { name: targets_alt }\nspec:\n  resource: target\n  key: name\n  mode: changeset\n  rows:\n    - { name: Alternate Target, status: ready }\n  axi: {}\n`,
+  );
+  await Deno.writeTextFile(
     `${root}/actions/generate.yaml`,
     `kind: Action\napiVersion: operant.dev/v1\nmetadata: { name: generate }\nspec:\n  input:\n    project_id: { type: string, required: true, format: uuid }\n    source_id: { type: string, required: true, format: uuid }\n  reads:\n    source:\n      resource: source\n      id_from: '$action.input.source_id'\n      fields: [name, status]\n      required: true\n  availability:\n    resource: source\n    states: [ready]\n    condition: 'status == "ready"'\n  axi: {}\n`,
   );

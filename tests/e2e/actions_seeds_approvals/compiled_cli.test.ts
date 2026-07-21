@@ -5,7 +5,11 @@ import {
   type Sql,
 } from "../../../src/adapters/outbound/postgres/client.ts";
 import { uuidV7 } from "../../../src/domain/ids/uuid_v7.ts";
-import { startLiveHarness } from "../../support/live_harness.ts";
+import {
+  type CliLauncher,
+  type LiveHarness,
+  startLiveHarness,
+} from "../../support/live_harness.ts";
 import { startHttpProvider } from "../../support/http_provider.ts";
 import {
   seedRead,
@@ -30,6 +34,8 @@ for (const trace of [false, true]) {
       const pack = await Deno.makeTempDir({
         prefix: "operant-actions-seeds-e2e-",
       });
+      let actor: CliLauncher | undefined;
+      let reviewer: CliLauncher | undefined;
       try {
         assertEquals(
           (await harness.bootstrap({
@@ -56,11 +62,21 @@ for (const trace of [false, true]) {
         assertEquals(project.code, 0, project.stderr);
         const projectId = JSON.parse(project.stdout).data.id as string;
         const read = await seedRead(harness, projectId);
+        actor = await provisionOrdinary(
+          harness,
+          `actor-${trace ? "trace" : "default"}`,
+          "all_projects",
+        );
+        reviewer = await provisionOrdinary(
+          harness,
+          `reviewer-${trace ? "trace" : "default"}`,
+          "system",
+        );
 
-        const action = await harness.runOptctl([
+        const action = await actor!.runOptctl([
           "--json",
           "--project",
-          "acceptance-project",
+          projectId,
           "action",
           "stage",
           "test/actionproof:generate",
@@ -82,7 +98,7 @@ for (const trace of [false, true]) {
           ).length,
           1,
         );
-        const inspect = await harness.runOptctl([
+        const inspect = await actor!.runOptctl([
           "--json",
           "changeset",
           "inspect",
@@ -93,10 +109,10 @@ for (const trace of [false, true]) {
           actionData.operation_graph_digest,
         );
 
-        const missingRead = await harness.runOptctl([
+        const missingRead = await actor!.runOptctl([
           "--json",
           "--project",
-          "acceptance-project",
+          projectId,
           "action",
           "stage",
           "test/actionproof:generate",
@@ -105,10 +121,10 @@ for (const trace of [false, true]) {
         ]);
         assertEquals(missingRead.code, 1);
         const beforeSeed = await stageCount(harness.server.sql);
-        const seed = await harness.runOptctl([
+        const seed = await actor!.runOptctl([
           "--json",
           "--project",
-          "acceptance-project",
+          projectId,
           "seed",
           "stage",
           "test/actionproof",
@@ -120,10 +136,10 @@ for (const trace of [false, true]) {
         assertEquals(seedData.stage.source.kind, "seed");
         assertEquals(await stageCount(harness.server.sql), beforeSeed + 1);
         await materializeSeed(harness.server.sql, projectId, seedData.stage);
-        const unchanged = await harness.runOptctl([
+        const unchanged = await actor!.runOptctl([
           "--json",
           "--project",
-          "acceptance-project",
+          projectId,
           "seed",
           "stage",
           "test/actionproof",
@@ -140,10 +156,10 @@ for (const trace of [false, true]) {
           `update "${targetTable}" set status='stale' where project_id=$1 and id=$2`,
           [projectId, seedObjectId],
         );
-        const changed = await harness.runOptctl([
+        const changed = await actor!.runOptctl([
           "--json",
           "--project",
-          "acceptance-project",
+          projectId,
           "seed",
           "stage",
           "test/actionproof",
@@ -164,9 +180,9 @@ for (const trace of [false, true]) {
           )).rows[0].note,
           "preserved extra",
         );
-        const toon = await harness.runOptctl([
+        const toon = await actor!.runOptctl([
           "--project",
-          "acceptance-project",
+          projectId,
           "seed",
           "stage",
           "test/actionproof",
@@ -185,15 +201,14 @@ for (const trace of [false, true]) {
           "Concurrent Seed Project",
         ]);
         assertEquals(concurrentProject.code, 0, concurrentProject.stderr);
-        const concurrentSlug = `concurrent-${trace ? "trace" : "default"}`;
         const concurrentId = JSON.parse(concurrentProject.stdout).data
           .id as string;
         const concurrentStages = await Promise.all(
           [0, 1].map(() =>
-            harness.runOptctl([
+            actor!.runOptctl([
               "--json",
               "--project",
-              concurrentSlug,
+              concurrentId,
               "seed",
               "stage",
               "test/actionproof",
@@ -228,15 +243,78 @@ for (const trace of [false, true]) {
         }
         assertEquals(uniquenessRejected, true);
 
+        const multiProject = await harness.runOptctl([
+          "--json",
+          "project",
+          "create",
+          `multi-${trace ? "trace" : "default"}`,
+          "--display-name",
+          "Multi Seed Project",
+        ]);
+        assertEquals(multiProject.code, 0, multiProject.stderr);
+        const multiProjectId = JSON.parse(multiProject.stdout).data
+          .id as string;
+        const multiSeed = await actor!.runOptctl([
+          "--json",
+          "--project",
+          multiProjectId,
+          "seed",
+          "stage",
+          "test/actionproof",
+          "--seed",
+          "targets_alt",
+          "--seed",
+          "targets",
+        ]);
+        assertEquals(multiSeed.code, 0, multiSeed.stderr);
+        const multiData = JSON.parse(multiSeed.stdout).data.stage;
+        assertEquals(multiData.source.identity.seed_names, [
+          "targets",
+          "targets_alt",
+        ]);
+        assertEquals(
+          [
+            ...new Set(
+              multiData.policy_decisions.map((decision: { action: string }) =>
+                decision.action
+              ),
+            ),
+          ].sort(),
+          [
+            "seed:test/actionproof:targets",
+            "seed:test/actionproof:targets_alt",
+          ],
+        );
+        const limited = await provisionOrdinary(
+          harness,
+          `limited-${trace ? "trace" : "default"}`,
+          "all_projects",
+          ["targets"],
+        );
+        const deniedMulti = await limited.runOptctl([
+          "--json",
+          "--project",
+          multiProjectId,
+          "seed",
+          "stage",
+          "test/actionproof",
+          "--seed",
+          "targets",
+          "--seed",
+          "targets_alt",
+        ]);
+        assertEquals(deniedMulti.code, 1);
+        await limited.close();
+
         const approval = await insertApprovalFixture(harness.server.sql);
-        const listed = await harness.runOptctl([
+        const listed = await reviewer!.runOptctl([
           "--json",
           "changeset",
           "approvals",
           approval.stageId,
         ]);
         assertEquals(listed.code, 0, listed.stderr);
-        const approved = await harness.runOptctl([
+        const approved = await reviewer!.runOptctl([
           "--json",
           "changeset",
           "approve",
@@ -249,7 +327,7 @@ for (const trace of [false, true]) {
         const approvedData = JSON.parse(approved.stdout).data;
         assertEquals(approvedData.status, "ready");
         assertEquals(approvedData.operation_graph_digest, approval.digest);
-        const duplicate = await harness.runOptctl([
+        const duplicate = await reviewer!.runOptctl([
           "--json",
           "changeset",
           "reject",
@@ -264,7 +342,7 @@ for (const trace of [false, true]) {
           1,
         );
         const rejectedFixture = await insertApprovalFixture(harness.server.sql);
-        const rejected = await harness.runOptctl([
+        const rejected = await reviewer!.runOptctl([
           "--json",
           "changeset",
           "reject",
@@ -276,7 +354,7 @@ for (const trace of [false, true]) {
         assertEquals(rejected.code, 0, rejected.stderr);
         assertEquals(JSON.parse(rejected.stdout).data.status, "rejected");
         assertEquals(
-          (await harness.runOptctl([
+          (await reviewer!.runOptctl([
             "--json",
             "changeset",
             "approve",
@@ -294,22 +372,109 @@ for (const trace of [false, true]) {
           ]
         ) {
           assertEquals(
-            (await harness.runOptctl([
+            (await reviewer!.runOptctl([
               "--json",
               "--project",
-              "acceptance-project",
+              projectId,
               ...legacy,
             ])).code,
             2,
           );
         }
       } finally {
+        await actor?.close();
+        await reviewer?.close();
         await harness.close();
         await provider.close();
         await Deno.remove(pack, { recursive: true }).catch(() => undefined);
       }
     },
   });
+}
+
+async function provisionOrdinary(
+  harness: LiveHarness,
+  username: string,
+  boundary: "all_projects" | "system",
+  seedNames: string[] = ["targets", "targets_alt"],
+): Promise<CliLauncher> {
+  const password = `ordinary password ${username}`;
+  const created = await harness.runOptctl([
+    "--json",
+    "auth",
+    "user",
+    "create",
+    "--username",
+    username,
+    "--display-name",
+    username,
+    "--password-stdin",
+  ], `${password}\n`);
+  assertEquals(created.code, 0, created.stderr);
+  const principalId = (await query<{ principal_id: string }>(
+    harness.server.sql,
+    "select principal_id from human_users where username=$1",
+    [username],
+  )).rows[0].principal_id;
+  const role = boundary === "system"
+    ? "system:admin"
+    : `system:${username.replaceAll("-", "_")}`;
+  if (boundary !== "system") {
+    await query(
+      harness.server.sql,
+      "insert into system_roles(id,display_name,active) values($1,$2,true)",
+      [role, username],
+    );
+    await query(
+      harness.server.sql,
+      "insert into role_definition_versions(id,role_id,version,active) values($1,$2,1,true)",
+      [uuidV7(), role],
+    );
+  }
+  await query(
+    harness.server.sql,
+    "insert into role_assignments(id,principal_id,role_id,boundary_type,active) values($1,$2,$3,$4,true)",
+    [uuidV7(), principalId, role, boundary],
+  );
+  const version = uuidV7();
+  await query(
+    harness.server.sql,
+    "insert into policy_definition_versions(id,policy_id,version,active) values($1,$2,1,true)",
+    [version, `system:${username.replaceAll("-", "_")}`],
+  );
+  const capabilities = boundary === "system"
+    ? [["changeset.approval.decide", "system:changeset-approval"]]
+    : [
+      ["action:test/actionproof:generate", "action:test/actionproof:generate"],
+      ...seedNames.map((
+        name,
+      ) => [`seed:test/actionproof:${name}`, `seed:test/actionproof:${name}`]),
+      ["changeset.inspect", "changeset"],
+      ["project.read", "*"],
+    ];
+  for (const [capability, resource] of capabilities) {
+    await query(
+      harness.server.sql,
+      "insert into policy_rules(id,policy_definition_version_id,role_id,capability,resource,condition_kind) values($1,$2,$3,$4,$5,'unconditional')",
+      [uuidV7(), version, role, capability, resource],
+    );
+  }
+  await query(
+    harness.server.sql,
+    "insert into policy_assignments(id,policy_definition_version_id,boundary_type,active) values($1,$2,$3,true)",
+    [uuidV7(), version, boundary],
+  );
+  const launcher = await harness.createProcessTreeLauncher("human");
+  const login = await launcher.runOptctl([
+    "--json",
+    "auth",
+    "login",
+    "--username",
+    username,
+    "--password-stdin",
+  ], `${password}\n`);
+  assertEquals(login.code, 0, login.stderr);
+  return launcher;
 }
 
 async function insertApprovalFixture(sql: Sql) {
@@ -331,7 +496,7 @@ async function insertApprovalFixture(sql: Sql) {
     [requirementId, stageId, {
       id: requirementId,
       key: "acceptance_review",
-      role: "system:super_admin",
+      role: "system:admin",
       boundary: { type: "system" },
       minimum: 1,
       principal_types: ["human_user"],
