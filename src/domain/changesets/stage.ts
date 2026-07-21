@@ -43,6 +43,12 @@ export type HookSecretGrantEvidence = Readonly<{
 export type HookGrantSnapshot = Readonly<{
   grants: readonly HookSecretGrantEvidence[];
 }>;
+export type HookAuthoritySnapshot = Readonly<{
+  principal_id: string;
+  auth_context_id: string;
+  assignment_digest: string;
+  policy_digest: string;
+}>;
 export type StageHookOutput = Readonly<{
   added_operations: readonly AuthoredOperation[];
   patch_outputs: readonly Readonly<{
@@ -72,6 +78,7 @@ export type StageHookExecution = Readonly<{
   logs_truncated: boolean;
   secrets_redacted: boolean;
   duration_ms: number;
+  authority_snapshot: HookAuthoritySnapshot;
   grant_snapshot: HookGrantSnapshot;
 }>;
 export type StageReadDependency = Readonly<{
@@ -137,6 +144,7 @@ export type StageHookInput = Readonly<{
   projects: readonly unknown[];
   pack_revisions: readonly unknown[];
   hook_declarations: readonly StageHookDeclaration[];
+  authority_snapshot: HookAuthoritySnapshot;
   proposed_states: Readonly<Record<string, Record<string, unknown>>>;
   base_states: Readonly<Record<string, Record<string, unknown> | null>>;
 }>;

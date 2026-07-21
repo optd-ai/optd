@@ -146,6 +146,11 @@ export function makeHookSecretGrantService(
             `insert into hook_secret_grant_heads(hook_revision_id,slot,grant_id) values($1,$2,$3)`,
             [input.hook_revision_id, input.slot, id],
           );
+          await auditGrant(tx, input.auth, "hook_secret_grant.created", id, {
+            hook_revision_id: input.hook_revision_id,
+            slot: input.slot,
+            secret_id: input.secret_id,
+          });
           return id;
         });
         return ok(
@@ -226,6 +231,12 @@ export function makeHookSecretGrantService(
               where hook_revision_id=$3 and slot=$4 and grant_id=$1`,
             [grantId, id, current.hook_revision_id, current.slot],
           );
+          await auditGrant(tx, input.auth, "hook_secret_grant.replaced", id, {
+            supersedes_grant_id: grantId,
+            hook_revision_id: current.hook_revision_id,
+            slot: current.slot,
+            secret_id: input.secret_id,
+          });
           return id;
         });
         return ok(
@@ -288,6 +299,15 @@ export function makeHookSecretGrantService(
             "delete from hook_secret_grant_heads where grant_id=$1",
             [grantId],
           );
+          await auditGrant(
+            tx,
+            input.auth,
+            "hook_secret_grant.revoked",
+            grantId,
+            {
+              reason: input.reason ?? null,
+            },
+          );
           return ok({ grant_id: grantId, status: "revoked" });
         });
       } catch (error) {
@@ -317,6 +337,33 @@ async function currentGrant(
 function grantListSql(): string {
   return `select * from (select g.id as grant_id,g.secret_id,s.name as secret_name,h.definition_name as hook_identity,g.hook_revision_id,g.hook_security_digest,g.slot,slot_decl->>'env' as env,case when r.id is not null then 'revoked' when successor.id is not null then 'superseded' when s.status<>'active' then 'unavailable' else 'effective' end as status,g.created_at::text,g.inherited_from_grant_id,g.supersedes_grant_id,r.reason as revoked_reason from hook_secret_grants g join platform_secrets s on s.id=g.secret_id join pack_component_revisions h on h.id=g.hook_revision_id left join lateral jsonb_array_elements(h.hook_normalized_config->'secrets') slot_decl on slot_decl->>'slot'=g.slot left join hook_secret_grant_revocations r on r.grant_id=g.id left join hook_secret_grants successor on successor.supersedes_grant_id=g.id order by g.created_at desc,g.id) where_view`;
 }
+async function auditGrant(
+  sql: Queryable,
+  auth: AuthContext,
+  eventType: string,
+  grantId: string,
+  metadata: Record<string, unknown>,
+): Promise<void> {
+  await query(
+    sql,
+    `insert into audit_events(
+       id,actor_id,event_type,resource,object_id,action,request_metadata_json
+     ) values($1,$2,$3,'system:hook-secret-grant',$4,$3,$5::jsonb)`,
+    [
+      uuidV7(),
+      auth.principalId,
+      eventType,
+      grantId,
+      JSON.stringify({
+        grant_id: grantId,
+        auth_context_id: auth.id,
+        super_admin_bypass: auth.roles.includes("system:super_admin"),
+        ...metadata,
+      }),
+    ],
+  );
+}
+
 function invalid(): ReturnType<typeof err> {
   return err({
     code: "hook_grant_invalid",

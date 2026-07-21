@@ -1,5 +1,5 @@
 // deno-lint-ignore-file no-import-prefix
-import { assert, assertEquals } from "jsr:@std/assert@1";
+import { assert, assertEquals, assertRejects } from "jsr:@std/assert@1";
 import { query } from "../../src/adapters/outbound/postgres/client.ts";
 import { startAuthenticatedHarness } from "../support/authenticated_harness.ts";
 import { startHttpProvider } from "../support/http_provider.ts";
@@ -270,6 +270,33 @@ Deno.test({
           "select count(*)::text count from hook_secret_grant_revocations",
         )).rows[0].count,
         "1",
+      );
+      await assertRejects(() =>
+        query(
+          harness.server.sql,
+          "update hook_secret_grants set slot=slot where id=$1",
+          [currentGrant.grant_id],
+        )
+      );
+      await assertRejects(() =>
+        query(
+          harness.server.sql,
+          "delete from hook_secret_grant_revocations where grant_id=$1",
+          [currentGrant.grant_id],
+        )
+      );
+      const audit = (await query<{ id: string; metadata: string }>(
+        harness.server.sql,
+        `select id,request_metadata_json::text metadata from audit_events
+          where object_id=$1 and event_type='hook_secret_grant.revoked'`,
+        [currentGrant.grant_id],
+      )).rows[0];
+      assert(audit);
+      assert(!audit.metadata.includes("reenabled-value"));
+      await assertRejects(() =>
+        query(harness.server.sql, "delete from audit_events where id=$1", [
+          audit.id,
+        ])
       );
       const leaked = await query<{ leaked: boolean }>(
         harness.server.sql,

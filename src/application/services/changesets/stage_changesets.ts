@@ -71,7 +71,7 @@ export function makeStageChangesetService(
                 projects: [],
                 pack_revisions: [],
                 hook_declarations: [],
-                grant_snapshot: {
+                authority_snapshot: {
                   principal_id: auth.principalId,
                   auth_context_id: auth.id,
                   assignment_digest: `sha256:${"0".repeat(64)}`,
@@ -336,6 +336,7 @@ async function validateHookResult(
         "logs_truncated",
         "secrets_redacted",
         "duration_ms",
+        "authority_snapshot",
         "grant_snapshot",
       ]) || !isUuidV7(execution.id) || executionIds.has(String(execution.id)) ||
       execution.attachment_id !== declaration.attachment_id ||
@@ -357,6 +358,14 @@ async function validateHookResult(
       !outputFields.every((field) =>
         Array.isArray((execution.output as Record<string, unknown>)[field])
       ) ||
+      !isExactRecord(execution.authority_snapshot, [
+        "principal_id",
+        "auth_context_id",
+        "assignment_digest",
+        "policy_digest",
+      ]) ||
+      await canonicalSha256(execution.authority_snapshot) !==
+        await canonicalSha256(hookInput.authority_snapshot) ||
       !isExactRecord(execution.grant_snapshot, ["grants"]) ||
       !Array.isArray(
         (execution.grant_snapshot as Record<string, unknown>).grants,

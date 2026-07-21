@@ -1,4 +1,6 @@
 import type {
+  HookAuthoritySnapshot,
+  HookGrantSnapshot,
   StageHookCoordinator,
   StageHookDeclaration,
   StageHookExecution,
@@ -28,6 +30,41 @@ export class StageHookError extends Error {
   }
 }
 
+export type ActionStageHookDeclaration =
+  & Omit<
+    StageHookDeclaration,
+    "phase" | "operation_key" | "output_schema"
+  >
+  & Readonly<{
+    phase: "action.stage";
+    operation_key: null;
+    output_schema: "changeset.operations.v1";
+  }>;
+export type ActionStageHookInput = Readonly<{
+  action: string;
+  input: Readonly<Record<string, unknown>>;
+  reads: Readonly<Record<string, unknown>>;
+  declarations: readonly ActionStageHookDeclaration[];
+  authority_snapshot: HookAuthoritySnapshot;
+}>;
+export type ActionStageHookExecution = Readonly<{
+  hook: string;
+  attachment_id: string;
+  hook_revision_id: string;
+  pack_revision_id: string;
+  script_digest: string;
+  security_digest: string;
+  input_digest: string;
+  output_digest: string;
+  operations: readonly Record<string, unknown>[];
+  stderr: string;
+  logs_truncated: boolean;
+  secrets_redacted: boolean;
+  duration_ms: number;
+  authority_snapshot: HookAuthoritySnapshot;
+  grant_snapshot: HookGrantSnapshot;
+}>;
+
 export class TrustedStageHookCoordinator implements StageHookCoordinator {
   constructor(
     private readonly secrets: {
@@ -41,6 +78,119 @@ export class TrustedStageHookCoordinator implements StageHookCoordinator {
       typeof DenoHookRunner
     >[0] = {},
   ) {}
+
+  async #resolveSecrets(
+    declaration: StageHookDeclaration | ActionStageHookDeclaration,
+  ): Promise<ResolvedHookSecrets> {
+    try {
+      return await this.secrets.resolve(
+        declaration.hook_revision_id,
+        declaration.security_digest,
+        declaration.secret_slots,
+      );
+    } catch (error) {
+      if (error instanceof HookSecretUnavailableError) {
+        throw new StageHookError("hook_secret_unavailable", error.message, {
+          hook: declaration.hook,
+          slot: error.slot,
+        });
+      }
+      throw error;
+    }
+  }
+
+  async #runDeclaration(
+    declaration: StageHookDeclaration | ActionStageHookDeclaration,
+    resolved: ResolvedHookSecrets,
+    envelope: HookEnvelope,
+  ) {
+    const runner = new DenoHookRunner({
+      ...this.runnerOptions,
+      secretValues: Object.fromEntries(
+        declaration.secret_slots.map((slot) => [
+          slot.slot,
+          resolved.values[slot.env],
+        ]),
+      ),
+    });
+    const result = await runner.run(toRunnerDefinition(declaration), envelope);
+    if (!result.ok || !result.output) {
+      throw new StageHookError(
+        result.error?.code ?? "hook_failed",
+        result.error?.message ?? "hook execution failed",
+        { hook: declaration.hook, logs: result.logs },
+      );
+    }
+    return result;
+  }
+
+  async coordinateAction(
+    input: ActionStageHookInput,
+  ): Promise<{
+    operations: Record<string, unknown>[];
+    hook_executions: ActionStageHookExecution[];
+  }> {
+    const operations: Record<string, unknown>[] = [];
+    const executions: ActionStageHookExecution[] = [];
+    for (
+      const declaration of [...input.declarations].sort(compareDeclarations)
+    ) {
+      const resolved = await this.#resolveSecrets(declaration);
+      const envelope: HookEnvelope = {
+        hook: declaration.hook,
+        phase: "action.stage",
+        input: mapValue(declaration.input_mapping, {
+          "$action.input": input.input,
+          ...Object.fromEntries(
+            Object.entries(input.reads).map(([name, value]) => [
+              `$reads.${name}`,
+              value,
+            ]),
+          ),
+        }) as Record<string, unknown>,
+        metadata: {
+          pack_revision: declaration.pack_revision_id,
+          script_digest: declaration.script_digest,
+          attachment_id: declaration.attachment_id,
+        },
+      };
+      const result = await this.#runDeclaration(
+        declaration,
+        resolved,
+        envelope,
+      );
+      const emitted = result.output?.operations;
+      if (
+        !Array.isArray(emitted) || emitted.some((value) => !isRecord(value))
+      ) {
+        throw new StageHookError(
+          "hook_invalid_output",
+          "action hook operations are malformed",
+          { hook: declaration.hook },
+        );
+      }
+      enforceEffects(declaration, emitted as Record<string, unknown>[]);
+      operations.push(...emitted as Record<string, unknown>[]);
+      executions.push({
+        hook: declaration.hook,
+        attachment_id: declaration.attachment_id,
+        hook_revision_id: declaration.hook_revision_id,
+        pack_revision_id: declaration.pack_revision_id,
+        script_digest: declaration.script_digest,
+        security_digest: declaration.security_digest,
+        input_digest: `sha256:${await canonicalSha256(envelope)}`,
+        output_digest: `sha256:${await canonicalSha256(result.output)}`,
+        operations: emitted as Record<string, unknown>[],
+        stderr: result.logs,
+        logs_truncated: result.logsTruncated ?? false,
+        secrets_redacted: result.secretsRedacted ?? false,
+        duration_ms: result.durationMs,
+        authority_snapshot: input.authority_snapshot,
+        grant_snapshot: { grants: resolved.evidence },
+      });
+    }
+    return { operations, hook_executions: executions };
+  }
 
   async coordinate(
     input: StageHookInput,
@@ -127,6 +277,7 @@ export class TrustedStageHookCoordinator implements StageHookCoordinator {
         logs_truncated: result.logsTruncated ?? false,
         secrets_redacted: result.secretsRedacted ?? false,
         duration_ms: result.durationMs,
+        authority_snapshot: input.authority_snapshot,
         grant_snapshot: { grants: resolved.evidence },
       });
     }
@@ -169,7 +320,9 @@ export function buildHookEnvelope(
   };
 }
 
-function toRunnerDefinition(declaration: StageHookDeclaration): HookDefinition {
+function toRunnerDefinition(
+  declaration: StageHookDeclaration | ActionStageHookDeclaration,
+): HookDefinition {
   return {
     namespace: declaration.hook.split(":")[0],
     name: declaration.hook,
@@ -193,6 +346,42 @@ function toRunnerDefinition(declaration: StageHookDeclaration): HookDefinition {
       env: slot.env,
     })),
   };
+}
+
+function compareDeclarations(
+  left: ActionStageHookDeclaration,
+  right: ActionStageHookDeclaration,
+): number {
+  return left.order - right.order || left.hook.localeCompare(right.hook) ||
+    left.attachment_id.localeCompare(right.attachment_id);
+}
+
+function enforceEffects(
+  declaration: ActionStageHookDeclaration,
+  operations: Record<string, unknown>[],
+): void {
+  const effects = declaration.effects.map((value) =>
+    isRecord(value) ? value : {}
+  );
+  for (const operation of operations) {
+    const resource = String(operation.resource ?? operation.relationship ?? "");
+    const op = String(operation.op ?? "");
+    const allowed = effects.some((effect) =>
+      effect.resource === resource && Array.isArray(effect.ops) &&
+      effect.ops.includes(op)
+    );
+    if (!resource || !op || !allowed) {
+      throw new StageHookError(
+        "hook_effect_denied",
+        "action hook emitted an undeclared operation effect",
+        { hook: declaration.hook, resource, op },
+      );
+    }
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function stageOutput(

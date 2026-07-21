@@ -1,4 +1,5 @@
 import {
+  type ActionStageHookDeclaration,
   TrustedStageHookCoordinator,
 } from "../../../src/application/services/hooks/stage_hook_coordinator.ts";
 import type {
@@ -64,6 +65,12 @@ Deno.test("trusted stage coordinator chains before-stage state in deterministic 
     projects: [],
     pack_revisions: [],
     hook_declarations: [first, second],
+    authority_snapshot: {
+      principal_id: "0198c4ba-42b8-7000-8000-000000000011",
+      auth_context_id: "0198c4ba-42b8-7000-8000-000000000012",
+      assignment_digest: SHA_A,
+      policy_digest: SHA_B,
+    },
     proposed_states: { item: {} },
     base_states: { item: null },
   };
@@ -80,6 +87,54 @@ Deno.test("trusted stage coordinator chains before-stage state in deterministic 
   );
   equals(result.hook_executions[0].grant_snapshot, { grants: [] });
   equals(result.hook_executions[0].script_digest, SHA_A);
+});
+
+Deno.test("trusted action-stage seam enforces declared operation effects", async () => {
+  const coordinator = new TrustedStageHookCoordinator({
+    resolve() {
+      return Promise.resolve({ values: {}, evidence: [] });
+    },
+  }, { cacheDir: await Deno.makeTempDir() });
+  const action = {
+    ...declaration(
+      1,
+      `console.log(JSON.stringify({operations:[{op:"create",project_id:"0198c4ba-42b8-7000-8000-000000000010",resource:"operant/test:item",fields:{name:"generated"}}]}));`,
+    ),
+    phase: "action.stage",
+    operation_key: null,
+    output_schema: "changeset.operations.v1",
+    effects: [{ resource: "operant/test:item", ops: ["create"] }],
+    input_mapping: { request: "$action.input", record: "$reads.item" },
+  } as ActionStageHookDeclaration;
+  const result = await coordinator.coordinateAction({
+    action: "operant/test:generate",
+    input: { name: "generated" },
+    reads: { item: { id: "0198c4ba-42b8-7000-8000-000000000020" } },
+    declarations: [action],
+    authority_snapshot: {
+      principal_id: "0198c4ba-42b8-7000-8000-000000000011",
+      auth_context_id: "0198c4ba-42b8-7000-8000-000000000012",
+      assignment_digest: SHA_A,
+      policy_digest: SHA_B,
+    },
+  });
+  equals(result.operations.length, 1);
+  equals(result.hook_executions.length, 1);
+
+  let denied = false;
+  try {
+    await coordinator.coordinateAction({
+      action: "operant/test:generate",
+      input: {},
+      reads: { item: {} },
+      declarations: [{ ...action, effects: [] }],
+      authority_snapshot: result.hook_executions[0].authority_snapshot,
+    });
+  } catch (error) {
+    denied = error instanceof Error && "code" in error &&
+      error.code === "hook_effect_denied";
+  }
+  equals(denied, true);
 });
 
 function equals(actual: unknown, expected: unknown): void {

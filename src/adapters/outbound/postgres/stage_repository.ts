@@ -250,6 +250,15 @@ export class PostgresStageRepository implements StageRepository {
           projects,
           pack_revisions: revisions,
           hook_declarations: hookDeclarations.sort(compareHookDeclarations),
+          authority_snapshot: {
+            principal_id: auth.principalId,
+            auth_context_id: auth.id,
+            assignment_digest: `sha256:${await canonicalSha256({
+              principal_id: auth.principalId,
+              roles: [...auth.roles].sort(),
+            })}`,
+            policy_digest: `sha256:${await canonicalSha256(revisions)}`,
+          },
           proposed_states: proposedStates,
           base_states: baseStates,
         });
@@ -475,8 +484,9 @@ export class PostgresStageRepository implements StageRepository {
             `insert into staged_hook_executions(
                id,stage_id,ordinal,attachment_id,phase,pack_revision_id,hook_revision_id,
                input_digest,output_digest,output_json,script_digest,security_digest,
-               stderr_text,logs_truncated,secrets_redacted,duration_ms,grant_snapshot_json
-             ) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13,$14,$15,$16,$17::jsonb)`,
+               stderr_text,logs_truncated,secrets_redacted,duration_ms,
+               authority_snapshot_json,grant_snapshot_json
+             ) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12,$13,$14,$15,$16,$17::jsonb,$18::jsonb)`,
             [
               execution.id,
               id,
@@ -494,6 +504,7 @@ export class PostgresStageRepository implements StageRepository {
               execution.logs_truncated,
               execution.secrets_redacted,
               execution.duration_ms,
+              record(execution.authority_snapshot),
               record(execution.grant_snapshot),
             ],
           );
@@ -2049,7 +2060,8 @@ async function load(sql: Queryable, id: string): Promise<StageDto | null> {
     sql,
     `select id,attachment_id,phase,pack_revision_id,hook_revision_id,input_digest,output_digest,
       output_json output,script_digest,security_digest,stderr_text stderr,logs_truncated,
-      secrets_redacted,duration_ms,grant_snapshot_json grant_snapshot,created_at
+      secrets_redacted,duration_ms,authority_snapshot_json authority_snapshot,
+      grant_snapshot_json grant_snapshot,created_at
      from staged_hook_executions where stage_id=$1 order by ordinal`,
     [id],
   )).rows.map((hook) => ({

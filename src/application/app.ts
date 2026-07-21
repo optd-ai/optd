@@ -6,7 +6,10 @@ import { makePackServices } from "./services/pack_services.ts";
 import { makeQueryObjectsService } from "./services/query_objects.ts";
 import { makeMigrationServices } from "./services/migration_services.ts";
 import { makeProcessOutboxService } from "./services/process_outbox.ts";
-import { DenoHookRunner } from "../adapters/outbound/deno-hooks/hook_runner.ts";
+import {
+  DenoHookRunner,
+  type DenoHookRunnerOptions,
+} from "../adapters/outbound/deno-hooks/hook_runner.ts";
 import { makeSecretsService } from "./services/secrets/manage_secrets.ts";
 import { makeHookSecretGrantService } from "./services/secrets/manage_grants.ts";
 import { EnvelopeCrypto } from "../adapters/outbound/crypto/envelope.ts";
@@ -38,6 +41,7 @@ export function makeApplication(
   options: {
     bootstrapToken?: string;
     stageHookCoordinator?: StageHookCoordinator;
+    hookRunnerOptions?: DenoHookRunnerOptions;
   } = {},
 ) {
   const clock = new SystemClock();
@@ -62,10 +66,11 @@ export function makeApplication(
         resource: "system:hook-secret-grant",
       }),
   });
-  const hookRunner = new DenoHookRunner();
+  const hookRunner = new DenoHookRunner(options.hookRunnerOptions);
   const stageHookCoordinator = options.stageHookCoordinator ??
     new TrustedStageHookCoordinator(
       new PostgresHookSecretRepository(sql, cryptoAdapter),
+      options.hookRunnerOptions,
     );
   const changesets = makeStageChangesetService(
     new PostgresStageRepository(sql),

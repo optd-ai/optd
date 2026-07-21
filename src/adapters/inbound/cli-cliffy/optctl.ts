@@ -1597,34 +1597,34 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
         await resolveActionPayload(parsed.positional.slice(3)),
       );
     } else if (cmd === "secret" && sub === "list") {
-      result = await getJson(`${parsed.server}/secrets`);
+      result = await getJson(`${parsed.server}/api/v1/secrets`);
     } else if (cmd === "secret" && sub === "create" && value) {
-      result = await postJson(`${parsed.server}/secrets`, {
+      result = await postJson(`${parsed.server}/api/v1/secrets`, {
         name: value,
         ...await parseSecretValuePayload(parsed.positional.slice(3), true),
       });
     } else if (cmd === "secret" && sub === "rotate" && value) {
-      const listed = await getJson(`${parsed.server}/secrets`) as {
+      const listed = await getJson(`${parsed.server}/api/v1/secrets`) as {
         data?: { secrets?: Array<{ id: string; name: string }> };
       };
       const secret = listed.data?.secrets?.find((item) => item.name === value);
       if (!secret) throw usageError(`unknown secret ${value}`);
       result = await postJson(
-        `${parsed.server}/secrets/${secret.id}/rotate`,
+        `${parsed.server}/api/v1/secrets/${secret.id}/rotate`,
         await parseSecretValuePayload(parsed.positional.slice(3), false),
       );
     } else if (cmd === "secret" && sub === "disable" && value) {
-      const listed = await getJson(`${parsed.server}/secrets`) as {
+      const listed = await getJson(`${parsed.server}/api/v1/secrets`) as {
         data?: { secrets?: Array<{ id: string; name: string }> };
       };
       const secret = listed.data?.secrets?.find((item) => item.name === value);
       if (!secret) throw usageError(`unknown secret ${value}`);
       result = await postJson(
-        `${parsed.server}/secrets/${secret.id}/disable`,
+        `${parsed.server}/api/v1/secrets/${secret.id}/disable`,
         {},
       );
     } else if (cmd === "secret" && sub === "grants") {
-      result = await getJson(`${parsed.server}/hook-secret-grants`);
+      result = await getJson(`${parsed.server}/api/v1/hook-secret-grants`);
     } else if (cmd === "secret" && sub === "grant" && value) {
       const options = parsed.positional.slice(3);
       let hookIdentity: string | undefined;
@@ -1637,7 +1637,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       if (!hookIdentity || !slot) {
         throw usageError("grant requires --hook <hook> --slot <slot>");
       }
-      const listed = await getJson(`${parsed.server}/secrets`) as {
+      const listed = await getJson(`${parsed.server}/api/v1/secrets`) as {
         data?: { secrets?: Array<{ id: string; name: string }> };
       };
       const secret = listed.data?.secrets?.find((item) => item.name === value);
@@ -1660,7 +1660,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       ) {
         throw usageError(`hook ${hookIdentity} does not declare slot ${slot}`);
       }
-      result = await postJson(`${parsed.server}/hook-secret-grants`, {
+      result = await postJson(`${parsed.server}/api/v1/hook-secret-grants`, {
         hook_revision_id: metadata.data.hook_revision_id,
         expected_security_digest: metadata.data.security_digest,
         slot,
@@ -1671,7 +1671,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       if (option.length !== 2 || option[0] !== "--secret") {
         throw usageError("replace-grant requires --secret <name>");
       }
-      const listed = await getJson(`${parsed.server}/secrets`) as {
+      const listed = await getJson(`${parsed.server}/api/v1/secrets`) as {
         data?: { secrets?: Array<{ id: string; name: string }> };
       };
       const secret = listed.data?.secrets?.find((item) =>
@@ -1679,12 +1679,12 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       );
       if (!secret) throw usageError(`unknown secret ${option[1]}`);
       result = await postJson(
-        `${parsed.server}/hook-secret-grants/${value}/replace`,
+        `${parsed.server}/api/v1/hook-secret-grants/${value}/replace`,
         { expected_current_grant_id: value, secret_id: secret.id },
       );
     } else if (cmd === "secret" && sub === "revoke-grant" && value) {
       result = await postJson(
-        `${parsed.server}/hook-secret-grants/${value}/revoke`,
+        `${parsed.server}/api/v1/hook-secret-grants/${value}/revoke`,
         {},
       );
     } else if (cmd === "outbox" && sub === "status") {

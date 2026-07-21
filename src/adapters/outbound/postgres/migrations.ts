@@ -1182,6 +1182,7 @@ export const platformMigrations: PlatformMigration[] = [
       alter table staged_hook_executions add column security_digest text;
       alter table staged_hook_executions add column logs_truncated boolean;
       alter table staged_hook_executions add column secrets_redacted boolean;
+      alter table staged_hook_executions add column authority_snapshot_json jsonb;
       create table hook_secret_grants(
         id uuid primary key,
         hook_revision_id uuid not null references pack_component_revisions(id),
@@ -1202,13 +1203,17 @@ export const platformMigrations: PlatformMigration[] = [
         revoked_at timestamptz not null default now(),
         check(reason is null or char_length(reason) between 1 and 1000)
       );
+      alter table hook_secret_grants add constraint hook_secret_grant_identity_unique
+        unique(id,hook_revision_id,slot);
       create table hook_secret_grant_heads(
         hook_revision_id uuid not null references pack_component_revisions(id),
         slot text not null,
-        grant_id uuid not null unique references hook_secret_grants(id),
+        grant_id uuid not null unique,
         version bigint not null default 1 check(version > 0),
         updated_at timestamptz not null default now(),
-        primary key(hook_revision_id,slot)
+        primary key(hook_revision_id,slot),
+        foreign key(grant_id,hook_revision_id,slot)
+          references hook_secret_grants(id,hook_revision_id,slot)
       );
       create index hook_secret_grants_hook_slot_idx on hook_secret_grants(hook_revision_id,slot,created_at desc);
       create index hook_secret_grants_secret_idx on hook_secret_grants(secret_id);
@@ -1237,17 +1242,31 @@ export const platformMigrations: PlatformMigration[] = [
       alter table staged_hook_executions add constraint staged_hook_security_evidence check(
         script_digest ~ '^sha256:[0-9a-f]{64}$' and
         security_digest ~ '^sha256:[0-9a-f]{64}$' and
-        logs_truncated is not null and secrets_redacted is not null
+        logs_truncated is not null and secrets_redacted is not null and
+        jsonb_typeof(authority_snapshot_json)='object'
       );
       alter table staged_hook_executions alter column script_digest set not null;
       alter table staged_hook_executions alter column security_digest set not null;
       alter table staged_hook_executions alter column logs_truncated set not null;
       alter table staged_hook_executions alter column secrets_redacted set not null;
+      alter table staged_hook_executions alter column authority_snapshot_json set not null;
       alter table pack_component_revisions add constraint hook_revision_security_facts check(
         (definition_kind='hook') =
         (hook_security_digest is not null and hook_script_digest is not null and
          hook_normalized_config is not null and hook_script_content is not null)
       );
+
+      create function operant_reject_hook_secret_history_mutation() returns trigger language plpgsql as $$
+      begin raise exception 'hook secret grant history is append-only'; end $$;
+      create trigger hook_secret_grants_immutable before update or delete on hook_secret_grants
+        for each row execute function operant_reject_hook_secret_history_mutation();
+      create trigger hook_secret_grant_revocations_immutable before update or delete on hook_secret_grant_revocations
+        for each row execute function operant_reject_hook_secret_history_mutation();
+
+      create function operant_reject_audit_event_mutation() returns trigger language plpgsql as $$
+      begin raise exception 'audit events are append-only'; end $$;
+      create trigger audit_events_immutable before update or delete on audit_events
+        for each row execute function operant_reject_audit_event_mutation();
     `,
   },
 ];

@@ -59,7 +59,9 @@ export type DenoHookRunnerOptions = {
   stderrLimitBytes?: number;
   maximumTimeoutMs?: number;
   serverPort?: number;
+  serverHosts?: string[];
   databaseEndpoints?: string[];
+  denoBin?: string;
 };
 
 const RESERVED_ENV = ["OPERANT_", "DENO_", "LD_", "DYLD_"];
@@ -130,14 +132,28 @@ export class DenoHookRunner {
       ...(envNames.length ? [`--allow-env=${envNames.join(",")}`] : []),
       scriptPath,
     ];
-    const child = new Deno.Command(Deno.execPath(), {
-      args,
-      clearEnv: true,
-      env: resolved.env,
-      stdin: "piped",
-      stdout: "piped",
-      stderr: "piped",
-    }).spawn();
+    let child: Deno.ChildProcess;
+    try {
+      child = new Deno.Command(
+        this.#options.denoBin ?? Deno.execPath(),
+        {
+          args,
+          clearEnv: true,
+          env: resolved.env,
+          stdin: "piped",
+          stdout: "piped",
+          stderr: "piped",
+        },
+      ).spawn();
+    } catch {
+      await removeEntry(scriptPath);
+      return failure(
+        hook,
+        started,
+        "hook_spawn_failed",
+        "hook process could not be spawned",
+      );
+    }
 
     try {
       const writer = child.stdin.getWriter();
@@ -147,6 +163,7 @@ export class DenoHookRunner {
       await writer.close();
     } catch {
       await killAndReap(child);
+      await removeEntry(scriptPath);
       return failure(
         hook,
         started,
@@ -160,9 +177,15 @@ export class DenoHookRunner {
       this.#options.stdoutLimitBytes ?? DEFAULT_STDOUT_LIMIT,
       false,
     );
+    const stderrLimit = this.#options.stderrLimitBytes ?? DEFAULT_STDERR_LIMIT;
+    const redactionOverlap = redactions.reduce(
+      (maximum, value) =>
+        Math.max(maximum, new TextEncoder().encode(value).length - 1),
+      0,
+    );
     const stderrPromise = readBounded(
       child.stderr,
-      this.#options.stderrLimitBytes ?? DEFAULT_STDERR_LIMIT,
+      stderrLimit + redactionOverlap,
       true,
     );
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -180,36 +203,38 @@ export class DenoHookRunner {
     if (timer !== undefined) clearTimeout(timer);
     if (completed === "stdout_overflow") {
       await killAndReap(child);
+      await removeEntry(scriptPath);
       const stderr = await stderrPromise.catch(() => ({
         bytes: new Uint8Array(),
         truncated: false,
       }));
-      const logs = redact(decode(stderr.bytes), redactions);
+      const logs = retainedLogs(stderr, redactions, stderrLimit);
       return failure(
         hook,
         started,
         "hook_stdout_limit",
         "hook stdout exceeded the byte limit",
-        logs.text + (stderr.truncated ? TRUNCATION_MARKER : ""),
-        stderr.truncated,
+        logs.text,
+        logs.truncated,
         logs.changed,
       );
     }
     if (completed === "timeout") {
       await killAndReap(child);
+      await removeEntry(scriptPath);
       const stderr = await stderrPromise.catch(() => ({
         bytes: new Uint8Array(),
         truncated: false,
       }));
       await stdoutPromise.catch(() => undefined);
-      const logs = redact(decode(stderr.bytes), redactions);
+      const logs = retainedLogs(stderr, redactions, stderrLimit);
       return failure(
         hook,
         started,
         "hook_timeout",
         "hook execution timed out",
         logs.text,
-        stderr.truncated,
+        logs.truncated,
         logs.changed,
       );
     }
@@ -218,20 +243,21 @@ export class DenoHookRunner {
       stdoutPromise,
       stderrPromise,
     ]);
+    await removeEntry(scriptPath);
+    const retained = retainedLogs(stderrRead, redactions, stderrLimit);
     if (stdoutRead.overflow) {
       return failure(
         hook,
         started,
         "hook_stdout_limit",
         "hook stdout exceeded the byte limit",
-        redact(decode(stderrRead.bytes), redactions).text,
-        stderrRead.truncated,
+        retained.text,
+        retained.truncated,
+        retained.changed,
       );
     }
     const stdoutRedacted = redact(decode(stdoutRead.bytes), redactions);
-    const stderrRedacted = redact(decode(stderrRead.bytes), redactions);
-    const logs = stderrRedacted.text +
-      (stderrRead.truncated ? TRUNCATION_MARKER : "");
+    const logs = retained.text;
     if (!completed.success) {
       return failure(
         hook,
@@ -239,8 +265,8 @@ export class DenoHookRunner {
         "hook_failed",
         "hook process failed",
         logs,
-        stderrRead.truncated,
-        stdoutRedacted.changed || stderrRedacted.changed,
+        retained.truncated,
+        stdoutRedacted.changed || retained.changed,
         completed.code,
       );
     }
@@ -257,8 +283,8 @@ export class DenoHookRunner {
         "hook_invalid_output",
         "hook stdout must be exactly one JSON object",
         logs,
-        stderrRead.truncated,
-        stdoutRedacted.changed || stderrRedacted.changed,
+        retained.truncated,
+        stdoutRedacted.changed || retained.changed,
         completed.code,
       );
     }
@@ -273,8 +299,8 @@ export class DenoHookRunner {
         "hook_invalid_output",
         outputError,
         logs,
-        stderrRead.truncated,
-        stdoutRedacted.changed || stderrRedacted.changed,
+        retained.truncated,
+        stdoutRedacted.changed || retained.changed,
         completed.code,
       );
     }
@@ -284,8 +310,8 @@ export class DenoHookRunner {
       outputSchema: hook.outputSchema,
       output: parsed as JsonRecord,
       logs,
-      logsTruncated: stderrRead.truncated,
-      secretsRedacted: stdoutRedacted.changed || stderrRedacted.changed,
+      logsTruncated: retained.truncated,
+      secretsRedacted: stdoutRedacted.changed || retained.changed,
       durationMs: Math.round(performance.now() - started),
       exitCode: completed.code,
       scriptDigest: hook.scriptDigest,
@@ -294,20 +320,16 @@ export class DenoHookRunner {
 
   async #materialize(hook: HookDefinition): Promise<string> {
     await Deno.mkdir(this.#cacheDir, { recursive: true, mode: 0o700 });
-    const safeDigest = hook.scriptDigest.replace(/[^a-zA-Z0-9_-]/g, "_");
-    const path = `${this.#cacheDir}/${safeDigest}.ts`;
-    try {
-      const existing = await Deno.readTextFile(path);
-      if (existing !== hook.scriptContent) {
-        throw new Error("stored hook digest collision");
-      }
-    } catch (error) {
-      if (!(error instanceof Deno.errors.NotFound)) throw error;
-      await Deno.writeTextFile(path, hook.scriptContent, {
-        createNew: true,
-        mode: 0o600,
-      });
-    }
+    const path = await Deno.makeTempFile({
+      dir: this.#cacheDir,
+      prefix: "entry_",
+      suffix: ".ts",
+    });
+    await Deno.chmod(path, 0o600);
+    await Deno.writeTextFile(
+      path,
+      `${trustedPrelude()}\n${hook.scriptContent}`,
+    );
     return path;
   }
 
@@ -336,6 +358,7 @@ export class DenoHookRunner {
         blockedEndpoint(
           endpoint,
           this.#options.serverPort,
+          this.#options.serverHosts ?? [],
           this.#options.databaseEndpoints ?? [],
         )
       )
@@ -478,6 +501,66 @@ export function validateOutputShape(
   return null;
 }
 
+export async function resolveHookDenoBinary(
+  configured = Deno.env.get("OPERANT_DENO_BIN"),
+): Promise<string> {
+  const candidate = configured ?? Deno.execPath();
+  if (!candidate.startsWith("/")) {
+    throw new Error("OPERANT_DENO_BIN must be an absolute path");
+  }
+  if (!configured && !/(?:^|\/)deno(?:\.exe)?$/.test(candidate)) {
+    throw new Error(
+      "OPERANT_DENO_BIN is required when the server executable is not Deno",
+    );
+  }
+  const stat = await Deno.stat(candidate).catch(() => null);
+  if (!stat?.isFile) throw new Error("configured Deno runtime is not a file");
+  const probe = await new Deno.Command(candidate, {
+    args: ["--version"],
+    stdin: "null",
+    stdout: "piped",
+    stderr: "piped",
+  }).output().catch(() => null);
+  if (
+    !probe?.success ||
+    !new TextDecoder().decode(probe.stdout).startsWith("deno ")
+  ) {
+    throw new Error("configured hook runtime is not a Deno interpreter");
+  }
+  return candidate;
+}
+
+function trustedPrelude(): string {
+  return `const __operantDenyDynamicCode = function () {
+  throw new Error("dynamic code evaluation is disabled");
+};
+for (const __operantTarget of [
+  globalThis,
+  Function.prototype,
+  Object.getPrototypeOf(async function () {}),
+  Object.getPrototypeOf(function* () {}),
+  Object.getPrototypeOf(async function* () {}),
+]) {
+  const __operantKey = __operantTarget === globalThis ? "eval" : "constructor";
+  Object.defineProperty(__operantTarget, __operantKey, {
+    value: __operantDenyDynamicCode,
+    writable: false,
+    enumerable: false,
+    configurable: false,
+  });
+}
+Object.defineProperty(globalThis, "Function", {
+  value: __operantDenyDynamicCode,
+  writable: false,
+  enumerable: false,
+  configurable: false,
+});`;
+}
+
+async function removeEntry(path: string): Promise<void> {
+  await Deno.remove(path).catch(() => undefined);
+}
+
 function curatedEnvelope(value: HookEnvelope): HookEnvelope {
   return {
     hook: value.hook,
@@ -558,6 +641,22 @@ async function killAndReap(child: Deno.ChildProcess): Promise<void> {
   } catch { /* exited */ }
   await child.status.catch(() => undefined);
 }
+function retainedLogs(
+  captured: { bytes: Uint8Array; truncated: boolean },
+  values: string[],
+  limit: number,
+): { text: string; truncated: boolean; changed: boolean } {
+  const redacted = redact(decode(captured.bytes), values);
+  const encoded = new TextEncoder().encode(redacted.text);
+  const truncated = captured.truncated || encoded.length > limit;
+  const retained = truncated ? encoded.subarray(0, limit) : encoded;
+  return {
+    text: decode(retained) + (truncated ? TRUNCATION_MARKER : ""),
+    truncated,
+    changed: redacted.changed,
+  };
+}
+
 function redact(
   text: string,
   values: string[],
@@ -593,15 +692,37 @@ function parseCeiling(
 function blockedEndpoint(
   endpoint: string,
   serverPort: number | undefined,
+  serverHosts: string[],
   database: string[],
 ): boolean {
   if (database.includes(endpoint)) return true;
   if (serverPort === undefined) return false;
-  const host = endpoint.replace(/^\[|\](?=:|$)/g, "").split(":")[0];
-  const port = Number(endpoint.slice(endpoint.lastIndexOf(":") + 1));
-  return port === serverPort &&
-    ["localhost", "127.0.0.1", "0.0.0.0", "::1", "::", "host.docker.internal"]
-      .includes(host);
+  const parsed = parseEndpoint(endpoint);
+  const aliases = new Set([
+    ...serverHosts,
+    "localhost",
+    "127.0.0.1",
+    "0.0.0.0",
+    "::1",
+    "::",
+    "host.docker.internal",
+  ].map((host) => host.replace(/^\[|\]$/g, "")));
+  return parsed.port === serverPort && aliases.has(parsed.host);
+}
+
+function parseEndpoint(
+  endpoint: string,
+): { host: string; port: number | null } {
+  const ipv6 = /^\[([^\]]+)\](?::([0-9]+))?$/.exec(endpoint);
+  if (ipv6) return { host: ipv6[1], port: ipv6[2] ? Number(ipv6[2]) : null };
+  const separator = endpoint.lastIndexOf(":");
+  if (separator > 0 && /^[0-9]+$/.test(endpoint.slice(separator + 1))) {
+    return {
+      host: endpoint.slice(0, separator),
+      port: Number(endpoint.slice(separator + 1)),
+    };
+  }
+  return { host: endpoint, port: null };
 }
 function isRecord(value: unknown): value is JsonRecord {
   return !!value && typeof value === "object" && !Array.isArray(value);

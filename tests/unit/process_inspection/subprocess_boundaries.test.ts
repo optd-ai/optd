@@ -20,7 +20,7 @@ Deno.test("production subprocess callsites remain explicitly classified", async 
     callsites.map(({ path, count }) => ({ path, count })),
     [
       { path: "src/adapters/inbound/cli-cliffy/optctl.ts", count: 1 },
-      { path: "src/adapters/outbound/deno-hooks/hook_runner.ts", count: 1 },
+      { path: "src/adapters/outbound/deno-hooks/hook_runner.ts", count: 2 },
       { path: "src/adapters/outbound/postgres-process/lifecycle.ts", count: 3 },
       { path: "src/adapters/outbound/process-inspection/linux.ts", count: 1 },
       { path: "src/adapters/outbound/postgres/auth_repository.ts", count: 2 },
@@ -40,6 +40,17 @@ Deno.test("production subprocess callsites remain explicitly classified", async 
     1,
   );
   assertEquals((cli.match(/childArgs\[0\]/g) ?? []).length, 2);
+
+  const hooks =
+    callsites.find((item) => item.path.endsWith("deno-hooks/hook_runner.ts"))!
+      .source;
+  assertMatch(
+    hooks,
+    /new Deno\.Command\(\s*this\.#options\.denoBin \?\? Deno\.execPath\(\)/,
+  );
+  assertMatch(hooks, /new Deno\.Command\(candidate/);
+  assertMatch(hooks, /args: \["--version"\]/);
+  assertMatch(hooks, /clearEnv: true/);
 
   const proc =
     callsites.find((item) => item.path.endsWith("process-inspection/linux.ts"))!

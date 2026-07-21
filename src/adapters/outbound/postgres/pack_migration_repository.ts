@@ -752,6 +752,13 @@ async function carryEquivalentHookSecretGrants(
       order by new_hook.definition_name,g.slot,g.id`,
     [fromRevisionId, toRevisionId],
   )).rows;
+  const carryActor = rows.length
+    ? (await query<{ principal_id: string; roles: string[] | string }>(
+      sql,
+      "select principal_id,roles from auth_contexts where id=$1",
+      [authContextId],
+    )).rows[0]
+    : undefined;
   for (const row of rows) {
     const id = uuidV7();
     await query(
@@ -775,6 +782,31 @@ async function carryEquivalentHookSecretGrants(
       `insert into hook_secret_grant_heads(hook_revision_id,slot,grant_id)
        values($1,$2,$3)`,
       [row.new_hook_revision_id, row.slot, id],
+    );
+    if (!carryActor) throw new Error("pack apply auth context is unavailable");
+    const roles = typeof carryActor.roles === "string"
+      ? JSON.parse(carryActor.roles) as string[]
+      : carryActor.roles;
+    await query(
+      sql,
+      `insert into audit_events(
+         id,actor_id,event_type,resource,object_id,action,request_metadata_json
+       ) values($1,$2,'hook_secret_grant.inherited','system:hook-secret-grant',$3,
+                'hook_secret_grant.inherited',$4::jsonb)`,
+      [
+        uuidV7(),
+        carryActor.principal_id,
+        id,
+        JSON.stringify({
+          grant_id: id,
+          inherited_from_grant_id: row.grant_id,
+          hook_revision_id: row.new_hook_revision_id,
+          slot: row.slot,
+          secret_id: row.secret_id,
+          auth_context_id: authContextId,
+          super_admin_bypass: roles.includes("system:super_admin"),
+        }),
+      ],
     );
   }
   const oldSlots = await hookSlots(sql, fromRevisionId, true);

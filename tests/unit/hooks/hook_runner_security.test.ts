@@ -16,6 +16,7 @@ function assertStringIncludes(actual: string, expected: string): void {
 import {
   DenoHookRunner,
   type HookDefinition,
+  resolveHookDenoBinary,
 } from "../../../src/adapters/outbound/deno-hooks/hook_runner.ts";
 
 function hook(
@@ -77,6 +78,11 @@ Deno.test("runner permanently denies imports and unrestricted capabilities befor
     const source of [
       `import "./x.ts";`,
       `await import("data:text/javascript,x")`,
+      `await import("blob:denied")`,
+      `await import("https://example.invalid/x.ts")`,
+      `await import("jsr:@std/assert")`,
+      `await import("npm:package")`,
+      `await import("node:fs")`,
       `new Function("return import('npm:x')")`,
     ]
   ) {
@@ -89,6 +95,52 @@ Deno.test("runner permanently denies imports and unrestricted capabilities befor
       .error?.code,
     "hook_capability_denied",
   );
+});
+
+Deno.test("trusted prelude blocks obfuscated eval and constructor imports and deletes entries", async () => {
+  const cacheDir = await Deno.makeTempDir();
+  const runner = new DenoHookRunner({ cacheDir });
+  const escapes = [
+    `const e=(0,eval); await e("im"+"port('data:text/javascript,export default 1')");`,
+    `await (()=>{}).constructor("return im"+"port('data:text/javascript,export default 1')")();`,
+    `await (async()=>{}).constructor("return im"+"port('data:text/javascript,export default 1')")();`,
+    `(function*(){}).constructor("return im"+"port('data:text/javascript,export default 1')")();`,
+    `(async function*(){}).constructor("return im"+"port('data:text/javascript,export default 1')")();`,
+  ];
+  for (let index = 0; index < escapes.length; index++) {
+    const result = await runner.run(
+      hook(
+        `${escapes[index]} ${valid}`,
+        { scriptDigest: `sha256:escape_${index}` },
+      ),
+      envelope,
+    );
+    assertEquals(result.ok, false);
+    assertEquals(result.error?.code, "hook_failed");
+    const entries = [];
+    for await (const entry of Deno.readDir(cacheDir)) entries.push(entry.name);
+    assertEquals(entries, []);
+  }
+});
+
+Deno.test("hook Deno runtime requires an absolute verified interpreter", async () => {
+  assertEquals(await resolveHookDenoBinary(Deno.execPath()), Deno.execPath());
+  let rejected = false;
+  try {
+    await resolveHookDenoBinary("deno");
+  } catch {
+    rejected = true;
+  }
+  assertEquals(rejected, true);
+  const fake = await Deno.makeTempFile();
+  await Deno.writeTextFile(fake, "not deno");
+  rejected = false;
+  try {
+    await resolveHookDenoBinary(fake);
+  } catch {
+    rejected = true;
+  }
+  assertEquals(rejected, true);
 });
 
 Deno.test("runner permanently denies filesystem, subprocess, sys, FFI, and undeclared net", async () => {
@@ -141,7 +193,10 @@ Deno.test("runner bounds stdout and truncates/redacts stderr", async () => {
     cacheDir: await Deno.makeTempDir(),
     stdoutLimitBytes: 128,
     stderrLimitBytes: 32,
-    secretValues: { token: "needle-secret" },
+    secretValues: {
+      token: "needle-secret",
+      overlapping: "secret",
+    },
   });
   const overflow = await runner.run(
     hook(
@@ -153,10 +208,15 @@ Deno.test("runner bounds stdout and truncates/redacts stderr", async () => {
   assertEquals(overflow.error?.code, "hook_stdout_limit");
   const truncated = await runner.run(
     hook(
-      `console.error("needle-secret"+"z".repeat(128)); ${valid}`,
+      `await Deno.stderr.write(new TextEncoder().encode("x".repeat(28)+"needle-"));
+       await Deno.stderr.write(new TextEncoder().encode("secret"+"z".repeat(128)));
+       ${valid}`,
       {
         scriptDigest: "sha256:truncated",
-        secrets: [{ name: "token", slot: "token", env: "TOKEN" }],
+        secrets: [
+          { name: "token", slot: "token", env: "TOKEN" },
+          { name: "overlapping", slot: "overlapping", env: "OVERLAPPING" },
+        ],
       },
     ),
     envelope,
@@ -164,6 +224,8 @@ Deno.test("runner bounds stdout and truncates/redacts stderr", async () => {
   assertEquals(truncated.ok, true);
   assertEquals(truncated.logsTruncated, true);
   assertEquals(truncated.logs.includes("needle-secret"), false);
+  assertEquals(truncated.logs.includes("needle-"), false);
+  assertEquals(truncated.logs.includes("secret"), false);
   assertEquals(truncated.logs.includes("[OPERANT_LOG_TRUNCATED]"), true);
 });
 

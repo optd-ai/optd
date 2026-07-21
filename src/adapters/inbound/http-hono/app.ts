@@ -626,11 +626,11 @@ export function makeHttpApp(
   );
 
   app.get(
-    "/secrets",
+    "/api/v1/secrets",
     async (c) =>
       resultJson(c, await deps.secrets.list({ auth: c.get("auth") })),
   );
-  app.post("/secrets", async (c) => {
+  app.post("/api/v1/secrets", async (c) => {
     const body = await strictAuthenticatedJson(c, [
       "name",
       "description",
@@ -638,21 +638,21 @@ export function makeHttpApp(
     ]);
     return resultJson(c, await deps.secrets.create(body));
   });
-  app.post("/secrets/:id/rotate", async (c) => {
+  app.post("/api/v1/secrets/:id/rotate", async (c) => {
     const body = await strictAuthenticatedJson(c, ["value"]);
     return resultJson(c, await deps.secrets.rotate(c.req.param("id"), body));
   });
-  app.post("/secrets/:id/disable", async (c) => {
+  app.post("/api/v1/secrets/:id/disable", async (c) => {
     const body = await strictAuthenticatedJson(c, []);
     return resultJson(c, await deps.secrets.disable(c.req.param("id"), body));
   });
   app.get(
-    "/hook-secret-grants",
+    "/api/v1/hook-secret-grants",
     async (c) =>
       resultJson(c, await deps.hookSecretGrants.list({ auth: c.get("auth") })),
   );
   app.post(
-    "/hook-secret-grants",
+    "/api/v1/hook-secret-grants",
     async (c) =>
       resultJson(
         c,
@@ -667,7 +667,7 @@ export function makeHttpApp(
       ),
   );
   app.post(
-    "/hook-secret-grants/:id/replace",
+    "/api/v1/hook-secret-grants/:id/replace",
     async (c) =>
       resultJson(
         c,
@@ -681,7 +681,7 @@ export function makeHttpApp(
       ),
   );
   app.post(
-    "/hook-secret-grants/:id/revoke",
+    "/api/v1/hook-secret-grants/:id/revoke",
     async (c) =>
       resultJson(
         c,

@@ -844,6 +844,7 @@ Deno.test({
                 logs_truncated: false,
                 secrets_redacted: false,
                 duration_ms: 1,
+                authority_snapshot: input.authority_snapshot,
                 grant_snapshot: { grants: [] },
               }],
             };

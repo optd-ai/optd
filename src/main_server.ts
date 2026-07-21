@@ -14,6 +14,7 @@ import {
   type MigrationStatus,
 } from "./adapters/outbound/postgres/migrations.ts";
 import { assertSecretSubsystemReady } from "./application/services/secrets/manage_secrets.ts";
+import { resolveHookDenoBinary } from "./adapters/outbound/deno-hooks/hook_runner.ts";
 import {
   type PostgresRuntime,
   startPostgresRuntime,
@@ -25,22 +26,37 @@ export type StartedServer = {
   shutdown(): Promise<void>;
 };
 
-export async function createFetchHandler() {
+export async function createFetchHandler(
+  options: { hookServerPort?: number; hookServerHosts?: string[] } = {},
+) {
   const postgresRuntime = await startPostgresRuntime();
   const sql = createPostgresClient(postgresRuntime.databaseUrl);
   let migrationResult: MigrationApplyResult;
+  let denoBin: string;
   try {
     migrationResult = await sql.begin(async (tx) =>
       await applyPlatformMigrations(tx)
     );
     await assertSecretSubsystemReady(sql);
+    denoBin = await resolveHookDenoBinary();
   } catch (error) {
     await closePostgresClient(sql).catch(() => undefined);
     await postgresRuntime.stop().catch(() => undefined);
     throw error;
   }
+  const database = new URL(postgresRuntime.databaseUrl);
+  const databasePort = database.port || "5432";
   const application = makeApplication(sql, {
     bootstrapToken: Deno.env.get("OPERANT_BOOTSTRAP_TOKEN"),
+    hookRunnerOptions: {
+      denoBin,
+      serverPort: options.hookServerPort ??
+        Number(Deno.env.get("OPERANT_SERVER_PORT") ?? "8789"),
+      serverHosts: options.hookServerHosts,
+      databaseEndpoints: databaseHostAliases(database.hostname).map((host) =>
+        `${host}:${databasePort}`
+      ),
+    },
   });
   const app = makeHttpApp({
     authentication: application.authentication,
@@ -84,7 +100,10 @@ export async function startServer(
   const hostname = options.hostname ?? "127.0.0.1";
   const port = options.port ?? 8789;
   const controller = new AbortController();
-  const handler = await createFetchHandler();
+  const handler = await createFetchHandler({
+    hookServerPort: port === 0 ? undefined : port,
+    hookServerHosts: databaseHostAliases(hostname),
+  });
   const server = Deno.serve({
     hostname,
     port,
@@ -107,6 +126,18 @@ export async function startServer(
       await handler.shutdown();
     },
   };
+}
+
+function databaseHostAliases(host: string): string[] {
+  const aliases = new Set([host]);
+  if (["localhost", "127.0.0.1", "::1", "0.0.0.0", "::"].includes(host)) {
+    for (
+      const alias of ["localhost", "127.0.0.1", "0.0.0.0", "[::1]", "[::]"]
+    ) {
+      aliases.add(alias);
+    }
+  }
+  return [...aliases].sort();
 }
 
 function makeHealthService(
