@@ -514,6 +514,15 @@ Deno.test({
         cancelImmutable,
       );
 
+      assertEquals(
+        await scalar(
+          harness.server.sql,
+          "select count(*)::text count from pg_stat_activity where datname=current_database() and pid<>pg_backend_pid() and state='idle in transaction'",
+          [],
+        ),
+        "0",
+      );
+
       await assertRejects(() =>
         query(
           harness.server.sql,
