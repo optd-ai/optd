@@ -2,6 +2,7 @@
 import { assert, assertEquals } from "jsr:@std/assert";
 import { normalizeOperations } from "../../src/domain/changesets/operations.ts";
 import {
+  makeStageSeedsService,
   reconcileSeedRow,
   validateSeedSelection,
 } from "../../src/application/services/seeds/stage_seeds.ts";
@@ -14,6 +15,24 @@ const context = {
   projectId: project,
   resource: "test/demo:status",
 };
+
+Deno.test("seed stage rejects names alias and unknown DTO fields before persistence", async () => {
+  const service = makeStageSeedsService({} as never, {
+    stageSource: () => Promise.reject(new Error("must not persist")),
+  });
+  const auth = {} as never;
+  for (
+    const body of [{ project_id: project, all: false, names: ["a"] }, {
+      project_id: project,
+      all: true,
+      seed_names: [],
+      extra: true,
+    }]
+  ) {
+    const result = await service.stage("test", "demo", body, auth);
+    assertEquals(result.ok, false);
+  }
+});
 
 Deno.test("seed selection requires strict all xor unique names", () => {
   assertEquals(validateSeedSelection(true, []), null);

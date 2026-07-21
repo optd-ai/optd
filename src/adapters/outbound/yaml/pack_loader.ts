@@ -6,6 +6,10 @@ import {
   validatePackDocument,
 } from "../../../schemas/packs/pack_schemas.ts";
 import { validateHookContract } from "../../../schemas/hooks/hook_contract.ts";
+import {
+  type FieldSpec,
+  lowerCelToSql,
+} from "../../../domain/queries/expression_lowerer.ts";
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | {
   [key: string]: JsonValue;
@@ -544,11 +548,97 @@ function validateReferences(pack: LoadedPack) {
   for (const def of Object.values(pack.actions)) {
     if (def.spec.reads) {
       for (const read of Object.values(asRecord(def.spec.reads, "reads"))) {
+        const declaration = asRecord(read, "read");
         local(
-          asRecord(read, "read").resource,
+          declaration.resource,
           pack.resources,
           `${def.path}.spec.reads`,
         );
+        const resourceName = String(declaration.resource).split(":").pop()!;
+        const resource = pack.resources[resourceName];
+        const resourceFields = asRecord(
+          resource.spec.fields,
+          "resource fields",
+        );
+        const allowedPlatform = new Set(["id", "version"]);
+        for (const field of asArray(declaration.fields, "read fields")) {
+          if (
+            typeof field !== "string" ||
+            (!allowedPlatform.has(field) &&
+              !Object.hasOwn(resourceFields, field))
+          ) {
+            throw new Error(
+              `${def.path}.spec.reads: projected field '${
+                String(field)
+              }' is not declared by ${resource.identity}`,
+            );
+          }
+        }
+      }
+    }
+    if (def.spec.availability) {
+      const availability = asRecord(def.spec.availability, "availability");
+      const resource = String(availability.resource);
+      const matchingReads = Object.values(
+        asRecord(def.spec.reads ?? {}, "reads"),
+      ).filter((read) => String(asRecord(read, "read").resource) === resource);
+      if (matchingReads.length !== 1) {
+        throw new Error(
+          `${def.path}: availability must bind exactly one reviewed read of its resource`,
+        );
+      }
+      const lifecycles = Object.values(pack.lifecycles).filter((lifecycle) =>
+        String(lifecycle.spec.resource) === resource
+      );
+      if (lifecycles.length !== 1) {
+        throw new Error(
+          `${def.path}: availability resource must have exactly one lifecycle`,
+        );
+      }
+      const lifecycleStates = new Set(
+        asArray(lifecycles[0].spec.states, "lifecycle states").map((state) =>
+          String(asRecord(state, "state").name)
+        ),
+      );
+      for (
+        const state of asArray(availability.states ?? [], "availability states")
+      ) {
+        if (!lifecycleStates.has(String(state))) {
+          throw new Error(
+            `${def.path}: availability state '${
+              String(state)
+            }' is not declared by its lifecycle`,
+          );
+        }
+      }
+      if (typeof availability.condition === "string") {
+        const resourceDefinition = pack.resources[resource.split(":").pop()!];
+        const descriptors = asRecord(
+          resourceDefinition.spec.fields,
+          "resource fields",
+        );
+        const fields = Object.fromEntries(
+          Object.entries(descriptors).map(([name, raw]) => {
+            const descriptor = asRecord(raw, "field");
+            return [name, {
+              type: String(descriptor.type) as FieldSpec["type"],
+              ...(descriptor.required !== true ? { nullable: true } : {}),
+              ...(descriptor.format === "uuid" || descriptor.ref
+                ? { format: "uuid" as const }
+                : {}),
+            }];
+          }),
+        );
+        lowerCelToSql(availability.condition, {
+          fields,
+          actor: {
+            id: { type: "string", value: "preview" },
+            human_user_id: { type: "string", value: "preview" },
+          },
+          alias: "candidate",
+          maxNodes: 80,
+          maxLength: 1000,
+        });
       }
     }
     const attached = Object.values(pack.hooks).some((hook) =>

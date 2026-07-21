@@ -1,4 +1,5 @@
 import { ObjectReadAuthorityInvalidError } from "../../../application/ports/object_reader.ts";
+import { validateFieldValue as validateCanonicalFieldValue } from "../../../schemas/changesets/field_values.ts";
 import type {
   StageDto,
   StageRepository,
@@ -18,7 +19,7 @@ import {
   canonicalSha256,
 } from "../../../domain/ids/canonical_json.ts";
 import { err, ok, type Result } from "../../../domain/errors/result.ts";
-import { isUuidV7, uuidV7 } from "../../../domain/ids/uuid_v7.ts";
+import { uuidV7 } from "../../../domain/ids/uuid_v7.ts";
 import { PostgresAuthorizationRepository } from "./authorization_repository.ts";
 import { query, type Queryable, quoteIdentifier, type Sql } from "./client.ts";
 import { lockReadAuthority } from "./object_read_boundary.ts";
@@ -567,7 +568,18 @@ export class PostgresStageRepository implements StageRepository {
   }
 
   async approvals(id: string, auth: AuthContext): Promise<Result<StageDto>> {
-    return await this.inspect(id, auth);
+    try {
+      return await this.sql.begin(async (tx) => {
+        if (
+          !await canAccess(tx, id, auth, "changeset.inspect", false) &&
+          !await canReviewAny(tx, id, auth)
+        ) return err(notFound());
+        const value = await load(tx, id);
+        return value ? ok(value) : err(notFound());
+      }) as Result<StageDto>;
+    } catch (error) {
+      return mapAccessError(error);
+    }
   }
 
   async decideApproval(
@@ -578,9 +590,6 @@ export class PostgresStageRepository implements StageRepository {
   ): Promise<Result<StageDto>> {
     try {
       return await this.sql.begin(async (tx) => {
-        if (!await canAccess(tx, id, auth, "changeset.inspect", false)) {
-          return err(notFound());
-        }
         const lifecycle = (await query<{ status: string }>(
           tx,
           "select status from staged_changeset_lifecycle where stage_id=$1 for update",
@@ -1142,6 +1151,9 @@ async function prepare(
       }
     }
     const action = operation.op;
+    const authorizationAction = source?.authority
+      ? source.authority.operation_authority[String(operation.key)]
+      : action;
     if (source?.authority) {
       if (operation.project_id !== source.authority.project_id) {
         throw domain(
@@ -1151,8 +1163,12 @@ async function prepare(
         );
       }
       if (
+        !authorizationAction ||
+        !source.authority.actions.includes(authorizationAction) ||
         !source.authority.effects.some((effect) =>
-          effect.resource === identity && effect.ops.includes(action)
+          effect.resource === identity && effect.ops.includes(action) &&
+          (!effect.authority_action ||
+            effect.authority_action === authorizationAction)
         )
       ) {
         throw domain(
@@ -1162,15 +1178,15 @@ async function prepare(
         );
       }
     }
-    const authorizationAction = source?.authority?.actions[0] ?? action;
+    const effectiveAuthorizationAction = authorizationAction ?? action;
     const authorizationResource = source?.authority
-      ? authorizationAction
+      ? effectiveAuthorizationAction
       : identity;
     const authorization = await new PostgresAuthorizationRepository(sql as Sql)
       .authorize({
         auth,
         boundary: { type: "project", projectId: operation.project_id },
-        action: authorizationAction,
+        action: effectiveAuthorizationAction,
         resource: authorizationResource,
       });
     if (!authorization.ok) {
@@ -1183,7 +1199,7 @@ async function prepare(
     const matchingCapabilities = authorization.value.capabilities.filter((
       capability,
     ) =>
-      capability.action === authorizationAction &&
+      capability.action === effectiveAuthorizationAction &&
       (capability.resource === "*" ||
         capability.resource === authorizationResource)
     );
@@ -1217,7 +1233,7 @@ async function prepare(
     }
     decisions.push({
       project_id: operation.project_id,
-      action: authorizationAction,
+      action: effectiveAuthorizationAction,
       resource_identity: authorizationResource,
       decision: "allow",
       authority_digest: authorization.value.digest,
@@ -1230,7 +1246,7 @@ async function prepare(
       kind: "policy",
       project_id: operation.project_id,
       authority_digest: authorization.value.digest,
-      action: authorizationAction,
+      action: effectiveAuthorizationAction,
       resource_identity: authorizationResource,
       capabilities: matchingCapabilities,
     });
@@ -2277,6 +2293,56 @@ async function validateUniqueness(
   }
 }
 
+async function canReviewAny(
+  sql: Queryable,
+  stageId: string,
+  auth: AuthContext,
+): Promise<boolean> {
+  const rows =
+    (await query<{ requirement_json: unknown; created_principal_id: string }>(
+      sql,
+      `select r.requirement_json,s.created_principal_id from staged_approval_requirements r join staged_changesets s on s.id=r.stage_id where r.stage_id=$1 order by r.ordinal`,
+      [stageId],
+    )).rows;
+  const principal = (await query<{ type: string; active: boolean }>(
+    sql,
+    "select type,active from principals where id=$1",
+    [auth.principalId],
+  )).rows[0];
+  if (!principal?.active) return false;
+  for (const row of rows) {
+    const requirement = record(row.requirement_json);
+    if (!array(requirement.principal_types).includes(principal.type)) continue;
+    if (
+      !requirement.allow_initiator &&
+      row.created_principal_id === auth.principalId
+    ) continue;
+    if (
+      requirement.expires_at &&
+      new Date(String(requirement.expires_at)) <= new Date()
+    ) continue;
+    const value = record(requirement.boundary);
+    const boundary = value.type === "project"
+      ? { type: "project" as const, projectId: String(value.project_id) }
+      : value.type === "all_projects"
+      ? { type: "all_projects" as const }
+      : { type: "system" as const };
+    const authority = await new PostgresAuthorizationRepository(sql as Sql)
+      .authorize({
+        auth,
+        boundary,
+        action: "changeset.approval.decide",
+        resource: "system:changeset-approval",
+      });
+    if (
+      authority.ok &&
+      (authority.value.superAdmin ||
+        authority.value.effectiveRoles.includes(String(requirement.role)))
+    ) return true;
+  }
+  return false;
+}
+
 async function canAccess(
   sql: Queryable,
   stageId: string,
@@ -2492,115 +2558,8 @@ function validateFieldValue(
   value: unknown,
   field: Record<string, unknown>,
 ): void {
-  const invalid = (reason: string): never => {
-    throw domain(
-      "validation_failed",
-      `Field '${name}' ${reason}`,
-      "validation",
-    );
-  };
-  if (value === null) invalid("is not nullable");
-  const type = String(field.type);
-  if (type === "string") {
-    if (typeof value !== "string") invalid("has the wrong type");
-    const text = value as string;
-    const length = [...text].length;
-    if (field.minLength !== undefined && length < Number(field.minLength)) {
-      invalid("is shorter than its minimum length");
-    }
-    if (field.maxLength !== undefined && length > Number(field.maxLength)) {
-      invalid("is longer than its maximum length");
-    }
-    if (Array.isArray(field.enum) && !field.enum.includes(text)) {
-      invalid("is not an allowed value");
-    }
-    if (field.format === "email" && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(text)) {
-      invalid("is not a valid email");
-    }
-    if (field.format === "uri") {
-      try {
-        if (!new URL(text).protocol) invalid("is not a valid URI");
-      } catch {
-        invalid("is not a valid URI");
-      }
-    }
-    if (
-      (field.format === "uuid" || field.ref !== undefined) && !isUuidV7(text)
-    ) invalid("must be a lowercase UUIDv7 reference");
-    return;
-  }
-  if (type === "integer") {
-    if (!Number.isSafeInteger(value)) invalid("has the wrong type");
-    if (field.minimum !== undefined && Number(value) < Number(field.minimum)) {
-      invalid("is below its minimum");
-    }
-    if (field.maximum !== undefined && Number(value) > Number(field.maximum)) {
-      invalid("is above its maximum");
-    }
-    return;
-  }
-  if (type === "decimal") {
-    if (typeof value !== "string") invalid("has the wrong type");
-    const decimal = value as string;
-    if (
-      !/^-?(?:0|[1-9][0-9]*)(?:\.[0-9]*[1-9])?$/.test(decimal) ||
-      decimal === "-0"
-    ) invalid("is not a canonical decimal");
-    const [whole, fraction = ""] = decimal.replace("-", "").split(".");
-    if (
-      field.precision !== undefined &&
-      whole.replace(/^0$/, "").length + fraction.length >
-        Number(field.precision)
-    ) invalid("exceeds decimal precision");
-    if (field.scale !== undefined && fraction.length > Number(field.scale)) {
-      invalid("exceeds decimal scale");
-    }
-    if (
-      field.minimum !== undefined && Number(decimal) < Number(field.minimum)
-    ) invalid("is below its minimum");
-    if (
-      field.maximum !== undefined && Number(decimal) > Number(field.maximum)
-    ) invalid("is above its maximum");
-    return;
-  }
-  if (type === "boolean") {
-    if (typeof value !== "boolean") invalid("has the wrong type");
-    return;
-  }
-  if (type === "date") {
-    if (typeof value !== "string") invalid("has the wrong type");
-    const date = value as string;
-    if (
-      !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
-      Number.isNaN(Date.parse(`${date}T00:00:00Z`)) ||
-      new Date(`${date}T00:00:00Z`).toISOString().slice(0, 10) !== date
-    ) invalid("is not a canonical date");
-    if (field.minimum !== undefined && date < String(field.minimum)) {
-      invalid("is below its minimum");
-    }
-    if (field.maximum !== undefined && date > String(field.maximum)) {
-      invalid("is above its maximum");
-    }
-    return;
-  }
-  if (type === "timestamp") {
-    if (typeof value !== "string") invalid("has the wrong type");
-    const timestamp = value as string;
-    if (
-      !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(timestamp) ||
-      Number.isNaN(Date.parse(timestamp))
-    ) invalid("is not a canonical UTC timestamp");
-    if (
-      field.minimum !== undefined &&
-      Date.parse(timestamp) < Date.parse(String(field.minimum))
-    ) invalid("is below its minimum");
-    if (
-      field.maximum !== undefined &&
-      Date.parse(timestamp) > Date.parse(String(field.maximum))
-    ) invalid("is above its maximum");
-    return;
-  }
-  invalid("uses an unsupported field type");
+  const issue = validateCanonicalFieldValue(name, value, field);
+  if (issue) throw domain("validation_failed", issue, "validation");
 }
 
 function componentIdentity(operation: CanonicalOperation): string {

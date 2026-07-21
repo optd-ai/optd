@@ -15,18 +15,18 @@ Deno.test("action input is strict and validates reviewed descriptors", () => {
   );
   assertEquals(
     validateActionInput({ id, extra: true }, fields),
-    "action input contains an undeclared field",
+    "Field 'extra' is not declared",
   );
   assertEquals(
     validateActionInput({ count: 2 }, fields),
-    "action input id is required",
+    "Required field 'id' is missing",
   );
   assertEquals(
     validateActionInput({ id, count: 4 }, fields),
-    "action input count exceeds maximum",
+    "Field 'count' is above its maximum",
   );
   assertEquals(
     validateActionInput({ id, mode: "other" }, fields),
-    "action input mode is outside its enum",
+    "Field 'mode' is not an allowed value",
   );
 });

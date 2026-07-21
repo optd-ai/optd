@@ -39,17 +39,17 @@ export function makeStageSeedsService(
         if (
           !isRecord(raw) ||
           Object.keys(raw).some((key) =>
-            !["project_id", "all", "names"].includes(key)
+            !["project_id", "all", "seed_names"].includes(key)
           ) ||
           typeof raw.project_id !== "string" || !isUuidV7(raw.project_id) ||
           typeof raw.all !== "boolean" ||
-          (raw.names !== undefined &&
-            (!Array.isArray(raw.names) ||
-              raw.names.some((name) =>
+          (raw.seed_names !== undefined &&
+            (!Array.isArray(raw.seed_names) ||
+              raw.seed_names.some((name) =>
                 typeof name !== "string" || !/^[a-z][a-z0-9_]{0,62}$/.test(name)
               )))
         ) return invalid("seed stage request is invalid");
-        const names = (raw.names ?? []) as string[];
+        const names = (raw.seed_names ?? []) as string[];
         const selectionIssue = validateSeedSelection(raw.all, names);
         if (selectionIssue) return invalid(selectionIssue);
         const revision = (await query<{ id: string; normalized: unknown }>(
@@ -76,7 +76,10 @@ export function makeStageSeedsService(
           if (!authority.ok) return authority;
         }
         const operations: Record<string, unknown>[] = [];
-        const effects = new Map<string, Set<string>>();
+        const effects: Array<
+          { resource: string; ops: string[]; authority_action: string }
+        > = [];
+        const operationAuthority: Record<string, string> = {};
         const dependencies: Record<string, unknown>[] = [];
         for (const name of selected) {
           const seed = record(seeds[name]);
@@ -141,12 +144,17 @@ export function makeStageSeedsService(
               projectId: raw.project_id,
               resource: identity,
             });
-            if (reconciled) operations.push(reconciled);
+            if (reconciled) {
+              operations.push(reconciled);
+              operationAuthority[String(reconciled.key)] =
+                `seed:${publisher}/${pack}:${name}`;
+            }
           }
-          const set = effects.get(identity) ?? new Set<string>();
-          set.add("create");
-          set.add("update");
-          effects.set(identity, set);
+          effects.push({
+            resource: identity,
+            ops: ["create", "update"],
+            authority_action: `seed:${publisher}/${pack}:${name}`,
+          });
         }
         if (!operations.length) {
           return ok({
@@ -170,10 +178,8 @@ export function makeStageSeedsService(
               `seed:${publisher}/${pack}:${name}`
             ),
             revision_id: revision.id,
-            effects: [...effects].map(([resource, ops]) => ({
-              resource,
-              ops: [...ops].sort(),
-            })),
+            effects,
+            operation_authority: operationAuthority,
           },
           dependencies,
         };

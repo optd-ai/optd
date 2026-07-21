@@ -14,7 +14,10 @@ export type StageSource = Readonly<{
     project_id: string;
     actions: readonly string[];
     revision_id: string;
-    effects: readonly Readonly<{ resource: string; ops: readonly string[] }>[];
+    effects: readonly Readonly<
+      { resource: string; ops: readonly string[]; authority_action?: string }
+    >[];
+    operation_authority: Readonly<Record<string, string>>;
   }>;
   dependencies?: readonly Readonly<Record<string, unknown>>[];
   hook_executions?: readonly Readonly<Record<string, unknown>>[];

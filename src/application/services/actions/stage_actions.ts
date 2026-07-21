@@ -12,6 +12,11 @@ import {
   TrustedStageHookCoordinator,
 } from "../hooks/stage_hook_coordinator.ts";
 import { PostgresAuthorizationRepository } from "../../../adapters/outbound/postgres/authorization_repository.ts";
+import { validateFieldMap } from "../../../schemas/changesets/field_values.ts";
+import {
+  type FieldSpec,
+  lowerCelToSql,
+} from "../../../domain/queries/expression_lowerer.ts";
 
 export function makeStageActionService(
   sql: Sql,
@@ -75,6 +80,10 @@ export function makeStageActionService(
           return authority;
         }
         const reads: Record<string, unknown> = {};
+        const readFacts: Record<
+          string,
+          { row: Record<string, unknown>; resource: string; table: string }
+        > = {};
         const readDependencies: Array<
           {
             name: string;
@@ -118,10 +127,12 @@ export function makeStageActionService(
             ? declaration.fields.map(String)
             : [];
           const columns = [
-            "id",
-            "version",
-            "current_object_version_id",
-            ...fields,
+            ...new Set([
+              "id",
+              "version",
+              "current_object_version_id",
+              ...fields,
+            ]),
           ].map(quoteIdentifier).join(",");
           const row = (await query<Record<string, unknown>>(
             sql,
@@ -137,16 +148,31 @@ export function makeStageActionService(
             return invalid(`required action read ${readName} was not found`);
           }
           reads[readName] = Object.fromEntries(
-            Object.entries(row).filter(([key]) =>
-              key !== "current_object_version_id"
-            ),
+            fields.map((field) => [field, row[field]]),
           );
+          readFacts[readName] = { row, resource: qualified, table };
           readDependencies.push({
             name: readName,
             project_id: raw.project_id,
             resource_identity: qualified,
             object_id: objectId,
             object_version_id: String(row.current_object_version_id),
+          });
+        }
+        const availabilityIssue = await checkAvailability(
+          sql,
+          revision.normalized,
+          spec,
+          readFacts,
+          raw.project_id,
+          auth,
+        );
+        if (availabilityIssue) {
+          return err({
+            code: "action_unavailable",
+            message: "action is not currently available",
+            severity: "conflict",
+            details: { reason: availabilityIssue },
           });
         }
         const rows = (await query<Record<string, unknown>>(
@@ -233,7 +259,15 @@ export function makeStageActionService(
             project_id: raw.project_id,
             actions: [semantic],
             revision_id: revision.id,
-            effects,
+            effects: effects.map((effect) => ({
+              ...effect,
+              authority_action: semantic,
+            })),
+            operation_authority: Object.fromEntries(
+              result.added_operations.map((
+                operation,
+              ) => [operation.key, semantic]),
+            ),
           },
           dependencies: readDependencies.map((dependency) => ({
             kind: "object_version",
@@ -277,67 +311,97 @@ export function makeStageActionService(
     },
   };
 }
+async function checkAvailability(
+  sql: Sql,
+  normalized: unknown,
+  actionSpec: Record<string, unknown>,
+  reads: Record<
+    string,
+    { row: Record<string, unknown>; resource: string; table: string }
+  >,
+  projectId: string,
+  auth: AuthContext,
+): Promise<string | null> {
+  const availability = record(actionSpec.availability);
+  if (!Object.keys(availability).length) return null;
+  const resource = String(availability.resource);
+  const matches = Object.values(reads).filter((read) =>
+    read.resource === resource
+  );
+  if (matches.length !== 1) {
+    return "availability does not bind one reviewed current read";
+  }
+  const current = matches[0];
+  const lifecycles = Object.values(record(record(normalized).lifecycles)).map(
+    record,
+  ).filter((value) => String(record(value.spec).resource) === resource);
+  if (lifecycles.length !== 1) {
+    return "availability lifecycle is unavailable or ambiguous";
+  }
+  const lifecycle = record(lifecycles[0].spec);
+  const field = String(lifecycle.field);
+  const state = (await query<Record<string, unknown>>(
+    sql,
+    `select ${quoteIdentifier(field)} state from ${
+      quoteIdentifier(current.table)
+    } where project_id=$1 and id=$2 and archived_at is null`,
+    [projectId, current.row.id],
+  )).rows[0]?.state;
+  if (state === undefined) return "availability object is absent or archived";
+  if (
+    Array.isArray(availability.states) && !availability.states.includes(state)
+  ) return "availability state is not allowed";
+  if (typeof availability.condition === "string") {
+    const resourceName = resource.split(":").pop()!;
+    const definition = record(
+      record(record(normalized).resources)[resourceName],
+    );
+    const descriptors = record(record(definition.spec).fields);
+    const fields = Object.fromEntries(
+      Object.entries(descriptors).map(([name, raw]) => {
+        const descriptor = record(raw);
+        return [name, {
+          type: String(descriptor.type) as FieldSpec["type"],
+          ...(descriptor.required !== true ? { nullable: true } : {}),
+          ...(descriptor.format === "uuid" || descriptor.ref
+            ? { format: "uuid" as const }
+            : {}),
+        }];
+      }),
+    );
+    const lowered = lowerCelToSql(availability.condition, {
+      fields,
+      actor: {
+        id: { type: "string", value: auth.principalId },
+        human_user_id: {
+          type: "string",
+          value: auth.principalType === "agent_user" ? null : auth.humanUserId,
+        },
+      },
+      alias: "candidate",
+      parameterOffset: 2,
+      maxNodes: 80,
+      maxLength: 1000,
+    });
+    const result = await query<{ allowed: boolean }>(
+      sql,
+      `select coalesce((${lowered.sql}),false) allowed from ${
+        quoteIdentifier(current.table)
+      } candidate where project_id=$1 and id=$2 and archived_at is null`,
+      [projectId, current.row.id, ...lowered.params],
+    );
+    if (!result.rows[0]?.allowed) {
+      return "availability condition is not satisfied";
+    }
+  }
+  return null;
+}
+
 export function validateActionInput(
   input: Record<string, unknown>,
   fields: Record<string, unknown>,
 ): string | null {
-  if (Object.keys(input).some((key) => !Object.hasOwn(fields, key))) {
-    return "action input contains an undeclared field";
-  }
-  for (const [name, raw] of Object.entries(fields)) {
-    const field = record(raw);
-    const value = input[name];
-    if (field.required === true && value === undefined) {
-      return `action input ${name} is required`;
-    }
-    if (value === undefined) continue;
-    const type = String(field.type);
-    if (
-      ["string", "decimal", "date", "timestamp"].includes(type) &&
-      typeof value !== "string"
-    ) return `action input ${name} must be a string`;
-    if (type === "integer" && !Number.isSafeInteger(value)) {
-      return `action input ${name} must be an integer`;
-    }
-    if (type === "boolean" && typeof value !== "boolean") {
-      return `action input ${name} must be boolean`;
-    }
-    if (typeof value === "string") {
-      if (
-        Number.isInteger(field.minLength) &&
-        [...value].length < Number(field.minLength)
-      ) return `action input ${name} is too short`;
-      if (
-        Number.isInteger(field.maxLength) &&
-        [...value].length > Number(field.maxLength)
-      ) return `action input ${name} is too long`;
-      if (Array.isArray(field.enum) && !field.enum.includes(value)) {
-        return `action input ${name} is outside its enum`;
-      }
-      if (field.format === "uuid" && !isUuidV7(value)) {
-        return `action input ${name} must be a UUIDv7`;
-      }
-      if (
-        field.format === "email" && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(value)
-      ) return `action input ${name} must be an email`;
-      if (field.format === "uri") {
-        try {
-          new URL(value);
-        } catch {
-          return `action input ${name} must be a URI`;
-        }
-      }
-    }
-    if (typeof value === "number") {
-      if (typeof field.minimum === "number" && value < field.minimum) {
-        return `action input ${name} is below minimum`;
-      }
-      if (typeof field.maximum === "number" && value > field.maximum) {
-        return `action input ${name} exceeds maximum`;
-      }
-    }
-  }
-  return null;
+  return validateFieldMap(input, fields, true);
 }
 function invalid(message: string): Result<never> {
   return err({

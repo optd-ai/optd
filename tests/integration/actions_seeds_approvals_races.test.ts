@@ -142,6 +142,26 @@ Deno.test({
         )).ok,
         false,
       );
+      const reviewerStage = await insertApprovalStage(
+        harness.server.sql,
+        auth,
+        1,
+        { role: "system:admin", allow_initiator: false },
+      );
+      await grantReviewer(harness.server.sql, ordinary.principalId);
+      assertEquals(
+        (await repository.approvals(reviewerStage.stageId, ordinary)).ok,
+        true,
+      );
+      assertEquals(
+        (await repository.decideApproval(
+          reviewerStage.stageId,
+          reviewerStage.requirementId,
+          { decision: "approve", reason: "ordinary reviewer" },
+          ordinary,
+        )).ok,
+        true,
+      );
       assertEquals(
         await scalar(
           harness.server.sql,
@@ -300,6 +320,33 @@ async function insertApprovalStage(
   );
   return { stageId, requirementId };
 }
+async function grantReviewer(
+  sql: Parameters<typeof query>[0],
+  principalId: string,
+) {
+  const version = uuidV7();
+  await query(
+    sql,
+    "insert into role_assignments(id,principal_id,role_id,boundary_type,active) values($1,$2,'system:admin','system',true)",
+    [uuidV7(), principalId],
+  );
+  await query(
+    sql,
+    "insert into policy_definition_versions(id,policy_id,version,active) values($1,$2,1,true)",
+    [version, `system:approval_${principalId.slice(-8)}`],
+  );
+  await query(
+    sql,
+    "insert into policy_rules(id,policy_definition_version_id,role_id,capability,resource,condition_kind) values($1,$2,'system:admin','changeset.approval.decide','system:changeset-approval','unconditional')",
+    [uuidV7(), version],
+  );
+  await query(
+    sql,
+    "insert into policy_assignments(id,policy_definition_version_id,boundary_type,active) values($1,$2,'system',true)",
+    [uuidV7(), version],
+  );
+}
+
 async function createAgentAuth(
   sql: Parameters<typeof query>[0],
   anchor: AuthContext,

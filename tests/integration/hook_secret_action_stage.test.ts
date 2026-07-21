@@ -80,12 +80,7 @@ Deno.test({
         action: "test/actionproof:generate",
         input: { project_id: projectId, source_id: read.id },
         reads: {
-          source: {
-            id: read.id,
-            version: read.version,
-            name: read.name,
-            status: read.status,
-          },
+          source: { name: read.name, status: read.status },
         },
         read_dependencies: [dependency],
         declarations: [declaration],
@@ -136,6 +131,35 @@ Deno.test({
       );
       assertEquals(provider.attempts.length, 2);
 
+      const sourceTable = (await query<{ table_name: string }>(
+        harness.server.sql,
+        `select table_name from pack_runtime_tables where publisher='test' and pack_name='actionproof' and definition_kind='resource' and definition_name='source'`,
+      )).rows[0].table_name;
+      const beforeUnavailable = await stageCount(harness.server.sql);
+      await query(
+        harness.server.sql,
+        `update "${sourceTable}" set status='blocked' where id=$1`,
+        [read.id],
+      );
+      const unavailable = await harness.runOptctl([
+        "--json",
+        "--project",
+        "action-stage-project",
+        "action",
+        "stage",
+        "test/actionproof:generate",
+        "--input",
+        JSON.stringify({ project_id: projectId, source_id: read.id }),
+      ]);
+      assertEquals(unavailable.code, 1);
+      assertEquals(provider.attempts.length, 2);
+      assertEquals(await stageCount(harness.server.sql), beforeUnavailable);
+      await query(
+        harness.server.sql,
+        `update "${sourceTable}" set status='ready' where id=$1`,
+        [read.id],
+      );
+
       const seedStage = await harness.runOptctl([
         "--json",
         "--project",
@@ -173,8 +197,6 @@ Deno.test({
             input: { project_id: projectId, source_id: read.id },
             reads: {
               source: {
-                id: read.id,
-                version: read.version,
                 name: read.name,
                 status: read.status,
               },
@@ -194,8 +216,6 @@ Deno.test({
             input: { project_id: projectId, source_id: read.id },
             reads: {
               source: {
-                id: read.id,
-                version: read.version,
                 name: read.name,
                 status: read.status,
               },
@@ -217,6 +237,15 @@ Deno.test({
     }
   },
 });
+
+async function stageCount(sql: Parameters<typeof query>[0]) {
+  return Number(
+    (await query<{ count: string }>(
+      sql,
+      "select count(*)::text count from staged_changesets",
+    )).rows[0].count,
+  );
+}
 
 async function assertStageError(
   operation: () => Promise<unknown>,
@@ -353,7 +382,7 @@ export async function seedRead(
   return {
     id: objectId,
     object_version_id: versionId,
-    version: 1,
+
     name: "Pinned Source",
     status: "ready",
   };
@@ -368,6 +397,7 @@ export async function writePack(
   await Deno.mkdir(`${root}/actions`);
   await Deno.mkdir(`${root}/hooks`);
   await Deno.mkdir(`${root}/seeds`);
+  await Deno.mkdir(`${root}/lifecycles`);
   await Deno.writeTextFile(
     `${root}/pack.yaml`,
     `kind: Pack\napiVersion: operant.dev/v1\nmetadata: { publisher: test, name: actionproof, version: 1.0.0 }\nspec: { purpose: Action stage integration proof., axi: {} }\n`,
@@ -379,12 +409,16 @@ export async function writePack(
     );
   }
   await Deno.writeTextFile(
+    `${root}/lifecycles/source_status.yaml`,
+    `kind: Lifecycle\napiVersion: operant.dev/v1\nmetadata: { name: source_status }\nspec:\n  resource: source\n  field: status\n  initial: ready\n  states:\n    - { name: ready, terminal: false }\n    - { name: blocked, terminal: true }\n  transitions:\n    - { name: block, from: [ready], to: blocked }\n  axi: {}\n`,
+  );
+  await Deno.writeTextFile(
     `${root}/seeds/targets.yaml`,
     `kind: Seed\napiVersion: operant.dev/v1\nmetadata: { name: targets }\nspec:\n  resource: target\n  key: name\n  mode: changeset\n  rows:\n    - { name: Seeded Target, status: ready }\n  axi: {}\n`,
   );
   await Deno.writeTextFile(
     `${root}/actions/generate.yaml`,
-    `kind: Action\napiVersion: operant.dev/v1\nmetadata: { name: generate }\nspec:\n  input:\n    project_id: { type: string, required: true, format: uuid }\n    source_id: { type: string, required: true, format: uuid }\n  reads:\n    source:\n      resource: source\n      id_from: '$action.input.source_id'\n      fields: [name, status]\n      required: true\n  axi: {}\n`,
+    `kind: Action\napiVersion: operant.dev/v1\nmetadata: { name: generate }\nspec:\n  input:\n    project_id: { type: string, required: true, format: uuid }\n    source_id: { type: string, required: true, format: uuid }\n  reads:\n    source:\n      resource: source\n      id_from: '$action.input.source_id'\n      fields: [name, status]\n      required: true\n  availability:\n    resource: source\n    states: [ready]\n    condition: 'status == "ready"'\n  axi: {}\n`,
   );
   await Deno.writeTextFile(
     `${root}/hooks/generate.yaml`,
@@ -392,7 +426,7 @@ export async function writePack(
   );
   await Deno.writeTextFile(
     `${root}/hooks/generate.ts`,
-    `const envelope=JSON.parse(await new Response(Deno.stdin.readable).text()); const read=envelope.input.read; const request=envelope.input.request; if (Object.keys(read).sort().join(',')!=="id,name,status,version" || read.status!=="ready") throw new Error("uncurated read"); await fetch(${
+    `const envelope=JSON.parse(await new Response(Deno.stdin.readable).text()); const read=envelope.input.read; const request=envelope.input.request; if (Object.keys(read).sort().join(',')!=="name,status" || read.status!=="ready") throw new Error("uncurated read"); await fetch(${
       JSON.stringify(providerUrl)
     }); console.log(JSON.stringify({operations:[{op:"create",key:"made",project_id:request.project_id,resource:"test/actionproof:target",fields:{name:read.name}},{op:"update",project_id:request.project_id,resource:"test/actionproof:target",object_id:{$ref:"made.object_id"},set:{status:"converted"}}]}));`,
   );

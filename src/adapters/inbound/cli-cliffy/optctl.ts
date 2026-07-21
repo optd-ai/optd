@@ -1610,7 +1610,11 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       }
       result = await postJson(
         `${parsed.server}/api/v1/packs/${publisher}/${pack}/seeds/stage`,
-        { project_id: project.id, all, names },
+        {
+          project_id: project.id,
+          all,
+          ...(names.length ? { seed_names: names } : {}),
+        },
       );
     } else if (cmd === "secret" && sub === "list") {
       result = await getJson(`${parsed.server}/api/v1/secrets`);
