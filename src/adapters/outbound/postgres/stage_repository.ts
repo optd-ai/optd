@@ -587,6 +587,12 @@ export class PostgresStageRepository implements StageRepository {
           [id],
         )).rows[0];
         if (!lifecycle) return err(notFound());
+        const existing = (await query<{ id: string }>(
+          tx,
+          "select id from staged_approval_decisions where stage_id=$1 and requirement_id=$2 and principal_id=$3",
+          [id, requirementId, auth.principalId],
+        )).rows[0];
+        if (existing) return ok((await load(tx, id))!);
         if (["rejected", "cancelled", "committed"].includes(lifecycle.status)) {
           throw domain(
             "approval_terminal",
@@ -668,12 +674,7 @@ export class PostgresStageRepository implements StageRepository {
             "authorization",
           );
         }
-        const existing = (await query<{ id: string }>(
-          tx,
-          "select id from staged_approval_decisions where requirement_id=$1 and principal_id=$2",
-          [requirementId, auth.principalId],
-        )).rows[0];
-        if (!existing) {
+        {
           const inserted = await query<{ id: string }>(
             tx,
             `insert into staged_approval_decisions(id,stage_id,requirement_id,principal_id,decision,reason,decided_auth_context_id)

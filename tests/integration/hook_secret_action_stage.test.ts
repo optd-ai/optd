@@ -291,7 +291,7 @@ async function storedDeclaration(
   };
 }
 
-async function seedRead(
+export async function seedRead(
   harness: Awaited<ReturnType<typeof startAuthenticatedHarness>>,
   projectId: string,
 ) {
@@ -359,7 +359,10 @@ async function seedRead(
   };
 }
 
-async function writePack(root: string, providerUrl: string): Promise<void> {
+export async function writePack(
+  root: string,
+  providerUrl: string,
+): Promise<void> {
   const endpoint = new URL(providerUrl).host;
   await Deno.mkdir(`${root}/resources`);
   await Deno.mkdir(`${root}/actions`);
@@ -372,7 +375,7 @@ async function writePack(root: string, providerUrl: string): Promise<void> {
   for (const name of ["source", "target"]) {
     await Deno.writeTextFile(
       `${root}/resources/${name}.yaml`,
-      `kind: Resource\napiVersion: operant.dev/v1\nmetadata: { name: ${name} }\nspec:\n  fields:\n    name: { type: string, required: true, unique: true }\n    status: { type: string, required: true }\n  axi: {}\n`,
+      `kind: Resource\napiVersion: operant.dev/v1\nmetadata: { name: ${name} }\nspec:\n  fields:\n    name: { type: string, required: true, unique: true }\n    status: { type: string, required: true }\n    note: { type: string }\n  axi: {}\n`,
     );
   }
   await Deno.writeTextFile(

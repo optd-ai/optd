@@ -135,7 +135,8 @@ export function canonicalizeApprovalRequirements(
       const parsed = new Date(raw.expires_at);
       if (
         !Number.isFinite(parsed.getTime()) ||
-        !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,9})?(?:Z|[+-]\d\d:\d\d)$/.test(raw.expires_at)
+        !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,9})?(?:Z|[+-]\d\d:\d\d)$/
+          .test(raw.expires_at)
       ) {
         throw new ApprovalContractError(
           `${path}/expires_at`,

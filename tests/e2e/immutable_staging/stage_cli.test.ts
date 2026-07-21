@@ -821,7 +821,16 @@ Deno.test({
                 code: "coordinated",
                 message: "validated",
               }],
-              approval_requirements: [{ id: uuidV7(), capability: "review" }],
+              approval_requirements: [{
+                key: "strict_review",
+                role: "testpub/strict:reviewer",
+                boundary: { type: "project", project_id: projectId },
+                minimum: 1,
+                principal_types: ["human_user"],
+                allow_initiator: true,
+                expires_at: null,
+                reason: "strict staging review is required",
+              }],
               required_capabilities: ["review"],
               effects: ["validated"],
               planned_events: [{ id: "event:validated" }],
@@ -892,6 +901,18 @@ Deno.test({
       assertEquals(coordinated.ok, true);
       if (coordinated.ok) {
         assertEquals(coordinated.value.status, "awaiting_approval");
+        assertEquals(coordinated.value.approval_requirements.length, 1);
+        assertEquals(
+          isUuidV7(
+            String(
+              (coordinated.value.approval_requirements[0] as Record<
+                string,
+                unknown
+              >).id,
+            ),
+          ),
+          true,
+        );
         assertEquals(coordinated.value.hook_executions.length, 1);
         assertEquals(
           (coordinated.value.hook_executions[0] as Record<string, unknown>)
