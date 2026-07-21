@@ -470,6 +470,133 @@ for (const trace of [false, true]) {
           "drop sequence commit_retry_fault_sequence",
         );
 
+        const deadlockProject = await harness.runOptctl([
+          "--json",
+          "project",
+          "create",
+          `deadlock-${trace ? "trace" : "default"}`,
+          "--display-name",
+          "Commit Deadlock Project",
+        ]);
+        assertEquals(deadlockProject.code, 0, deadlockProject.stderr);
+        const deadlockProjectId = JSON.parse(deadlockProject.stdout).data.id;
+        const deadlockStage = await actor!.runOptctl([
+          "--json",
+          "--project",
+          deadlockProjectId,
+          "seed",
+          "stage",
+          "test/actionproof",
+          "--seed",
+          "targets",
+        ]);
+        assertEquals(deadlockStage.code, 0, deadlockStage.stderr);
+        const deadlockStageId = JSON.parse(deadlockStage.stdout).data.stage.id;
+        const hookFactsBeforeDeadlock = Number(
+          (await query<{ count: string }>(
+            harness.server.sql,
+            "select count(*)::text count from staged_hook_executions",
+          )).rows[0].count,
+        );
+        await query(
+          harness.server.sql,
+          "create table commit_deadlock_barrier(id integer primary key, touched integer not null default 0)",
+        );
+        await query(
+          harness.server.sql,
+          "insert into commit_deadlock_barrier(id) select generate_series(1,1000)",
+        );
+        await query(
+          harness.server.sql,
+          "create sequence commit_deadlock_attempts",
+        );
+        await query(
+          harness.server.sql,
+          `create function inject_commit_deadlock() returns trigger language plpgsql as $$
+           begin
+             perform nextval('commit_deadlock_attempts');
+             perform set_config('deadlock_timeout','50ms',true);
+             update commit_deadlock_barrier set touched=touched+1 where id=1;
+             return new;
+           end $$`,
+        );
+        await query(
+          harness.server.sql,
+          `create trigger inject_commit_deadlock before insert on changeset_commits
+           for each row execute function inject_commit_deadlock()`,
+        );
+        let blockerReady!: () => void;
+        let beginCycle!: () => void;
+        const ready = new Promise<void>((resolve) => blockerReady = resolve);
+        const cycle = new Promise<void>((resolve) => beginCycle = resolve);
+        const deadlockBlocker = harness.server.sql.begin(async (tx) => {
+          await query(tx, "select set_config('deadlock_timeout','5s',true)");
+          await query(
+            tx,
+            "update commit_deadlock_barrier set touched=touched+1",
+          );
+          blockerReady();
+          await cycle;
+          await query(
+            tx,
+            "select stage_id from staged_changeset_lifecycle where stage_id=$1 for update",
+            [deadlockStageId],
+          );
+        });
+        await ready;
+        const deadlockedCommit = actor!.runOptctl([
+          "--json",
+          "changeset",
+          "commit",
+          deadlockStageId,
+          "--timeout",
+          "2s",
+        ]);
+        await observeBlockedQuery(
+          harness.server.sql,
+          "insert into changeset_commits",
+        );
+        beginCycle();
+        const [blockerOutcome, commitOutcome] = await Promise.allSettled([
+          deadlockBlocker,
+          deadlockedCommit,
+        ]);
+        if (blockerOutcome.status === "rejected") throw blockerOutcome.reason;
+        if (commitOutcome.status === "rejected") throw commitOutcome.reason;
+        const deadlockedResult = commitOutcome.value;
+        assertEquals(deadlockedResult.code, 0, deadlockedResult.stderr);
+        assertEquals(
+          Number(
+            (await query<{ last_value: string }>(
+              harness.server.sql,
+              "select last_value::text last_value from commit_deadlock_attempts",
+            )).rows[0].last_value,
+          ) >= 2,
+          true,
+        );
+        assertEquals(
+          Number(
+            (await query<{ count: string }>(
+              harness.server.sql,
+              "select count(*)::text count from staged_hook_executions",
+            )).rows[0].count,
+          ),
+          hookFactsBeforeDeadlock,
+        );
+        await query(
+          harness.server.sql,
+          "drop trigger inject_commit_deadlock on changeset_commits",
+        );
+        await query(
+          harness.server.sql,
+          "drop function inject_commit_deadlock()",
+        );
+        await query(
+          harness.server.sql,
+          "drop sequence commit_deadlock_attempts",
+        );
+        await query(harness.server.sql, "drop table commit_deadlock_barrier");
+
         const timeoutProject = await harness.runOptctl([
           "--json",
           "project",
@@ -814,18 +941,22 @@ async function stageCount(sql: Parameters<typeof query>[0]) {
   );
 }
 async function observeBlockedCommit(sql: Sql): Promise<void> {
+  await observeBlockedQuery(sql, "staged_changeset_lifecycle");
+}
+async function observeBlockedQuery(sql: Sql, fragment: string): Promise<void> {
   const deadline = Date.now() + 5_000;
   while (Date.now() < deadline) {
     const blocked = (await query<{ present: boolean }>(
       sql,
       `select exists(select 1 from pg_stat_activity
        where cardinality(pg_blocking_pids(pid))>0
-         and query like '%staged_changeset_lifecycle%') present`,
+         and position($1 in query)>0) present`,
+      [fragment],
     )).rows[0]?.present;
     if (blocked) return;
     await Promise.resolve();
   }
-  throw new Error("bounded lifecycle waiter observation failed");
+  throw new Error(`bounded waiter observation failed for ${fragment}`);
 }
 
 async function runtimeTable(sql: Sql, name: string) {
