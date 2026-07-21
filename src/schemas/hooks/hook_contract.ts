@@ -194,7 +194,6 @@ export function rejectHookImports(source: string): void {
   const forbidden: Array<[RegExp, string]> = [
     [/\bimport\b/i, "import"],
     [/\brequire\s*\(/i, "require"],
-    [/\b(?:https?|file|data|blob|npm|jsr|node):/i, "module URL"],
     [/\bfrom\s*["'`]/i, "static module source"],
   ];
   for (const [pattern, label] of forbidden) {

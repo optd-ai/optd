@@ -151,7 +151,7 @@ export function makeHookSecretGrantService(
         return ok(
           (await query<Record<string, unknown>>(
             deps.sql,
-            `${grantListSql()} where_view.grant_id=$1`,
+            `${grantListSql()} where where_view.grant_id=$1`,
             [id],
           )).rows[0],
         );
@@ -231,7 +231,7 @@ export function makeHookSecretGrantService(
         return ok(
           (await query<Record<string, unknown>>(
             deps.sql,
-            `${grantListSql()} where_view.grant_id=$1`,
+            `${grantListSql()} where where_view.grant_id=$1`,
             [id],
           )).rows[0],
         );
@@ -341,6 +341,14 @@ function grantError(error: unknown): ReturnType<typeof err> {
     code?: string;
     severity?: "validation" | "conflict";
   };
+  if (value.code === "23505") {
+    return err({
+      code: "hook_grant_conflict",
+      message: "an effective grant already exists",
+      severity: "conflict",
+      details: {},
+    });
+  }
   return err({
     code: value.code ?? "hook_grant_failed",
     message: value.code ? value.message : "hook grant operation failed",

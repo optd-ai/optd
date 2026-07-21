@@ -1,3 +1,4 @@
+// deno-lint-ignore-file no-import-prefix
 import { assertEquals, assertRejects } from "jsr:@std/assert@1";
 import {
   closePostgresClient,
@@ -16,7 +17,7 @@ import {
 import { canonicalSha256 } from "../../src/domain/ids/canonical_json.ts";
 import { isUuidV7, uuidV7 } from "../../src/domain/ids/uuid_v7.ts";
 import { storeOrReuseCandidate } from "../../src/adapters/outbound/postgres/pack_repository.ts";
-import type { LoadedPack } from "../../src/adapters/outbound/yaml/pack_loader.ts";
+import { loadPackFromFiles } from "../../src/adapters/outbound/yaml/pack_loader.ts";
 
 Deno.test({
   name:
@@ -41,6 +42,13 @@ Deno.test({
       const migration1021 = platformMigrations.find((migration) =>
         migration.id === "1021_immutable_hook_attachment_revisions"
       )!;
+      const migrations1022To1024 = platformMigrations.filter((migration) =>
+        [
+          "1022_hook_attachment_ordinal_identity",
+          "1023_hook_attachment_component_ordinal_identity",
+          "1024_trusted_hook_secrets",
+        ].includes(migration.id)
+      );
       const before1020 = platformMigrations.slice(
         0,
         platformMigrations.indexOf(migration1020),
@@ -68,38 +76,40 @@ Deno.test({
         lifecycles: { flow: { kind: "Lifecycle", spec: {} } },
         actions: { run: { kind: "Action", spec: {} } },
         hooks: {
-          guard: {
-            kind: "Hook",
-            spec: {
-              attachments: [
-                {
-                  phase: "changeset.before_stage",
-                  resource: "test/upgrade:thing",
-                  input: { "\u{10000}": 1e-7, "\uE000": 1e30 },
-                },
-                {
-                  phase: "action.stage",
-                  action: "test/upgrade:run",
-                  input: {},
-                },
-                {
-                  phase: "changeset.validate",
-                  resource: "test/upgrade:thing",
-                  input: {},
-                },
-                {
-                  phase: "event.after_commit",
-                  event: "thing.changed",
-                  input: {},
-                },
-              ],
+          guard_before: strictLegacyHook("guard_before.ts", "patch.v1", {
+            phase: "changeset.before_stage",
+            resource: "test/upgrade:thing",
+            input: { "\u{10000}": 1e-7, "\uE000": 1e30 },
+          }),
+          guard_action: strictLegacyHook(
+            "guard_action.ts",
+            "changeset.operations.v1",
+            {
+              phase: "action.stage",
+              action: "test/upgrade:run",
+              input: {},
             },
-          },
+          ),
+          guard_validate: strictLegacyHook(
+            "guard_validate.ts",
+            "validation.v1",
+            {
+              phase: "changeset.validate",
+              resource: "test/upgrade:thing",
+              input: {},
+            },
+          ),
+          guard_event: strictLegacyHook("guard_event.ts", "delivery.v1", {
+            phase: "event.after_commit",
+            event: "thing.changed",
+            input: {},
+          }),
         },
         roles: { worker: { kind: "Role", spec: {} } },
         policies: { allow: { kind: "Policy", spec: {} } },
         seeds: { initial: { kind: "Seed", spec: {} } },
       };
+      const legacySources = await legacyHookSources();
       await sql.begin(async (tx) => {
         await query(
           tx,
@@ -129,12 +139,13 @@ Deno.test({
         await query(
           tx,
           `insert into pack_candidate_revisions(id,publisher,pack_name,version,source_digest,content_digest,manifest,normalized,source_files)
-          values($1,'test','upgrade','1.0.0',$2,$3,'{}',$4::jsonb,'{}')`,
+          values($1,'test','upgrade','1.0.0',$2,$3,'{}',$4::jsonb,$5::jsonb)`,
           [
             candidate,
             `sha256:${"1".repeat(64)}`,
             `sha256:${"2".repeat(64)}`,
             definitions,
+            legacySources,
           ],
         );
         await query(
@@ -215,7 +226,7 @@ Deno.test({
         "select id,definition_kind,definition_name,definition_digest from pack_component_revisions where candidate_revision_id=$1 order by definition_kind",
         [candidate],
       );
-      assertEquals(components.rows.length, 8);
+      assertEquals(components.rows.length, 11);
       for (const component of components.rows) {
         assertEquals(isUuidV7(component.id), true);
         const section = component.definition_kind === "policy"
@@ -283,7 +294,7 @@ Deno.test({
       ]);
       const expectedAttachmentSpecs = [
         {
-          hook: "test/upgrade:guard",
+          hook: "test/upgrade:guard_before",
           phase: "changeset.before_stage",
           resource: "test/upgrade:thing",
           action: null,
@@ -293,7 +304,7 @@ Deno.test({
           input: { "\u{10000}": 1e-7, "\uE000": 1e30 },
         },
         {
-          hook: "test/upgrade:guard",
+          hook: "test/upgrade:guard_action",
           phase: "action.stage",
           resource: null,
           action: "test/upgrade:run",
@@ -303,7 +314,7 @@ Deno.test({
           input: {},
         },
         {
-          hook: "test/upgrade:guard",
+          hook: "test/upgrade:guard_validate",
           phase: "changeset.validate",
           resource: "test/upgrade:thing",
           action: null,
@@ -313,7 +324,7 @@ Deno.test({
           input: {},
         },
         {
-          hook: "test/upgrade:guard",
+          hook: "test/upgrade:guard_event",
           phase: "event.after_commit",
           resource: null,
           action: null,
@@ -348,36 +359,156 @@ Deno.test({
         )).rows[0].count,
         "1",
       );
-      const legacyPack = {
-        publisher: "test",
-        name: "upgrade",
-        version: "1.0.0",
-        revision: `test/upgrade@1.0.0:sha256:${"2".repeat(64)}`,
-        sourceDigest: `sha256:${"1".repeat(64)}`,
-        manifest: {},
-        normalized: definitions,
-        sourceFiles: [],
-        resources: definitions.resources,
-        relationships: definitions.relationships,
-        lifecycles: definitions.lifecycles,
-        actions: definitions.actions,
-        hooks: definitions.hooks,
-        roles: definitions.roles,
-        policies: definitions.policies,
-        seeds: definitions.seeds,
-        scripts: {},
-      } as unknown as LoadedPack;
-      const reused = await sql.begin((tx) =>
-        storeOrReuseCandidate(tx, legacyPack)
+      await query(
+        sql,
+        `insert into platform_secrets(name,description,ciphertext,nonce,algorithm,key_id,created_by)
+         values('legacy-secret',null,$1,$2,'AES-256-GCM','legacy-key','legacy-actor')`,
+        [new Uint8Array([1, 2, 3]), new Uint8Array(12)],
       );
-      assertEquals(reused, { id: candidate, reused: true });
+      await query(
+        sql,
+        `create table legacy_hook_secret_grants(id text primary key)`,
+      );
+      await query(
+        sql,
+        `insert into legacy_hook_secret_grants values('legacy-grant')`,
+      );
+      const auditId = uuidV7();
+      await query(
+        sql,
+        `insert into audit_events(id,actor_id,event_type,resource,object_id,action,request_metadata_json)
+         values($1,'legacy-actor','legacy.secret','system:secret','legacy-secret','legacy.secret','{}')`,
+        [auditId],
+      );
+      await assertRejects(
+        () =>
+          sql!.begin((tx) => applyPlatformMigrations(tx, migrations1022To1024)),
+        Error,
+        "incompatible legacy secret ciphertext",
+      );
+      assertEquals(
+        (await query<{ count: string }>(
+          sql,
+          `select count(*)::text count from platform_schema_migrations
+            where id=any($1::text[])`,
+          [migrations1022To1024.map((migration) => migration.id)],
+        )).rows[0].count,
+        "0",
+      );
+      assertEquals(
+        (await query<{ present: boolean }>(
+          sql,
+          `select exists(select 1 from information_schema.columns
+            where table_name='pack_component_revisions' and column_name='hook_security_digest') present`,
+        )).rows[0].present,
+        false,
+      );
+      assertEquals(
+        (await query<{ count: string }>(
+          sql,
+          "select count(*)::text count from audit_events where id=$1",
+          [auditId],
+        )).rows[0].count,
+        "1",
+      );
+      assertEquals(
+        (await query<{ count: string }>(
+          sql,
+          "select count(*)::text count from platform_secrets where name='legacy-secret'",
+        )).rows[0].count,
+        "1",
+      );
+      await query(
+        sql,
+        "delete from platform_secrets where name='legacy-secret'",
+      );
+      await assertRejects(
+        () =>
+          sql!.begin((tx) => applyPlatformMigrations(tx, migrations1022To1024)),
+        Error,
+        "incompatible legacy hook secret grants",
+      );
+      assertEquals(
+        (await query<{ count: string }>(
+          sql,
+          `select count(*)::text count from platform_schema_migrations
+            where id=any($1::text[])`,
+          [migrations1022To1024.map((migration) => migration.id)],
+        )).rows[0].count,
+        "0",
+      );
+      await query(sql, "delete from legacy_hook_secret_grants");
+      assertEquals(
+        (await sql.begin((tx) =>
+          applyPlatformMigrations(tx, migrations1022To1024)
+        )).applied,
+        migrations1022To1024.map((migration) => migration.id),
+      );
+      assertEquals(
+        (await query<{ count: string }>(
+          sql,
+          "select count(*)::text count from audit_events where id=$1",
+          [auditId],
+        )).rows[0].count,
+        "1",
+      );
+      const currentPack = await loadPackFromFiles([
+        {
+          path: "pack.yaml",
+          text: `kind: Pack
+apiVersion: operant.dev/v1
+metadata: { publisher: test, name: current, version: 1.0.0 }
+spec: { purpose: Current repository proof., axi: {} }
+`,
+        },
+        {
+          path: "resources/item.yaml",
+          text: `kind: Resource
+apiVersion: operant.dev/v1
+metadata: { name: item }
+spec:
+  fields:
+    name: { type: string, required: true }
+  axi: {}
+`,
+        },
+        {
+          path: "hooks/guard.yaml",
+          text: `kind: Hook
+apiVersion: operant.dev/v1
+metadata: { name: guard }
+spec:
+  script: guard.ts
+  permissions: { net: false, env: false, read: false, write: false, run: false }
+  secrets: []
+  effects: { operations: [] }
+  output: { schema: validation.v1 }
+  attachments:
+    - { phase: changeset.validate, resource: item, input: {} }
+  axi: {}
+`,
+        },
+        {
+          path: "hooks/guard.ts",
+          text:
+            `console.log(JSON.stringify({allow:true,errors:[],warnings:[],required_approvals:[]}));`,
+        },
+      ]);
+      const stored = await sql.begin((tx) =>
+        storeOrReuseCandidate(tx, currentPack)
+      );
+      assertEquals(stored.reused, false);
+      assertEquals(
+        await sql.begin((tx) => storeOrReuseCandidate(tx, currentPack)),
+        { id: stored.id, reused: true },
+      );
       assertEquals(
         (await query<{ count: string }>(
           sql,
           "select count(*)::text count from pack_component_revisions where candidate_revision_id=$1",
           [candidate],
         )).rows[0].count,
-        "8",
+        "11",
       );
       assertEquals(
         (await query<{ count: string }>(
@@ -420,7 +551,7 @@ Deno.test({
           "select count(*)::text count from pack_component_revisions where candidate_revision_id=$1",
           [candidate],
         )).rows[0].count,
-        "8",
+        "11",
       );
       assertEquals(
         (await query<{ count: string }>(
@@ -439,3 +570,60 @@ Deno.test({
     }
   },
 });
+
+function strictLegacyHook(
+  script: string,
+  output: string,
+  attachment: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    kind: "Hook",
+    spec: {
+      script,
+      timeout: "30s",
+      permissions: {
+        net: false,
+        env: false,
+        read: false,
+        write: false,
+        run: false,
+      },
+      secrets: [],
+      effects: { operations: [] },
+      output: { schema: output },
+      attachments: [{ order: 0, ...attachment }],
+      axi: {},
+    },
+  };
+}
+
+async function legacyHookSources(): Promise<Array<Record<string, unknown>>> {
+  const sources = {
+    "guard_before.ts": `console.log(JSON.stringify({patches:[]}));`,
+    "guard_action.ts": `console.log(JSON.stringify({operations:[]}));`,
+    "guard_validate.ts":
+      `console.log(JSON.stringify({allow:true,errors:[],warnings:[],required_approvals:[]}));`,
+    "guard_event.ts": `console.log(JSON.stringify({outcome:"success"}));`,
+  };
+  const rows: Array<Record<string, unknown>> = [];
+  for (const [name, content] of Object.entries(sources)) {
+    const digest = new Uint8Array(
+      await crypto.subtle.digest(
+        "SHA-256",
+        new TextEncoder().encode(content),
+      ),
+    );
+    rows.push({
+      path: `hooks/${name}`,
+      kind: "script",
+      digest: `sha256:${
+        Array.from(
+          digest,
+          (byte) => byte.toString(16).padStart(2, "0"),
+        ).join("")
+      }`,
+      content,
+    });
+  }
+  return rows;
+}

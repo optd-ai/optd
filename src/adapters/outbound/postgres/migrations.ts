@@ -1,6 +1,7 @@
 import { query, type Queryable } from "./client.ts";
 import { canonicalSha256 } from "../../../domain/ids/canonical_json.ts";
 import { uuidV7 } from "../../../domain/ids/uuid_v7.ts";
+import { validateHookContract } from "../../../schemas/hooks/hook_contract.ts";
 
 export type PlatformMigration = {
   id: string;
@@ -1171,14 +1172,7 @@ export const platformMigrations: PlatformMigration[] = [
       alter table platform_secrets add column updated_auth_context_id uuid references auth_contexts(id);
       alter table platform_secrets add column disabled_at timestamptz;
       alter table platform_secrets add column disabled_auth_context_id uuid references auth_contexts(id);
-      alter table platform_secrets drop column created_by;
-      alter table platform_secrets drop column updated_by;
-      alter table platform_secrets drop constraint platform_secrets_pkey;
-      alter table platform_secrets alter column id set not null;
-      alter table platform_secrets add primary key(id);
-      alter table platform_secrets add constraint platform_secrets_name_unique unique(name);
-      alter table platform_secrets add constraint platform_secrets_nonce_96_bit check(octet_length(nonce)=12);
-
+      alter table platform_secrets add constraint platform_secrets_id_unique unique(id);
       alter table pack_migration_applications add column hook_secret_grant_report jsonb not null default '{"preserved":[],"reauthorization_required":[],"new_ungranted_slots":[],"unused_retained":[]}'::jsonb;
       alter table pack_component_revisions add column hook_security_digest text;
       alter table pack_component_revisions add column hook_script_digest text;
@@ -1188,21 +1182,6 @@ export const platformMigrations: PlatformMigration[] = [
       alter table staged_hook_executions add column security_digest text;
       alter table staged_hook_executions add column logs_truncated boolean;
       alter table staged_hook_executions add column secrets_redacted boolean;
-      alter table staged_hook_executions add constraint staged_hook_security_evidence check(
-        script_digest ~ '^sha256:[0-9a-f]{64}$' and
-        security_digest ~ '^sha256:[0-9a-f]{64}$' and
-        logs_truncated is not null and secrets_redacted is not null
-      );
-      alter table staged_hook_executions alter column script_digest set not null;
-      alter table staged_hook_executions alter column security_digest set not null;
-      alter table staged_hook_executions alter column logs_truncated set not null;
-      alter table staged_hook_executions alter column secrets_redacted set not null;
-      alter table pack_component_revisions add constraint hook_revision_security_facts check(
-        (definition_kind='hook') =
-        (hook_security_digest is not null and hook_script_digest is not null and
-         hook_normalized_config is not null and hook_script_content is not null)
-      );
-
       create table hook_secret_grants(
         id uuid primary key,
         hook_revision_id uuid not null references pack_component_revisions(id),
@@ -1244,8 +1223,142 @@ export const platformMigrations: PlatformMigration[] = [
         ('01900000-0000-7000-8000-000000000255','01900000-0000-7000-8000-000000000201','system:admin','secret.grant','system:hook-secret-grant','unconditional','Grant secrets to reviewed hook slots.'),
         ('01900000-0000-7000-8000-000000000256','01900000-0000-7000-8000-000000000201','system:admin','hook.secret.configure','system:hook-secret-grant','unconditional','Configure reviewed hook secret slots.');
     `,
+    migrate: backfillTrustedHookSecurity,
+    applicationChecksum: "trusted-hook-security-backfill-v1",
+    finalSql: `
+      alter table platform_secrets drop column created_by;
+      alter table platform_secrets drop column updated_by;
+      alter table platform_secrets drop constraint platform_secrets_pkey;
+      alter table platform_secrets alter column id set not null;
+      alter table platform_secrets add primary key(id);
+      alter table platform_secrets add constraint platform_secrets_name_unique unique(name);
+      alter table platform_secrets add constraint platform_secrets_nonce_96_bit check(octet_length(nonce)=12);
+
+      alter table staged_hook_executions add constraint staged_hook_security_evidence check(
+        script_digest ~ '^sha256:[0-9a-f]{64}$' and
+        security_digest ~ '^sha256:[0-9a-f]{64}$' and
+        logs_truncated is not null and secrets_redacted is not null
+      );
+      alter table staged_hook_executions alter column script_digest set not null;
+      alter table staged_hook_executions alter column security_digest set not null;
+      alter table staged_hook_executions alter column logs_truncated set not null;
+      alter table staged_hook_executions alter column secrets_redacted set not null;
+      alter table pack_component_revisions add constraint hook_revision_security_facts check(
+        (definition_kind='hook') =
+        (hook_security_digest is not null and hook_script_digest is not null and
+         hook_normalized_config is not null and hook_script_content is not null)
+      );
+    `,
   },
 ];
+
+async function backfillTrustedHookSecurity(sql: Queryable): Promise<void> {
+  const legacySecrets = (await query<{ count: string }>(
+    sql,
+    "select count(*)::text count from platform_secrets",
+  )).rows[0]?.count ?? "0";
+  if (legacySecrets !== "0") {
+    throw new Error(
+      "incompatible legacy secret ciphertext cannot be migrated without authenticated row/version AAD",
+    );
+  }
+  const legacyGrantTable = (await query<{ present: boolean }>(
+    sql,
+    "select to_regclass('public.legacy_hook_secret_grants') is not null present",
+  )).rows[0]?.present;
+  if (legacyGrantTable) {
+    const legacyGrants = (await query<{ count: string }>(
+      sql,
+      "select count(*)::text count from legacy_hook_secret_grants",
+    )).rows[0]?.count ?? "0";
+    if (legacyGrants !== "0") {
+      throw new Error(
+        "incompatible legacy hook secret grants cannot be migrated",
+      );
+    }
+  }
+  const legacyExecutions = (await query<{ count: string }>(
+    sql,
+    "select count(*)::text count from staged_hook_executions",
+  )).rows[0]?.count ?? "0";
+  if (legacyExecutions !== "0") {
+    throw new Error(
+      "incompatible legacy hook execution evidence cannot be migrated",
+    );
+  }
+  const candidates = (await query<{
+    id: string;
+    publisher: string;
+    pack_name: string;
+    normalized: unknown;
+    source_files: unknown;
+  }>(
+    sql,
+    `select id,publisher,pack_name,normalized,source_files
+       from pack_candidate_revisions order by id`,
+  )).rows;
+  await query(
+    sql,
+    "alter table pack_component_revisions disable trigger pack_component_revisions_immutable",
+  );
+  try {
+    for (const candidate of candidates) {
+      const normalized = asRecord(candidate.normalized);
+      const hooks = asRecord(normalized.hooks);
+      const sourceFiles = asArray(candidate.source_files).map(asRecord);
+      for (
+        const [name, documentValue] of Object.entries(hooks).sort(([a], [b]) =>
+          a.localeCompare(b)
+        )
+      ) {
+        const document = asRecord(documentValue);
+        const spec = asRecord(document.spec);
+        const script = String(spec.script ?? "");
+        const source = sourceFiles.find((file) =>
+          file.path === `hooks/${script}` && file.kind === "script"
+        );
+        if (
+          !source || typeof source.digest !== "string" ||
+          typeof source.content !== "string"
+        ) {
+          throw new Error(
+            `incompatible legacy hook ${candidate.publisher}/${candidate.pack_name}:${name} has no exact stored script`,
+          );
+        }
+        const security = await validateHookContract(
+          `${candidate.publisher}/${candidate.pack_name}:${name}`,
+          spec,
+          source.digest,
+          source.content,
+        );
+        const updated = await query<{ id: string }>(
+          sql,
+          `update pack_component_revisions set
+             hook_security_digest=$3,hook_script_digest=$4,
+             hook_normalized_config=$5::jsonb,hook_script_content=$6
+           where candidate_revision_id=$1 and definition_kind='hook' and definition_name=$2
+           returning id`,
+          [
+            candidate.id,
+            name,
+            security.securityDigest,
+            source.digest,
+            security.normalized,
+            source.content,
+          ],
+        );
+        if (updated.rows.length !== 1) {
+          throw new Error("legacy hook component projection is incomplete");
+        }
+      }
+    }
+  } finally {
+    await query(
+      sql,
+      "alter table pack_component_revisions enable trigger pack_component_revisions_immutable",
+    );
+  }
+}
 
 async function backfillComponentRevisions(sql: Queryable): Promise<void> {
   const candidates = (await query<{
@@ -1423,7 +1536,13 @@ async function backfillHookAttachmentRevisions(sql: Queryable): Promise<void> {
   }
 }
 
+function asArray(value: unknown): unknown[] {
+  if (typeof value === "string") value = JSON.parse(value);
+  return Array.isArray(value) ? value : [];
+}
+
 function asRecord(value: unknown): Record<string, unknown> {
+  if (typeof value === "string") value = JSON.parse(value);
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : {};

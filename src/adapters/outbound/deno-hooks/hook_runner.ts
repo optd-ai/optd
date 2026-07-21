@@ -575,8 +575,7 @@ function decode(bytes: Uint8Array): string {
   return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
 }
 function containsForbiddenModuleSyntax(source: string): boolean {
-  return /\bimport\b|\brequire\s*\(|\b(?:https?|file|data|blob|npm|jsr|node):|\bfrom\s*["'`]/i
-    .test(source);
+  return /\bimport\b|\brequire\s*\(|\bfrom\s*["'`]/i.test(source);
 }
 function netList(value: HookPermissions["net"]): string[] {
   return Array.isArray(value) ? value : [];

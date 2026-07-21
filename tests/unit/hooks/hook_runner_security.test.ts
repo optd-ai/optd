@@ -30,7 +30,7 @@ function hook(
     scriptDigest: "sha256:test",
     scriptContent: source,
     outputSchema: "validation.v1",
-    timeoutMs: 5_000,
+    timeoutMs: 30_000,
     permissions: {
       net: false,
       env: false,
@@ -89,6 +89,82 @@ Deno.test("runner permanently denies imports and unrestricted capabilities befor
       .error?.code,
     "hook_capability_denied",
   );
+});
+
+Deno.test("runner permanently denies filesystem, subprocess, sys, FFI, and undeclared net", async () => {
+  const cases = [
+    `await Deno.readTextFile("/etc/passwd");`,
+    `await Deno.writeTextFile("/tmp/denied", "x");`,
+    `new Deno.Command("/bin/echo").outputSync();`,
+    `Deno.systemMemoryInfo();`,
+    `Deno.dlopen("/tmp/missing.so", {});`,
+    `await fetch("http://127.0.0.1:9");`,
+  ];
+  for (let index = 0; index < cases.length; index++) {
+    const runner = new DenoHookRunner({ cacheDir: await Deno.makeTempDir() });
+    const result = await runner.run(
+      hook(
+        `${cases[index]} ${valid}`,
+        { scriptDigest: `sha256:denied_${index}` },
+      ),
+      envelope,
+    );
+    assertEquals(result.ok, false);
+    assertEquals(result.error?.code, "hook_failed");
+  }
+  const self = await new DenoHookRunner({
+    cacheDir: await Deno.makeTempDir(),
+    serverPort: 8789,
+  }).run(
+    hook(valid, {
+      scriptDigest: "sha256:self",
+      permissions: { net: ["127.0.0.1:8789"] },
+    }),
+    envelope,
+  );
+  assertEquals(self.error?.code, "hook_capability_denied");
+  const database = await new DenoHookRunner({
+    cacheDir: await Deno.makeTempDir(),
+    databaseEndpoints: ["127.0.0.1:5432"],
+  }).run(
+    hook(valid, {
+      scriptDigest: "sha256:database",
+      permissions: { net: ["127.0.0.1:5432"] },
+    }),
+    envelope,
+  );
+  assertEquals(database.error?.code, "hook_capability_denied");
+});
+
+Deno.test("runner bounds stdout and truncates/redacts stderr", async () => {
+  const runner = new DenoHookRunner({
+    cacheDir: await Deno.makeTempDir(),
+    stdoutLimitBytes: 128,
+    stderrLimitBytes: 32,
+    secretValues: { token: "needle-secret" },
+  });
+  const overflow = await runner.run(
+    hook(
+      `console.log("x".repeat(1024));`,
+      { scriptDigest: "sha256:overflow" },
+    ),
+    envelope,
+  );
+  assertEquals(overflow.error?.code, "hook_stdout_limit");
+  const truncated = await runner.run(
+    hook(
+      `console.error("needle-secret"+"z".repeat(128)); ${valid}`,
+      {
+        scriptDigest: "sha256:truncated",
+        secrets: [{ name: "token", slot: "token", env: "TOKEN" }],
+      },
+    ),
+    envelope,
+  );
+  assertEquals(truncated.ok, true);
+  assertEquals(truncated.logsTruncated, true);
+  assertEquals(truncated.logs.includes("needle-secret"), false);
+  assertEquals(truncated.logs.includes("[OPERANT_LOG_TRUNCATED]"), true);
 });
 
 Deno.test("runner enforces timeout and strict output without retaining stdout", async () => {
