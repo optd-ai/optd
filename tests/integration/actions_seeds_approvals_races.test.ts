@@ -85,6 +85,102 @@ Deno.test({
         "1",
       );
 
+      const selfDenied = await insertApprovalStage(
+        harness.server.sql,
+        auth,
+        1,
+        { allow_initiator: false },
+      );
+      assertEquals(
+        (await repository.decideApproval(
+          selfDenied.stageId,
+          selfDenied.requirementId,
+          { decision: "approve", reason: null },
+          auth,
+        )).ok,
+        false,
+      );
+      const expired = await insertApprovalStage(harness.server.sql, auth, 1, {
+        expires_at: "2000-01-01T00:00:00.000Z",
+      });
+      assertEquals(
+        (await repository.decideApproval(
+          expired.stageId,
+          expired.requirementId,
+          { decision: "approve", reason: null },
+          auth,
+        )).ok,
+        false,
+      );
+      const agent = await createAgentAuth(harness.server.sql, auth);
+      const typeDenied = await insertApprovalStage(
+        harness.server.sql,
+        agent,
+        1,
+      );
+      assertEquals(
+        (await repository.decideApproval(
+          typeDenied.stageId,
+          typeDenied.requirementId,
+          { decision: "approve", reason: null },
+          agent,
+        )).ok,
+        false,
+      );
+      const ordinary = await createHumanAuth(harness.server.sql, false);
+      const roleDenied = await insertApprovalStage(
+        harness.server.sql,
+        ordinary,
+        1,
+      );
+      assertEquals(
+        (await repository.decideApproval(
+          roleDenied.stageId,
+          roleDenied.requirementId,
+          { decision: "approve", reason: null },
+          ordinary,
+        )).ok,
+        false,
+      );
+      assertEquals(
+        await scalar(
+          harness.server.sql,
+          "select count(*) from staged_approval_decisions where stage_id in ($1,$2,$3,$4)",
+          [
+            selfDenied.stageId,
+            expired.stageId,
+            typeDenied.stageId,
+            roleDenied.stageId,
+          ],
+        ),
+        "0",
+      );
+
+      const secondAdmin = await createHumanAuth(harness.server.sql, true);
+      const quorum = await insertApprovalStage(harness.server.sql, auth, 2);
+      assertEquals(
+        (await repository.decideApproval(quorum.stageId, quorum.requirementId, {
+          decision: "approve",
+          reason: null,
+        }, auth)).ok,
+        true,
+      );
+      assertEquals(
+        (await lifecycle(harness.server.sql, quorum.stageId)).status,
+        "awaiting_approval",
+      );
+      assertEquals(
+        (await repository.decideApproval(quorum.stageId, quorum.requirementId, {
+          decision: "approve",
+          reason: null,
+        }, secondAdmin)).ok,
+        true,
+      );
+      assertEquals(
+        (await lifecycle(harness.server.sql, quorum.stageId)).status,
+        "ready",
+      );
+
       const race = await insertApprovalStage(harness.server.sql, auth, 1);
       const raced = await Promise.all([
         repository.decideApproval(race.stageId, race.requirementId, {
@@ -170,6 +266,7 @@ async function insertApprovalStage(
   sql: Parameters<typeof query>[0],
   auth: AuthContext,
   minimum: number,
+  overrides: Record<string, unknown> = {},
 ) {
   const stageId = uuidV7();
   const requirementId = uuidV7();
@@ -189,6 +286,7 @@ async function insertApprovalStage(
     allow_initiator: true,
     expires_at: null,
     reason: "system review",
+    ...overrides,
   };
   await query(
     sql,
@@ -202,6 +300,87 @@ async function insertApprovalStage(
   );
   return { stageId, requirementId };
 }
+async function createAgentAuth(
+  sql: Parameters<typeof query>[0],
+  anchor: AuthContext,
+): Promise<AuthContext> {
+  const principalId = uuidV7(), contextId = uuidV7();
+  await query(
+    sql,
+    "insert into principals(id,type,active) values($1,'agent_user',true)",
+    [principalId],
+  );
+  await query(
+    sql,
+    "insert into auth_contexts(id,principal_id,human_user_id,session_id,credential_kind,roles,created_at) values($1,$2,$3,$4,'agent_authorization',$5,now())",
+    [contextId, principalId, anchor.humanUserId, anchor.sessionId, [
+      "system:super_admin",
+    ]],
+  );
+  return Object.freeze({
+    ...anchor,
+    id: contextId,
+    principalId,
+    principalType: "agent_user",
+    credentialKind: "agent_authorization",
+    roles: ["system:super_admin"],
+  });
+}
+
+async function createHumanAuth(
+  sql: Parameters<typeof query>[0],
+  superAdmin: boolean,
+): Promise<AuthContext> {
+  const principalId = uuidV7(),
+    humanId = uuidV7(),
+    sessionId = uuidV7(),
+    contextId = uuidV7();
+  const suffix = principalId.slice(-8);
+  await query(
+    sql,
+    "insert into principals(id,type,active) values($1,'human_user',true)",
+    [principalId],
+  );
+  await query(
+    sql,
+    "insert into human_users(id,principal_id,username,display_name,status) values($1,$2,$3,$4,'active')",
+    [humanId, principalId, `reviewer-${suffix}`, `Reviewer ${suffix}`],
+  );
+  await query(
+    sql,
+    "insert into auth_sessions(id,principal_id,human_user_id,credential_kind,token_digest) values($1,$2,$3,'human_full',$4)",
+    [
+      sessionId,
+      principalId,
+      humanId,
+      `sha256:${crypto.randomUUID().replaceAll("-", "").padEnd(64, "0")}`,
+    ],
+  );
+  const roles = superAdmin ? ["system:super_admin"] : [];
+  await query(
+    sql,
+    "insert into auth_contexts(id,principal_id,human_user_id,session_id,credential_kind,roles,created_at) values($1,$2,$3,$4,'human_full',$5,now())",
+    [contextId, principalId, humanId, sessionId, roles],
+  );
+  if (superAdmin) {
+    await query(
+      sql,
+      "insert into role_assignments(id,principal_id,role_id,boundary_type,active) values($1,$2,'system:super_admin','system',true)",
+      [uuidV7(), principalId],
+    );
+  }
+  return Object.freeze({
+    id: contextId,
+    principalId,
+    principalType: "human_user",
+    humanUserId: humanId,
+    sessionId,
+    credentialKind: "human_full",
+    roles,
+    createdAt: new Date().toISOString(),
+  });
+}
+
 async function immutableSnapshot(
   sql: Parameters<typeof query>[0],
   stageId: string,
