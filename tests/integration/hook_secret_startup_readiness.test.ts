@@ -2,6 +2,10 @@
 import { assert, assertEquals, assertRejects } from "jsr:@std/assert@1";
 import { query } from "../../src/adapters/outbound/postgres/client.ts";
 import { startLiveHarness } from "../support/live_harness.ts";
+import {
+  startManagedPostgres,
+  stopManagedPostgres,
+} from "../../src/adapters/outbound/postgres-process/lifecycle.ts";
 
 const KEY_A = btoa(String.fromCharCode(...new Uint8Array(32).fill(41)));
 const KEY_B = btoa(String.fromCharCode(...new Uint8Array(32).fill(42)));
@@ -53,7 +57,12 @@ Deno.test({
       "canonical base64",
     );
 
+    const externalRoot = await Deno.makeTempDir({
+      prefix: "operant-secret-startup-pg-",
+    });
+    const external = await startManagedPostgres(externalRoot);
     const encrypted = await startLiveHarness({
+      externalDatabaseUrl: external.databaseUrl,
       environment: { OPERANT_SECRET_MASTER_KEY: KEY_A },
     });
     try {
@@ -110,6 +119,10 @@ Deno.test({
       );
     } finally {
       await encrypted.close();
+      await stopManagedPostgres(external);
+      await Deno.remove(externalRoot, { recursive: true }).catch(() =>
+        undefined
+      );
     }
   },
 });
