@@ -1,3 +1,4 @@
+// deno-lint-ignore-file no-import-prefix no-unversioned-import
 import { Command } from "jsr:@cliffy/command";
 import { walk } from "jsr:@std/fs/walk";
 import { relative } from "jsr:@std/path";

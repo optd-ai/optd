@@ -1,3 +1,4 @@
+// deno-lint-ignore-file no-import-prefix
 import { isMap, isScalar, parseAllDocuments, visit } from "npm:yaml@2";
 import {
   type PackKind,

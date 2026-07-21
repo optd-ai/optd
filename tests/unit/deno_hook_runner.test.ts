@@ -26,7 +26,7 @@ function hook(
     revision: "test.pack@0:abc",
     scriptPath: `hooks/${name}.ts`,
     scriptDigest: `sha256:${name}`,
-    scriptContent: source,
+    scriptContent: `await new Response(Deno.stdin.readable).text();\n${source}`,
     outputSchema: "validation.v1",
     timeoutMs: 30_000,
     permissions: {},
@@ -50,6 +50,26 @@ Deno.test("DenoHookRunner captures stderr and valid output", async () => {
   if (!result.ok) throw new Error(JSON.stringify(result));
   assertEquals(result.ok, true);
   assertStringIncludes(result.logs, "hello logs");
+});
+
+Deno.test("DenoHookRunner captures status and diagnostics when child exits during delivery", async () => {
+  const runner = new DenoHookRunner({ cacheDir: await Deno.makeTempDir() });
+  const result = await runner.run(
+    hook(
+      "early_exit",
+      `console.error("startup-diagnostic"); Deno.exit(7);`,
+      { scriptContent: `console.error("startup-diagnostic"); Deno.exit(7);` },
+    ),
+    {
+      hook: "early_exit",
+      phase: "changeset.validate",
+      input: { payload: "x".repeat(16 * 1024 * 1024) },
+    },
+  );
+  assertEquals(result.ok, false);
+  assertEquals(result.error?.code, "hook_spawn_failed");
+  assertEquals(result.exitCode, 7);
+  assertStringIncludes(result.logs, "startup-diagnostic");
 });
 
 Deno.test("DenoHookRunner reports permission failures", async () => {

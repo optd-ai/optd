@@ -390,9 +390,9 @@ function definitions(
 function fields(document: Record<string, unknown>): Record<string, unknown> {
   return record(record(document).spec).fields as Record<string, unknown> ?? {};
 }
-function record(value: unknown): Record<string, any> {
+function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, any>
+    ? value as Record<string, unknown>
     : {};
 }
 function identity(pack: LoadedPack, name: string) {

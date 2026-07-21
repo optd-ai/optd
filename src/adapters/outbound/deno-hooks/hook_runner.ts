@@ -155,23 +155,9 @@ export class DenoHookRunner {
       );
     }
 
-    try {
-      const writer = child.stdin.getWriter();
-      await writer.write(
-        new TextEncoder().encode(JSON.stringify(curatedEnvelope(envelope))),
-      );
-      await writer.close();
-    } catch {
-      await killAndReap(child);
-      await removeEntry(scriptPath);
-      return failure(
-        hook,
-        started,
-        "hook_spawn_failed",
-        "hook input could not be delivered",
-      );
-    }
-
+    // Drain both child pipes immediately. A fast-failing runtime can otherwise
+    // fill a startup diagnostic pipe while the parent is still delivering
+    // stdin, obscuring the real status or turning delivery into a deadlock.
     const stdoutPromise = readBounded(
       child.stdout,
       this.#options.stdoutLimitBytes ?? DEFAULT_STDOUT_LIMIT,
@@ -188,6 +174,46 @@ export class DenoHookRunner {
       stderrLimit + redactionOverlap,
       true,
     );
+    const statusPromise = child.status;
+    const deliveryPromise = deliverInput(child, curatedEnvelope(envelope));
+    const delivery = await Promise.race([
+      deliveryPromise,
+      statusPromise.then((status) => ({ delivered: false as const, status })),
+    ]);
+    if (!delivery.delivered) {
+      if (!("status" in delivery)) await killAndReap(child);
+      const [status, stdout, stderr] = await Promise.all([
+        statusPromise.catch(() => ({
+          success: false,
+          code: -1,
+          signal: null,
+        } as Deno.CommandStatus)),
+        stdoutPromise.catch(() => ({
+          bytes: new Uint8Array(),
+          truncated: false,
+        })),
+        stderrPromise.catch(() => ({
+          bytes: new Uint8Array(),
+          truncated: false,
+        })),
+        // The delivery promise catches its own write/close errors, so awaiting
+        // it here cannot create an unhandled rejection after status wins.
+        deliveryPromise,
+      ]);
+      await removeEntry(scriptPath);
+      const retained = retainedLogs(stderr, redactions, stderrLimit);
+      const stdoutRedacted = redact(decode(stdout.bytes), redactions);
+      return failure(
+        hook,
+        started,
+        "hook_spawn_failed",
+        "hook input could not be delivered",
+        retained.text,
+        retained.truncated,
+        retained.changed || stdoutRedacted.changed,
+        status.code,
+      );
+    }
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<"timeout">((resolve) => {
       timer = setTimeout(() => resolve("timeout"), hook.timeoutMs);
@@ -196,7 +222,7 @@ export class DenoHookRunner {
       value.overflow ? "stdout_overflow" as const : new Promise<never>(() => {})
     );
     const completed = await Promise.race([
-      child.status,
+      statusPromise,
       timeout,
       stdoutOverflow,
     ]);
@@ -661,6 +687,27 @@ function concat(chunks: Uint8Array[], size: number): Uint8Array {
   }
   return out;
 }
+async function deliverInput(
+  child: Deno.ChildProcess,
+  envelope: HookEnvelope,
+): Promise<{ delivered: true } | { delivered: false }> {
+  const writer = child.stdin.getWriter();
+  try {
+    await writer.write(
+      new TextEncoder().encode(JSON.stringify(envelope)),
+    );
+    await writer.close();
+    return { delivered: true };
+  } catch {
+    await writer.abort().catch(() => undefined);
+    return { delivered: false };
+  } finally {
+    try {
+      writer.releaseLock();
+    } catch { /* stream already finalized */ }
+  }
+}
+
 async function killAndReap(child: Deno.ChildProcess): Promise<void> {
   try {
     child.kill("SIGKILL");
