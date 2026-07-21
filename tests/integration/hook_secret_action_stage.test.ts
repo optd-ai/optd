@@ -108,6 +108,45 @@ Deno.test({
       );
       assertEquals(result.operation_graph_digest.startsWith("sha256:"), true);
 
+      const publicStage = await harness.runOptctl([
+        "--json",
+        "--project",
+        "action-stage-project",
+        "action",
+        "stage",
+        "test/actionproof:generate",
+        "--input",
+        JSON.stringify({ project_id: projectId, source_id: read.id }),
+      ]);
+      assertEquals(publicStage.code, 0, publicStage.stderr);
+      const staged = JSON.parse(publicStage.stdout).data;
+      assertEquals(staged.source.kind, "action");
+      assertEquals(staged.source.identity.action, "test/actionproof:generate");
+      assertEquals(staged.operations.length, 1);
+      assertEquals(
+        staged.hook_executions.some((execution: { phase: string }) =>
+          execution.phase === "action.stage"
+        ),
+        true,
+      );
+      assertEquals(provider.attempts.length, 2);
+
+      const seedStage = await harness.runOptctl([
+        "--json",
+        "--project",
+        "action-stage-project",
+        "seed",
+        "stage",
+        "test/actionproof",
+        "--seed",
+        "targets",
+      ]);
+      assertEquals(seedStage.code, 0, seedStage.stderr);
+      const seeded = JSON.parse(seedStage.stdout).data;
+      assertEquals(seeded.status, "staged");
+      assertEquals(seeded.stage.source.kind, "seed");
+      assertEquals(seeded.stage.operations[0].op, "create");
+
       await assertStageError(
         () =>
           coordinator.runActionStage({
@@ -120,7 +159,7 @@ Deno.test({
           }),
         "hook_input_invalid",
       );
-      assertEquals(provider.attempts.length, 1);
+      assertEquals(provider.attempts.length, 2);
 
       await assertStageError(
         () =>
@@ -136,7 +175,7 @@ Deno.test({
           }),
         "hook_effect_denied",
       );
-      assertEquals(provider.attempts.length, 2);
+      assertEquals(provider.attempts.length, 3);
 
       await assertStageError(
         () =>
@@ -309,6 +348,7 @@ async function writePack(root: string, providerUrl: string): Promise<void> {
   await Deno.mkdir(`${root}/resources`);
   await Deno.mkdir(`${root}/actions`);
   await Deno.mkdir(`${root}/hooks`);
+  await Deno.mkdir(`${root}/seeds`);
   await Deno.writeTextFile(
     `${root}/pack.yaml`,
     `kind: Pack\napiVersion: operant.dev/v1\nmetadata: { publisher: test, name: actionproof, version: 1.0.0 }\nspec: { purpose: Action stage integration proof., axi: {} }\n`,
@@ -316,12 +356,16 @@ async function writePack(root: string, providerUrl: string): Promise<void> {
   for (const name of ["source", "target"]) {
     await Deno.writeTextFile(
       `${root}/resources/${name}.yaml`,
-      `kind: Resource\napiVersion: operant.dev/v1\nmetadata: { name: ${name} }\nspec:\n  fields:\n    name: { type: string, required: true }\n    status: { type: string, required: true }\n  axi: {}\n`,
+      `kind: Resource\napiVersion: operant.dev/v1\nmetadata: { name: ${name} }\nspec:\n  fields:\n    name: { type: string, required: true, unique: true }\n    status: { type: string, required: true }\n  axi: {}\n`,
     );
   }
   await Deno.writeTextFile(
+    `${root}/seeds/targets.yaml`,
+    `kind: Seed\napiVersion: operant.dev/v1\nmetadata: { name: targets }\nspec:\n  resource: target\n  key: name\n  mode: changeset\n  rows:\n    - { name: Seeded Target, status: ready }\n  axi: {}\n`,
+  );
+  await Deno.writeTextFile(
     `${root}/actions/generate.yaml`,
-    `kind: Action\napiVersion: operant.dev/v1\nmetadata: { name: generate }\nspec:\n  input:\n    project_id: { type: string, required: true, format: uuid }\n    source_id: { type: string, required: true, format: uuid }\n  reads:\n    source:\n      resource: source\n      id_from: input.source_id\n      required: true\n  axi: {}\n`,
+    `kind: Action\napiVersion: operant.dev/v1\nmetadata: { name: generate }\nspec:\n  input:\n    project_id: { type: string, required: true, format: uuid }\n    source_id: { type: string, required: true, format: uuid }\n  reads:\n    source:\n      resource: source\n      id_from: '$action.input.source_id'\n      fields: [name, status]\n      required: true\n  axi: {}\n`,
   );
   await Deno.writeTextFile(
     `${root}/hooks/generate.yaml`,

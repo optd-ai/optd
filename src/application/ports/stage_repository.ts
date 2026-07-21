@@ -17,6 +17,7 @@ export type StageSource = Readonly<{
     effects: readonly Readonly<{ resource: string; ops: readonly string[] }>[];
   }>;
   dependencies?: readonly Readonly<Record<string, unknown>>[];
+  hook_executions?: readonly Readonly<Record<string, unknown>>[];
 }>;
 
 export type StageDto = {

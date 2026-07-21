@@ -41,35 +41,51 @@ export function makeStageChangesetService(
   repository: StageRepository,
   hookCoordinator?: StageHookCoordinator,
 ) {
-  return {
+  const service = {
     async stageSource(
       input: unknown,
       source: StageSource,
       auth: AuthContext,
     ): Promise<Result<StageDto | null>> {
-      try {
-        if (!stageRequestContract.check(input)) {
-          throw new ContractValidationError(stageRequestContract.issues(input));
-        }
-        const normalized = await normalizeOperations(input as StageRequest);
-        if (normalized.operations.length === 0) {
-          return { ok: true, value: null };
-        }
-        return await repository.create({
-          operations: normalized.operations,
-          operationGraphDigest: normalized.operationGraphDigest,
-          source,
-        }, auth);
-      } catch (error) {
-        return validationResult(error);
-      }
+      return await service.stage(input, auth, source);
     },
-    async stage(input: unknown, auth: AuthContext): Promise<Result<StageDto>> {
+    async stage(
+      input: unknown,
+      auth: AuthContext,
+      source?: StageSource,
+    ): Promise<Result<StageDto>> {
       try {
-        if (!stageRequestContract.check(input)) {
-          throw new ContractValidationError(stageRequestContract.issues(input));
+        let normalized;
+        if (source?.kind === "action") {
+          const raw = isRecord(input) && Array.isArray(input.operations)
+            ? input.operations
+            : [];
+          const issues = raw.flatMap((operation, index) =>
+            resolvedOperationContract.issues(operation).map((issue) => ({
+              ...issue,
+              path: `/operations/${index}${
+                issue.path === "/" ? "" : issue.path
+              }`,
+            }))
+          );
+          if (!raw.length || issues.length) {
+            throw new ContractValidationError(
+              issues.length ? issues : [{
+                path: "/operations",
+                code: "minItems",
+                message: "expected at least one operation",
+              }],
+            );
+          }
+          normalized = await canonicalizeResolvedOperations(raw as never[]);
+        } else {
+          if (!stageRequestContract.check(input)) {
+            throw new ContractValidationError(
+              stageRequestContract.issues(input),
+            );
+          }
+          normalized = await normalizeOperations(input as StageRequest);
         }
-        const normalized = await normalizeOperations(input as StageRequest);
         let hookResult;
         let hookWarnings: StageHookResult["warnings"][number][] = [];
         let hookDeclarations: readonly StageHookDeclaration[] = [];
@@ -243,6 +259,7 @@ export function makeStageChangesetService(
               hookDeclarations,
             }
             : {}),
+          ...(source ? { source } : {}),
         }, auth);
       } catch (error) {
         return validationResult(error);
@@ -355,6 +372,7 @@ export function makeStageChangesetService(
       );
     },
   };
+  return service;
 }
 
 async function validateHookResult(

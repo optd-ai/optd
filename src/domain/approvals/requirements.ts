@@ -44,7 +44,6 @@ export function canonicalizeApprovalRequirements(
       throw new ApprovalContractError(path, "requirement must be an object");
     }
     const allowed = new Set([
-      "id",
       "key",
       "role",
       "boundary",
@@ -59,14 +58,6 @@ export function canonicalizeApprovalRequirements(
       throw new ApprovalContractError(
         `${path}/${unknown}`,
         "unknown requirement field",
-      );
-    }
-    if (
-      raw.id !== undefined && (typeof raw.id !== "string" || !UUID.test(raw.id))
-    ) {
-      throw new ApprovalContractError(
-        `${path}/id`,
-        "id must be a lowercase UUIDv7",
       );
     }
     if (typeof raw.key !== "string" || !KEY.test(raw.key)) {
@@ -144,7 +135,7 @@ export function canonicalizeApprovalRequirements(
       const parsed = new Date(raw.expires_at);
       if (
         !Number.isFinite(parsed.getTime()) ||
-        !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,9})?Z$/.test(raw.expires_at)
+        !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,9})?(?:Z|[+-]\d\d:\d\d)$/.test(raw.expires_at)
       ) {
         throw new ApprovalContractError(
           `${path}/expires_at`,
@@ -163,7 +154,7 @@ export function canonicalizeApprovalRequirements(
       expiresAt = parsed.toISOString();
     }
     const requirement: ApprovalRequirement = {
-      id: typeof raw.id === "string" ? raw.id : uuidV7(),
+      id: uuidV7(),
       key: raw.key,
       role: raw.role,
       boundary,

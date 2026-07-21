@@ -1,14 +1,14 @@
-import type { Sql } from "../../adapters/outbound/postgres/client.ts";
+import type { Sql } from "../../../adapters/outbound/postgres/client.ts";
 import {
   query,
   quoteIdentifier,
-} from "../../adapters/outbound/postgres/client.ts";
-import type { AuthContext } from "../../domain/auth/model.ts";
-import { err, ok, type Result } from "../../domain/errors/result.ts";
-import { canonicalJson } from "../../domain/ids/canonical_json.ts";
-import { isUuidV7 } from "../../domain/ids/uuid_v7.ts";
-import type { StageDto, StageSource } from "../ports/stage_repository.ts";
-import { PostgresAuthorizationRepository } from "../../adapters/outbound/postgres/authorization_repository.ts";
+} from "../../../adapters/outbound/postgres/client.ts";
+import type { AuthContext } from "../../../domain/auth/model.ts";
+import { err, ok, type Result } from "../../../domain/errors/result.ts";
+import { canonicalJson } from "../../../domain/ids/canonical_json.ts";
+import { isUuidV7 } from "../../../domain/ids/uuid_v7.ts";
+import type { StageDto, StageSource } from "../../ports/stage_repository.ts";
+import { PostgresAuthorizationRepository } from "../../../adapters/outbound/postgres/authorization_repository.ts";
 
 export type SeedStageDto = {
   status: "staged" | "unchanged";
@@ -50,14 +50,8 @@ export function makeStageSeedsService(
               )))
         ) return invalid("seed stage request is invalid");
         const names = (raw.names ?? []) as string[];
-        if (
-          (raw.all && names.length) || (!raw.all && !names.length) ||
-          new Set(names).size !== names.length
-        ) {
-          return invalid(
-            "seed selection must use exactly one of all or unique names",
-          );
-        }
+        const selectionIssue = validateSeedSelection(raw.all, names);
+        if (selectionIssue) return invalid(selectionIssue);
         const revision = (await query<{ id: string; normalized: unknown }>(
           sql,
           `select cr.id,cr.normalized from pack_active_revisions ar join pack_candidate_revisions cr on cr.id=ar.candidate_revision_id
@@ -142,32 +136,12 @@ export function makeStageSeedsService(
                 }
                 : {}),
             });
-            if (!current) {
-              operations.push({
-                op: "create",
-                key: `${name}_${operations.length}`,
-                project_id: raw.project_id,
-                resource: identity,
-                fields: row,
-              });
-            } else {
-              const changed = Object.fromEntries(
-                Object.entries(row).filter(([field, value]) =>
-                  canonicalJson(current[field]) !== canonicalJson(value)
-                ),
-              );
-              if (Object.keys(changed).length) {
-                operations.push({
-                  op: "update",
-                  key: `${name}_${operations.length}`,
-                  project_id: raw.project_id,
-                  resource: identity,
-                  object_id: current.id,
-                  expected_version: Number(current.version),
-                  set: changed,
-                });
-              }
-            }
+            const reconciled = reconcileSeedRow(row, current, {
+              operationKey: `${name}_${operations.length}`,
+              projectId: raw.project_id,
+              resource: identity,
+            });
+            if (reconciled) operations.push(reconciled);
           }
           const set = effects.get(identity) ?? new Set<string>();
           set.add("create");
@@ -224,6 +198,50 @@ export function makeStageSeedsService(
     },
   };
 }
+export function validateSeedSelection(
+  all: boolean,
+  names: readonly string[],
+): string | null {
+  if (
+    (all && names.length > 0) || (!all && names.length === 0) ||
+    new Set(names).size !== names.length
+  ) {
+    return "seed selection must use exactly one of all or unique names";
+  }
+  return null;
+}
+
+export function reconcileSeedRow(
+  desired: Record<string, unknown>,
+  current: Record<string, unknown> | undefined,
+  context: { operationKey: string; projectId: string; resource: string },
+): Record<string, unknown> | null {
+  if (!current) {
+    return {
+      op: "create",
+      key: context.operationKey,
+      project_id: context.projectId,
+      resource: context.resource,
+      fields: structuredClone(desired),
+    };
+  }
+  const changed = Object.fromEntries(
+    Object.entries(desired).filter(([field, value]) =>
+      canonicalJson(current[field]) !== canonicalJson(value)
+    ),
+  );
+  if (!Object.keys(changed).length) return null;
+  return {
+    op: "update",
+    key: context.operationKey,
+    project_id: context.projectId,
+    resource: context.resource,
+    object_id: current.id,
+    expected_version: Number(current.version),
+    set: changed,
+  };
+}
+
 function invalid(message: string): Result<never> {
   return err({
     code: "validation_failed",

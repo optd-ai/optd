@@ -1,17 +1,17 @@
-import type { Sql } from "../../adapters/outbound/postgres/client.ts";
+import type { Sql } from "../../../adapters/outbound/postgres/client.ts";
 import {
   query,
   quoteIdentifier,
-} from "../../adapters/outbound/postgres/client.ts";
-import type { AuthContext } from "../../domain/auth/model.ts";
-import { err, ok, type Result } from "../../domain/errors/result.ts";
-import { isUuidV7 } from "../../domain/ids/uuid_v7.ts";
-import type { StageDto, StageSource } from "../ports/stage_repository.ts";
+} from "../../../adapters/outbound/postgres/client.ts";
+import type { AuthContext } from "../../../domain/auth/model.ts";
+import { err, ok, type Result } from "../../../domain/errors/result.ts";
+import { isUuidV7 } from "../../../domain/ids/uuid_v7.ts";
+import type { StageDto, StageSource } from "../../ports/stage_repository.ts";
 import {
   type ActionStageHookDeclaration,
   TrustedStageHookCoordinator,
-} from "./hooks/stage_hook_coordinator.ts";
-import { PostgresAuthorizationRepository } from "../../adapters/outbound/postgres/authorization_repository.ts";
+} from "../hooks/stage_hook_coordinator.ts";
+import { PostgresAuthorizationRepository } from "../../../adapters/outbound/postgres/authorization_repository.ts";
 
 export function makeStageActionService(
   sql: Sql,
@@ -59,7 +59,7 @@ export function makeStageActionService(
         }
         const spec = record(action.spec);
         const inputSpec = record(spec.input);
-        const inputIssue = validateFields(raw.input, inputSpec);
+        const inputIssue = validateActionInput(raw.input, inputSpec);
         if (inputIssue) {
           return invalid(inputIssue);
         }
@@ -240,6 +240,24 @@ export function makeStageActionService(
             ...dependency,
             expected_version_id: dependency.object_version_id,
           })),
+          hook_executions: result.hook_executions.map((execution) => ({
+            id: execution.id,
+            attachment_id: execution.attachment_id,
+            phase: execution.phase,
+            pack_revision_id: execution.pack_revision_id,
+            hook_revision_id: execution.hook_revision_id,
+            input_digest: execution.input_digest,
+            output_digest: execution.output_digest,
+            output: execution.output,
+            script_digest: execution.script_digest,
+            security_digest: execution.security_digest,
+            stderr: execution.stderr,
+            logs_truncated: execution.logs_truncated,
+            secrets_redacted: execution.secrets_redacted,
+            duration_ms: execution.duration_ms,
+            authority_snapshot: execution.authority_snapshot,
+            grant_snapshot: execution.grant_snapshot,
+          })),
         };
         const staged = await common.stageSource(
           { operations: result.added_operations },
@@ -259,7 +277,7 @@ export function makeStageActionService(
     },
   };
 }
-function validateFields(
+export function validateActionInput(
   input: Record<string, unknown>,
   fields: Record<string, unknown>,
 ): string | null {
@@ -273,14 +291,50 @@ function validateFields(
       return `action input ${name} is required`;
     }
     if (value === undefined) continue;
-    if (field.type === "string" && typeof value !== "string") {
-      return `action input ${name} must be a string`;
-    }
-    if (field.type === "integer" && !Number.isSafeInteger(value)) {
+    const type = String(field.type);
+    if (
+      ["string", "decimal", "date", "timestamp"].includes(type) &&
+      typeof value !== "string"
+    ) return `action input ${name} must be a string`;
+    if (type === "integer" && !Number.isSafeInteger(value)) {
       return `action input ${name} must be an integer`;
     }
-    if (field.type === "boolean" && typeof value !== "boolean") {
+    if (type === "boolean" && typeof value !== "boolean") {
       return `action input ${name} must be boolean`;
+    }
+    if (typeof value === "string") {
+      if (
+        Number.isInteger(field.minLength) &&
+        [...value].length < Number(field.minLength)
+      ) return `action input ${name} is too short`;
+      if (
+        Number.isInteger(field.maxLength) &&
+        [...value].length > Number(field.maxLength)
+      ) return `action input ${name} is too long`;
+      if (Array.isArray(field.enum) && !field.enum.includes(value)) {
+        return `action input ${name} is outside its enum`;
+      }
+      if (field.format === "uuid" && !isUuidV7(value)) {
+        return `action input ${name} must be a UUIDv7`;
+      }
+      if (
+        field.format === "email" && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(value)
+      ) return `action input ${name} must be an email`;
+      if (field.format === "uri") {
+        try {
+          new URL(value);
+        } catch {
+          return `action input ${name} must be a URI`;
+        }
+      }
+    }
+    if (typeof value === "number") {
+      if (typeof field.minimum === "number" && value < field.minimum) {
+        return `action input ${name} is below minimum`;
+      }
+      if (typeof field.maximum === "number" && value > field.maximum) {
+        return `action input ${name} exceeds maximum`;
+      }
     }
   }
   return null;

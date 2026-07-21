@@ -1272,6 +1272,10 @@ export const platformMigrations: PlatformMigration[] = [
   {
     id: "1025_frozen_approval_decisions",
     sql: `
+      alter table staged_hook_executions drop constraint staged_hook_executions_phase_check;
+      alter table staged_hook_executions add constraint staged_hook_executions_phase_check check(
+        phase in ('action.stage','changeset.before_stage','changeset.validate')
+      );
       alter table staged_approval_decisions add constraint staged_approval_reject_reason check(
         decision <> 'reject' or (reason is not null and char_length(btrim(reason)) > 0)
       );

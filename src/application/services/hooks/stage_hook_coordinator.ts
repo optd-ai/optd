@@ -80,6 +80,7 @@ export type ActionStageHookExecution = Readonly<{
   security_digest: string;
   input_digest: string;
   output_digest: string;
+  output: Readonly<Record<string, unknown>>;
   added_operations: readonly CanonicalOperation[];
   stderr: string;
   logs_truncated: boolean;
@@ -272,6 +273,7 @@ export class TrustedStageHookCoordinator implements StageHookCoordinator {
         security_digest: declaration.security_digest,
         input_digest: `sha256:${await canonicalSha256(envelope)}`,
         output_digest: `sha256:${await canonicalSha256(result.output)}`,
+        output: result.output!,
         added_operations: added,
         stderr: result.logs,
         logs_truncated: result.logsTruncated ?? false,

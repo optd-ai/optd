@@ -2,9 +2,7 @@ import { canonicalSha256 } from "../ids/canonical_json.ts";
 import type { CanonicalOperation } from "./operations.ts";
 import type { AuthoredOperation } from "../../schemas/changesets/operations.ts";
 import type { PatchOutput } from "../../schemas/changesets/patch.ts";
-import type { ApprovalRequirement } from "./approvals.ts";
-
-export type { ApprovalRequirement } from "./approvals.ts";
+export type { ApprovalRequirement } from "../approvals/requirements.ts";
 
 export type ValidationMessage = Readonly<{
   path: string;
@@ -60,7 +58,7 @@ export type StageHookOutput = Readonly<{
   }>[];
   read_dependencies: readonly StageReadDependency[];
   warnings: readonly ValidationMessage[];
-  approval_requirements: readonly ApprovalRequirement[];
+  approval_requirements: readonly unknown[];
   required_capabilities: readonly string[];
   effects: readonly string[];
   planned_events: readonly PlannedIdentity[];

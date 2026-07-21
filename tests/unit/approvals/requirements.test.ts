@@ -3,7 +3,8 @@ import { assertEquals, assertThrows } from "jsr:@std/assert";
 import {
   ApprovalContractError,
   canonicalizeApprovalRequirements,
-} from "../../../src/domain/changesets/approvals.ts";
+} from "../../../src/domain/approvals/requirements.ts";
+import { stageDigest } from "../../../src/domain/changesets/stage.ts";
 
 const project = "019b7a2e-7c10-7000-8000-000000000001";
 const now = new Date("2026-01-01T00:00:00.000Z");
@@ -57,6 +58,34 @@ Deno.test("approval requirements reject conflicting keys and invalid authority f
       ApprovalContractError,
     );
   }
+});
+
+Deno.test("approval decisions and lifecycle facts remain outside immutable digests", async () => {
+  const evidence = {
+    operation_graph_digest: `sha256:${"1".repeat(64)}`,
+    projects: [],
+    pack_revisions: [],
+    operations: [],
+    dependencies: [],
+    hook_executions: [],
+    policy_decisions: [],
+    approval_requirements: canonicalizeApprovalRequirements(
+      [base],
+      new Set([project]),
+      now,
+    ),
+    required_capabilities: [],
+    effects: [],
+    planned_events: [],
+    planned_deliveries: [],
+  };
+  const before = await stageDigest(evidence);
+  const representation = {
+    evidence,
+    approval_decisions: [{ decision: "approve" }],
+    status: "ready",
+  };
+  assertEquals(await stageDigest(representation.evidence), before);
 });
 
 Deno.test("approval expiration is normalized and bounded", () => {

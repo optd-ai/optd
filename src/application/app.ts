@@ -35,8 +35,8 @@ import { HistoryCursorSigner } from "../domain/history/cursor.ts";
 import { makeExpressionService } from "./services/queries/expressions.ts";
 import { err } from "../domain/errors/result.ts";
 import type { StageHookCoordinator } from "../domain/changesets/stage.ts";
-import { makeStageActionService } from "./services/stage_actions.ts";
-import { makeStageSeedsService } from "./services/stage_seeds.ts";
+import { makeStageActionService } from "./services/actions/stage_actions.ts";
+import { makeStageSeedsService } from "./services/seeds/stage_seeds.ts";
 
 export function makeApplication(
   sql: Sql,

@@ -1599,6 +1599,15 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       const args = parsed.positional.slice(3);
       const all = args.includes("--all");
       const names = options(args, "--seed");
+      for (let index = 0; index < args.length; index++) {
+        const arg = args[index];
+        if (arg === "--all" || arg.startsWith("--seed=")) continue;
+        if (arg === "--seed" && args[index + 1]) {
+          index++;
+          continue;
+        }
+        throw usageError(`unknown seed stage option ${arg}`);
+      }
       result = await postJson(
         `${parsed.server}/api/v1/packs/${publisher}/${pack}/seeds/stage`,
         { project_id: project.id, all, names },

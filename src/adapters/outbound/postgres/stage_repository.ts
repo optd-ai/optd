@@ -6,7 +6,7 @@ import type {
 } from "../../../application/ports/stage_repository.ts";
 import type { AuthContext } from "../../../domain/auth/model.ts";
 import type { CanonicalOperation } from "../../../domain/changesets/operations.ts";
-import { canonicalizeApprovalRequirements } from "../../../domain/changesets/approvals.ts";
+import { canonicalizeApprovalRequirements } from "../../../domain/approvals/requirements.ts";
 import {
   stageDigest,
   type StageHookDeclaration,
@@ -335,6 +335,10 @@ export class PostgresStageRepository implements StageRepository {
         ].map(record).sort((a, b) =>
           canonicalJson(a).localeCompare(canonicalJson(b))
         );
+        const allHookExecutions = [
+          ...(input.source?.hook_executions ?? []).map(record),
+          ...(hook?.hook_executions ?? []).map(record),
+        ];
         const approvalRequirements = canonicalizeApprovalRequirements(
           hook?.approval_requirements ?? [],
           new Set(input.operations.map((operation) => operation.project_id)),
@@ -345,7 +349,7 @@ export class PostgresStageRepository implements StageRepository {
           pack_revisions: prepared.revisions.map(publicRevision),
           operations: input.operations,
           dependencies,
-          hook_executions: (hook?.hook_executions ?? []).map((execution) => {
+          hook_executions: allHookExecutions.map((execution) => {
             const value = record(execution);
             return Object.fromEntries(
               Object.entries(value).filter(([key]) =>
@@ -487,10 +491,10 @@ export class PostgresStageRepository implements StageRepository {
         }
         for (
           let ordinal = 0;
-          ordinal < (hook?.hook_executions.length ?? 0);
+          ordinal < allHookExecutions.length;
           ordinal++
         ) {
-          const execution = record(hook!.hook_executions[ordinal]);
+          const execution = allHookExecutions[ordinal];
           await query(
             tx,
             `insert into staged_hook_executions(
