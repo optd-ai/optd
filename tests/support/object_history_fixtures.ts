@@ -40,7 +40,15 @@ export async function seedObjectHistoryFixture(
   const resourceDefinition = record(record(document.resources)[input.resource]);
   const declaredResourceFields = record(record(resourceDefinition.spec).fields);
   const resourceData = {
-    ...input.resourceData,
+    ...Object.fromEntries(
+      Object.entries(input.resourceData).map(([field, value]) => [
+        field,
+        record(declaredResourceFields[field]).type === "decimal" &&
+          typeof value === "string"
+          ? String(Number(value))
+          : value,
+      ]),
+    ),
     ...(Object.hasOwn(declaredResourceFields, "email") &&
         !Object.hasOwn(input.resourceData, "email") &&
         !Object.hasOwn(input.resourceData, "phone")
