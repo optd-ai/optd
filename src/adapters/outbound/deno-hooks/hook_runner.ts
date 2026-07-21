@@ -183,9 +183,12 @@ export class DenoHookRunner {
     const stdoutOverflow = stdoutPromise.then((value) =>
       value.overflow ? "stdout_overflow" as const : new Promise<never>(() => {})
     );
-    const deliveryFailure = delivery.writeAccepted.then((accepted) =>
-      accepted ? new Promise<never>(() => {}) : "delivery_failure" as const
-    );
+    const deliveryFailure = delivery.writeAccepted.then(async (accepted) => {
+      if (accepted || await statusSettlesWithin(statusPromise, 100)) {
+        return await new Promise<never>(() => {});
+      }
+      return "delivery_failure" as const;
+    });
     const completed = await Promise.race([
       statusPromise,
       timeout,
@@ -688,6 +691,23 @@ function concat(chunks: Uint8Array[], size: number): Uint8Array {
   }
   return out;
 }
+async function statusSettlesWithin(
+  status: Promise<Deno.CommandStatus>,
+  milliseconds: number,
+): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      status.then(() => true, () => true),
+      new Promise<false>((resolve) => {
+        timer = setTimeout(() => resolve(false), milliseconds);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 function startInputDelivery(
   child: Deno.ChildProcess,
   envelope: HookEnvelope,
