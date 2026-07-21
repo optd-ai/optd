@@ -855,6 +855,67 @@ async function prepare(
       );
     }
   }
+  for (const rawDependency of source?.dependencies ?? []) {
+    const dependency = record(rawDependency);
+    if (dependency.kind === "object_version") {
+      const parsed = parseIdentity(String(dependency.resource_identity));
+      const table = (await query<{ table_name: string }>(
+        sql,
+        `select table_name from pack_runtime_tables where publisher=$1 and pack_name=$2 and definition_kind='resource' and definition_name=$3`,
+        [parsed.publisher, parsed.pack, parsed.name],
+      )).rows[0]?.table_name;
+      const current = table
+        ? (await query<{ current_object_version_id: string }>(
+          sql,
+          `select current_object_version_id from ${
+            quoteIdentifier(table)
+          } where project_id=$1 and id=$2 and archived_at is null for share`,
+          [dependency.project_id, dependency.object_id],
+        )).rows[0]
+        : undefined;
+      if (
+        !current ||
+        current.current_object_version_id !== dependency.expected_version_id
+      ) {
+        throw domain(
+          "project_conflict",
+          "Semantic source read changed before persistence",
+          "conflict",
+        );
+      }
+    } else if (dependency.kind === "uniqueness") {
+      const parsed = parseIdentity(String(dependency.definition));
+      const table = (await query<{ table_name: string }>(
+        sql,
+        `select table_name from pack_runtime_tables where publisher=$1 and pack_name=$2 and definition_kind='resource' and definition_name=$3`,
+        [parsed.publisher, parsed.pack, parsed.name],
+      )).rows[0]?.table_name;
+      const current = table
+        ? (await query<{ id: string; current_object_version_id: string }>(
+          sql,
+          `select id,current_object_version_id from ${
+            quoteIdentifier(table)
+          } where project_id=$1 and ${
+            quoteIdentifier(String(dependency.key))
+          }=$2 for share`,
+          [dependency.project_id, dependency.value],
+        )).rows[0]
+        : undefined;
+      if (
+        Boolean(current) !== Boolean(dependency.present) ||
+        (current && dependency.object_id &&
+          (current.id !== dependency.object_id ||
+            current.current_object_version_id !==
+              dependency.expected_version_id))
+      ) {
+        throw domain(
+          "project_conflict",
+          "Seed reconciliation fact changed before persistence",
+          "conflict",
+        );
+      }
+    }
+  }
   const hookDeclarations: Record<string, unknown>[] = [];
   const uniqueRevisions = [
     ...new Map(
