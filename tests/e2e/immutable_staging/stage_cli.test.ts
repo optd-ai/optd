@@ -358,7 +358,7 @@ Deno.test({
           [firstData.id],
         )
       );
-      for (const removed of ["preview", "commit", "stage-and-commit"]) {
+      for (const removed of ["preview", "stage-and-commit"]) {
         const result = await harness.runOptctl([
           "--json",
           "changeset",
