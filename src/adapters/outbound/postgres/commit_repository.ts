@@ -232,6 +232,7 @@ async function attemptCommit(
     });
   }
   await validateRevisions(tx, array(stage.pack_revisions_json));
+  await validateRuntimeMetadata(tx, runtimes);
   await validateProjects(tx, array(stage.projects_json));
   await lockAndValidateDependencies(tx, dependencies, operations, runtimes);
   const cutoff = await authorizationCutoff(
@@ -387,6 +388,13 @@ async function rereadRuntimeMetadata(
   discovered: Runtime[],
 ) {
   await validateRevisions(tx, revisions);
+  await validateRuntimeMetadata(tx, discovered);
+}
+
+async function validateRuntimeMetadata(
+  tx: Queryable,
+  discovered: Runtime[],
+) {
   for (const runtime of discovered) {
     const current = (await query<{ table_name: string }>(
       tx,
@@ -399,7 +407,11 @@ async function rereadRuntimeMetadata(
         runtime.definition_name,
       ],
     )).rows[0];
-    if (!current || current.table_name !== runtime.table_name) return;
+    if (!current || current.table_name !== runtime.table_name) {
+      throw new CommitFailure("stage_stale", "conflict", {
+        reason: "pack_revision_changed",
+      });
+    }
   }
 }
 

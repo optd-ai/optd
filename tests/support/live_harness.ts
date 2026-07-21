@@ -55,6 +55,7 @@ export type LiveHarness = {
   dataDir: string;
   homeDir: string;
   baseUrl: string;
+  databaseUrl: string;
   binaryPath: string;
   /** Test-support SQL is only for focused setup/assertions, never acceptance actions. */
   server: { sql: Sql };
@@ -191,6 +192,7 @@ export async function startLiveHarness(
     dataDir,
     homeDir,
     baseUrl: running.url,
+    databaseUrl,
     binaryPath,
     server: { sql },
     runOptctl: runBinary,
