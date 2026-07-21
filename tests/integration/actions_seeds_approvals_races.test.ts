@@ -19,71 +19,73 @@ Deno.test({
       const repository = new PostgresStageRepository(harness.server.sql);
       const first = await insertApprovalStage(harness.server.sql, auth, 1);
       const before = await immutableSnapshot(harness.server.sql, first.stageId);
-      const [sameA, sameB] = await Promise.all([
-        repository.decideApproval(first.stageId, first.requirementId, {
-          decision: "approve",
-          reason: "reviewed",
-        }, auth),
-        repository.decideApproval(first.stageId, first.requirementId, {
-          decision: "approve",
-          reason: "duplicate",
-        }, auth),
-      ]);
-      assertEquals(sameA.ok, true);
-      assertEquals(sameB.ok, true);
-      assertEquals(
-        await scalar(
-          harness.server.sql,
-          "select count(*) from staged_approval_decisions where stage_id=$1",
-          [first.stageId],
-        ),
-        "1",
+      const same = await queueTwo(
+        harness.server.sql,
+        first.stageId,
+        () =>
+          repository.decideApproval(first.stageId, first.requirementId, {
+            decision: "approve",
+            reason: "first",
+          }, auth),
+        () =>
+          repository.decideApproval(first.stageId, first.requirementId, {
+            decision: "approve",
+            reason: "second",
+          }, auth),
       );
-      assertEquals(
-        await scalar(
-          harness.server.sql,
-          "select count(*) from staged_approval_audit_events where stage_id=$1",
-          [first.stageId],
-        ),
-        "1",
-      );
-      assertEquals(
-        (await lifecycle(harness.server.sql, first.stageId)).status,
+      assertEquals(same.every((result) => result.ok), true);
+      await assertDecisionState(
+        harness.server.sql,
+        first.stageId,
+        "approve",
         "ready",
+        2,
+        1,
       );
       assertEquals(
         await immutableSnapshot(harness.server.sql, first.stageId),
         before,
       );
 
-      const opposite = await insertApprovalStage(harness.server.sql, auth, 1);
-      const results = await Promise.all([
-        repository.decideApproval(opposite.stageId, opposite.requirementId, {
-          decision: "approve",
-          reason: null,
-        }, auth),
-        repository.decideApproval(opposite.stageId, opposite.requirementId, {
-          decision: "reject",
-          reason: "unsafe",
-        }, auth),
-      ]);
-      assertEquals(results.every((result) => result.ok), true);
-      assertEquals(
-        await scalar(
+      for (const firstDecision of ["approve", "reject"] as const) {
+        const opposite = await insertApprovalStage(harness.server.sql, auth, 1);
+        const secondDecision = firstDecision === "approve"
+          ? "reject"
+          : "approve";
+        const results = await queueTwo(
           harness.server.sql,
-          "select count(*) from staged_approval_decisions where stage_id=$1",
-          [opposite.stageId],
-        ),
-        "1",
-      );
-      assertEquals(
-        await scalar(
+          opposite.stageId,
+          () =>
+            repository.decideApproval(
+              opposite.stageId,
+              opposite.requirementId,
+              {
+                decision: firstDecision,
+                reason: firstDecision === "reject" ? "first reject" : null,
+              },
+              auth,
+            ),
+          () =>
+            repository.decideApproval(
+              opposite.stageId,
+              opposite.requirementId,
+              {
+                decision: secondDecision,
+                reason: secondDecision === "reject" ? "second reject" : null,
+              },
+              auth,
+            ),
+        );
+        assertEquals(results.every((result) => result.ok), true);
+        await assertDecisionState(
           harness.server.sql,
-          "select count(*) from staged_approval_audit_events where stage_id=$1",
-          [opposite.stageId],
-        ),
-        "1",
-      );
+          opposite.stageId,
+          firstDecision,
+          firstDecision === "reject" ? "rejected" : "ready",
+          2,
+          1,
+        );
+      }
 
       const selfDenied = await insertApprovalStage(
         harness.server.sql,
@@ -142,13 +144,16 @@ Deno.test({
         )).ok,
         false,
       );
+      const ordinaryGrant = await grantReviewer(
+        harness.server.sql,
+        ordinary.principalId,
+      );
       const reviewerStage = await insertApprovalStage(
         harness.server.sql,
         auth,
         1,
-        { role: "system:admin", allow_initiator: false },
+        { role: ordinaryGrant.role, allow_initiator: false },
       );
-      await grantReviewer(harness.server.sql, ordinary.principalId);
       assertEquals(
         (await repository.approvals(reviewerStage.stageId, ordinary)).ok,
         true,
@@ -162,6 +167,122 @@ Deno.test({
         )).ok,
         true,
       );
+
+      const roleRevoked = await createHumanAuth(harness.server.sql, false);
+      const roleGrant = await grantReviewer(
+        harness.server.sql,
+        roleRevoked.principalId,
+      );
+      const roleStage = await insertApprovalStage(harness.server.sql, auth, 1, {
+        role: roleGrant.role,
+        allow_initiator: false,
+      });
+      const roleResult = await queueOneWithMutation(
+        harness.server.sql,
+        roleStage.stageId,
+        () =>
+          repository.decideApproval(
+            roleStage.stageId,
+            roleStage.requirementId,
+            { decision: "approve", reason: null },
+            roleRevoked,
+          ),
+        () =>
+          query(
+            harness.server.sql,
+            "update role_assignments set active=false where id=$1",
+            [roleGrant.roleAssignmentId],
+          ),
+      );
+      assertEquals(roleResult.ok, false);
+      await assertUnchangedLifecycle(harness.server.sql, roleStage.stageId);
+
+      const policyRevoked = await createHumanAuth(harness.server.sql, false);
+      const policyGrant = await grantReviewer(
+        harness.server.sql,
+        policyRevoked.principalId,
+      );
+      const policyStage = await insertApprovalStage(
+        harness.server.sql,
+        auth,
+        1,
+        { role: policyGrant.role, allow_initiator: false },
+      );
+      const policyResult = await queueOneWithMutation(
+        harness.server.sql,
+        policyStage.stageId,
+        () =>
+          repository.decideApproval(
+            policyStage.stageId,
+            policyStage.requirementId,
+            { decision: "approve", reason: null },
+            policyRevoked,
+          ),
+        () =>
+          query(
+            harness.server.sql,
+            "update policy_assignments set active=false where id=$1",
+            [policyGrant.policyAssignmentId],
+          ),
+      );
+      assertEquals(policyResult.ok, false);
+      await assertUnchangedLifecycle(harness.server.sql, policyStage.stageId);
+
+      const expiringStage = await insertApprovalStage(
+        harness.server.sql,
+        auth,
+        1,
+        { expires_at: new Date(Date.now() + 250).toISOString() },
+      );
+      const expiryResult = await queueOneWithMutation(
+        harness.server.sql,
+        expiringStage.stageId,
+        () =>
+          repository.decideApproval(
+            expiringStage.stageId,
+            expiringStage.requirementId,
+            { decision: "approve", reason: null },
+            auth,
+          ),
+        () => new Promise((resolve) => setTimeout(resolve, 350)),
+      );
+      assertEquals(expiryResult.ok, false);
+      await assertUnchangedLifecycle(harness.server.sql, expiringStage.stageId);
+
+      const chainedAgent = await createAuthorizedAgent(
+        harness.server.sql,
+        auth,
+        ordinaryGrant.role,
+      );
+      const agentStage = await insertApprovalStage(
+        harness.server.sql,
+        auth,
+        1,
+        {
+          role: ordinaryGrant.role,
+          principal_types: ["agent_user"],
+          allow_initiator: false,
+        },
+      );
+      const agentResult = await queueOneWithMutation(
+        harness.server.sql,
+        agentStage.stageId,
+        () =>
+          repository.decideApproval(
+            agentStage.stageId,
+            agentStage.requirementId,
+            { decision: "approve", reason: null },
+            chainedAgent.auth,
+          ),
+        () =>
+          query(
+            harness.server.sql,
+            "update agent_authorizations set revoked_at=now() where id=$1",
+            [chainedAgent.authorizationId],
+          ),
+      );
+      assertEquals(agentResult.ok, false);
+      await assertUnchangedLifecycle(harness.server.sql, agentStage.stageId);
       assertEquals(
         await scalar(
           harness.server.sql,
@@ -178,28 +299,81 @@ Deno.test({
 
       const secondAdmin = await createHumanAuth(harness.server.sql, true);
       const quorum = await insertApprovalStage(harness.server.sql, auth, 2);
-      assertEquals(
-        (await repository.decideApproval(quorum.stageId, quorum.requirementId, {
-          decision: "approve",
-          reason: null,
-        }, auth)).ok,
-        true,
+      const quorumResults = await queueTwo(
+        harness.server.sql,
+        quorum.stageId,
+        () =>
+          repository.decideApproval(quorum.stageId, quorum.requirementId, {
+            decision: "approve",
+            reason: "reviewer a",
+          }, auth),
+        () =>
+          repository.decideApproval(quorum.stageId, quorum.requirementId, {
+            decision: "approve",
+            reason: "reviewer b",
+          }, secondAdmin),
       );
-      assertEquals(
-        (await lifecycle(harness.server.sql, quorum.stageId)).status,
-        "awaiting_approval",
-      );
-      assertEquals(
-        (await repository.decideApproval(quorum.stageId, quorum.requirementId, {
-          decision: "approve",
-          reason: null,
-        }, secondAdmin)).ok,
-        true,
-      );
-      assertEquals(
-        (await lifecycle(harness.server.sql, quorum.stageId)).status,
+      assertEquals(quorumResults.every((result) => result.ok), true);
+      await assertDecisionState(
+        harness.server.sql,
+        quorum.stageId,
+        "approve",
         "ready",
+        2,
+        2,
       );
+
+      for (const rejectFirst of [true, false]) {
+        const distinct = await insertApprovalStage(harness.server.sql, auth, 2);
+        const firstActor = rejectFirst ? auth : secondAdmin;
+        const secondActor = rejectFirst ? secondAdmin : auth;
+        const distinctResults = await queueTwo(
+          harness.server.sql,
+          distinct.stageId,
+          () =>
+            repository.decideApproval(
+              distinct.stageId,
+              distinct.requirementId,
+              {
+                decision: rejectFirst ? "reject" : "approve",
+                reason: rejectFirst ? "reject first" : null,
+              },
+              firstActor,
+            ),
+          () =>
+            repository.decideApproval(
+              distinct.stageId,
+              distinct.requirementId,
+              {
+                decision: rejectFirst ? "approve" : "reject",
+                reason: rejectFirst ? null : "reject second",
+              },
+              secondActor,
+            ),
+        );
+        if (rejectFirst) {
+          assertEquals(distinctResults[0].ok, true);
+          assertEquals(distinctResults[1].ok, false);
+          await assertDecisionState(
+            harness.server.sql,
+            distinct.stageId,
+            "reject",
+            "rejected",
+            2,
+            1,
+          );
+        } else {
+          assertEquals(distinctResults.every((result) => result.ok), true);
+          await assertDecisionState(
+            harness.server.sql,
+            distinct.stageId,
+            "reject",
+            "rejected",
+            2,
+            2,
+          );
+        }
+      }
 
       const approvalFirst = await insertApprovalStage(
         harness.server.sql,
@@ -227,8 +401,8 @@ Deno.test({
       approvalHold.release();
       await Promise.all([queuedApproval, queuedCancel, approvalHold.done]);
       assertEquals(
-        (await lifecycle(harness.server.sql, approvalFirst.stageId)).status,
-        "cancelled",
+        await lifecycle(harness.server.sql, approvalFirst.stageId),
+        { status: "cancelled", version: "3" },
       );
       assertEquals(
         await scalar(
@@ -262,8 +436,8 @@ Deno.test({
       cancelHold.release();
       await Promise.all([firstCancel, laterApproval, cancelHold.done]);
       assertEquals(
-        (await lifecycle(harness.server.sql, cancelFirst.stageId)).status,
-        "cancelled",
+        await lifecycle(harness.server.sql, cancelFirst.stageId),
+        { status: "cancelled", version: "2" },
       );
       assertEquals(
         await scalar(
@@ -273,30 +447,6 @@ Deno.test({
         ),
         "0",
       );
-
-      const race = await insertApprovalStage(harness.server.sql, auth, 1);
-      const raced = await Promise.all([
-        repository.decideApproval(race.stageId, race.requirementId, {
-          decision: "approve",
-          reason: null,
-        }, auth),
-        repository.cancel(race.stageId, "cancel race", auth),
-      ]);
-      assertEquals(raced.filter((result) => result.ok).length >= 1, true);
-      const terminal = await lifecycle(harness.server.sql, race.stageId);
-      assertEquals(["ready", "cancelled"].includes(terminal.status), true);
-      const raceDecisions = await scalar(
-        harness.server.sql,
-        "select count(*) from staged_approval_decisions where stage_id=$1",
-        [race.stageId],
-      );
-      const raceAudits = await scalar(
-        harness.server.sql,
-        "select count(*) from staged_approval_audit_events where stage_id=$1",
-        [race.stageId],
-      );
-      assertEquals(raceAudits, raceDecisions);
-      assertEquals(["0", "1"].includes(raceDecisions), true);
 
       await assertRejects(() =>
         query(
@@ -336,6 +486,114 @@ Deno.test({
     }
   },
 });
+
+async function queueTwo<T>(
+  sql: Parameters<typeof query>[0],
+  stageId: string,
+  first: () => Promise<T>,
+  second: () => Promise<T>,
+): Promise<[T, T]> {
+  const immutable = await immutableSnapshot(sql, stageId);
+  const hold = holdLifecycle(sql, stageId);
+  await hold.locked;
+  const firstResult = first();
+  await waitForLifecycleWaiters(sql, 1);
+  const secondResult = second();
+  await waitForLifecycleWaiters(sql, 2);
+  hold.release();
+  const results = await Promise.all([firstResult, secondResult]);
+  await hold.done;
+  assertEquals(await immutableSnapshot(sql, stageId), immutable);
+  return results as [T, T];
+}
+async function queueOneWithMutation<T>(
+  sql: Parameters<typeof query>[0],
+  stageId: string,
+  request: () => Promise<T>,
+  mutate: () => Promise<unknown>,
+): Promise<T> {
+  const immutable = await immutableSnapshot(sql, stageId);
+  const hold = holdLifecycle(sql, stageId);
+  await hold.locked;
+  const result = request();
+  await waitForLifecycleWaiters(sql, 1);
+  await mutate();
+  hold.release();
+  await hold.done;
+  const settled = await result;
+  assertEquals(await immutableSnapshot(sql, stageId), immutable);
+  return settled;
+}
+async function assertDecisionState(
+  sql: Parameters<typeof query>[0],
+  stageId: string,
+  decision: string,
+  status: string,
+  version: number,
+  count: number,
+) {
+  const projection = await lifecycle(sql, stageId);
+  assertEquals(projection.status, status);
+  assertEquals(Number(projection.version), version);
+  assertEquals(
+    await scalar(
+      sql,
+      "select count(*) from staged_approval_decisions where stage_id=$1",
+      [stageId],
+    ),
+    String(count),
+  );
+  assertEquals(
+    await scalar(
+      sql,
+      "select count(*) from staged_approval_audit_events where stage_id=$1",
+      [stageId],
+    ),
+    String(count),
+  );
+  if (count === 1) {
+    assertEquals(
+      (await query<{ decision: string }>(
+        sql,
+        "select decision from staged_approval_decisions where stage_id=$1 limit 1",
+        [stageId],
+      )).rows[0]?.decision,
+      decision,
+    );
+  } else {
+    assertEquals(
+      (await query<{ present: boolean }>(
+        sql,
+        "select exists(select 1 from staged_approval_decisions where stage_id=$1 and decision=$2) present",
+        [stageId, decision],
+      )).rows[0].present,
+      true,
+    );
+  }
+}
+async function assertUnchangedLifecycle(
+  sql: Parameters<typeof query>[0],
+  stageId: string,
+) {
+  const projection = await lifecycle(sql, stageId);
+  assertEquals(projection, { status: "awaiting_approval", version: "1" });
+  assertEquals(
+    await scalar(
+      sql,
+      "select count(*) from staged_approval_decisions where stage_id=$1",
+      [stageId],
+    ),
+    "0",
+  );
+  assertEquals(
+    await scalar(
+      sql,
+      "select count(*) from staged_approval_audit_events where stage_id=$1",
+      [stageId],
+    ),
+    "0",
+  );
+}
 
 function holdLifecycle(sql: Parameters<typeof query>[0], stageId: string) {
   let unlock!: () => void, lockedResolve!: () => void;
@@ -434,10 +692,22 @@ async function grantReviewer(
   principalId: string,
 ) {
   const version = uuidV7();
+  const role = `system:approval_${principalId.slice(-8)}`;
   await query(
     sql,
-    "insert into role_assignments(id,principal_id,role_id,boundary_type,active) values($1,$2,'system:admin','system',true)",
-    [uuidV7(), principalId],
+    "insert into system_roles(id,display_name,active) values($1,$1,true)",
+    [role],
+  );
+  await query(
+    sql,
+    "insert into role_definition_versions(id,role_id,version,active) values($1,$2,1,true)",
+    [uuidV7(), role],
+  );
+  const roleAssignmentId = uuidV7();
+  await query(
+    sql,
+    "insert into role_assignments(id,principal_id,role_id,boundary_type,active) values($1,$2,$3,'system',true)",
+    [roleAssignmentId, principalId, role],
   );
   await query(
     sql,
@@ -446,14 +716,87 @@ async function grantReviewer(
   );
   await query(
     sql,
-    "insert into policy_rules(id,policy_definition_version_id,role_id,capability,resource,condition_kind) values($1,$2,'system:admin','changeset.approval.decide','system:changeset-approval','unconditional')",
-    [uuidV7(), version],
+    "insert into policy_rules(id,policy_definition_version_id,role_id,capability,resource,condition_kind) values($1,$2,$3,'changeset.approval.decide','system:changeset-approval','unconditional')",
+    [uuidV7(), version, role],
   );
+  const policyAssignmentId = uuidV7();
   await query(
     sql,
     "insert into policy_assignments(id,policy_definition_version_id,boundary_type,active) values($1,$2,'system',true)",
-    [uuidV7(), version],
+    [policyAssignmentId, version],
   );
+  return { roleAssignmentId, policyAssignmentId, role };
+}
+
+async function createAuthorizedAgent(
+  sql: Parameters<typeof query>[0],
+  anchor: AuthContext,
+  role: string,
+) {
+  const principalId = uuidV7(),
+    agentUserId = uuidV7(),
+    authorizationId = uuidV7(),
+    sessionId = uuidV7(),
+    contextId = uuidV7();
+  await query(
+    sql,
+    "insert into principals(id,type,active) values($1,'agent_user',true)",
+    [principalId],
+  );
+  await query(
+    sql,
+    "insert into agent_users(id,principal_id,human_user_id,name) values($1,$2,$3,'approval agent')",
+    [agentUserId, principalId, anchor.humanUserId],
+  );
+  await (sql as import("../../src/adapters/outbound/postgres/client.ts").Sql)
+    .begin(async (tx) => {
+      await query(
+        tx,
+        "insert into agent_authorizations(id,agent_user_id,human_user_id,root_authorization_id,approved_by_auth_context_id) values($1,$2,$3,$1,$4)",
+        [authorizationId, agentUserId, anchor.humanUserId, anchor.id],
+      );
+    });
+  await query(
+    sql,
+    "insert into agent_authorization_roles(id,authorization_id,role_id,boundary_type) values($1,$2,$3,'system')",
+    [uuidV7(), authorizationId, role],
+  );
+  await query(
+    sql,
+    "insert into auth_sessions(id,principal_id,human_user_id,credential_kind,token_digest,authorization_id) values($1,$2,$3,'agent_authorization',$4,$5)",
+    [
+      sessionId,
+      principalId,
+      anchor.humanUserId,
+      `sha256:${crypto.randomUUID().replaceAll("-", "").padEnd(64, "0")}`,
+      authorizationId,
+    ],
+  );
+  await query(
+    sql,
+    "insert into auth_contexts(id,principal_id,human_user_id,session_id,credential_kind,roles,created_at,authorization_id) values($1,$2,$3,$4,'agent_authorization',$5,now(),$6)",
+    [
+      contextId,
+      principalId,
+      anchor.humanUserId,
+      sessionId,
+      [role],
+      authorizationId,
+    ],
+  );
+  return {
+    authorizationId,
+    auth: Object.freeze({
+      ...anchor,
+      id: contextId,
+      principalId,
+      principalType: "agent_user" as const,
+      sessionId,
+      credentialKind: "agent_authorization" as const,
+      roles: [role],
+      authorizationId,
+    }),
+  };
 }
 
 async function createAgentAuth(
