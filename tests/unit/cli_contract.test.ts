@@ -1,4 +1,5 @@
-import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert";
+// deno-lint-ignore-file no-import-prefix no-unversioned-import
+import { assertEquals, assertStringIncludes } from "jsr:@std/assert";
 import { runOptctl } from "../../src/adapters/inbound/cli-cliffy/optctl.ts";
 
 type SeenRequest = { method: string; path: string; body?: unknown };
