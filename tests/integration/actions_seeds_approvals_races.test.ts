@@ -13,11 +13,37 @@ Deno.test({
   sanitizeResources: false,
   async fn() {
     const harness = await startAuthenticatedHarness();
+    const pack = await Deno.makeTempDir({ prefix: "operant-approval-races-" });
     try {
       assertEquals((await harness.runOptctl(["--json", "home"])).code, 0);
+      await writeRacePack(pack);
+      const applied = await harness.runOptctl([
+        "--json",
+        "pack",
+        "apply",
+        pack,
+        "--safe",
+      ]);
+      assertEquals(applied.code, 0, applied.stderr);
+      const project = await harness.runOptctl([
+        "--json",
+        "project",
+        "create",
+        "approval-races",
+        "--display-name",
+        "Approval Races",
+      ]);
+      assertEquals(project.code, 0, project.stderr);
+      const projectId = JSON.parse(project.stdout).data.id as string;
       const auth = await currentAuth(harness.server.sql);
       const repository = new PostgresStageRepository(harness.server.sql);
-      const first = await insertApprovalStage(harness.server.sql, auth, 1);
+      await grantReviewer(harness.server.sql, auth.principalId);
+      const stage = (
+        actor: AuthContext,
+        minimum: number,
+        overrides: Record<string, unknown> = {},
+      ) => stageApproval(harness, projectId, actor, minimum, overrides);
+      const first = await stage(auth, 1);
       const before = await immutableSnapshot(harness.server.sql, first.stageId);
       const same = await queueTwo(
         harness.server.sql,
@@ -34,6 +60,14 @@ Deno.test({
           }, auth),
       );
       assertEquals(same.every((result) => result.ok), true);
+      await assertRepeatedFact(
+        harness.server.sql,
+        first.stageId,
+        auth.principalId,
+        same,
+        "approve",
+        "first",
+      );
       await assertDecisionState(
         harness.server.sql,
         first.stageId,
@@ -48,7 +82,7 @@ Deno.test({
       );
 
       for (const firstDecision of ["approve", "reject"] as const) {
-        const opposite = await insertApprovalStage(harness.server.sql, auth, 1);
+        const opposite = await stage(auth, 1);
         const secondDecision = firstDecision === "approve"
           ? "reject"
           : "approve";
@@ -77,6 +111,14 @@ Deno.test({
             ),
         );
         assertEquals(results.every((result) => result.ok), true);
+        await assertRepeatedFact(
+          harness.server.sql,
+          opposite.stageId,
+          auth.principalId,
+          results,
+          firstDecision,
+          firstDecision === "reject" ? "first reject" : null,
+        );
         await assertDecisionState(
           harness.server.sql,
           opposite.stageId,
@@ -87,12 +129,7 @@ Deno.test({
         );
       }
 
-      const selfDenied = await insertApprovalStage(
-        harness.server.sql,
-        auth,
-        1,
-        { allow_initiator: false },
-      );
+      const selfDenied = await stage(auth, 1, { allow_initiator: false });
       assertEquals(
         (await repository.decideApproval(
           selfDenied.stageId,
@@ -102,9 +139,10 @@ Deno.test({
         )).ok,
         false,
       );
-      const expired = await insertApprovalStage(harness.server.sql, auth, 1, {
-        expires_at: "2000-01-01T00:00:00.000Z",
+      const expired = await stage(auth, 1, {
+        expires_at: new Date(Date.now() + 2_000).toISOString(),
       });
+      await new Promise((resolve) => setTimeout(resolve, 2_100));
       assertEquals(
         (await repository.decideApproval(
           expired.stageId,
@@ -115,11 +153,7 @@ Deno.test({
         false,
       );
       const agent = await createAgentAuth(harness.server.sql, auth);
-      const typeDenied = await insertApprovalStage(
-        harness.server.sql,
-        agent,
-        1,
-      );
+      const typeDenied = await stage(agent, 1);
       assertEquals(
         (await repository.decideApproval(
           typeDenied.stageId,
@@ -130,11 +164,7 @@ Deno.test({
         false,
       );
       const ordinary = await createHumanAuth(harness.server.sql, false);
-      const roleDenied = await insertApprovalStage(
-        harness.server.sql,
-        ordinary,
-        1,
-      );
+      const roleDenied = await stage(ordinary, 1);
       assertEquals(
         (await repository.decideApproval(
           roleDenied.stageId,
@@ -148,12 +178,10 @@ Deno.test({
         harness.server.sql,
         ordinary.principalId,
       );
-      const reviewerStage = await insertApprovalStage(
-        harness.server.sql,
-        auth,
-        1,
-        { role: ordinaryGrant.role, allow_initiator: false },
-      );
+      const reviewerStage = await stage(auth, 1, {
+        role: ordinaryGrant.role,
+        allow_initiator: false,
+      });
       assertEquals(
         (await repository.approvals(reviewerStage.stageId, ordinary)).ok,
         true,
@@ -173,7 +201,7 @@ Deno.test({
         harness.server.sql,
         roleRevoked.principalId,
       );
-      const roleStage = await insertApprovalStage(harness.server.sql, auth, 1, {
+      const roleStage = await stage(auth, 1, {
         role: roleGrant.role,
         allow_initiator: false,
       });
@@ -202,12 +230,10 @@ Deno.test({
         harness.server.sql,
         policyRevoked.principalId,
       );
-      const policyStage = await insertApprovalStage(
-        harness.server.sql,
-        auth,
-        1,
-        { role: policyGrant.role, allow_initiator: false },
-      );
+      const policyStage = await stage(auth, 1, {
+        role: policyGrant.role,
+        allow_initiator: false,
+      });
       const policyResult = await queueOneWithMutation(
         harness.server.sql,
         policyStage.stageId,
@@ -227,13 +253,15 @@ Deno.test({
       );
       assertEquals(policyResult.ok, false);
       await assertUnchangedLifecycle(harness.server.sql, policyStage.stageId);
-
-      const expiringStage = await insertApprovalStage(
+      await query(
         harness.server.sql,
-        auth,
-        1,
-        { expires_at: new Date(Date.now() + 250).toISOString() },
+        "update policy_assignments set active=true where id=$1",
+        [policyGrant.policyAssignmentId],
       );
+
+      const expiringStage = await stage(auth, 1, {
+        expires_at: new Date(Date.now() + 2_000).toISOString(),
+      });
       const expiryResult = await queueOneWithMutation(
         harness.server.sql,
         expiringStage.stageId,
@@ -244,7 +272,7 @@ Deno.test({
             { decision: "approve", reason: null },
             auth,
           ),
-        () => new Promise((resolve) => setTimeout(resolve, 350)),
+        () => new Promise((resolve) => setTimeout(resolve, 2_100)),
       );
       assertEquals(expiryResult.ok, false);
       await assertUnchangedLifecycle(harness.server.sql, expiringStage.stageId);
@@ -254,16 +282,11 @@ Deno.test({
         auth,
         ordinaryGrant.role,
       );
-      const agentStage = await insertApprovalStage(
-        harness.server.sql,
-        auth,
-        1,
-        {
-          role: ordinaryGrant.role,
-          principal_types: ["agent_user"],
-          allow_initiator: false,
-        },
-      );
+      const agentStage = await stage(auth, 1, {
+        role: ordinaryGrant.role,
+        principal_types: ["agent_user"],
+        allow_initiator: false,
+      });
       const agentResult = await queueOneWithMutation(
         harness.server.sql,
         agentStage.stageId,
@@ -298,7 +321,8 @@ Deno.test({
       );
 
       const secondAdmin = await createHumanAuth(harness.server.sql, true);
-      const quorum = await insertApprovalStage(harness.server.sql, auth, 2);
+      await grantReviewer(harness.server.sql, secondAdmin.principalId);
+      const quorum = await stage(auth, 2);
       const quorumResults = await queueTwo(
         harness.server.sql,
         quorum.stageId,
@@ -314,6 +338,12 @@ Deno.test({
           }, secondAdmin),
       );
       assertEquals(quorumResults.every((result) => result.ok), true);
+      assertResponseProjection(quorumResults[0], "awaiting_approval", 1, 1);
+      assertResponseProjection(quorumResults[1], "ready", 2, 2);
+      assertEquals(
+        immutableDto(dtoOf(quorumResults[0])),
+        immutableDto(dtoOf(quorumResults[1])),
+      );
       await assertDecisionState(
         harness.server.sql,
         quorum.stageId,
@@ -324,7 +354,7 @@ Deno.test({
       );
 
       for (const rejectFirst of [true, false]) {
-        const distinct = await insertApprovalStage(harness.server.sql, auth, 2);
+        const distinct = await stage(auth, 2);
         const firstActor = rejectFirst ? auth : secondAdmin;
         const secondActor = rejectFirst ? secondAdmin : auth;
         const distinctResults = await queueTwo(
@@ -375,10 +405,10 @@ Deno.test({
         }
       }
 
-      const approvalFirst = await insertApprovalStage(
+      const approvalFirst = await stage(auth, 1);
+      const approvalImmutable = await immutableSnapshot(
         harness.server.sql,
-        auth,
-        1,
+        approvalFirst.stageId,
       );
       const approvalHold = holdLifecycle(
         harness.server.sql,
@@ -399,7 +429,13 @@ Deno.test({
       );
       await waitForLifecycleWaiters(harness.server.sql, 2);
       approvalHold.release();
-      await Promise.all([queuedApproval, queuedCancel, approvalHold.done]);
+      const [approvalResponse, cancelResponse] = await Promise.all([
+        queuedApproval,
+        queuedCancel,
+      ]);
+      await approvalHold.done;
+      assertResponseProjection(approvalResponse, "ready", 2, 1);
+      assertResponseProjection(cancelResponse, "cancelled", 3, 1);
       assertEquals(
         await lifecycle(harness.server.sql, approvalFirst.stageId),
         { status: "cancelled", version: "3" },
@@ -412,11 +448,23 @@ Deno.test({
         ),
         "1",
       );
+      assertEquals(
+        await scalar(
+          harness.server.sql,
+          "select count(*) from staged_approval_audit_events where stage_id=$1",
+          [approvalFirst.stageId],
+        ),
+        "1",
+      );
+      assertEquals(
+        await immutableSnapshot(harness.server.sql, approvalFirst.stageId),
+        approvalImmutable,
+      );
 
-      const cancelFirst = await insertApprovalStage(
+      const cancelFirst = await stage(auth, 1);
+      const cancelImmutable = await immutableSnapshot(
         harness.server.sql,
-        auth,
-        1,
+        cancelFirst.stageId,
       );
       const cancelHold = holdLifecycle(harness.server.sql, cancelFirst.stageId);
       await cancelHold.locked;
@@ -434,7 +482,13 @@ Deno.test({
       );
       await waitForLifecycleWaiters(harness.server.sql, 2);
       cancelHold.release();
-      await Promise.all([firstCancel, laterApproval, cancelHold.done]);
+      const [cancelFirstResponse, deniedApproval] = await Promise.all([
+        firstCancel,
+        laterApproval,
+      ]);
+      await cancelHold.done;
+      assertResponseProjection(cancelFirstResponse, "cancelled", 2, 0);
+      assertEquals(deniedApproval.ok, false);
       assertEquals(
         await lifecycle(harness.server.sql, cancelFirst.stageId),
         { status: "cancelled", version: "2" },
@@ -446,6 +500,18 @@ Deno.test({
           [cancelFirst.stageId],
         ),
         "0",
+      );
+      assertEquals(
+        await scalar(
+          harness.server.sql,
+          "select count(*) from staged_approval_audit_events where stage_id=$1",
+          [cancelFirst.stageId],
+        ),
+        "0",
+      );
+      assertEquals(
+        await immutableSnapshot(harness.server.sql, cancelFirst.stageId),
+        cancelImmutable,
       );
 
       await assertRejects(() =>
@@ -483,9 +549,77 @@ Deno.test({
       );
     } finally {
       await harness.close();
+      await Deno.remove(pack, { recursive: true }).catch(() => undefined);
     }
   },
 });
+
+function dtoOf(result: unknown): Record<string, unknown> {
+  const value = result as { ok: boolean; value?: Record<string, unknown> };
+  if (!value.ok || !value.value) throw new Error("expected complete stage DTO");
+  return value.value;
+}
+function immutableDto(dto: Record<string, unknown>) {
+  return JSON.stringify(
+    Object.fromEntries(
+      [
+        "id",
+        "schema_version",
+        "source",
+        "created_at",
+        "created_auth_context_id",
+        "operation_graph_digest",
+        "stage_digest",
+        "projects",
+        "pack_revisions",
+        "operations",
+        "dependencies",
+        "hook_executions",
+        "policy_decisions",
+        "warnings",
+        "approval_requirements",
+        "planned_events",
+        "planned_deliveries",
+      ].map((key) => [key, dto[key]]),
+    ),
+  );
+}
+function assertResponseProjection(
+  result: unknown,
+  status: string,
+  version: number,
+  decisions: number,
+) {
+  const dto = dtoOf(result);
+  assertEquals(dto.status, status);
+  assertEquals(dto.lifecycle_version, version);
+  assertEquals((dto.approval_decisions as unknown[]).length, decisions);
+}
+async function assertRepeatedFact(
+  sql: Parameters<typeof query>[0],
+  stageId: string,
+  principalId: string,
+  results: readonly unknown[],
+  decision: string,
+  reason: string | null,
+) {
+  const dtos = results.map(dtoOf);
+  const facts = dtos.map((dto) =>
+    (dto.approval_decisions as Array<Record<string, unknown>>).find((item) =>
+      item.principal_id === principalId
+    )
+  );
+  assertEquals(facts[0], facts[1]);
+  assertEquals(facts[0]?.decision, decision);
+  assertEquals(facts[0]?.reason, reason);
+  assertEquals(immutableDto(dtos[0]), immutableDto(dtos[1]));
+  const stored = (await query<Record<string, unknown>>(
+    sql,
+    "select id,requirement_id,principal_id,decision,reason,decided_auth_context_id,decided_at from staged_approval_decisions where stage_id=$1 and principal_id=$2",
+    [stageId, principalId],
+  )).rows[0];
+  assertEquals(stored, facts[0]);
+}
 
 async function queueTwo<T>(
   sql: Parameters<typeof query>[0],
@@ -649,82 +783,103 @@ async function currentAuth(
     createdAt: new Date(String(row.created_at)).toISOString(),
   });
 }
-async function insertApprovalStage(
-  sql: Parameters<typeof query>[0],
-  auth: AuthContext,
+async function writeRacePack(root: string): Promise<void> {
+  await Deno.mkdir(`${root}/resources`);
+  await Deno.mkdir(`${root}/roles`);
+  await Deno.mkdir(`${root}/hooks`);
+  await Deno.writeTextFile(
+    `${root}/pack.yaml`,
+    `kind: Pack\napiVersion: operant.dev/v1\nmetadata: { publisher: test, name: races, version: 1.0.0 }\nspec: { purpose: Deterministic approval race evidence., axi: {} }\n`,
+  );
+  await Deno.writeTextFile(
+    `${root}/roles/reviewer.yaml`,
+    `kind: Role\napiVersion: operant.dev/v1\nmetadata: { name: reviewer }\nspec:\n  display_name: Race Reviewer\n  description: Exact reviewer role for deterministic approval races.\n  axi: {}\n`,
+  );
+  await Deno.writeTextFile(
+    `${root}/resources/approval_case.yaml`,
+    `kind: Resource\napiVersion: operant.dev/v1\nmetadata: { name: approval_case }\nspec:\n  fields:\n    name: { type: string, required: true, unique: true }\n    minimum: { type: integer, required: true }\n    allow_initiator: { type: boolean, required: true }\n    principal_kind: { type: string, required: true }\n    expires_at: { type: string, required: true }\n  axi: {}\n`,
+  );
+  await Deno.writeTextFile(
+    `${root}/hooks/approval.yaml`,
+    `kind: Hook\napiVersion: operant.dev/v1\nmetadata: { name: approval }\nspec:\n  script: approval.ts\n  permissions: { net: false, env: false, read: false, write: false, run: false }\n  secrets: []\n  effects: { operations: [] }\n  output: { schema: validation.v1 }\n  attachments:\n    - { phase: changeset.validate, resource: approval_case, input: { proposed: '$proposed' } }\n  axi: {}\n`,
+  );
+  await Deno.writeTextFile(
+    `${root}/hooks/approval.ts`,
+    `const envelope=JSON.parse(await new Response(Deno.stdin.readable).text());const p=envelope.input.proposed;console.log(JSON.stringify({allow:true,errors:[],warnings:[],required_approvals:[{key:"race_review",role:"test/races:reviewer",boundary:{type:"system"},minimum:p.minimum,principal_types:[p.principal_kind==="agent"?"agent_user":"human_user"],allow_initiator:p.allow_initiator,expires_at:p.expires_at==="none"?null:p.expires_at,reason:"deterministic race review"}]}));`,
+  );
+}
+
+async function stageApproval(
+  harness: Awaited<ReturnType<typeof startAuthenticatedHarness>>,
+  projectId: string,
+  _actor: AuthContext,
   minimum: number,
   overrides: Record<string, unknown> = {},
 ) {
-  const stageId = uuidV7();
-  const requirementId = uuidV7();
-  const digest = `sha256:${"a".repeat(64)}`;
-  await query(
-    sql,
-    `insert into staged_changesets(id,schema_version,source_kind,source_identity_json,created_auth_context_id,created_principal_id,creating_context_json,operation_graph_digest,stage_digest,canonical_graph_json,projects_json,pack_revisions_json,warnings_json,planned_events_json,planned_deliveries_json) values($1,1,'direct','{}',$2,$3,'{}',$4,$4,'{"schema":"changeset.operations.v1","operations":[]}','[]','[]','[]','[]','[]')`,
-    [stageId, auth.id, auth.principalId, digest],
-  );
-  const requirement = {
-    id: requirementId,
-    key: "system_review",
-    role: "system:super_admin",
-    boundary: { type: "system" },
-    minimum,
-    principal_types: ["human_user"],
-    allow_initiator: true,
-    expires_at: null,
-    reason: "system review",
-    ...overrides,
+  const result = await harness.runJson(["--json", "changeset", "stage"], {
+    project_id: projectId,
+    operations: [{
+      op: "create",
+      resource: "test/races:approval_case",
+      fields: {
+        name: `race-${crypto.randomUUID()}`,
+        minimum,
+        allow_initiator: overrides.allow_initiator ?? true,
+        principal_kind: Array.isArray(overrides.principal_types) &&
+            overrides.principal_types[0] === "agent_user"
+          ? "agent"
+          : "human",
+        expires_at: overrides.expires_at ?? "none",
+      },
+    }],
+  });
+  assertEquals(result.code, 0, result.stderr);
+  const dto = JSON.parse(result.stdout).data;
+  assertEquals(dto.operations.length, 1);
+  assertEquals(dto.dependencies.length > 0, true);
+  assertEquals(dto.hook_executions.length, 1);
+  assertEquals(dto.policy_decisions.length > 0, true);
+  assertEquals(dto.approval_requirements.length, 1);
+  return {
+    stageId: dto.id as string,
+    requirementId: dto.approval_requirements[0].id as string,
   };
-  await query(
-    sql,
-    `insert into staged_approval_requirements(id,stage_id,ordinal,requirement_json) values($1,$2,0,$3::jsonb)`,
-    [requirementId, stageId, requirement],
-  );
-  await query(
-    sql,
-    `insert into staged_changeset_lifecycle(stage_id,status,version) values($1,'awaiting_approval',1)`,
-    [stageId],
-  );
-  return { stageId, requirementId };
 }
 async function grantReviewer(
   sql: Parameters<typeof query>[0],
   principalId: string,
 ) {
-  const version = uuidV7();
-  const role = `system:approval_${principalId.slice(-8)}`;
-  await query(
-    sql,
-    "insert into system_roles(id,display_name,active) values($1,$1,true)",
-    [role],
-  );
-  await query(
-    sql,
-    "insert into role_definition_versions(id,role_id,version,active) values($1,$2,1,true)",
-    [uuidV7(), role],
-  );
+  const role = "test/races:reviewer";
   const roleAssignmentId = uuidV7();
   await query(
     sql,
     "insert into role_assignments(id,principal_id,role_id,boundary_type,active) values($1,$2,$3,'system',true)",
     [roleAssignmentId, principalId, role],
   );
-  await query(
+  let policyAssignmentId = (await query<{ id: string }>(
     sql,
-    "insert into policy_definition_versions(id,policy_id,version,active) values($1,$2,1,true)",
-    [version, `system:approval_${principalId.slice(-8)}`],
-  );
-  await query(
-    sql,
-    "insert into policy_rules(id,policy_definition_version_id,role_id,capability,resource,condition_kind) values($1,$2,$3,'changeset.approval.decide','system:changeset-approval','unconditional')",
-    [uuidV7(), version, role],
-  );
-  const policyAssignmentId = uuidV7();
-  await query(
-    sql,
-    "insert into policy_assignments(id,policy_definition_version_id,boundary_type,active) values($1,$2,'system',true)",
-    [policyAssignmentId, version],
-  );
+    `select pa.id from policy_assignments pa join policy_definition_versions pdv on pdv.id=pa.policy_definition_version_id join policy_rules pr on pr.policy_definition_version_id=pdv.id where pr.role_id=$1 and pr.capability='changeset.approval.decide' limit 1`,
+    [role],
+  )).rows[0]?.id;
+  if (!policyAssignmentId) {
+    const version = uuidV7();
+    policyAssignmentId = uuidV7();
+    await query(
+      sql,
+      "insert into policy_definition_versions(id,policy_id,version,active) values($1,'system:approval_races',1,true)",
+      [version],
+    );
+    await query(
+      sql,
+      "insert into policy_rules(id,policy_definition_version_id,role_id,capability,resource,condition_kind) values($1,$2,$3,'changeset.approval.decide','system:changeset-approval','unconditional')",
+      [uuidV7(), version, role],
+    );
+    await query(
+      sql,
+      "insert into policy_assignments(id,policy_definition_version_id,boundary_type,active) values($1,$2,'system',true)",
+      [policyAssignmentId, version],
+    );
+  }
   return { roleAssignmentId, policyAssignmentId, role };
 }
 
@@ -884,13 +1039,34 @@ async function immutableSnapshot(
   sql: Parameters<typeof query>[0],
   stageId: string,
 ) {
-  return JSON.stringify(
-    (await query(
-      sql,
-      `select s.operation_graph_digest,s.stage_digest,s.canonical_graph_json,(select jsonb_agg(dependency_json order by ordinal) from staged_changeset_dependencies where stage_id=s.id) dependencies,(select jsonb_agg(output_json order by ordinal) from staged_hook_executions where stage_id=s.id) hooks,(select jsonb_agg(requirement_json order by ordinal) from staged_approval_requirements where stage_id=s.id) requirements from staged_changesets s where id=$1`,
-      [stageId],
-    )).rows[0],
-  );
+  const snapshot = (await query<Record<string, unknown>>(
+    sql,
+    `select to_jsonb(s) staged_changeset,
+      (select jsonb_agg(to_jsonb(o) order by ordinal) from staged_changeset_operations o where o.stage_id=s.id) operations,
+      (select jsonb_agg(to_jsonb(d) order by ordinal) from staged_changeset_dependencies d where d.stage_id=s.id) dependencies,
+      (select jsonb_agg(to_jsonb(h) order by ordinal) from staged_hook_executions h where h.stage_id=s.id) hooks,
+      (select jsonb_agg(to_jsonb(p) order by ordinal) from staged_policy_decisions p where p.stage_id=s.id) policies,
+      (select jsonb_agg(to_jsonb(r) order by ordinal) from staged_approval_requirements r where r.stage_id=s.id) requirements
+     from staged_changesets s where s.id=$1`,
+    [stageId],
+  )).rows[0];
+  for (
+    const collection of [
+      "operations",
+      "dependencies",
+      "hooks",
+      "policies",
+      "requirements",
+    ]
+  ) {
+    assertEquals(
+      Array.isArray(snapshot[collection]) &&
+        (snapshot[collection] as unknown[]).length > 0,
+      true,
+      `${collection} immutable evidence must be nonempty`,
+    );
+  }
+  return JSON.stringify(snapshot);
 }
 async function lifecycle(sql: Parameters<typeof query>[0], stageId: string) {
   return (await query<{ status: string; version: string }>(
