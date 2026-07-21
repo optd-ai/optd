@@ -100,10 +100,44 @@ export async function startServer(
   const hostname = options.hostname ?? "127.0.0.1";
   const port = options.port ?? 8789;
   const controller = new AbortController();
-  const handler = await createFetchHandler({
-    hookServerPort: port === 0 ? undefined : port,
-    hookServerHosts: databaseHostAliases(hostname),
-  });
+  if (port !== 0) {
+    const handler = await createFetchHandler({
+      hookServerPort: port,
+      hookServerHosts: databaseHostAliases(hostname),
+    });
+    const server = Deno.serve({
+      hostname,
+      port,
+      signal: controller.signal,
+      onListen: ({ hostname: actualHost, port: actualPort }) => {
+        options.onListen?.(`http://${actualHost}:${actualPort}`);
+      },
+    }, handler.fetch);
+    const addr = server.addr as Deno.NetAddr;
+    return {
+      url: `http://${addr.hostname}:${addr.port}`,
+      sql: handler.sql,
+      async shutdown() {
+        controller.abort();
+        await server.finished.catch((error) => {
+          if (!(error instanceof Deno.errors.Interrupted)) throw error;
+        });
+        await handler.shutdown();
+      },
+    };
+  }
+
+  let handler: Awaited<ReturnType<typeof createFetchHandler>> | undefined;
+  let resolveHandler:
+    | ((value: Awaited<ReturnType<typeof createFetchHandler>>) => void)
+    | undefined;
+  let rejectHandler: ((reason: unknown) => void) | undefined;
+  const ready = new Promise<Awaited<ReturnType<typeof createFetchHandler>>>(
+    (resolve, reject) => {
+      resolveHandler = resolve;
+      rejectHandler = reject;
+    },
+  );
   const server = Deno.serve({
     hostname,
     port,
@@ -112,9 +146,21 @@ export async function startServer(
       const url = `http://${actualHost}:${actualPort}`;
       options.onListen?.(url);
     },
-  }, handler.fetch);
+  }, async (request) => await (handler ?? await ready).fetch(request));
   const addr = server.addr as Deno.NetAddr;
   const url = `http://${addr.hostname}:${addr.port}`;
+  try {
+    handler = await createFetchHandler({
+      hookServerPort: addr.port,
+      hookServerHosts: databaseHostAliases(addr.hostname),
+    });
+    resolveHandler?.(handler);
+  } catch (error) {
+    rejectHandler?.(error);
+    controller.abort();
+    await server.finished.catch(() => undefined);
+    throw error;
+  }
   return {
     url,
     sql: handler.sql,
@@ -123,7 +169,7 @@ export async function startServer(
       await server.finished.catch((error) => {
         if (!(error instanceof Deno.errors.Interrupted)) throw error;
       });
-      await handler.shutdown();
+      await handler!.shutdown();
     },
   };
 }

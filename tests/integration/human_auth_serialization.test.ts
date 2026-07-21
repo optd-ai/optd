@@ -1,3 +1,4 @@
+// deno-lint-ignore-file no-import-prefix no-unversioned-import
 import { assertEquals, assertFalse } from "jsr:@std/assert";
 import { startLiveHarness } from "../support/live_harness.ts";
 import { query } from "../../src/adapters/outbound/postgres/client.ts";
@@ -194,7 +195,14 @@ Deno.test("destructive confirmations share serialized login throttling", async (
       "change",
       "--password-stdin",
     ], "wrong password five\nunused replacement password\n");
-    assertEquals(JSON.parse(fifth.stderr).error.code, "login_invalid");
+    assertEquals(
+      await capturedCliErrorCode(
+        harness,
+        fifth,
+        "fifth destructive confirmation",
+      ),
+      "login_invalid",
+    );
     const blocked = await harness.runOptctl([
       "--json",
       "auth",
@@ -203,7 +211,10 @@ Deno.test("destructive confirmations share serialized login throttling", async (
       "--yes",
       "--password-stdin",
     ], "administrator password\n");
-    assertEquals(JSON.parse(blocked.stderr).error.code, "login_throttled");
+    assertEquals(
+      await capturedCliErrorCode(harness, blocked, "throttled confirmation"),
+      "login_throttled",
+    );
     const active = await query<{ count: string }>(
       harness.server.sql,
       `select count(*)::text count from auth_sessions where human_user_id=(select id from human_users where username='destructive-admin') and revoked_at is null`,
@@ -213,6 +224,37 @@ Deno.test("destructive confirmations share serialized login throttling", async (
     await harness.close();
   }
 });
+
+async function capturedCliErrorCode(
+  harness: Awaited<ReturnType<typeof startLiveHarness>>,
+  result: Awaited<ReturnType<typeof harness.runOptctl>>,
+  label: string,
+): Promise<string> {
+  if (!result.stderr) {
+    const [diagnostics, processes] = await Promise.all([
+      harness.diagnostics(),
+      new Deno.Command("/bin/ps", {
+        args: ["-u", String(Deno.uid()), "-o", "pid,ppid,state,args"],
+        stdout: "piped",
+        stderr: "piped",
+      }).output().then((output) => new TextDecoder().decode(output.stdout))
+        .catch((error) => String(error)),
+    ]);
+    throw new Error(`${label} produced no JSON stderr: ${
+      JSON.stringify({
+        code: result.code,
+        signal: result.signal,
+        stdout: result.stdout,
+        stderr: result.stderr,
+        argv: result.argv,
+        duration_ms: result.durationMs,
+        diagnostics,
+        processes,
+      })
+    }`);
+  }
+  return JSON.parse(result.stderr).error.code;
+}
 
 Deno.test("reset decisions redemption completion and anchored revocation serialize", async () => {
   const harness = await startLiveHarness();

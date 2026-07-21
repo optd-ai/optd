@@ -11,6 +11,17 @@ import { canonicalSha256 } from "../../../domain/ids/canonical_json.ts";
 import { uuidV7 } from "../../../domain/ids/uuid_v7.ts";
 import { applyPatches } from "../../../domain/changesets/patch.ts";
 import {
+  canonicalizeResolvedOperations,
+  type CanonicalOperation,
+  DEFAULT_OPERATION_LIMITS,
+  type OperationLimits,
+  resolveAddedOperations,
+} from "../../../domain/changesets/operations.ts";
+import {
+  type AuthoredOperation,
+  authoredOperationContract,
+} from "../../../schemas/changesets/operations.ts";
+import {
   DenoHookRunner,
   type HookDefinition,
   type HookEnvelope,
@@ -46,8 +57,13 @@ export type ActionStageHookInput = Readonly<{
   reads: Readonly<Record<string, unknown>>;
   declarations: readonly ActionStageHookDeclaration[];
   authority_snapshot: HookAuthoritySnapshot;
+  limits?: OperationLimits;
+  allocate_id?: () => string;
 }>;
 export type ActionStageHookExecution = Readonly<{
+  id: string;
+  phase: "action.stage";
+  output_schema: "changeset.operations.v1";
   hook: string;
   attachment_id: string;
   hook_revision_id: string;
@@ -56,7 +72,7 @@ export type ActionStageHookExecution = Readonly<{
   security_digest: string;
   input_digest: string;
   output_digest: string;
-  operations: readonly Record<string, unknown>[];
+  added_operations: readonly CanonicalOperation[];
   stderr: string;
   logs_truncated: boolean;
   secrets_redacted: boolean;
@@ -124,17 +140,29 @@ export class TrustedStageHookCoordinator implements StageHookCoordinator {
     return result;
   }
 
-  async coordinateAction(
+  async runActionStage(
     input: ActionStageHookInput,
   ): Promise<{
-    operations: Record<string, unknown>[];
+    added_operations: CanonicalOperation[];
+    operation_graph_digest: string;
     hook_executions: ActionStageHookExecution[];
   }> {
-    const operations: Record<string, unknown>[] = [];
+    let operations: CanonicalOperation[] = [];
     const executions: ActionStageHookExecution[] = [];
     for (
       const declaration of [...input.declarations].sort(compareDeclarations)
     ) {
+      if (
+        declaration.phase !== "action.stage" ||
+        declaration.output_schema !== "changeset.operations.v1" ||
+        declaration.operation_key !== null
+      ) {
+        throw new StageHookError(
+          "hook_invalid_output_schema",
+          "action.stage hooks must use changeset.operations.v1",
+          { hook: declaration.hook },
+        );
+      }
       const resolved = await this.#resolveSecrets(declaration);
       const envelope: HookEnvelope = {
         hook: declaration.hook,
@@ -160,18 +188,54 @@ export class TrustedStageHookCoordinator implements StageHookCoordinator {
         envelope,
       );
       const emitted = result.output?.operations;
-      if (
-        !Array.isArray(emitted) || emitted.some((value) => !isRecord(value))
-      ) {
+      if (!Array.isArray(emitted)) {
         throw new StageHookError(
           "hook_invalid_output",
           "action hook operations are malformed",
           { hook: declaration.hook },
         );
       }
-      enforceEffects(declaration, emitted as Record<string, unknown>[]);
-      operations.push(...emitted as Record<string, unknown>[]);
+      const authored: AuthoredOperation[] = [];
+      for (let index = 0; index < emitted.length; index++) {
+        if (!authoredOperationContract.check(emitted[index])) {
+          throw new StageHookError(
+            "hook_invalid_output",
+            "action hook operation does not satisfy changeset.operations.v1",
+            {
+              hook: declaration.hook,
+              operation_index: index,
+              issues: authoredOperationContract.issues(emitted[index]),
+            },
+          );
+        }
+        authored.push(emitted[index]);
+      }
+      enforceEffects(declaration, authored);
+      const priorLength = operations.length;
+      try {
+        operations = resolveAddedOperations(
+          operations,
+          authored,
+          input.allocate_id ?? uuidV7,
+        );
+        await canonicalizeResolvedOperations(
+          operations,
+          input.limits ?? DEFAULT_OPERATION_LIMITS,
+        );
+      } catch (error) {
+        throw new StageHookError(
+          "hook_invalid_output",
+          error instanceof Error
+            ? error.message
+            : "operation normalization failed",
+          { hook: declaration.hook },
+        );
+      }
+      const added = operations.slice(priorLength);
       executions.push({
+        id: uuidV7(),
+        phase: "action.stage",
+        output_schema: "changeset.operations.v1",
         hook: declaration.hook,
         attachment_id: declaration.attachment_id,
         hook_revision_id: declaration.hook_revision_id,
@@ -180,7 +244,7 @@ export class TrustedStageHookCoordinator implements StageHookCoordinator {
         security_digest: declaration.security_digest,
         input_digest: `sha256:${await canonicalSha256(envelope)}`,
         output_digest: `sha256:${await canonicalSha256(result.output)}`,
-        operations: emitted as Record<string, unknown>[],
+        added_operations: added,
         stderr: result.logs,
         logs_truncated: result.logsTruncated ?? false,
         secrets_redacted: result.secretsRedacted ?? false,
@@ -189,7 +253,19 @@ export class TrustedStageHookCoordinator implements StageHookCoordinator {
         grant_snapshot: { grants: resolved.evidence },
       });
     }
-    return { operations, hook_executions: executions };
+    const canonical = await canonicalizeResolvedOperations(
+      operations,
+      input.limits ?? DEFAULT_OPERATION_LIMITS,
+    );
+    return {
+      added_operations: canonical.operations,
+      operation_graph_digest: canonical.operationGraphDigest,
+      hook_executions: executions,
+    };
+  }
+
+  async coordinateAction(input: ActionStageHookInput) {
+    return await this.runActionStage(input);
   }
 
   async coordinate(
@@ -356,15 +432,24 @@ function compareDeclarations(
     left.attachment_id.localeCompare(right.attachment_id);
 }
 
+export async function runActionStage(
+  coordinator: TrustedStageHookCoordinator,
+  input: ActionStageHookInput,
+) {
+  return await coordinator.runActionStage(input);
+}
+
 function enforceEffects(
   declaration: ActionStageHookDeclaration,
-  operations: Record<string, unknown>[],
+  operations: readonly AuthoredOperation[],
 ): void {
   const effects = declaration.effects.map((value) =>
     isRecord(value) ? value : {}
   );
   for (const operation of operations) {
-    const resource = String(operation.resource ?? operation.relationship ?? "");
+    const resource = String(
+      "resource" in operation ? operation.resource : operation.relationship,
+    );
     const op = String(operation.op ?? "");
     const allowed = effects.some((effect) =>
       effect.resource === resource && Array.isArray(effect.ops) &&

@@ -1,3 +1,4 @@
+// deno-lint-ignore-file no-import-prefix no-unversioned-import
 import { Hono } from "npm:hono";
 import {
   err,
@@ -217,6 +218,12 @@ export function makeHttpApp(
   const app = new Hono<{ Variables: AuthVariables }>();
 
   app.use("*", async (c, next) => {
+    if (
+      /^\/(?:secrets|hook-secret-grants)(?:\/|$)/.test(c.req.path)
+    ) {
+      await next();
+      return;
+    }
     if (
       c.req.path === "/live" || c.req.path === "/ready" ||
       c.req.path === "/api/v1/auth/bootstrap/status" ||

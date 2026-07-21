@@ -106,11 +106,20 @@ Deno.test("trusted action-stage seam enforces declared operation effects", async
     effects: [{ resource: "operant/test:item", ops: ["create"] }],
     input_mapping: { request: "$action.input", record: "$reads.item" },
   } as ActionStageHookDeclaration;
-  const result = await coordinator.coordinateAction({
+  const second = {
+    ...action,
+    attachment_id: "0198c4ba-42b8-7000-8000-000000000031",
+    hook_revision_id: "0198c4ba-42b8-7000-8000-000000000032",
+    order: 2,
+    script_content:
+      `const input=JSON.parse(await new Response(Deno.stdin.readable).text()); if (input.input.request.name !== "generated" || input.input.record.id !== "0198c4ba-42b8-7000-8000-000000000020" || input.input.authority_snapshot !== undefined) throw new Error("uncurated input"); console.log(JSON.stringify({operations:[{op:"update",project_id:"0198c4ba-42b8-7000-8000-000000000010",resource:"operant/test:item",object_id:{$ref:"op_000001.object_id"},set:{status:"ready"}}]}));`,
+    effects: [{ resource: "operant/test:item", ops: ["update"] }],
+  } as ActionStageHookDeclaration;
+  const result = await coordinator.runActionStage({
     action: "operant/test:generate",
     input: { name: "generated" },
     reads: { item: { id: "0198c4ba-42b8-7000-8000-000000000020" } },
-    declarations: [action],
+    declarations: [second, action],
     authority_snapshot: {
       principal_id: "0198c4ba-42b8-7000-8000-000000000011",
       auth_context_id: "0198c4ba-42b8-7000-8000-000000000012",
@@ -118,12 +127,22 @@ Deno.test("trusted action-stage seam enforces declared operation effects", async
       policy_digest: SHA_B,
     },
   });
-  equals(result.operations.length, 1);
-  equals(result.hook_executions.length, 1);
+  equals(result.added_operations.length, 1);
+  equals(result.hook_executions.length, 2);
+  equals(
+    result.hook_executions[1].added_operations[0].object_id,
+    result.added_operations[0].object_id,
+  );
+  equals(result.added_operations[0].fields, {
+    name: "generated",
+    status: "ready",
+  });
+  equals(result.hook_executions[0].output_schema, "changeset.operations.v1");
+  equals(result.hook_executions[0].added_operations.length, 1);
 
   let denied = false;
   try {
-    await coordinator.coordinateAction({
+    await coordinator.runActionStage({
       action: "operant/test:generate",
       input: {},
       reads: { item: {} },
@@ -135,6 +154,27 @@ Deno.test("trusted action-stage seam enforces declared operation effects", async
       error.code === "hook_effect_denied";
   }
   equals(denied, true);
+
+  let limited = false;
+  try {
+    await coordinator.runActionStage({
+      action: "operant/test:generate",
+      input: {},
+      reads: { item: {} },
+      declarations: [action],
+      authority_snapshot: result.hook_executions[0].authority_snapshot,
+      limits: {
+        maxOperations: 0,
+        maxDepth: 64,
+        maxGraphBytes: 1024,
+        maxStringBytes: 1024,
+      },
+    });
+  } catch (error) {
+    limited = error instanceof Error && "code" in error &&
+      error.code === "hook_invalid_output";
+  }
+  equals(limited, true);
 });
 
 function equals(actual: unknown, expected: unknown): void {

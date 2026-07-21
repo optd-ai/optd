@@ -23,6 +23,11 @@ Deno.test({
       prefix: "operant-hook-secret-pack-",
     });
     try {
+      for (const legacyPath of ["/secrets", "/hook-secret-grants"]) {
+        const legacy = await fetch(`${harness.baseUrl}${legacyPath}`);
+        await legacy.body?.cancel();
+        assertEquals(legacy.status, 404);
+      }
       await writePack(pack, provider.url);
       const apply = await harness.runOptctl([
         "--json",
@@ -122,12 +127,25 @@ Deno.test({
           fields: { name: "proof" },
         }],
       });
-      assertEquals(staged.code, 0, staged.stderr);
+      assertEquals(
+        staged.code,
+        0,
+        `${staged.stderr}\n${(await harness.diagnostics()).server}`,
+      );
       const stageData = JSON.parse(staged.stdout).data;
       assertEquals(stageData.hook_executions.length, 1);
       assertEquals(
         stageData.hook_executions[0].grant_snapshot.grants.length,
         1,
+      );
+      assertEquals(
+        Object.keys(stageData.hook_executions[0].authority_snapshot).sort(),
+        [
+          "assignment_digest",
+          "auth_context_id",
+          "policy_digest",
+          "principal_id",
+        ],
       );
       assertEquals(
         stageData.hook_executions[0].grant_snapshot.grants[0].grant_id,
@@ -183,6 +201,29 @@ Deno.test({
         heads: "1",
         successors: "1",
       });
+      await Deno.writeTextFile(
+        `${pack}/pack.yaml`,
+        (await Deno.readTextFile(`${pack}/pack.yaml`)).replace(
+          "1.0.0",
+          "1.0.1",
+        ),
+      );
+      const upgradedPack = await harness.runOptctl([
+        "--json",
+        "pack",
+        "apply",
+        pack,
+        "--safe",
+      ]);
+      assertEquals(upgradedPack.code, 0, upgradedPack.stderr);
+      assertEquals(
+        (await query<{ count: string }>(
+          harness.server.sql,
+          `select count(*)::text count from audit_events
+            where event_type='hook_secret_grant.inherited'`,
+        )).rows[0].count,
+        "1",
+      );
       const currentGrant = (await query<{ grant_id: string; name: string }>(
         harness.server.sql,
         `select head.grant_id,secret.name
@@ -190,6 +231,40 @@ Deno.test({
            join hook_secret_grants grant_row on grant_row.id=head.grant_id
            join platform_secrets secret on secret.id=grant_row.secret_id`,
       )).rows[0];
+      await assertRejects(() =>
+        query(
+          harness.server.sql,
+          "update hook_secret_grant_heads set slot='corrupt' where grant_id=$1",
+          [currentGrant.grant_id],
+        )
+      );
+      const lifecycleAudit = (await query<
+        { event_type: string; metadata: string }
+      >(
+        harness.server.sql,
+        `select event_type,request_metadata_json::text metadata from audit_events
+          where resource='system:hook-secret-grant'
+          order by created_at,event_type`,
+      )).rows;
+      assertEquals(
+        lifecycleAudit.map((event) => event.event_type).sort(),
+        [
+          "hook_secret_grant.created",
+          "hook_secret_grant.inherited",
+          "hook_secret_grant.replaced",
+        ],
+      );
+      for (const event of lifecycleAudit) {
+        assert(event.metadata.includes("auth_context_id"));
+        assert(event.metadata.includes("super_admin_bypass"));
+        const decoded = JSON.parse(event.metadata);
+        const metadata = typeof decoded === "string"
+          ? JSON.parse(decoded)
+          : decoded;
+        assertEquals(metadata.super_admin_bypass, true);
+        assert(!event.metadata.includes("-value"));
+        assert(!event.metadata.includes("rotation-"));
+      }
       const beforeDisabledStage = (await query<{ count: string }>(
         harness.server.sql,
         "select count(*)::text count from staged_changesets",
@@ -262,7 +337,7 @@ Deno.test({
           harness.server.sql,
           "select count(*)::text count from hook_secret_grant_heads",
         )).rows[0].count,
-        "0",
+        "1",
       );
       assertEquals(
         (await query<{ count: string }>(
@@ -292,6 +367,8 @@ Deno.test({
         [currentGrant.grant_id],
       )).rows[0];
       assert(audit);
+      assert(audit.metadata.includes("auth_context_id"));
+      assert(audit.metadata.includes("super_admin_bypass"));
       assert(!audit.metadata.includes("reenabled-value"));
       await assertRejects(() =>
         query(harness.server.sql, "delete from audit_events where id=$1", [
@@ -337,8 +414,8 @@ async function writePack(root: string, providerUrl: string): Promise<void> {
   );
   await Deno.writeTextFile(
     `${root}/hooks/guard.ts`,
-    `const token=Deno.env.get("TOKEN"); const response=await fetch(${
+    `const input=JSON.parse(await new Response(Deno.stdin.readable).text()); const token=Deno.env.get("TOKEN"); const response=await fetch(${
       JSON.stringify(`${providerUrl}/validate`)
-    }); const body=await response.json(); console.error(token); const allow=!!token&&body.allowed===true; console.log(JSON.stringify({allow,errors:allow?[]:[{path:"/",code:"missing",message:"missing"}],warnings:[],required_approvals:[]}));`,
+    }); const body=await response.json(); console.error(token); const curated=input.authority_snapshot===undefined&&input.grant_snapshot===undefined; const allow=!!token&&body.allowed===true&&curated; console.log(JSON.stringify({allow,errors:allow?[]:[{path:"/",code:"missing",message:"missing"}],warnings:[],required_approvals:[]}));`,
   );
 }

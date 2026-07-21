@@ -81,11 +81,10 @@ export class PostgresStageRepository implements StageRepository {
     try {
       return await this.sql.begin(async (tx) => {
         const projects: Record<string, unknown>[] = [];
-        for (
-          const projectId of [
-            ...new Set(operations.map((operation) => operation.project_id)),
-          ].sort()
-        ) {
+        const projectIds = [
+          ...new Set(operations.map((operation) => operation.project_id)),
+        ].sort();
+        for (const projectId of projectIds) {
           await lockReadAuthority(tx, auth, projectId);
           const project =
             (await query<{ id: string; version: string; status: string }>(
@@ -250,15 +249,11 @@ export class PostgresStageRepository implements StageRepository {
           projects,
           pack_revisions: revisions,
           hook_declarations: hookDeclarations.sort(compareHookDeclarations),
-          authority_snapshot: {
-            principal_id: auth.principalId,
-            auth_context_id: auth.id,
-            assignment_digest: `sha256:${await canonicalSha256({
-              principal_id: auth.principalId,
-              roles: [...auth.roles].sort(),
-            })}`,
-            policy_digest: `sha256:${await canonicalSha256(revisions)}`,
-          },
+          authority_snapshot: await captureHookAuthoritySnapshot(
+            tx,
+            auth,
+            projectIds,
+          ),
           proposed_states: proposedStates,
           base_states: baseStates,
         });
@@ -2388,6 +2383,72 @@ function timestamp(value: unknown): string | null {
     ? new Date(value).toISOString()
     : null;
 }
+async function captureHookAuthoritySnapshot(
+  sql: Queryable,
+  auth: AuthContext,
+  projectIds: string[],
+): Promise<StageHookInput["authority_snapshot"]> {
+  const assignments = (await query<{ kind: string; id: string }>(
+    sql,
+    `with recursive lineage(id) as (
+       select $1::uuid where $1::uuid is not null
+       union
+       select agent_auth.parent_authorization_id
+         from agent_authorizations agent_auth
+         join lineage child on child.id=agent_auth.id
+        where agent_auth.parent_authorization_id is not null
+     )
+     select kind,id::text from (
+       select 'auth_session' kind,id from auth_sessions where id=$2
+       union all select 'principal',id from principals where id=$3
+       union all select 'human_user',id from human_users where id=$4
+       union all select 'agent_authorization',id from lineage
+       union all select 'role_assignment',id from role_assignments
+        where principal_id=$3 and
+          (boundary_type in ('system','all_projects') or project_id=any($5::uuid[]))
+       union all select 'agent_authorization_role',id from agent_authorization_roles
+        where authorization_id=$1 and
+          (boundary_type in ('system','all_projects') or project_id=any($5::uuid[]))
+       union all select 'role_definition_version',role_version.id
+         from role_definition_versions role_version where role_version.role_id in (
+           select role_id from role_assignments where principal_id=$3
+           union select role_id from agent_authorization_roles where authorization_id=$1
+         )
+     ) evidence order by kind,id`,
+    [
+      auth.authorizationId ?? null,
+      auth.sessionId,
+      auth.principalId,
+      auth.humanUserId,
+      projectIds,
+    ],
+  )).rows;
+  const policies = (await query<{ kind: string; id: string }>(
+    sql,
+    `select kind,id::text from (
+       select 'policy_assignment' kind,id from policy_assignments
+        where boundary_type in ('system','all_projects') or project_id=any($1::uuid[])
+       union all select 'policy_definition_version',definition.id
+         from policy_definition_versions definition join policy_assignments assignment
+           on assignment.policy_definition_version_id=definition.id
+        where assignment.boundary_type in ('system','all_projects') or
+              assignment.project_id=any($1::uuid[])
+       union all select 'policy_rule',rule.id from policy_rules rule
+         join policy_assignments assignment
+           on assignment.policy_definition_version_id=rule.policy_definition_version_id
+        where assignment.boundary_type in ('system','all_projects') or
+              assignment.project_id=any($1::uuid[])
+     ) evidence order by kind,id`,
+    [projectIds],
+  )).rows;
+  return {
+    principal_id: auth.principalId,
+    auth_context_id: auth.id,
+    assignment_digest: `sha256:${await canonicalSha256(assignments)}`,
+    policy_digest: `sha256:${await canonicalSha256(policies)}`,
+  };
+}
+
 function domain(code: string, message: string, severity: string): Error {
   return Object.assign(new Error(message), { code, severity });
 }

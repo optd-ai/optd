@@ -1,3 +1,4 @@
+// deno-lint-ignore-file no-import-prefix no-unversioned-import
 import { assertEquals } from "jsr:@std/assert";
 import { walk } from "jsr:@std/fs/walk";
 import { join } from "jsr:@std/path";
@@ -15,6 +16,7 @@ import {
 export type CliResult = {
   argv: string[];
   code: number;
+  signal: Deno.Signal | null;
   stdout: string;
   stderr: string;
   startedAt: number;
@@ -344,40 +346,72 @@ async function compileOptctl(): Promise<string> {
     // Compile below.
   }
   await Deno.mkdir(cacheDir, { recursive: true, mode: 0o700 });
-  const temporary = `${binary}.${Deno.pid}.${crypto.randomUUID()}`;
-  const output = await new Deno.Command(Deno.execPath(), {
-    args: [
-      "compile",
-      "--no-prompt",
-      "--allow-read",
-      "--allow-write",
-      "--allow-env",
-      "--allow-net",
-      "--allow-run",
-      "--allow-sys=uid",
-      "--output",
-      temporary,
-      "src/main_optctl.ts",
-    ],
-    stdout: "piped",
-    stderr: "piped",
-  }).output();
-  if (!output.success) {
-    throw new Error(
-      `optctl compilation failed: ${new TextDecoder().decode(output.stderr)}`,
-    );
-  }
+  const compileLock = `${binary}.compile-lock`;
+  let ownsLock = false;
   try {
-    await Deno.rename(temporary, binary);
+    await Deno.mkdir(compileLock, { mode: 0o700 });
+    ownsLock = true;
   } catch (error) {
-    await Deno.remove(temporary).catch(() => undefined);
-    try {
-      await Deno.stat(binary);
-    } catch {
-      throw error;
-    }
+    if (!(error instanceof Deno.errors.AlreadyExists)) throw error;
   }
-  return binary;
+  if (!ownsLock) {
+    const deadline = Date.now() + 180_000;
+    while (Date.now() < deadline) {
+      try {
+        const ready = await Deno.stat(binary);
+        if (ready.isFile && ((ready.mode ?? 0) & 0o111) !== 0) return binary;
+      } catch { /* compiler still owns the cache entry */ }
+      const lock = await Deno.stat(compileLock).catch(() => undefined);
+      if (lock?.mtime && Date.now() - lock.mtime.getTime() > 180_000) {
+        await Deno.remove(compileLock, { recursive: true }).catch(() =>
+          undefined
+        );
+        return await compileOptctl();
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    throw new Error("timed out waiting for the shared optctl compilation");
+  }
+
+  const temporary = `${binary}.${Deno.pid}.${crypto.randomUUID()}`;
+  try {
+    const output = await new Deno.Command(Deno.execPath(), {
+      args: [
+        "compile",
+        "--no-prompt",
+        "--allow-read",
+        "--allow-write",
+        "--allow-env",
+        "--allow-net",
+        "--allow-run",
+        "--allow-sys=uid",
+        "--output",
+        temporary,
+        "src/main_optctl.ts",
+      ],
+      stdout: "piped",
+      stderr: "piped",
+    }).output();
+    if (!output.success) {
+      throw new Error(
+        `optctl compilation failed: ${new TextDecoder().decode(output.stderr)}`,
+      );
+    }
+    try {
+      await Deno.rename(temporary, binary);
+    } catch (error) {
+      await Deno.remove(temporary).catch(() => undefined);
+      try {
+        await Deno.stat(binary);
+      } catch {
+        throw error;
+      }
+    }
+    return binary;
+  } finally {
+    await Deno.remove(temporary).catch(() => undefined);
+    await Deno.remove(compileLock, { recursive: true }).catch(() => undefined);
+  }
 }
 
 async function sourceDigest(): Promise<string> {
@@ -546,6 +580,7 @@ function cliResult(
   return {
     argv,
     code: output.code,
+    signal: output.signal,
     stdout: new TextDecoder().decode(output.stdout).trimEnd(),
     stderr: new TextDecoder().decode(output.stderr).trimEnd(),
     startedAt,
@@ -705,6 +740,7 @@ function testAuthStoreBridge(
   };
 }
 
+// deno-lint-ignore require-await
 export async function makeProcessTreeLauncher(
   kind: ProcessTreeKind,
   binaryPath: string,
@@ -742,6 +778,7 @@ export async function makeProcessTreeLauncher(
         const output = await process.output();
         console.log(JSON.stringify({
           code: output.code,
+          signal: output.signal,
           stdout: new TextDecoder().decode(output.stdout),
           stderr: new TextDecoder().decode(output.stderr),
         }));
@@ -841,6 +878,7 @@ export async function makeProcessTreeLauncher(
         );
         const result = JSON.parse(await readLine()) as {
           code: number;
+          signal: Deno.Signal | null;
           stdout: string;
           stderr: string;
         };
@@ -853,6 +891,7 @@ export async function makeProcessTreeLauncher(
         return {
           argv,
           code: result.code,
+          signal: result.signal,
           stdout: result.stdout.trimEnd(),
           stderr: result.stderr.trimEnd(),
           startedAt,

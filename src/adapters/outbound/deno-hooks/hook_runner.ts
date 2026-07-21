@@ -517,6 +517,7 @@ export async function resolveHookDenoBinary(
   if (!stat?.isFile) throw new Error("configured Deno runtime is not a file");
   const probe = await new Deno.Command(candidate, {
     args: ["--version"],
+    clearEnv: true,
     stdin: "null",
     stdout: "piped",
     stderr: "piped",
@@ -549,12 +550,19 @@ for (const __operantTarget of [
     configurable: false,
   });
 }
-Object.defineProperty(globalThis, "Function", {
-  value: __operantDenyDynamicCode,
-  writable: false,
-  enumerable: false,
-  configurable: false,
-});`;
+for (const __operantGlobalName of [
+  "Function",
+  "AsyncFunction",
+  "GeneratorFunction",
+  "AsyncGeneratorFunction",
+]) {
+  Object.defineProperty(globalThis, __operantGlobalName, {
+    value: __operantDenyDynamicCode,
+    writable: false,
+    enumerable: false,
+    configurable: false,
+  });
+}`;
 }
 
 async function removeEntry(path: string): Promise<void> {

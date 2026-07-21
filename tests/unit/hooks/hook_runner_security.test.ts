@@ -106,6 +106,9 @@ Deno.test("trusted prelude blocks obfuscated eval and constructor imports and de
     `await (async()=>{}).constructor("return im"+"port('data:text/javascript,export default 1')")();`,
     `(function*(){}).constructor("return im"+"port('data:text/javascript,export default 1')")();`,
     `(async function*(){}).constructor("return im"+"port('data:text/javascript,export default 1')")();`,
+    `AsyncFunction("return im"+"port('blob:denied')")();`,
+    `GeneratorFunction("return im"+"port('data:text/javascript,export default 1')")();`,
+    `AsyncGeneratorFunction("return im"+"port('data:text/javascript,export default 1')")();`,
   ];
   for (let index = 0; index < escapes.length; index++) {
     const result = await runner.run(

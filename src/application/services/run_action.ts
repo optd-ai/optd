@@ -54,14 +54,14 @@ export function makeRunActionService(deps: {
       action: string,
       input: ActionRequest,
     ): Promise<Result<ActionDto>> {
-      return runAction(deps, namespace, action, input, "preview");
+      return await runAction(deps, namespace, action, input, "preview");
     },
     async commit(
       namespace: string,
       action: string,
       input: ActionRequest,
     ): Promise<Result<ActionDto>> {
-      return runAction(deps, namespace, action, input, "commit");
+      return await runAction(deps, namespace, action, input, "commit");
     },
   };
 }
@@ -96,6 +96,14 @@ async function runAction(
     if (!hook) {
       return err(
         validationError("unknown_hook", `action hook ${hookId} not found`),
+      );
+    }
+    if (hook.outputSchema !== "changeset.operations.v1") {
+      return err(
+        validationError(
+          "action_hook_schema_invalid",
+          "action.stage hooks must use changeset.operations.v1",
+        ),
       );
     }
 
@@ -152,16 +160,6 @@ async function runAction(
       );
     }
     const output = hookResult.output ?? {};
-    const hookErrors = Array.isArray(output.errors) ? output.errors : [];
-    if (hookErrors.length) {
-      return err(
-        validationError(
-          "action_hook_validation",
-          "action hook returned validation errors",
-          { errors: hookErrors },
-        ),
-      );
-    }
     const operations =
       (Array.isArray(output.operations) ? output.operations : [])
         .filter(isRecord)
@@ -243,10 +241,13 @@ export async function loadHook(
     scriptPath: row.script_path,
     scriptDigest: row.script_digest,
     scriptContent: row.content,
-    outputSchema: (output.schema === "patch.v1" ||
-        output.schema === "changeset.operations.v1")
+    outputSchema: output.schema === "patch.v1" ||
+        output.schema === "changeset.operations.v1" ||
+        output.schema === "validation.v1" || output.schema === "delivery.v1"
       ? output.schema
-      : "validation.v1",
+      : (() => {
+        throw new Error("hook output schema is invalid");
+      })(),
     timeoutMs: parseTimeoutMs(spec.timeout),
     permissions: {
       net: permissions.net === true,
