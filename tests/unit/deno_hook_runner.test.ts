@@ -28,7 +28,7 @@ function hook(
     scriptDigest: `sha256:${name}`,
     scriptContent: source,
     outputSchema: "validation.v1",
-    timeoutMs: 5_000,
+    timeoutMs: 30_000,
     permissions: {},
     ...extra,
   };
