@@ -35,6 +35,8 @@ import { HistoryCursorSigner } from "../domain/history/cursor.ts";
 import { makeExpressionService } from "./services/queries/expressions.ts";
 import { err } from "../domain/errors/result.ts";
 import type { StageHookCoordinator } from "../domain/changesets/stage.ts";
+import { makeStageActionService } from "./services/stage_actions.ts";
+import { makeStageSeedsService } from "./services/stage_seeds.ts";
 
 export function makeApplication(
   sql: Sql,
@@ -72,8 +74,9 @@ export function makeApplication(
       new PostgresHookSecretRepository(sql, cryptoAdapter),
       options.hookRunnerOptions,
     );
+  const stageRepository = new PostgresStageRepository(sql);
   const changesets = makeStageChangesetService(
-    new PostgresStageRepository(sql),
+    stageRepository,
     stageHookCoordinator,
   );
   const maximumHashes = Number(
@@ -131,23 +134,19 @@ export function makeApplication(
       hookRunner,
     }),
     secrets,
-    actions: {
-      preview() {
-        return Promise.resolve(err({
-          code: "unavailable",
-          message: "action staging is unavailable",
-          severity: "unavailable",
-          details: {},
-        }));
+    actions: stageHookCoordinator instanceof TrustedStageHookCoordinator
+      ? makeStageActionService(sql, stageHookCoordinator, changesets)
+      : {
+        stage: () =>
+          Promise.resolve(
+            err({
+              code: "unavailable",
+              message: "action staging coordinator is unavailable",
+              severity: "unavailable",
+              details: {},
+            }),
+          ),
       },
-      commit() {
-        return Promise.resolve(err({
-          code: "unavailable",
-          message: "action commit is unavailable",
-          severity: "unavailable",
-          details: {},
-        }));
-      },
-    },
+    seeds: makeStageSeedsService(sql, changesets),
   };
 }

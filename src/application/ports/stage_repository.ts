@@ -7,10 +7,25 @@ import type {
   StageHookResult,
 } from "../../domain/changesets/stage.ts";
 
+export type StageSource = Readonly<{
+  kind: "direct" | "action" | "seed";
+  identity: Readonly<Record<string, unknown>>;
+  authority?: Readonly<{
+    project_id: string;
+    actions: readonly string[];
+    revision_id: string;
+    effects: readonly Readonly<{ resource: string; ops: readonly string[] }>[];
+  }>;
+  dependencies?: readonly Readonly<Record<string, unknown>>[];
+}>;
+
 export type StageDto = {
   id: string;
   schema_version: 1;
-  source: { kind: "direct"; identity: Record<string, never> };
+  source: {
+    kind: "direct" | "action" | "seed";
+    identity: Record<string, unknown>;
+  };
   status:
     | "ready"
     | "awaiting_approval"
@@ -49,10 +64,18 @@ export interface StageRepository {
       operationGraphDigest: string;
       hookResult?: StageHookResult;
       hookDeclarations?: readonly StageHookDeclaration[];
+      source?: StageSource;
     },
     auth: AuthContext,
   ): Promise<Result<StageDto>>;
   inspect(id: string, auth: AuthContext): Promise<Result<StageDto>>;
+  approvals(id: string, auth: AuthContext): Promise<Result<StageDto>>;
+  decideApproval(
+    id: string,
+    requirementId: string,
+    input: { decision: "approve" | "reject"; reason: string | null },
+    auth: AuthContext,
+  ): Promise<Result<StageDto>>;
   cancel(
     id: string,
     reason: string | null,

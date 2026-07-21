@@ -1,3 +1,4 @@
+// deno-lint-ignore-file no-import-prefix no-unversioned-import
 import * as AjvModule from "npm:ajv/dist/2020.js";
 import type { ErrorObject } from "npm:ajv";
 import { Type } from "npm:@sinclair/typebox@0.34.38";
@@ -196,7 +197,10 @@ export const LifecycleSchema = Type.Object({
 
 const Read = Type.Object({
   resource: Identity,
-  id_from: Type.String({ pattern: "^input\\.[a-z][a-z0-9_]{0,62}$" }),
+  id_from: Type.String({
+    pattern: "^\\$action\\.input\\.[a-z][a-z0-9_]{0,62}$",
+  }),
+  fields: Type.Array(Name, { minItems: 1, uniqueItems: true }),
   required: Type.Boolean(),
 }, { additionalProperties: false });
 export const ActionSchema = Type.Object({

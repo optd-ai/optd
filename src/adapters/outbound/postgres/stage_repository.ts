@@ -2,9 +2,11 @@ import { ObjectReadAuthorityInvalidError } from "../../../application/ports/obje
 import type {
   StageDto,
   StageRepository,
+  StageSource,
 } from "../../../application/ports/stage_repository.ts";
 import type { AuthContext } from "../../../domain/auth/model.ts";
 import type { CanonicalOperation } from "../../../domain/changesets/operations.ts";
+import { canonicalizeApprovalRequirements } from "../../../domain/changesets/approvals.ts";
 import {
   stageDigest,
   type StageHookDeclaration,
@@ -276,6 +278,7 @@ export class PostgresStageRepository implements StageRepository {
       operationGraphDigest: string;
       hookResult?: StageHookResult;
       hookDeclarations?: readonly StageHookDeclaration[];
+      source?: StageSource;
     },
     auth: AuthContext,
   ): Promise<Result<StageDto>> {
@@ -286,6 +289,7 @@ export class PostgresStageRepository implements StageRepository {
           input.operations,
           auth,
           input.hookDeclarations ?? [],
+          input.source,
         );
         const operationGraphDigest = `sha256:${await canonicalSha256({
           schema: "changeset.operations.v1",
@@ -318,6 +322,7 @@ export class PostgresStageRepository implements StageRepository {
         }
         const dependencies: Record<string, unknown>[] = [
           ...prepared.dependencies,
+          ...(input.source?.dependencies ?? []).map(record),
           ...(hook?.read_dependencies ?? []).map(record),
           ...(hook?.required_capabilities ?? []).map((capability) => ({
             kind: "policy",
@@ -329,6 +334,10 @@ export class PostgresStageRepository implements StageRepository {
           })),
         ].map(record).sort((a, b) =>
           canonicalJson(a).localeCompare(canonicalJson(b))
+        );
+        const approvalRequirements = canonicalizeApprovalRequirements(
+          hook?.approval_requirements ?? [],
+          new Set(input.operations.map((operation) => operation.project_id)),
         );
         const evidence = {
           operation_graph_digest: operationGraphDigest,
@@ -346,7 +355,7 @@ export class PostgresStageRepository implements StageRepository {
             );
           }),
           policy_decisions: prepared.decisions,
-          approval_requirements: hook?.approval_requirements ?? [],
+          approval_requirements: approvalRequirements,
           required_capabilities: [
             ...prepared.decisions.map((decision) =>
               `${String(decision.project_id)}:${String(decision.action)}:${
@@ -384,10 +393,11 @@ export class PostgresStageRepository implements StageRepository {
           `insert into staged_changesets(
           id,schema_version,source_kind,source_identity_json,created_auth_context_id,created_principal_id,creating_context_json,
           operation_graph_digest,stage_digest,canonical_graph_json,projects_json,pack_revisions_json,warnings_json,
-          planned_events_json,planned_deliveries_json) values($1,1,'direct',$2::jsonb,$3,$4,$5::jsonb,$6,$7,$8::jsonb,$9::jsonb,$10::jsonb,$11::jsonb,$12::jsonb,$13::jsonb) returning created_at`,
+          planned_events_json,planned_deliveries_json) values($1,1,$2,$3::jsonb,$4,$5,$6::jsonb,$7,$8,$9::jsonb,$10::jsonb,$11::jsonb,$12::jsonb,$13::jsonb,$14::jsonb) returning created_at`,
           [
             id,
-            {},
+            input.source?.kind ?? "direct",
+            input.source?.identity ?? {},
             auth.id,
             auth.principalId,
             {
@@ -513,10 +523,10 @@ export class PostgresStageRepository implements StageRepository {
         }
         for (
           let ordinal = 0;
-          ordinal < (hook?.approval_requirements.length ?? 0);
+          ordinal < approvalRequirements.length;
           ordinal++
         ) {
-          const requirement = record(hook!.approval_requirements[ordinal]);
+          const requirement = record(approvalRequirements[ordinal]);
           await query(
             tx,
             `insert into staged_approval_requirements(id,stage_id,ordinal,requirement_json) values($1,$2,$3,$4::jsonb)`,
@@ -528,9 +538,7 @@ export class PostgresStageRepository implements StageRepository {
           `insert into staged_changeset_lifecycle(stage_id,status,version) values($1,$2,1)`,
           [
             id,
-            (hook?.approval_requirements.length ?? 0)
-              ? "awaiting_approval"
-              : "ready",
+            approvalRequirements.length ? "awaiting_approval" : "ready",
           ],
         );
         return ok(await load(tx, id)!);
@@ -548,6 +556,171 @@ export class PostgresStageRepository implements StageRepository {
         }
         const value = await load(tx, id);
         return value ? ok(value) : err(notFound());
+      }) as Result<StageDto>;
+    } catch (error) {
+      return mapAccessError(error);
+    }
+  }
+
+  async approvals(id: string, auth: AuthContext): Promise<Result<StageDto>> {
+    return await this.inspect(id, auth);
+  }
+
+  async decideApproval(
+    id: string,
+    requirementId: string,
+    input: { decision: "approve" | "reject"; reason: string | null },
+    auth: AuthContext,
+  ): Promise<Result<StageDto>> {
+    try {
+      return await this.sql.begin(async (tx) => {
+        if (!await canAccess(tx, id, auth, "changeset.inspect", false)) {
+          return err(notFound());
+        }
+        const lifecycle = (await query<{ status: string }>(
+          tx,
+          "select status from staged_changeset_lifecycle where stage_id=$1 for update",
+          [id],
+        )).rows[0];
+        if (!lifecycle) return err(notFound());
+        if (["rejected", "cancelled", "committed"].includes(lifecycle.status)) {
+          throw domain(
+            "approval_terminal",
+            "changeset no longer accepts approval decisions",
+            "conflict",
+          );
+        }
+        const row = (await query<
+          { requirement_json: unknown; created_principal_id: string }
+        >(
+          tx,
+          `select r.requirement_json,s.created_principal_id from staged_approval_requirements r
+           join staged_changesets s on s.id=r.stage_id where r.stage_id=$1 and r.id=$2 for share of r,s`,
+          [id, requirementId],
+        )).rows[0];
+        if (!row) return err(notFound());
+        const requirement = record(row.requirement_json);
+        const principal = (await query<{ type: string; active: boolean }>(
+          tx,
+          "select type,active from principals where id=$1 for share",
+          [auth.principalId],
+        )).rows[0];
+        if (
+          !principal?.active ||
+          !array(requirement.principal_types).includes(principal.type)
+        ) {
+          throw domain(
+            "approval_denied",
+            "current principal cannot satisfy this requirement",
+            "authorization",
+          );
+        }
+        if (
+          !requirement.allow_initiator &&
+          row.created_principal_id === auth.principalId
+        ) {
+          throw domain(
+            "approval_denied",
+            "stage initiator cannot satisfy this requirement",
+            "authorization",
+          );
+        }
+        if (
+          requirement.expires_at &&
+          new Date(String(requirement.expires_at)) <= new Date()
+        ) {
+          throw domain(
+            "approval_expired",
+            "approval requirement has expired",
+            "conflict",
+          );
+        }
+        const boundaryValue = record(requirement.boundary);
+        const boundary = boundaryValue.type === "project"
+          ? {
+            type: "project" as const,
+            projectId: String(boundaryValue.project_id),
+          }
+          : boundaryValue.type === "all_projects"
+          ? { type: "all_projects" as const }
+          : { type: "system" as const };
+        const authority = await new PostgresAuthorizationRepository(
+          tx as unknown as Sql,
+        )
+          .authorize({
+            auth,
+            boundary,
+            action: "changeset.approval.decide",
+            resource: "system:changeset-approval",
+          });
+        if (
+          !authority.ok ||
+          (!authority.value.superAdmin &&
+            !authority.value.effectiveRoles.includes(String(requirement.role)))
+        ) {
+          throw domain(
+            "approval_denied",
+            "current approval authority is insufficient",
+            "authorization",
+          );
+        }
+        const existing = (await query<{ id: string }>(
+          tx,
+          "select id from staged_approval_decisions where requirement_id=$1 and principal_id=$2",
+          [requirementId, auth.principalId],
+        )).rows[0];
+        if (!existing) {
+          const inserted = await query<{ id: string }>(
+            tx,
+            `insert into staged_approval_decisions(id,stage_id,requirement_id,principal_id,decision,reason,decided_auth_context_id)
+             values($1,$2,$3,$4,$5,$6,$7) on conflict(requirement_id,principal_id) do nothing returning id`,
+            [
+              uuidV7(),
+              id,
+              requirementId,
+              auth.principalId,
+              input.decision,
+              input.reason,
+              auth.id,
+            ],
+          );
+          if (inserted.rows.length) {
+            await query(
+              tx,
+              `insert into staged_approval_audit_events(id,stage_id,requirement_id,principal_id,auth_context_id,event_type,details_json)
+             values($1,$2,$3,$4,$5,'decision_recorded',$6::jsonb)`,
+              [uuidV7(), id, requirementId, auth.principalId, auth.id, {
+                decision: input.decision,
+                reason: input.reason,
+              }],
+            );
+          }
+        }
+        const rejected = (await query<{ present: boolean }>(
+          tx,
+          "select exists(select 1 from staged_approval_decisions where stage_id=$1 and decision='reject') present",
+          [id],
+        )).rows[0]?.present;
+        let status = "awaiting_approval";
+        if (rejected) status = "rejected";
+        else {
+          const unsatisfied = (await query<{ present: boolean }>(
+            tx,
+            `select exists(select 1 from staged_approval_requirements r where r.stage_id=$1 and
+              (select count(distinct d.principal_id) from staged_approval_decisions d where d.requirement_id=r.id and d.decision='approve') <
+              (r.requirement_json->>'minimum')::int) present`,
+            [id],
+          )).rows[0]?.present;
+          if (!unsatisfied) status = "ready";
+        }
+        if (status !== lifecycle.status) {
+          await query(
+            tx,
+            "update staged_changeset_lifecycle set status=$2,version=version+1 where stage_id=$1",
+            [id, status],
+          );
+        }
+        return ok((await load(tx, id))!);
       }) as Result<StageDto>;
     } catch (error) {
       return mapAccessError(error);
@@ -606,6 +779,7 @@ async function prepare(
   operations: CanonicalOperation[],
   auth: AuthContext,
   pinnedHookDeclarations: readonly StageHookDeclaration[],
+  source?: StageSource,
 ): Promise<Prepared> {
   const projectIds = [
     ...new Set(operations.map((operation) => operation.project_id)),
@@ -663,6 +837,13 @@ async function prepare(
       normalized: record(row.normalized),
     };
     revisions.set(`${parsed.publisher}/${parsed.pack}`, revision);
+    if (source?.authority && revision.id !== source.authority.revision_id) {
+      throw domain(
+        "project_conflict",
+        "Semantic source revision changed before persistence",
+        "conflict",
+      );
+    }
     const collection = operationDefinitionKind(
       operations.find((op) => componentIdentity(op) === identity)!,
     );
@@ -778,6 +959,25 @@ async function prepare(
     }
   }
   const decisions: Record<string, unknown>[] = [];
+  if (source?.authority) {
+    for (const semanticAction of source.authority.actions) {
+      const semanticAuthority = await new PostgresAuthorizationRepository(
+        sql as Sql,
+      ).authorize({
+        auth,
+        boundary: { type: "project", projectId: source.authority.project_id },
+        action: semanticAction,
+        resource: semanticAction,
+      });
+      if (!semanticAuthority.ok) {
+        throw domain(
+          semanticAuthority.error.code,
+          semanticAuthority.error.message,
+          semanticAuthority.error.severity,
+        );
+      }
+    }
+  }
   const operationRows: Prepared["operationRows"] = [];
   const stagedLinkSignatures = new Set<string>();
   const stagedUniqueSignatures = new Set<string>();
@@ -876,12 +1076,36 @@ async function prepare(
       }
     }
     const action = operation.op;
+    if (source?.authority) {
+      if (operation.project_id !== source.authority.project_id) {
+        throw domain(
+          "project_conflict",
+          "Semantic source operations must remain in the request Project",
+          "conflict",
+        );
+      }
+      if (
+        !source.authority.effects.some((effect) =>
+          effect.resource === identity && effect.ops.includes(action)
+        )
+      ) {
+        throw domain(
+          "hook_effect_violation",
+          "Semantic source emitted an operation outside its reviewed effects",
+          "validation",
+        );
+      }
+    }
+    const authorizationAction = source?.authority?.actions[0] ?? action;
+    const authorizationResource = source?.authority
+      ? authorizationAction
+      : identity;
     const authorization = await new PostgresAuthorizationRepository(sql as Sql)
       .authorize({
         auth,
         boundary: { type: "project", projectId: operation.project_id },
-        action,
-        resource: identity,
+        action: authorizationAction,
+        resource: authorizationResource,
       });
     if (!authorization.ok) {
       throw domain(
@@ -893,13 +1117,20 @@ async function prepare(
     const matchingCapabilities = authorization.value.capabilities.filter((
       capability,
     ) =>
-      capability.action === action &&
-      (capability.resource === "*" || capability.resource === identity)
+      capability.action === authorizationAction &&
+      (capability.resource === "*" ||
+        capability.resource === authorizationResource)
     );
     const policyEvaluation = authorization.value.superAdmin
       ? {
         allowed: true,
         matched_rule_ids: ["system:super_admin"],
+        rule_evidence: [],
+      }
+      : source?.authority
+      ? {
+        allowed: matchingCapabilities.length > 0,
+        matched_rule_ids: [],
         rule_evidence: [],
       }
       : await evaluateStagePolicy(
@@ -920,8 +1151,8 @@ async function prepare(
     }
     decisions.push({
       project_id: operation.project_id,
-      action,
-      resource_identity: identity,
+      action: authorizationAction,
+      resource_identity: authorizationResource,
       decision: "allow",
       authority_digest: authorization.value.digest,
       superadmin_bypass: authorization.value.superAdmin,
@@ -933,8 +1164,8 @@ async function prepare(
       kind: "policy",
       project_id: operation.project_id,
       authority_digest: authorization.value.digest,
-      action,
-      resource_identity: identity,
+      action: authorizationAction,
+      resource_identity: authorizationResource,
       capabilities: matchingCapabilities,
     });
     dependencies.push({
@@ -2090,7 +2321,10 @@ async function load(sql: Queryable, id: string): Promise<StageDto | null> {
   return {
     id: String(row.id),
     schema_version: 1,
-    source: { kind: "direct", identity: {} },
+    source: {
+      kind: String(row.source_kind) as StageDto["source"]["kind"],
+      identity: record(row.source_identity_json),
+    },
     status: String(row.status) as StageDto["status"],
     lifecycle_version: Number(row.lifecycle_version),
     created_at: timestamp(row.created_at)!,

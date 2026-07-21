@@ -16,10 +16,6 @@ import type {
 } from "../../../application/services/inspect_metadata.ts";
 import type { ReadAddress } from "../../../application/ports/object_reader.ts";
 import type { StageDto } from "../../../application/ports/stage_repository.ts";
-import type {
-  ActionDto,
-  ActionRequest,
-} from "../../../application/services/run_action.ts";
 import type { PackPreviewDto } from "../../../application/services/pack_services.ts";
 import type { QueryObjectsDto } from "../../../application/services/query_objects.ts";
 import type { UploadedPackFile } from "../../outbound/yaml/pack_loader.ts";
@@ -156,16 +152,21 @@ export type HttpDependencies = {
     ): Promise<Result<QueryObjectsDto>>;
   };
   actions: {
-    preview(
-      namespace: string,
+    stage(
+      publisher: string,
+      pack: string,
       action: string,
-      input: ActionRequest,
-    ): Promise<Result<ActionDto>>;
-    commit(
-      namespace: string,
-      action: string,
-      input: ActionRequest,
-    ): Promise<Result<ActionDto>>;
+      input: unknown,
+      auth: AuthVariables["auth"],
+    ): Promise<Result<unknown>>;
+  };
+  seeds: {
+    stage(
+      publisher: string,
+      pack: string,
+      input: unknown,
+      auth: AuthVariables["auth"],
+    ): Promise<Result<unknown>>;
   };
   changesets: {
     stage(
@@ -175,6 +176,16 @@ export type HttpDependencies = {
     inspect(id: string, auth: AuthVariables["auth"]): Promise<Result<StageDto>>;
     cancel(
       id: string,
+      input: unknown,
+      auth: AuthVariables["auth"],
+    ): Promise<Result<StageDto>>;
+    approvals(
+      id: string,
+      auth: AuthVariables["auth"],
+    ): Promise<Result<StageDto>>;
+    decideApproval(
+      id: string,
+      requirementId: string,
       input: unknown,
       auth: AuthVariables["auth"],
     ): Promise<Result<StageDto>>;
@@ -496,30 +507,41 @@ export function makeHttpApp(
     }));
   });
 
-  app.post(
-    "/actions/:namespace/:action/preview",
-    async (c) =>
-      resultJson(
-        c,
-        await deps.actions.preview(
-          c.req.param("namespace"),
-          c.req.param("action"),
-          await authenticatedJson(c),
-        ),
-      ),
-  );
-  app.post(
-    "/actions/:namespace/:action/commit",
-    async (c) =>
-      resultJson(
-        c,
-        await deps.actions.commit(
-          c.req.param("namespace"),
-          c.req.param("action"),
-          await authenticatedJson(c),
-        ),
-      ),
-  );
+  app.post("/api/v1/actions/:publisher/:pack/:action/stage", async (c) => {
+    const result = await deps.actions.stage(
+      c.req.param("publisher"),
+      c.req.param("pack"),
+      c.req.param("action"),
+      await requestJson(c),
+      c.get("auth"),
+    );
+    return result.ok
+      ? c.json(
+        successEnvelope(result.value),
+        result.value && typeof result.value === "object" &&
+          (result.value as Record<string, unknown>).stage === null
+          ? 200
+          : 201,
+      )
+      : resultJson(c, result);
+  });
+  app.post("/api/v1/packs/:publisher/:pack/seeds/stage", async (c) => {
+    const result = await deps.seeds.stage(
+      c.req.param("publisher"),
+      c.req.param("pack"),
+      await requestJson(c),
+      c.get("auth"),
+    );
+    return result.ok
+      ? c.json(
+        successEnvelope(result.value),
+        result.value && typeof result.value === "object" &&
+          (result.value as Record<string, unknown>).stage === null
+          ? 200
+          : 201,
+      )
+      : resultJson(c, result);
+  });
 
   app.post("/api/v1/changesets/stage", async (c) => {
     const result = await deps.changesets.stage(
@@ -535,6 +557,27 @@ export function makeHttpApp(
       resultJson(
         c,
         await deps.changesets.inspect(c.req.param("stage_id"), c.get("auth")),
+      ),
+  );
+  app.get(
+    "/api/v1/changesets/:stage_id/approvals",
+    async (c) =>
+      resultJson(
+        c,
+        await deps.changesets.approvals(c.req.param("stage_id"), c.get("auth")),
+      ),
+  );
+  app.post(
+    "/api/v1/changesets/:stage_id/approvals/:requirement_id/decide",
+    async (c) =>
+      resultJson(
+        c,
+        await deps.changesets.decideApproval(
+          c.req.param("stage_id"),
+          c.req.param("requirement_id"),
+          await requestJson(c),
+          c.get("auth"),
+        ),
       ),
   );
   app.post(

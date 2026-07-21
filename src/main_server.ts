@@ -72,6 +72,7 @@ export async function createFetchHandler(
     expressions: application.expressions,
     queries: application.queries,
     actions: application.actions,
+    seeds: application.seeds,
     changesets: application.changesets,
     outbox: application.outbox,
     secrets: application.secrets,

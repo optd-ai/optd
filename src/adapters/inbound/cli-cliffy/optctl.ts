@@ -373,33 +373,25 @@ function isErrorEnvelope(value: unknown): value is ErrorEnvelope {
     !Array.isArray(error.details) && typeof meta.request_id === "string";
 }
 
-function parseActionPayload(args: string[]): Record<string, unknown> {
-  const payload: Record<string, unknown> = { input: {} };
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-    const next = () => args[++i] ?? "";
-    if (arg === "--input") payload.input = JSON.parse(next());
-    else if (arg.startsWith("--input=")) {
-      payload.input = JSON.parse(arg.slice("--input=".length));
-    } else if (arg === "--input-file") payload.input_file = next();
-    else if (arg.startsWith("--input-file=")) {
-      payload.input_file = arg.slice("--input-file=".length);
-    } else if (arg === "--idempotency-key") payload.idempotency_key = next();
-    else if (arg.startsWith("--idempotency-key=")) {
-      payload.idempotency_key = arg.slice("--idempotency-key=".length);
-    } else throw usageError(`unknown action option ${arg}`);
-  }
-  return payload;
-}
-async function resolveActionPayload(
+async function resolveActionInput(
   args: string[],
 ): Promise<Record<string, unknown>> {
-  const payload = parseActionPayload(args);
-  if (typeof payload.input_file === "string") {
-    payload.input = await readJsonFile(payload.input_file);
-    delete payload.input_file;
+  if (args.length !== 2 || args[0] !== "--input") {
+    throw usageError("action stage requires exactly --input <JSON-or-file>");
   }
-  return payload;
+  try {
+    const value = JSON.parse(args[1]);
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw new Error();
+    }
+    return value;
+  } catch {
+    const value = await readJsonFile(args[1]);
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      throw usageError("action input must be a JSON object");
+    }
+    return value as Record<string, unknown>;
+  }
 }
 
 async function parseSecretValuePayload(
@@ -1589,13 +1581,27 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
           },
         };
       }
-    } else if (
-      cmd === "action" && (sub === "preview" || sub === "commit") && value
-    ) {
+    } else if (cmd === "action" && sub === "stage" && value) {
+      if (!parsed.project) throw usageError("action stage requires --project");
+      const project = await resolveProject(parsed.server, parsed.project);
       const [publisher, pack, name] = splitDefinitionIdentity(value);
       result = await postJson(
-        `${parsed.server}/actions/${publisher}/${pack}/${name}/${sub}`,
-        await resolveActionPayload(parsed.positional.slice(3)),
+        `${parsed.server}/api/v1/actions/${publisher}/${pack}/${name}/stage`,
+        {
+          project_id: project.id,
+          input: await resolveActionInput(parsed.positional.slice(3)),
+        },
+      );
+    } else if (cmd === "seed" && sub === "stage" && value) {
+      if (!parsed.project) throw usageError("seed stage requires --project");
+      const project = await resolveProject(parsed.server, parsed.project);
+      const [publisher, pack] = splitPackIdentity(value);
+      const args = parsed.positional.slice(3);
+      const all = args.includes("--all");
+      const names = options(args, "--seed");
+      result = await postJson(
+        `${parsed.server}/api/v1/packs/${publisher}/${pack}/seeds/stage`,
+        { project_id: project.id, all, names },
       );
     } else if (cmd === "secret" && sub === "list") {
       result = await getJson(`${parsed.server}/api/v1/secrets`);
@@ -1785,6 +1791,22 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       result = await postJson(
         `${parsed.server}/api/v1/changesets/stage`,
         await readChangesetInput(parsed.positional.slice(2)),
+      );
+    } else if (cmd === "changeset" && sub === "approvals") {
+      result = await getJson(
+        `${parsed.server}/api/v1/changesets/${changesetId(value)}/approvals`,
+      );
+    } else if (cmd === "changeset" && (sub === "approve" || sub === "reject")) {
+      const id = changesetId(value);
+      const requirementId = changesetId(parsed.positional[3]);
+      const decisionArgs = parsed.positional.slice(4);
+      const reason = option(decisionArgs, "--reason");
+      if (sub === "reject" && !reason?.trim()) {
+        throw usageError("changeset reject requires --reason");
+      }
+      result = await postJson(
+        `${parsed.server}/api/v1/changesets/${id}/approvals/${requirementId}/decide`,
+        { decision: sub, ...(reason !== undefined ? { reason } : {}) },
       );
     } else if (cmd === "changeset" && sub === "inspect") {
       if (parsed.positional.length !== 3) {

@@ -1,6 +1,7 @@
 import type {
   StageDto,
   StageRepository,
+  StageSource,
 } from "../../ports/stage_repository.ts";
 import type { AuthContext } from "../../../domain/auth/model.ts";
 import {
@@ -41,6 +42,28 @@ export function makeStageChangesetService(
   hookCoordinator?: StageHookCoordinator,
 ) {
   return {
+    async stageSource(
+      input: unknown,
+      source: StageSource,
+      auth: AuthContext,
+    ): Promise<Result<StageDto | null>> {
+      try {
+        if (!stageRequestContract.check(input)) {
+          throw new ContractValidationError(stageRequestContract.issues(input));
+        }
+        const normalized = await normalizeOperations(input as StageRequest);
+        if (normalized.operations.length === 0) {
+          return { ok: true, value: null };
+        }
+        return await repository.create({
+          operations: normalized.operations,
+          operationGraphDigest: normalized.operationGraphDigest,
+          source,
+        }, auth);
+      } catch (error) {
+        return validationResult(error);
+      }
+    },
     async stage(input: unknown, auth: AuthContext): Promise<Result<StageDto>> {
       try {
         if (!stageRequestContract.check(input)) {
@@ -235,6 +258,62 @@ export function makeStageChangesetService(
         });
       }
       return await repository.inspect(id, auth);
+    },
+    async approvals(id: string, auth: AuthContext): Promise<Result<StageDto>> {
+      if (!isUuidV7(id)) {
+        return err({
+          code: "not_found",
+          message: "changeset was not found",
+          severity: "not_found",
+          details: {},
+        });
+      }
+      return await repository.approvals(id, auth);
+    },
+    async decideApproval(
+      id: string,
+      requirementId: string,
+      input: unknown,
+      auth: AuthContext,
+    ): Promise<Result<StageDto>> {
+      if (!isUuidV7(id) || !isUuidV7(requirementId)) {
+        return err({
+          code: "not_found",
+          message: "approval requirement was not found",
+          severity: "not_found",
+          details: {},
+        });
+      }
+      if (
+        !isRecord(input) ||
+        Object.keys(input).some((key) =>
+          key !== "decision" && key !== "reason"
+        ) ||
+        (input.decision !== "approve" && input.decision !== "reject") ||
+        (input.reason !== undefined &&
+          (typeof input.reason !== "string" ||
+            new TextEncoder().encode(input.reason).byteLength > 4096)) ||
+        (input.decision === "reject" &&
+          (typeof input.reason !== "string" || !input.reason.trim()))
+      ) {
+        return err({
+          code: "validation_failed",
+          message: "approval decision is invalid",
+          severity: "validation",
+          details: {
+            issues: [{
+              path: "/",
+              code: "invalid",
+              message:
+                "expected approve with optional reason or reject with a non-empty reason",
+            }],
+          },
+        });
+      }
+      return await repository.decideApproval(id, requirementId, {
+        decision: input.decision,
+        reason: typeof input.reason === "string" ? input.reason : null,
+      }, auth);
     },
     async cancel(
       id: string,

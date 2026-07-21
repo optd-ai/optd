@@ -1269,6 +1269,32 @@ export const platformMigrations: PlatformMigration[] = [
         for each row execute function operant_reject_audit_event_mutation();
     `,
   },
+  {
+    id: "1025_frozen_approval_decisions",
+    sql: `
+      alter table staged_approval_decisions add constraint staged_approval_reject_reason check(
+        decision <> 'reject' or (reason is not null and char_length(btrim(reason)) > 0)
+      );
+      alter table staged_approval_decisions add constraint staged_approval_reason_bounded check(
+        reason is null or octet_length(reason) <= 4096
+      );
+      create index staged_approval_requirement_stage_idx on staged_approval_requirements(stage_id,id);
+      create index staged_approval_decision_stage_idx on staged_approval_decisions(stage_id,requirement_id,decision);
+      create table staged_approval_audit_events(
+        id uuid primary key,
+        stage_id uuid not null references staged_changesets(id),
+        requirement_id uuid not null references staged_approval_requirements(id),
+        principal_id uuid not null references principals(id),
+        auth_context_id uuid not null references auth_contexts(id),
+        event_type text not null check(event_type='decision_recorded'),
+        details_json jsonb not null check(jsonb_typeof(details_json)='object'),
+        created_at timestamptz not null default now()
+      );
+      create index staged_approval_audit_stage_idx on staged_approval_audit_events(stage_id,created_at,id);
+      create trigger staged_approval_audit_immutable before update or delete on staged_approval_audit_events
+        for each row execute function operant_reject_staged_evidence_mutation();
+    `,
+  },
 ];
 
 async function backfillTrustedHookSecurity(sql: Queryable): Promise<void> {

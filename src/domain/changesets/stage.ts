@@ -2,6 +2,9 @@ import { canonicalSha256 } from "../ids/canonical_json.ts";
 import type { CanonicalOperation } from "./operations.ts";
 import type { AuthoredOperation } from "../../schemas/changesets/operations.ts";
 import type { PatchOutput } from "../../schemas/changesets/patch.ts";
+import type { ApprovalRequirement } from "./approvals.ts";
+
+export type { ApprovalRequirement } from "./approvals.ts";
 
 export type ValidationMessage = Readonly<{
   path: string;
@@ -94,11 +97,6 @@ export type StageReadDependency = Readonly<{
   definition?: string;
   digest?: string;
   query_digest?: string;
-}>;
-export type ApprovalRequirement = Readonly<{
-  id: string;
-  capability: string;
-  project_id?: string;
 }>;
 export type PlannedIdentity = Readonly<{
   id: string;
