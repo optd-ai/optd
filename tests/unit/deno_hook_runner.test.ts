@@ -47,6 +47,7 @@ Deno.test("DenoHookRunner captures stderr and valid output", async () => {
       input: {},
     },
   );
+  if (!result.ok) throw new Error(JSON.stringify(result));
   assertEquals(result.ok, true);
   assertStringIncludes(result.logs, "hello logs");
 });
