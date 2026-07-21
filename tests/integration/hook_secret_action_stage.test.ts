@@ -80,7 +80,12 @@ Deno.test({
         action: "test/actionproof:generate",
         input: { project_id: projectId, source_id: read.id },
         reads: {
-          source: { id: read.id, name: read.name, status: read.status },
+          source: {
+            id: read.id,
+            version: read.version,
+            name: read.name,
+            status: read.status,
+          },
         },
         read_dependencies: [dependency],
         declarations: [declaration],
@@ -167,7 +172,12 @@ Deno.test({
             action: "test/actionproof:generate",
             input: { project_id: projectId, source_id: read.id },
             reads: {
-              source: { id: read.id, name: read.name, status: read.status },
+              source: {
+                id: read.id,
+                version: read.version,
+                name: read.name,
+                status: read.status,
+              },
             },
             read_dependencies: [dependency],
             declarations: [{ ...declaration, effects: [] }],
@@ -183,7 +193,12 @@ Deno.test({
             action: "test/actionproof:generate",
             input: { project_id: projectId, source_id: read.id },
             reads: {
-              source: { id: read.id, name: read.name, status: read.status },
+              source: {
+                id: read.id,
+                version: read.version,
+                name: read.name,
+                status: read.status,
+              },
             },
             read_dependencies: [dependency],
             declarations: [{
@@ -338,6 +353,7 @@ async function seedRead(
   return {
     id: objectId,
     object_version_id: versionId,
+    version: 1,
     name: "Pinned Source",
     status: "ready",
   };
@@ -373,7 +389,7 @@ async function writePack(root: string, providerUrl: string): Promise<void> {
   );
   await Deno.writeTextFile(
     `${root}/hooks/generate.ts`,
-    `const envelope=JSON.parse(await new Response(Deno.stdin.readable).text()); const read=envelope.input.read; const request=envelope.input.request; if (Object.keys(read).sort().join(',')!=="id,name,status" || read.status!=="ready") throw new Error("uncurated read"); await fetch(${
+    `const envelope=JSON.parse(await new Response(Deno.stdin.readable).text()); const read=envelope.input.read; const request=envelope.input.request; if (Object.keys(read).sort().join(',')!=="id,name,status,version" || read.status!=="ready") throw new Error("uncurated read"); await fetch(${
       JSON.stringify(providerUrl)
     }); console.log(JSON.stringify({operations:[{op:"create",key:"made",project_id:request.project_id,resource:"test/actionproof:target",fields:{name:read.name}},{op:"update",project_id:request.project_id,resource:"test/actionproof:target",object_id:{$ref:"made.object_id"},set:{status:"converted"}}]}));`,
   );

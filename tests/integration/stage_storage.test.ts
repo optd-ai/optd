@@ -34,6 +34,7 @@ Deno.test({
          and table_name like 'staged_%' order by table_name`,
       )).rows.map((row) => row.table_name);
       assertEquals(tables, [
+        "staged_approval_audit_events",
         "staged_approval_decisions",
         "staged_approval_requirements",
         "staged_changeset_dependencies",
@@ -49,9 +50,9 @@ Deno.test({
          and tgrelid in ('staged_changesets'::regclass,'staged_changeset_operations'::regclass,
           'staged_changeset_dependencies'::regclass,'staged_hook_executions'::regclass,
           'staged_policy_decisions'::regclass,'staged_approval_requirements'::regclass,
-          'staged_approval_decisions'::regclass)`,
+          'staged_approval_decisions'::regclass,'staged_approval_audit_events'::regclass)`,
       );
-      assertEquals(immutableTriggers.rows[0].count, "7");
+      assertEquals(immutableTriggers.rows[0].count, "8");
       const commitColumns = await query<
         { column_name: string; is_nullable: string }
       >(

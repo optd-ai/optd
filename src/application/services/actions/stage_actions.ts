@@ -138,7 +138,7 @@ export function makeStageActionService(
           }
           reads[readName] = Object.fromEntries(
             Object.entries(row).filter(([key]) =>
-              key !== "current_object_version_id" && key !== "version"
+              key !== "current_object_version_id"
             ),
           );
           readDependencies.push({
