@@ -108,6 +108,24 @@ for (const trace of [false, true]) {
           JSON.parse(inspect.stdout).data.operation_graph_digest,
           actionData.operation_graph_digest,
         );
+        const actionCommit = await actor!.runOptctl([
+          "--json",
+          "changeset",
+          "commit",
+          actionData.id,
+        ]);
+        assertEquals(actionCommit.code, 0, actionCommit.stderr);
+        const repeatedActionCommit = await actor!.runOptctl([
+          "--json",
+          "changeset",
+          "commit",
+          actionData.id,
+        ]);
+        assertEquals(repeatedActionCommit.code, 0, repeatedActionCommit.stderr);
+        assertEquals(
+          JSON.parse(repeatedActionCommit.stdout).data,
+          JSON.parse(actionCommit.stdout).data,
+        );
 
         const missingRead = await actor!.runOptctl([
           "--json",
@@ -135,7 +153,24 @@ for (const trace of [false, true]) {
         const seedData = JSON.parse(seed.stdout).data;
         assertEquals(seedData.stage.source.kind, "seed");
         assertEquals(await stageCount(harness.server.sql), beforeSeed + 1);
-        await materializeSeed(harness.server.sql, projectId, seedData.stage);
+        const seedCommit = await actor!.runOptctl([
+          "--json",
+          "changeset",
+          "commit",
+          seedData.stage.id,
+        ]);
+        assertEquals(seedCommit.code, 0, seedCommit.stderr);
+        const repeatedSeedCommit = await actor!.runOptctl([
+          "--json",
+          "changeset",
+          "commit",
+          seedData.stage.id,
+        ]);
+        assertEquals(repeatedSeedCommit.code, 0, repeatedSeedCommit.stderr);
+        assertEquals(
+          JSON.parse(repeatedSeedCommit.stdout).data,
+          JSON.parse(seedCommit.stdout).data,
+        );
         const unchanged = await actor!.runOptctl([
           "--json",
           "--project",
@@ -153,7 +188,7 @@ for (const trace of [false, true]) {
         const targetTable = await runtimeTable(harness.server.sql, "target");
         await query(
           harness.server.sql,
-          `update "${targetTable}" set status='stale' where project_id=$1 and id=$2`,
+          `update "${targetTable}" set status='stale',note='preserved extra' where project_id=$1 and id=$2`,
           [projectId, seedObjectId],
         );
         const changed = await actor!.runOptctl([
@@ -226,22 +261,27 @@ for (const trace of [false, true]) {
             concurrentData[1].operations[0].object_id,
           false,
         );
-        await materializeSeed(
-          harness.server.sql,
-          concurrentId,
-          concurrentData[0],
+        const concurrentCommits = await Promise.all(
+          concurrentData.map((stage) =>
+            actor!.runOptctl([
+              "--json",
+              "changeset",
+              "commit",
+              stage.id,
+            ])
+          ),
         );
-        let uniquenessRejected = false;
-        try {
-          await materializeSeed(
-            harness.server.sql,
-            concurrentId,
-            concurrentData[1],
-          );
-        } catch {
-          uniquenessRejected = true;
-        }
-        assertEquals(uniquenessRejected, true);
+        assertEquals(
+          concurrentCommits.map((result) => result.code).sort(),
+          [0, 1],
+        );
+        const rejectedCommit = concurrentCommits.find((result) =>
+          result.code !== 0
+        )!;
+        assertEquals(
+          JSON.parse(rejectedCommit.stderr).error.code,
+          "constraint_conflict",
+        );
 
         const multiProject = await harness.runOptctl([
           "--json",
@@ -527,61 +567,4 @@ async function runtimeTable(sql: Sql, name: string) {
     `select table_name from pack_runtime_tables where publisher='test' and pack_name='actionproof' and definition_kind='resource' and definition_name=$1`,
     [name],
   )).rows[0].table_name;
-}
-
-async function materializeSeed(
-  sql: Sql,
-  projectId: string,
-  stage: Record<string, unknown>,
-) {
-  const operation = (stage.operations as Array<Record<string, unknown>>)[0];
-  const metadata = (await query<{ candidate: string; table_name: string }>(
-    sql,
-    `select a.candidate_revision_id candidate,r.table_name from pack_active_revisions a join pack_runtime_tables r on r.publisher=a.publisher and r.pack_name=a.pack_name where a.publisher='test' and a.pack_name='actionproof' and r.definition_kind='resource' and r.definition_name='target'`,
-  )).rows[0];
-  const auth = (await query<{ id: string }>(
-    sql,
-    "select id from auth_contexts order by created_at desc limit 1",
-  )).rows[0].id;
-  const commitId = uuidV7(),
-    versionId = uuidV7(),
-    digest = String(stage.operation_graph_digest);
-  await sql.begin(async (tx) => {
-    await query(
-      tx,
-      "update staged_changeset_lifecycle set status='committed',committed_at=now() where stage_id=$1",
-      [stage.id],
-    );
-    await query(
-      tx,
-      "insert into changeset_commits(id,stage_id,committed_auth_context_id,authorization_cutoff_at,operation_graph_digest) values($1,$2,$3,now(),$4)",
-      [commitId, stage.id, auth, digest],
-    );
-    await query(
-      tx,
-      `insert into object_versions(id,project_id,definition_kind,resource_identity,object_id,version,changeset_commit_id,operation,resource_revision,snapshot_json,changed_fields,auth_context_id) values($1,$2,'resource','test/actionproof:target',$3,1,$4,'create',$5,$6::jsonb,array['name','status'],$7)`,
-      [
-        versionId,
-        projectId,
-        operation.object_id,
-        commitId,
-        metadata.candidate,
-        { data: operation.fields, archived_at: null },
-        auth,
-      ],
-    );
-    const fields = operation.fields as Record<string, unknown>;
-    await query(
-      tx,
-      `insert into "${metadata.table_name}"(id,project_id,version,current_object_version_id,created_by,updated_by,name,status,note) values($1,$2,1,$3,$4,$4,$5,$6,'preserved extra')`,
-      [
-        operation.object_id,
-        projectId,
-        versionId,
-        auth,
-        fields.name,
-        fields.status,
-      ],
-    );
-  });
 }

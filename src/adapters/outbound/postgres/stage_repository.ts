@@ -546,6 +546,12 @@ export class PostgresStageRepository implements StageRepository {
             approvalRequirements.length ? "awaiting_approval" : "ready",
           ],
         );
+        await query(
+          tx,
+          `insert into audit_events(id,stage_id,auth_context_id,event_type,action,decision)
+           values($1,$2,$3,'changeset.staged','changeset.stage','allowed')`,
+          [uuidV7(), id, auth.id],
+        );
         return ok(await load(tx, id)!);
       }) as Result<StageDto>;
     } catch (error) {
@@ -733,6 +739,14 @@ export class PostgresStageRepository implements StageRepository {
             "update staged_changeset_lifecycle set status=$2,version=version+1 where stage_id=$1",
             [id, status],
           );
+          if (status === "rejected") {
+            await query(
+              tx,
+              `insert into audit_events(id,stage_id,auth_context_id,event_type,action,decision)
+               values($1,$2,$3,'changeset.rejected','changeset.approval.reject','denied')`,
+              [uuidV7(), id, auth.id],
+            );
+          }
         }
         return ok((await load(tx, id))!);
       }) as Result<StageDto>;
@@ -779,6 +793,12 @@ export class PostgresStageRepository implements StageRepository {
           tx,
           `update staged_changeset_lifecycle set status='cancelled',version=version+1,cancelled_auth_context_id=$2,cancelled_at=now(),cancellation_reason=$3 where stage_id=$1`,
           [id, auth.id, reason],
+        );
+        await query(
+          tx,
+          `insert into audit_events(id,stage_id,auth_context_id,event_type,action,decision,request_metadata_json)
+           values($1,$2,$3,'changeset.cancelled','changeset.cancel','committed',$4::jsonb)`,
+          [uuidV7(), id, auth.id, { reason }],
         );
         return ok((await load(tx, id))!);
       }) as Result<StageDto>;

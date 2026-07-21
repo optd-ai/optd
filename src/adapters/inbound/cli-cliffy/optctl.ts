@@ -445,6 +445,19 @@ function changesetId(value: string | undefined): string {
   return value;
 }
 
+function commitPayload(args: string[]): { lock_timeout?: string } {
+  if (!args.length) return {};
+  const timeout = option(args, "--timeout");
+  const consumed = (args.length === 2 && args[0] === "--timeout") ||
+    (args.length === 1 && args[0].startsWith("--timeout="));
+  if (!consumed || !timeout || !/^[1-9][0-9]*(ms|s|m)$/.test(timeout)) {
+    throw usageError(
+      "changeset commit accepts only --timeout <positive-duration>",
+    );
+  }
+  return { lock_timeout: timeout };
+}
+
 function cancelPayload(args: string[]): { reason?: string } {
   if (!args.length) return {};
   if (args.length === 2 && args[0] === "--reason") {
@@ -1805,6 +1818,12 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
         `${parsed.server}/api/v1/changesets/stage`,
         await readChangesetInput(parsed.positional.slice(2)),
       );
+    } else if (cmd === "changeset" && sub === "commit") {
+      const id = changesetId(value);
+      result = await postJson(
+        `${parsed.server}/api/v1/changesets/${id}/commit`,
+        commitPayload(parsed.positional.slice(3)),
+      );
     } else if (cmd === "changeset" && sub === "approvals") {
       result = await getJson(
         `${parsed.server}/api/v1/changesets/${changesetId(value)}/approvals`,
@@ -1902,7 +1921,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       );
     } else {
       throw usageError(
-        "usage: optctl status live/ready/bootstrap | bootstrap init | home | project list/create/view/update/archive/select | context set-project | pack preview <dir> | pack apply <dir> [--safe|--reviewed] [--timeout duration] | metadata [packs] | metadata pack <publisher/pack> | metadata resource/relationship/lifecycle/action/hook/role/policy/seed <publisher/pack:name> | secret list/create/rotate/disable/grants/grant/replace-grant/revoke-grant | action preview/commit <namespace.action> --input '{...}' | outbox status/drain/retry | migration inspect <id> [--sql|--violations] | migration validate <id> | migration apply <id> (--safe|--reviewed|--confirm-token <token>) [--timeout duration] | query <namespace.resource> [--where expr] [--fields a,b] [--sort field:desc] [--limit n] [--cursor c] | changeset stage <json-file> | changeset inspect <stage-id> | changeset cancel <stage-id> [--reason text] | --project <selector> view publisher/pack:name <uuid> | --project <selector> history publisher/pack:name <uuid> [--limit n] [--cursor c] | --project <selector> view relationship publisher/pack:name <uuid> | --project <selector> history relationship publisher/pack:name <uuid> [--limit n] [--cursor c]",
+        "usage: optctl status live/ready/bootstrap | bootstrap init | home | project list/create/view/update/archive/select | context set-project | pack preview <dir> | pack apply <dir> [--safe|--reviewed] [--timeout duration] | metadata [packs] | metadata pack <publisher/pack> | metadata resource/relationship/lifecycle/action/hook/role/policy/seed <publisher/pack:name> | secret list/create/rotate/disable/grants/grant/replace-grant/revoke-grant | action preview/commit <namespace.action> --input '{...}' | outbox status/drain/retry | migration inspect <id> [--sql|--violations] | migration validate <id> | migration apply <id> (--safe|--reviewed|--confirm-token <token>) [--timeout duration] | query <namespace.resource> [--where expr] [--fields a,b] [--sort field:desc] [--limit n] [--cursor c] | changeset stage <json-file> | changeset commit <stage-id> [--timeout duration] | changeset inspect <stage-id> | changeset cancel <stage-id> [--reason text] | --project <selector> view publisher/pack:name <uuid> | --project <selector> history publisher/pack:name <uuid> [--limit n] [--cursor c] | --project <selector> view relationship publisher/pack:name <uuid> | --project <selector> history relationship publisher/pack:name <uuid> [--limit n] [--cursor c]",
       );
     }
     const output = parsed.verbose

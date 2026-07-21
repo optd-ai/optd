@@ -16,6 +16,7 @@ import type {
 } from "../../../application/services/inspect_metadata.ts";
 import type { ReadAddress } from "../../../application/ports/object_reader.ts";
 import type { StageDto } from "../../../application/ports/stage_repository.ts";
+import type { CommitChangesetDto } from "../../../domain/changesets/commit.ts";
 import type { PackPreviewDto } from "../../../application/services/pack_services.ts";
 import type { QueryObjectsDto } from "../../../application/services/query_objects.ts";
 import type { UploadedPackFile } from "../../outbound/yaml/pack_loader.ts";
@@ -169,6 +170,11 @@ export type HttpDependencies = {
     ): Promise<Result<unknown>>;
   };
   changesets: {
+    commit(
+      id: string,
+      input: unknown,
+      auth: AuthVariables["auth"],
+    ): Promise<Result<CommitChangesetDto>>;
     stage(
       input: unknown,
       auth: AuthVariables["auth"],
@@ -551,6 +557,18 @@ export function makeHttpApp(
     if (result.ok) return c.json(successEnvelope(result.value), 201);
     return resultJson(c, result);
   });
+  app.post(
+    "/api/v1/changesets/:stage_id/commit",
+    async (c) =>
+      resultJson(
+        c,
+        await deps.changesets.commit(
+          c.req.param("stage_id"),
+          await requestJson(c),
+          c.get("auth"),
+        ),
+      ),
+  );
   app.get(
     "/api/v1/changesets/:stage_id",
     async (c) =>

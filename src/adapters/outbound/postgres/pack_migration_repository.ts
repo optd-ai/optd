@@ -465,10 +465,6 @@ export async function applyMigrationPlan(
   if (existing) return existing;
   const timeout = parseLockTimeout(request.lock_timeout ?? "10s");
   await query(sql, "select set_config('lock_timeout',$1,true)", [timeout]);
-  await query(sql, "select pg_advisory_xact_lock(hashtext($1),hashtext($2))", [
-    plan.publisher,
-    plan.pack,
-  ]);
   const tables = await query<{ table_name: string }>(
     sql,
     `select table_name from pack_runtime_tables where publisher=$1 and pack_name=$2

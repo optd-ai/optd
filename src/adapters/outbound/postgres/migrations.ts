@@ -1299,6 +1299,39 @@ export const platformMigrations: PlatformMigration[] = [
         for each row execute function operant_reject_staged_evidence_mutation();
     `,
   },
+  {
+    id: "1026_race_free_commit_facts",
+    sql: `
+      alter table audit_events alter column actor_id drop not null;
+      alter table audit_events add column stage_id uuid references staged_changesets(id);
+      alter table audit_events add column changeset_commit_id uuid references changeset_commits(id);
+      alter table audit_events add column auth_context_id uuid references auth_contexts(id);
+      alter table audit_events add column project_id uuid references projects(id);
+      alter table audit_events add column resource_identity text;
+      create index audit_events_commit_idx on audit_events(changeset_commit_id,created_at,id);
+      create index audit_events_stage_idx on audit_events(stage_id,created_at,id);
+      create index audit_events_object_timeline_idx on audit_events(project_id,resource_identity,object_id,created_at,id);
+
+      alter table events alter column changeset_id drop not null;
+      alter table events add column changeset_commit_id uuid references changeset_commits(id);
+      alter table events add column project_id uuid references projects(id);
+      alter table events add column schema_version integer;
+      alter table events add column resource_identity text;
+      alter table events add constraint events_canonical_or_legacy check(
+        (changeset_commit_id is null and changeset_id is not null and schema_version is null) or
+        (changeset_commit_id is not null and changeset_id is null and schema_version=1)
+      );
+      create index events_commit_idx on events(changeset_commit_id,occurred_at,id);
+      create index events_object_timeline_idx on events(project_id,resource_identity,object_id,occurred_at,id);
+      create trigger events_immutable before update or delete on events
+        for each row execute function operant_reject_history_mutation();
+
+      alter table changeset_commits add constraint changeset_commits_canonical_uuidv7 check(
+        stage_id is null or uuid_extract_version(id)=7
+      );
+      create index changeset_commits_committed_at_idx on changeset_commits(committed_at,id);
+    `,
+  },
 ];
 
 async function backfillTrustedHookSecurity(sql: Queryable): Promise<void> {

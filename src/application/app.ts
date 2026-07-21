@@ -2,6 +2,8 @@ import { SystemClock } from "./ports/clock.ts";
 import { makeInspectMetadataService } from "./services/inspect_metadata.ts";
 import { makeStageChangesetService } from "./services/changesets/stage_changesets.ts";
 import { PostgresStageRepository } from "../adapters/outbound/postgres/stage_repository.ts";
+import { PostgresCommitRepository } from "../adapters/outbound/postgres/commit_repository.ts";
+import { makeCommitChangesetService } from "./services/commit/commit_changeset.ts";
 import { makePackServices } from "./services/pack_services.ts";
 import { makeQueryObjectsService } from "./services/query_objects.ts";
 import { makeMigrationServices } from "./services/migration_services.ts";
@@ -75,10 +77,14 @@ export function makeApplication(
       options.hookRunnerOptions,
     );
   const stageRepository = new PostgresStageRepository(sql);
-  const changesets = makeStageChangesetService(
+  const stageChangesets = makeStageChangesetService(
     stageRepository,
     stageHookCoordinator,
   );
+  const changesets = {
+    ...stageChangesets,
+    ...makeCommitChangesetService(new PostgresCommitRepository(sql)),
+  };
   const maximumHashes = Number(
     Deno.env.get("OPERANT_PASSWORD_MAX_CONCURRENT_HASHES") ?? "4",
   );
