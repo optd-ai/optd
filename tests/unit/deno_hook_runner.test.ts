@@ -52,13 +52,42 @@ Deno.test("DenoHookRunner captures stderr and valid output", async () => {
   assertStringIncludes(result.logs, "hello logs");
 });
 
-Deno.test("DenoHookRunner captures status and diagnostics when child exits during delivery", async () => {
+Deno.test("DenoHookRunner accepts authoritative fast valid exits concurrently", async () => {
+  const runner = new DenoHookRunner({ cacheDir: await Deno.makeTempDir() });
+  const results = await Promise.all(
+    Array.from({ length: 16 }, (_, index) =>
+      runner.run(
+        hook(
+          `fast_exit_${index}`,
+          "",
+          {
+            scriptContent:
+              `console.log(JSON.stringify({allow:true,errors:[],warnings:[],required_approvals:[]}));`,
+          },
+        ),
+        {
+          hook: `fast_exit_${index}`,
+          phase: "changeset.validate",
+          input: { payload: "x".repeat(64 * 1024) },
+        },
+      )),
+  );
+  for (const result of results) {
+    if (!result.ok) throw new Error(JSON.stringify(result));
+    assertEquals(result.ok, true);
+  }
+});
+
+Deno.test("DenoHookRunner preserves diagnostics after accepted child closes stdin", async () => {
   const runner = new DenoHookRunner({ cacheDir: await Deno.makeTempDir() });
   const result = await runner.run(
     hook(
       "early_exit",
       `console.error("startup-diagnostic"); Deno.exit(7);`,
-      { scriptContent: `console.error("startup-diagnostic"); Deno.exit(7);` },
+      {
+        scriptContent:
+          `await Deno.stdin.readable.cancel(); console.error("startup-diagnostic"); await new Promise(resolve=>setTimeout(resolve,500));`,
+      },
     ),
     {
       hook: "early_exit",
@@ -67,9 +96,25 @@ Deno.test("DenoHookRunner captures status and diagnostics when child exits durin
     },
   );
   assertEquals(result.ok, false);
-  assertEquals(result.error?.code, "hook_spawn_failed");
-  assertEquals(result.exitCode, 7);
+  assertEquals(result.error?.code, "hook_invalid_output");
+  assertEquals(result.exitCode, 0);
   assertStringIncludes(result.logs, "startup-diagnostic");
+});
+
+Deno.test("DenoHookRunner preserves post-accept invalid and nonzero results", async () => {
+  const runner = new DenoHookRunner({ cacheDir: await Deno.makeTempDir() });
+  const invalid = await runner.run(
+    hook("accepted_invalid", `console.log("not-json");`),
+    { hook: "accepted_invalid", phase: "changeset.validate", input: {} },
+  );
+  assertEquals(invalid.error?.code, "hook_invalid_output");
+  const failed = await runner.run(
+    hook("accepted_failure", `console.error("actual-failure"); Deno.exit(9);`),
+    { hook: "accepted_failure", phase: "changeset.validate", input: {} },
+  );
+  assertEquals(failed.error?.code, "hook_failed");
+  assertEquals(failed.exitCode, 9);
+  assertStringIncludes(failed.logs, "actual-failure");
 });
 
 Deno.test("DenoHookRunner reports permission failures", async () => {

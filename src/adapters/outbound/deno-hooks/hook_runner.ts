@@ -175,13 +175,26 @@ export class DenoHookRunner {
       true,
     );
     const statusPromise = child.status;
-    const deliveryPromise = deliverInput(child, curatedEnvelope(envelope));
-    const delivery = await Promise.race([
-      deliveryPromise,
-      statusPromise.then((status) => ({ delivered: false as const, status })),
+    const delivery = startInputDelivery(child, curatedEnvelope(envelope));
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<"timeout">((resolve) => {
+      timer = setTimeout(() => resolve("timeout"), hook.timeoutMs);
+    });
+    const stdoutOverflow = stdoutPromise.then((value) =>
+      value.overflow ? "stdout_overflow" as const : new Promise<never>(() => {})
+    );
+    const deliveryFailure = delivery.writeAccepted.then((accepted) =>
+      accepted ? new Promise<never>(() => {}) : "delivery_failure" as const
+    );
+    const completed = await Promise.race([
+      statusPromise,
+      timeout,
+      stdoutOverflow,
+      deliveryFailure,
     ]);
-    if (!delivery.delivered) {
-      if (!("status" in delivery)) await killAndReap(child);
+    if (timer !== undefined) clearTimeout(timer);
+    if (completed === "delivery_failure") {
+      await killAndReap(child);
       const [status, stdout, stderr] = await Promise.all([
         statusPromise.catch(() => ({
           success: false,
@@ -196,9 +209,7 @@ export class DenoHookRunner {
           bytes: new Uint8Array(),
           truncated: false,
         })),
-        // The delivery promise catches its own write/close errors, so awaiting
-        // it here cannot create an unhandled rejection after status wins.
-        deliveryPromise,
+        delivery.settled,
       ]);
       await removeEntry(scriptPath);
       const retained = retainedLogs(stderr, redactions, stderrLimit);
@@ -214,21 +225,9 @@ export class DenoHookRunner {
         status.code,
       );
     }
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const timeout = new Promise<"timeout">((resolve) => {
-      timer = setTimeout(() => resolve("timeout"), hook.timeoutMs);
-    });
-    const stdoutOverflow = stdoutPromise.then((value) =>
-      value.overflow ? "stdout_overflow" as const : new Promise<never>(() => {})
-    );
-    const completed = await Promise.race([
-      statusPromise,
-      timeout,
-      stdoutOverflow,
-    ]);
-    if (timer !== undefined) clearTimeout(timer);
     if (completed === "stdout_overflow") {
       await killAndReap(child);
+      await delivery.settled;
       await removeEntry(scriptPath);
       const stderr = await stderrPromise.catch(() => ({
         bytes: new Uint8Array(),
@@ -247,6 +246,7 @@ export class DenoHookRunner {
     }
     if (completed === "timeout") {
       await killAndReap(child);
+      await delivery.settled;
       await removeEntry(scriptPath);
       const stderr = await stderrPromise.catch(() => ({
         bytes: new Uint8Array(),
@@ -268,6 +268,7 @@ export class DenoHookRunner {
     const [stdoutRead, stderrRead] = await Promise.all([
       stdoutPromise,
       stderrPromise,
+      delivery.settled,
     ]);
     await removeEntry(scriptPath);
     const retained = retainedLogs(stderrRead, redactions, stderrLimit);
@@ -687,25 +688,41 @@ function concat(chunks: Uint8Array[], size: number): Uint8Array {
   }
   return out;
 }
-async function deliverInput(
+function startInputDelivery(
   child: Deno.ChildProcess,
   envelope: HookEnvelope,
-): Promise<{ delivered: true } | { delivered: false }> {
-  const writer = child.stdin.getWriter();
-  try {
-    await writer.write(
-      new TextEncoder().encode(JSON.stringify(envelope)),
-    );
-    await writer.close();
-    return { delivered: true };
-  } catch {
-    await writer.abort().catch(() => undefined);
-    return { delivered: false };
-  } finally {
+): { writeAccepted: Promise<boolean>; settled: Promise<void> } {
+  let resolveWriteAccepted!: (accepted: boolean) => void;
+  let acceptanceResolved = false;
+  const writeAccepted = new Promise<boolean>((resolve) => {
+    resolveWriteAccepted = (accepted) => {
+      if (acceptanceResolved) return;
+      acceptanceResolved = true;
+      resolve(accepted);
+    };
+  });
+  const settled = (async () => {
+    let writer: WritableStreamDefaultWriter<Uint8Array> | undefined;
     try {
-      writer.releaseLock();
-    } catch { /* stream already finalized */ }
-  }
+      writer = child.stdin.getWriter();
+      await writer.write(
+        new TextEncoder().encode(JSON.stringify(envelope)),
+      );
+      resolveWriteAccepted(true);
+      // EOF is best-effort after the bytes have been accepted. A fast child may
+      // exit after producing an authoritative result before close settles.
+      await writer.close().catch(() => undefined);
+    } catch {
+      resolveWriteAccepted(false);
+      await writer?.abort().catch(() => undefined);
+    } finally {
+      resolveWriteAccepted(false);
+      try {
+        writer?.releaseLock();
+      } catch { /* stream already finalized */ }
+    }
+  })();
+  return { writeAccepted, settled };
 }
 
 async function killAndReap(child: Deno.ChildProcess): Promise<void> {
