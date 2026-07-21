@@ -927,7 +927,7 @@ with recursive caller_lineage as (
     join staged_approval_requirements req on req.id=d.requirement_id and req.stage_id=$5
     join principals principal on principal.id=d.principal_id and principal.active
     join auth_contexts dc on dc.id=d.decided_auth_context_id and dc.principal_id=d.principal_id
-    join auth_sessions ds on ds.id=dc.session_id and ds.principal_id=d.principal_id and ds.revoked_at is null
+    join auth_sessions ds on ds.id=dc.session_id and ds.principal_id=d.principal_id
     join human_users human on human.id=ds.human_user_id and human.status='active'
    where (req.requirement_json->'principal_types') ? principal.type
      and ((req.requirement_json->>'allow_initiator')::boolean or d.principal_id<>$6::uuid)
@@ -941,13 +941,21 @@ with recursive caller_lineage as (
            join role_definition_versions rv on rv.role_id=sr.id and rv.active
            where ds.authorization_id is null and ra.principal_id=d.principal_id and ra.active
              and ra.role_id=req.requirement_json->>'role'
-             and (ra.boundary_type='system' or ra.boundary_type='all_projects' or
-               (ra.boundary_type='project' and ra.project_id=(req.requirement_json->'boundary'->>'project_id')::uuid)))
+             and case req.requirement_json->'boundary'->>'type'
+               when 'system' then ra.boundary_type='system'
+               when 'all_projects' then ra.boundary_type in ('system','all_projects')
+               else ra.boundary_type in ('system','all_projects') or
+                 (ra.boundary_type='project' and ra.project_id=(req.requirement_json->'boundary'->>'project_id')::uuid)
+             end)
        or exists(select 1 from agent_authorization_roles ar join system_roles sr on sr.id=ar.role_id and sr.active
            join role_definition_versions rv on rv.role_id=sr.id and rv.active
            where ar.authorization_id=ds.authorization_id and ar.role_id=req.requirement_json->>'role'
-             and (ar.boundary_type='system' or ar.boundary_type='all_projects' or
-               (ar.boundary_type='project' and ar.project_id=(req.requirement_json->'boundary'->>'project_id')::uuid))))
+             and case req.requirement_json->'boundary'->>'type'
+               when 'system' then ar.boundary_type='system'
+               when 'all_projects' then ar.boundary_type in ('system','all_projects')
+               else ar.boundary_type in ('system','all_projects') or
+                 (ar.boundary_type='project' and ar.project_id=(req.requirement_json->'boundary'->>'project_id')::uuid)
+             end))
 ), approvals_valid as (
   select not exists(select 1 from staged_approval_requirements req where req.stage_id=$5 and (
     (req.requirement_json->>'expires_at') is not null and (req.requirement_json->>'expires_at')::timestamptz<=statement_timestamp()
