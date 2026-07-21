@@ -532,7 +532,25 @@ export async function resolveHookDenoBinary(
 }
 
 function trustedPrelude(): string {
-  return `const __operantDenyDynamicCode = function () {
+  return `(() => {
+  const nativeFetch = globalThis.fetch.bind(globalThis);
+  const safeFetch = async function (input, init = undefined) {
+    const response = await nativeFetch(input, { ...(init ?? {}), redirect: "manual" });
+    if (response.status >= 300 && response.status < 400 && response.headers.has("location")) {
+      try { await response.body?.cancel(); } catch { /* response may already be closed */ }
+      throw new Error("HTTP redirects are disabled");
+    }
+    return response;
+  };
+  Object.freeze(safeFetch);
+  Object.defineProperty(globalThis, "fetch", {
+    value: safeFetch,
+    writable: false,
+    enumerable: true,
+    configurable: false,
+  });
+})();
+const __operantDenyDynamicCode = function () {
   throw new Error("dynamic code evaluation is disabled");
 };
 for (const __operantTarget of [

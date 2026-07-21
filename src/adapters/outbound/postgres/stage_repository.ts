@@ -244,11 +244,18 @@ export class PostgresStageRepository implements StageRepository {
             ? null
             : await currentResourceState(tx, operation, parsed);
         }
+        const orderedHookDeclarations = hookDeclarations.sort(
+          compareHookDeclarations,
+        );
+        // Run the same complete current Project, operation, policy, lineage,
+        // definition, and hook pin validation used by final persistence before
+        // any secret resolution, provider request, or child spawn.
+        await prepare(tx, operations, auth, orderedHookDeclarations);
         return ok({
           operations,
           projects,
           pack_revisions: revisions,
-          hook_declarations: hookDeclarations.sort(compareHookDeclarations),
+          hook_declarations: orderedHookDeclarations,
           authority_snapshot: await captureHookAuthoritySnapshot(
             tx,
             auth,

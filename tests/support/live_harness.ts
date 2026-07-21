@@ -77,7 +77,10 @@ export type LiveHarness = {
   createProcessTreeLauncher(kind: ProcessTreeKind): Promise<CliLauncher>;
   createAgentLauncher(): Promise<CliLauncher>;
   runConcurrent(requests: ConcurrentCliRequest[]): Promise<CliResult[]>;
-  restart(options?: { bootstrapToken?: string | null }): Promise<void>;
+  restart(options?: {
+    bootstrapToken?: string | null;
+    environment?: Record<string, string | null>;
+  }): Promise<void>;
   diagnostics(): Promise<HarnessDiagnostics>;
   close(options?: { retain?: boolean }): Promise<void>;
 };
@@ -100,6 +103,7 @@ export async function startLiveHarness(
   options: {
     externalDatabaseUrl?: string;
     bootstrapToken?: string | null;
+    environment?: Record<string, string | null>;
   } = {},
 ): Promise<LiveHarness> {
   if (!options.externalDatabaseUrl && !await findPostgresBins()) {
@@ -134,8 +138,22 @@ export async function startLiveHarness(
   if (options.externalDatabaseUrl) {
     env.OPERANT_DATABASE_URL = options.externalDatabaseUrl;
   } else delete env.OPERANT_DATABASE_URL;
+  applyEnvironment(env, options.environment);
 
-  let running = await launchServer(rootDir, env);
+  let running: RunningServer;
+  try {
+    running = await launchServer(rootDir, env);
+  } catch (error) {
+    const startupLog = await Deno.readTextFile(join(rootDir, "server.log"))
+      .catch(() => "");
+    await Deno.remove(rootDir, { recursive: true }).catch(() => undefined);
+    throw new Error(
+      `${
+        error instanceof Error ? error.message : String(error)
+      }\n${startupLog}`,
+    );
+  }
+  let serverRunning = true;
   const legacyAuthBridge = testAuthStoreBridge(
     homeDir,
     xdgConfig,
@@ -286,9 +304,24 @@ export async function startLiveHarness(
       } else if (restartOptions.bootstrapToken !== undefined) {
         env.OPERANT_BOOTSTRAP_TOKEN = restartOptions.bootstrapToken;
       }
-      await stopServer(running);
-      running = await launchServer(rootDir, env);
-      harness.baseUrl = running.url;
+      applyEnvironment(env, restartOptions.environment);
+      if (serverRunning) {
+        await stopServer(running);
+        serverRunning = false;
+      }
+      try {
+        running = await launchServer(rootDir, env);
+        serverRunning = true;
+        harness.baseUrl = running.url;
+      } catch (error) {
+        const startupLog = await Deno.readTextFile(join(rootDir, "server.log"))
+          .catch(() => "");
+        throw new Error(
+          `${
+            error instanceof Error ? error.message : String(error)
+          }\n${startupLog}`,
+        );
+      }
     },
     async diagnostics() {
       const serverLog = running.log.text();
@@ -307,7 +340,7 @@ export async function startLiveHarness(
       );
       launchers.clear();
       await closePostgresClient(sql).catch(() => undefined);
-      await stopServer(running);
+      if (serverRunning) await stopServer(running);
       if (!closeOptions.retain) {
         await Deno.remove(rootDir, { recursive: true }).catch(() => undefined);
       }
@@ -558,6 +591,16 @@ async function stopServer(server: RunningServer): Promise<void> {
   await server.process.status.catch(() => undefined);
   await Promise.all(server.pumps.map((pump) => pump.catch(() => undefined)));
   await server.log.close().catch(() => undefined);
+}
+
+function applyEnvironment(
+  target: Record<string, string>,
+  changes: Record<string, string | null> | undefined,
+): void {
+  for (const [name, value] of Object.entries(changes ?? {})) {
+    if (value === null) delete target[name];
+    else target[name] = value;
+  }
 }
 
 function randomSecret(bytes: number): string {

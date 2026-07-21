@@ -119,6 +119,13 @@ Deno.test("trusted action-stage seam enforces declared operation effects", async
     action: "operant/test:generate",
     input: { name: "generated" },
     reads: { item: { id: "0198c4ba-42b8-7000-8000-000000000020" } },
+    read_dependencies: [{
+      name: "item",
+      project_id: "0198c4ba-42b8-7000-8000-000000000010",
+      resource_identity: "operant/test:item",
+      object_id: "0198c4ba-42b8-7000-8000-000000000020",
+      object_version_id: "0198c4ba-42b8-7000-8000-000000000021",
+    }],
     declarations: [second, action],
     authority_snapshot: {
       principal_id: "0198c4ba-42b8-7000-8000-000000000011",
@@ -139,6 +146,10 @@ Deno.test("trusted action-stage seam enforces declared operation effects", async
   });
   equals(result.hook_executions[0].output_schema, "changeset.operations.v1");
   equals(result.hook_executions[0].added_operations.length, 1);
+  equals(
+    result.read_dependencies[0].object_version_id,
+    "0198c4ba-42b8-7000-8000-000000000021",
+  );
 
   let denied = false;
   try {
@@ -146,6 +157,13 @@ Deno.test("trusted action-stage seam enforces declared operation effects", async
       action: "operant/test:generate",
       input: {},
       reads: { item: {} },
+      read_dependencies: [{
+        name: "item",
+        project_id: "0198c4ba-42b8-7000-8000-000000000010",
+        resource_identity: "operant/test:item",
+        object_id: "0198c4ba-42b8-7000-8000-000000000020",
+        object_version_id: "0198c4ba-42b8-7000-8000-000000000021",
+      }],
       declarations: [{ ...action, effects: [] }],
       authority_snapshot: result.hook_executions[0].authority_snapshot,
     });
@@ -161,6 +179,13 @@ Deno.test("trusted action-stage seam enforces declared operation effects", async
       action: "operant/test:generate",
       input: {},
       reads: { item: {} },
+      read_dependencies: [{
+        name: "item",
+        project_id: "0198c4ba-42b8-7000-8000-000000000010",
+        resource_identity: "operant/test:item",
+        object_id: "0198c4ba-42b8-7000-8000-000000000020",
+        object_version_id: "0198c4ba-42b8-7000-8000-000000000021",
+      }],
       declarations: [action],
       authority_snapshot: result.hook_executions[0].authority_snapshot,
       limits: {
@@ -175,6 +200,24 @@ Deno.test("trusted action-stage seam enforces declared operation effects", async
       error.code === "hook_invalid_output";
   }
   equals(limited, true);
+
+  let undeclaredRead = false;
+  try {
+    await coordinator.runActionStage({
+      action: "operant/test:generate",
+      input: {},
+      reads: {},
+      declarations: [{
+        ...action,
+        input_mapping: { missing: "$reads.missing" },
+      }],
+      authority_snapshot: result.hook_executions[0].authority_snapshot,
+    });
+  } catch (error) {
+    undeclaredRead = error instanceof Error && "code" in error &&
+      error.code === "hook_input_invalid";
+  }
+  equals(undeclaredRead, true);
 });
 
 function equals(actual: unknown, expected: unknown): void {

@@ -10,14 +10,15 @@ Deno.test("failed pre-spawn authority never invokes hook coordinator or persiste
   let createCalls = 0;
   const repository = {
     hasHooks: () => Promise.resolve(true),
-    hookInput: () => Promise.resolve({
-      ok: false as const,
-      error: {
-        code: "forbidden",
-        message: "current Project authority is unavailable",
-        severity: "forbidden" as const,
-      },
-    }),
+    hookInput: () =>
+      Promise.resolve({
+        ok: false as const,
+        error: {
+          code: "forbidden",
+          message: "current Project authority is unavailable",
+          severity: "forbidden" as const,
+        },
+      }),
     create() {
       createCalls++;
       throw new Error("persistence must not run");

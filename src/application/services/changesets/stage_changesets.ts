@@ -148,9 +148,11 @@ export function makeStageChangesetService(
             );
           }
           const mapName = operation.op === "create" ? "fields" : "set";
-          const before = hookWorkingStates[batch.operation_key] ??
-            hookProposedStates[batch.operation_key] ??
-            (isRecord(operation[mapName]) ? operation[mapName] : {});
+          const before = operation.op === "create"
+            ? (isRecord(operation.fields) ? operation.fields : {})
+            : hookWorkingStates[batch.operation_key] ??
+              hookProposedStates[batch.operation_key] ??
+              (isRecord(operation[mapName]) ? operation[mapName] : {});
           const paths = batch.output.patches.map((patch) =>
             patch.path.slice(1).split("/")[0].replaceAll("~1", "/").replaceAll(
               "~0",

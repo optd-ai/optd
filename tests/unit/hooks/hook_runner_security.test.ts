@@ -109,6 +109,7 @@ Deno.test("trusted prelude blocks obfuscated eval and constructor imports and de
     `AsyncFunction("return im"+"port('blob:denied')")();`,
     `GeneratorFunction("return im"+"port('data:text/javascript,export default 1')")();`,
     `AsyncGeneratorFunction("return im"+"port('data:text/javascript,export default 1')")();`,
+    `fetch.constructor("return globalThis.fetch")();`,
   ];
   for (let index = 0; index < escapes.length; index++) {
     const result = await runner.run(
@@ -123,6 +124,67 @@ Deno.test("trusted prelude blocks obfuscated eval and constructor imports and de
     const entries = [];
     for await (const entry of Deno.readDir(cacheDir)) entries.push(entry.name);
     assertEquals(entries, []);
+  }
+});
+
+Deno.test("trusted fetch rejects declared redirects without contacting destination", async () => {
+  let destinationAttempts = 0;
+  const destinationController = new AbortController();
+  const destination = Deno.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    signal: destinationController.signal,
+    onListen() {},
+  }, () => {
+    destinationAttempts++;
+    return new Response("destination");
+  });
+  const destinationAddress = destination.addr as Deno.NetAddr;
+  const sourceController = new AbortController();
+  const source = Deno.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    signal: sourceController.signal,
+    onListen() {},
+  }, () =>
+    new Response(null, {
+      status: 302,
+      headers: {
+        location: `http://127.0.0.1:${destinationAddress.port}/target`,
+      },
+    }));
+  const sourceAddress = source.addr as Deno.NetAddr;
+  try {
+    const runner = new DenoHookRunner({ cacheDir: await Deno.makeTempDir() });
+    const result = await runner.run(
+      hook(
+        `await fetch("http://127.0.0.1:${sourceAddress.port}/redirect", {redirect:"follow"}); ${valid}`,
+        {
+          scriptDigest: "sha256:redirect",
+          permissions: {
+            net: [
+              `127.0.0.1:${sourceAddress.port}`,
+              `127.0.0.1:${destinationAddress.port}`,
+            ],
+            env: false,
+            read: false,
+            write: false,
+            run: false,
+          },
+        },
+      ),
+      envelope,
+    );
+    assertEquals(result.ok, false);
+    assertEquals(result.error?.code, "hook_failed");
+    assertEquals(destinationAttempts, 0);
+  } finally {
+    sourceController.abort();
+    destinationController.abort();
+    await Promise.all([
+      source.finished.catch(() => undefined),
+      destination.finished.catch(() => undefined),
+    ]);
   }
 });
 

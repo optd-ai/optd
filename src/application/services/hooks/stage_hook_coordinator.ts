@@ -51,10 +51,18 @@ export type ActionStageHookDeclaration =
     operation_key: null;
     output_schema: "changeset.operations.v1";
   }>;
+export type ActionStageReadDependency = Readonly<{
+  name: string;
+  project_id: string;
+  resource_identity: string;
+  object_id: string;
+  object_version_id: string;
+}>;
 export type ActionStageHookInput = Readonly<{
   action: string;
   input: Readonly<Record<string, unknown>>;
   reads: Readonly<Record<string, unknown>>;
+  read_dependencies?: readonly ActionStageReadDependency[];
   declarations: readonly ActionStageHookDeclaration[];
   authority_snapshot: HookAuthoritySnapshot;
   limits?: OperationLimits;
@@ -79,6 +87,7 @@ export type ActionStageHookExecution = Readonly<{
   duration_ms: number;
   authority_snapshot: HookAuthoritySnapshot;
   grant_snapshot: HookGrantSnapshot;
+  read_dependencies: readonly ActionStageReadDependency[];
 }>;
 
 export class TrustedStageHookCoordinator implements StageHookCoordinator {
@@ -145,10 +154,29 @@ export class TrustedStageHookCoordinator implements StageHookCoordinator {
   ): Promise<{
     added_operations: CanonicalOperation[];
     operation_graph_digest: string;
+    read_dependencies: ActionStageReadDependency[];
     hook_executions: ActionStageHookExecution[];
   }> {
     let operations: CanonicalOperation[] = [];
     const executions: ActionStageHookExecution[] = [];
+    const readDependencies = [...(input.read_dependencies ?? [])].sort((a, b) =>
+      a.name.localeCompare(b.name)
+    );
+    if (
+      readDependencies.some((dependency) =>
+        !Object.hasOwn(input.reads, dependency.name)
+      ) || Object.keys(input.reads).some((name) =>
+        !readDependencies.some((dependency) =>
+          dependency.name === name
+        )
+      )
+    ) {
+      throw new StageHookError(
+        "hook_input_invalid",
+        "action read evidence does not match curated declared reads",
+        {},
+      );
+    }
     for (
       const declaration of [...input.declarations].sort(compareDeclarations)
     ) {
@@ -251,6 +279,7 @@ export class TrustedStageHookCoordinator implements StageHookCoordinator {
         duration_ms: result.durationMs,
         authority_snapshot: input.authority_snapshot,
         grant_snapshot: { grants: resolved.evidence },
+        read_dependencies: readDependencies,
       });
     }
     const canonical = await canonicalizeResolvedOperations(
@@ -260,6 +289,7 @@ export class TrustedStageHookCoordinator implements StageHookCoordinator {
     return {
       added_operations: canonical.operations,
       operation_graph_digest: canonical.operationGraphDigest,
+      read_dependencies: readDependencies,
       hook_executions: executions,
     };
   }
