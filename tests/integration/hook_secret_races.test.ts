@@ -442,6 +442,41 @@ Deno.test({
           .value_version,
         2,
       );
+
+      provider.enqueue({
+        kind: "delay",
+        delayMs: 1_000,
+        body: { allowed: true },
+      });
+      const pinnedInvocation = stageItem(harness, projectId, "pinned-version");
+      await provider.waitForAttempts(5);
+      const rotatedDuringChild = await harness.runOptctl([
+        "--json",
+        "secret",
+        "rotate",
+        currentGrant.name,
+        "--stdin",
+      ], "post-snapshot-value\n");
+      assertEquals(rotatedDuringChild.code, 0, rotatedDuringChild.stderr);
+      const pinnedResult = await pinnedInvocation;
+      assertEquals(pinnedResult.code, 0, pinnedResult.stderr);
+      assertEquals(
+        JSON.parse(pinnedResult.stdout).data.hook_executions.find((execution: {
+          grant_snapshot: { grants: unknown[] };
+        }) => execution.grant_snapshot.grants.length === 1).grant_snapshot
+          .grants[0].value_version,
+        2,
+      );
+      provider.enqueue({ kind: "success", body: { allowed: true } });
+      const nextVersion = await stageItem(harness, projectId, "next-version");
+      assertEquals(nextVersion.code, 0, nextVersion.stderr);
+      assertEquals(
+        JSON.parse(nextVersion.stdout).data.hook_executions.find((execution: {
+          grant_snapshot: { grants: unknown[] };
+        }) => execution.grant_snapshot.grants.length === 1).grant_snapshot
+          .grants[0].value_version,
+        3,
+      );
       const revoke = await harness.runOptctl([
         "--json",
         "secret",
@@ -483,7 +518,7 @@ Deno.test({
         JSON.parse(afterRevoke.stderr).error.code,
         "hook_secret_unavailable",
       );
-      assertEquals(provider.attempts.length, 4);
+      assertEquals(provider.attempts.length, 6);
       const audit = (await query<{ id: string; metadata: string }>(
         harness.server.sql,
         `select id,request_metadata_json::text metadata from audit_events
@@ -589,6 +624,54 @@ Deno.test({
           : ordinaryMetadata).super_admin_bypass,
         false,
       );
+
+      const activeHead = (await query<{
+        hook_revision_id: string;
+        slot: string;
+        secret_id: string;
+        auth_context_id: string;
+      }>(
+        harness.server.sql,
+        `select grant_row.hook_revision_id,grant_row.slot,grant_row.secret_id,
+                grant_row.created_auth_context_id auth_context_id
+           from hook_secret_grant_heads head
+           join hook_secret_grants grant_row on grant_row.id=head.grant_id
+           join pack_component_revisions component on component.id=grant_row.hook_revision_id
+           join pack_active_revisions active
+             on active.candidate_revision_id=component.candidate_revision_id`,
+      )).rows[0];
+      const mismatchedGrant = uuidV7();
+      await query(
+        harness.server.sql,
+        `insert into hook_secret_grants(
+           id,hook_revision_id,hook_security_digest,slot,secret_id,created_auth_context_id
+         ) values($1,$2,$3,$4,$5,$6)`,
+        [
+          mismatchedGrant,
+          activeHead.hook_revision_id,
+          `sha256:${"f".repeat(64)}`,
+          activeHead.slot,
+          activeHead.secret_id,
+          activeHead.auth_context_id,
+        ],
+      );
+      await query(
+        harness.server.sql,
+        `update hook_secret_grant_heads set grant_id=$3
+          where hook_revision_id=$1 and slot=$2`,
+        [activeHead.hook_revision_id, activeHead.slot, mismatchedGrant],
+      );
+      const digestMismatch = await stageItem(
+        harness,
+        projectId,
+        "digest-mismatch",
+      );
+      assertEquals(digestMismatch.code, 1, digestMismatch.stderr);
+      assertEquals(
+        JSON.parse(digestMismatch.stderr).error.code,
+        "hook_secret_unavailable",
+      );
+      assertEquals(provider.attempts.length, 6);
       const leaked = await query<{ leaked: boolean }>(
         harness.server.sql,
         `select exists(
