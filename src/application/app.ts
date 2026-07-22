@@ -9,10 +9,7 @@ import { makeQueryObjectsService } from "./services/query_objects.ts";
 import { makeMigrationServices } from "./services/migration_services.ts";
 import { makeProcessOutboxService } from "./services/process_outbox.ts";
 import { PostgresOutboxRepository } from "../adapters/outbound/postgres/outbox_repository.ts";
-import {
-  DenoHookRunner,
-  type DenoHookRunnerOptions,
-} from "../adapters/outbound/deno-hooks/hook_runner.ts";
+import type { DenoHookRunnerOptions } from "../adapters/outbound/deno-hooks/hook_runner.ts";
 import { makeSecretsService } from "./services/secrets/manage_secrets.ts";
 import { makeHookSecretGrantService } from "./services/secrets/manage_grants.ts";
 import { EnvelopeCrypto } from "../adapters/outbound/crypto/envelope.ts";
@@ -71,7 +68,6 @@ export function makeApplication(
         resource: "system:hook-secret-grant",
       }),
   });
-  const hookRunner = new DenoHookRunner(options.hookRunnerOptions);
   const hookSecretRepository = new PostgresHookSecretRepository(
     sql,
     cryptoAdapter,
