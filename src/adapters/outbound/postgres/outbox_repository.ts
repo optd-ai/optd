@@ -258,11 +258,13 @@ export class PostgresOutboxRepository {
       clauses.push(`created_at <= $${values.length}::timestamptz`);
     }
     if (cursor) {
-      values.push(cursor.created_at, cursor.id);
+      values.push(cursor.id);
       clauses.push(
-        `(created_at,id) < ($${
-          values.length - 1
-        }::timestamptz,$${values.length}::uuid)`,
+        `(created_at < (select anchor.created_at from outbox_deliveries anchor
+                        where anchor.id=$${values.length}::uuid) or
+          (created_at = (select anchor.created_at from outbox_deliveries anchor
+                         where anchor.id=$${values.length}::uuid) and
+           id < $${values.length}::uuid))`,
       );
     }
     values.push(limit + 1);

@@ -7,7 +7,7 @@ import {
 } from "jsr:@std/assert";
 import { decode as decodeToon } from "npm:@toon-format/toon";
 import { query } from "../../../src/adapters/outbound/postgres/client.ts";
-import { uuidV7 } from "../../../src/domain/ids/uuid_v7.ts";
+import { isUuidV7, uuidV7 } from "../../../src/domain/ids/uuid_v7.ts";
 import { startHttpProvider } from "../../support/http_provider.ts";
 import {
   type LiveHarness,
@@ -504,6 +504,45 @@ for (const logLevel of ["info", "trace"] as const) {
           )).rows[0].hook_identity,
         );
         assertEquals(hookBIdentity, "test/durableoutbox:deliver_b");
+        const tiedDeliveries = (await query<{
+          id: string;
+          created_at: string;
+        }>(
+          harness.server.sql,
+          `select delivery.id,delivery.created_at::text
+           from outbox_deliveries delivery
+           join changeset_commits commit on commit.id=delivery.changeset_commit_id
+           where commit.stage_id=$1 order by delivery.id desc`,
+          [hookBUpdate.stageId],
+        )).rows;
+        assertEquals(tiedDeliveries.length, 2);
+        assertEquals(
+          tiedDeliveries[0].created_at,
+          tiedDeliveries[1].created_at,
+        );
+        for (const tied of tiedDeliveries) {
+          await waitStatus(harness, tied.id, "succeeded");
+        }
+        const tiedJsonPages = await collectListPages(
+          harness,
+          true,
+          ["--hook", "test/durableoutbox:deliver_b", "--limit", "1"],
+          outputs,
+        );
+        const tiedToonPages = await collectListPages(
+          harness,
+          false,
+          ["--hook", "test/durableoutbox:deliver_b", "--limit", "1"],
+          outputs,
+        );
+        const tiedExpected = tiedDeliveries.map((row) => row.id);
+        assertEquals(tiedJsonPages.pageCount, 2);
+        assertEquals(tiedToonPages.pageCount, 2);
+        assertEquals(tiedJsonPages.ids, tiedExpected);
+        assertEquals(tiedToonPages.ids, tiedExpected);
+        assertEquals(tiedToonPages.items, tiedJsonPages.items);
+        assertEquals(tiedJsonPages.terminalCursor, null);
+        assertEquals(tiedToonPages.terminalCursor, null);
 
         await installPauseTrigger(harness);
         const statusPending = await stageCommit(
@@ -614,6 +653,38 @@ for (const logLevel of ["info", "trace"] as const) {
           dead_letter: statusDeadDelivery.id,
           cancelled: statusCancelledDelivery.id,
         };
+        for (
+          const status of [
+            "pending",
+            "running",
+            "retry_wait",
+            "succeeded",
+            "dead_letter",
+            "cancelled",
+          ]
+        ) {
+          const result = toon(
+            await successful(
+              harness.runOptctl(["outbox", "list", "--status", status]),
+              outputs,
+            ),
+          );
+          assert(result.data.items.length > 0, `${status} list was empty`);
+          assertEquals(
+            result.data.items.every((item: Record<string, unknown>) =>
+              item.status === status
+            ),
+            true,
+          );
+          assertEquals(
+            result.data.items.some((item: Record<string, unknown>) =>
+              item.id === statusFixtures[status]
+            ),
+            true,
+          );
+        }
+        provider.release("status-running");
+        await waitStatus(harness, statusRunningDelivery.id, "succeeded");
 
         const listed = await successful(
           harness.runOptctl([
@@ -766,106 +837,133 @@ for (const logLevel of ["info", "trace"] as const) {
         const insideFrom = new Date(insideInstant - 1).toISOString();
         const insideTo = new Date(insideInstant + 1).toISOString();
         const filterCases = [
-          ["--status", "succeeded"],
-          ["--hook", "test/durableoutbox:deliver"],
-          ["--hook", "test/durableoutbox:deliver_b"],
-          ["--event", normalDelivery.event_id],
-          ["--event", hookBDelivery.event_id],
-          ["--from", insideFrom],
-          ["--to", insideTo],
-          ["--from", insideFrom, "--to", insideTo],
-          [
-            "--status",
-            "succeeded",
-            "--hook",
-            "test/durableoutbox:deliver",
-            "--event",
-            normalDelivery.event_id,
-            "--from",
-            "2000-01-01T00:00:00Z",
-            "--to",
-            "2100-01-01T00:00:00Z",
-          ],
+          {
+            args: ["--status", "succeeded"],
+            target: statusSucceededDelivery.id,
+            contrasts: [statusPendingDelivery.id],
+            predicate: (row: Record<string, any>) => row.status === "succeeded",
+          },
+          {
+            args: ["--hook", "test/durableoutbox:deliver"],
+            target: normalDelivery.id,
+            contrasts: [tiedDeliveries[0].id],
+            predicate: (row: Record<string, any>) =>
+              row.hook_identity === "test/durableoutbox:deliver",
+          },
+          {
+            args: ["--hook", "test/durableoutbox:deliver_b"],
+            target: tiedDeliveries[0].id,
+            contrasts: [normalDelivery.id],
+            predicate: (row: Record<string, any>) =>
+              row.hook_identity === "test/durableoutbox:deliver_b",
+          },
+          {
+            args: ["--event", normalDelivery.event_id],
+            target: normalDelivery.id,
+            contrasts: [hookBDelivery.id, statusSucceededDelivery.id],
+            predicate: (row: Record<string, any>) =>
+              row.event_id === normalDelivery.event_id,
+          },
+          {
+            args: ["--event", hookBDelivery.event_id],
+            target: tiedDeliveries[0].id,
+            contrasts: [normalDelivery.id],
+            predicate: (row: Record<string, any>) =>
+              row.event_id === hookBDelivery.event_id,
+          },
+          {
+            args: ["--from", insideFrom],
+            target: statusSucceededDelivery.id,
+            contrasts: [normalDelivery.id],
+            predicate: (row: Record<string, any>) =>
+              Date.parse(row.created_at) >= Date.parse(insideFrom),
+          },
+          {
+            args: ["--to", insideTo],
+            target: statusSucceededDelivery.id,
+            contrasts: [statusDeadDelivery.id],
+            predicate: (row: Record<string, any>) =>
+              Date.parse(row.created_at) <= Date.parse(insideTo),
+          },
+          {
+            args: ["--from", insideFrom, "--to", insideTo],
+            target: statusSucceededDelivery.id,
+            contrasts: [normalDelivery.id, statusDeadDelivery.id],
+            predicate: (row: Record<string, any>) =>
+              Date.parse(row.created_at) >= Date.parse(insideFrom) &&
+              Date.parse(row.created_at) <= Date.parse(insideTo),
+          },
+          {
+            args: [
+              "--status",
+              "succeeded",
+              "--hook",
+              "test/durableoutbox:deliver",
+              "--event",
+              statusSucceededDelivery.event_id,
+              "--from",
+              insideFrom,
+              "--to",
+              insideTo,
+            ],
+            target: statusSucceededDelivery.id,
+            contrasts: [
+              statusPendingDelivery.id,
+              tiedDeliveries[0].id,
+              normalDelivery.id,
+              statusDeadDelivery.id,
+            ],
+            dimensionContrasts: {
+              status: statusPendingDelivery.id,
+              hook: tiedDeliveries[0].id,
+              event: normalDelivery.id,
+              before_from: normalDelivery.id,
+              after_to: statusDeadDelivery.id,
+            },
+            predicate: (row: Record<string, any>) =>
+              row.status === "succeeded" &&
+              row.hook_identity === "test/durableoutbox:deliver" &&
+              row.event_id === statusSucceededDelivery.event_id &&
+              Date.parse(row.created_at) >= Date.parse(insideFrom) &&
+              Date.parse(row.created_at) <= Date.parse(insideTo),
+          },
         ];
-        for (const filters of filterCases) {
+        for (const testCase of filterCases) {
           const jsonFiltered = json(
             await successful(
               harness.runOptctl([
                 "--json",
                 "outbox",
                 "list",
-                ...filters,
+                ...testCase.args,
               ]),
               outputs,
             ),
           );
           const toonFiltered = toon(
             await successful(
-              harness.runOptctl(["outbox", "list", ...filters]),
+              harness.runOptctl(["outbox", "list", ...testCase.args]),
               outputs,
             ),
           );
           assertEquals(toonFiltered.data, jsonFiltered.data);
           assertEquals(jsonFiltered.data.page.limit, 50);
-          assertEquals(jsonFiltered.data.filters, expectedFilters(filters));
-          assert(jsonFiltered.data.items.length > 0);
-          const ids = jsonFiltered.data.items.map((
-            item: Record<string, unknown>,
-          ) => item.id);
-          if (filters.includes(insideFrom) && filters.includes(insideTo)) {
-            assertEquals(ids, [statusSucceededDelivery.id]);
-            assertEquals(ids.includes(normalDelivery.id), false);
-          } else if (filters.includes(normalDelivery.event_id)) {
-            assertEquals(ids, [normalDelivery.id]);
-            assertEquals(ids.includes(statusPendingDelivery.id), false);
-          } else if (filters.includes(hookBDelivery.event_id)) {
-            assertEquals(ids, [hookBDelivery.id]);
-            assertEquals(ids.includes(normalDelivery.id), false);
-          } else if (filters.includes("test/durableoutbox:deliver_b")) {
-            assertEquals(ids.includes(hookBDelivery.id), true);
-            assertEquals(ids.includes(normalDelivery.id), false);
-          } else if (filters.includes(insideFrom)) {
-            assertEquals(ids.includes(statusSucceededDelivery.id), true);
-            assertEquals(ids.includes(normalDelivery.id), false);
-          } else {
-            assertEquals(ids.includes(normalDelivery.id), true);
-            if (filters.includes("succeeded")) {
-              assertEquals(ids.includes(statusPendingDelivery.id), false);
-            }
+          assertEquals(
+            jsonFiltered.data.filters,
+            expectedFilters(testCase.args),
+          );
+          const rows = jsonFiltered.data.items as Array<Record<string, any>>;
+          assert(rows.length > 0);
+          const ids = rows.map((row) => row.id);
+          assertEquals(ids.includes(testCase.target), true);
+          for (const contrast of testCase.contrasts) {
+            assertEquals(ids.includes(contrast), false);
           }
+          for (
+            const contrast of Object.values(testCase.dimensionContrasts ?? {})
+          ) assertEquals(ids.includes(contrast), false);
+          assertEquals(rows.every(testCase.predicate), true);
         }
-        for (
-          const status of [
-            "pending",
-            "running",
-            "retry_wait",
-            "succeeded",
-            "dead_letter",
-            "cancelled",
-          ]
-        ) {
-          const result = toon(
-            await successful(
-              harness.runOptctl(["outbox", "list", "--status", status]),
-              outputs,
-            ),
-          );
-          assert(result.data.items.length > 0, `${status} list was empty`);
-          assertEquals(
-            result.data.items.every((item: Record<string, unknown>) =>
-              item.status === status
-            ),
-            true,
-          );
-          assertEquals(
-            result.data.items.some((item: Record<string, unknown>) =>
-              item.id === statusFixtures[status]
-            ),
-            true,
-          );
-        }
-        provider.release("status-running");
-        await waitStatus(harness, statusRunningDelivery.id, "succeeded");
         const deliveryInspection = json(
           await successful(
             harness.runOptctl([
@@ -1204,13 +1302,12 @@ for (const logLevel of ["info", "trace"] as const) {
         assertEquals(drainOne.retried, 0);
         assertEquals(drainOne.dead_lettered, 0);
         assertEquals(drainOne.executions.length, 1);
-        assertEquals(drainOne.executions[0].delivery_id, drainOneDelivery.id);
         await waitStatus(harness, drainOneDelivery.id, "succeeded");
-        assertEquals(
-          provider.effects.some((effect) =>
-            effect.idempotencyKey === drainOneDelivery.id
-          ),
-          true,
+        await assertExactDrain(
+          harness,
+          provider,
+          drainOne,
+          drainOneDelivery.id,
         );
         await installPauseTrigger(harness);
         const jsonDrainWork = await stageCommit(
@@ -1244,16 +1341,12 @@ for (const logLevel of ["info", "trace"] as const) {
         assertEquals(jsonDrainOne.retried, 0);
         assertEquals(jsonDrainOne.dead_lettered, 0);
         assertEquals(jsonDrainOne.executions.length, 1);
-        assertEquals(
-          jsonDrainOne.executions[0].delivery_id,
-          jsonDrainDelivery.id,
-        );
         await waitStatus(harness, jsonDrainDelivery.id, "succeeded");
-        assertEquals(
-          provider.effects.some((effect) =>
-            effect.idempotencyKey === jsonDrainDelivery.id
-          ),
-          true,
+        await assertExactDrain(
+          harness,
+          provider,
+          jsonDrainOne,
+          jsonDrainDelivery.id,
         );
         const jsonDrain = json(
           await successful(
@@ -1765,7 +1858,7 @@ async function addHookB(root: string, providerUrl: string) {
   const host = new URL(providerUrl).host;
   await Deno.writeTextFile(
     `${root}/hooks/deliver_b.yaml`,
-    `kind: Hook\napiVersion: operant.dev/v1\nmetadata: { name: deliver_b }\nspec:\n  script: deliver_b.ts\n  timeout: 10s\n  permissions: { net: [${host}], env: false, read: false, write: false, run: false }\n  secrets: []\n  effects: { operations: [] }\n  output: { schema: delivery.v1 }\n  attachments:\n    - phase: event.after_commit\n      event: object.updated\n      order: 20\n      condition: 'event_type == "object.updated"'\n      input: { event: '$event' }\n  axi: {}\n`,
+    `kind: Hook\napiVersion: operant.dev/v1\nmetadata: { name: deliver_b }\nspec:\n  script: deliver_b.ts\n  timeout: 10s\n  permissions: { net: [${host}], env: false, read: false, write: false, run: false }\n  secrets: []\n  effects: { operations: [] }\n  output: { schema: delivery.v1 }\n  attachments:\n    - phase: event.after_commit\n      event: object.updated\n      order: 20\n      condition: 'event_type == "object.updated"'\n      input: { event: '$event' }\n    - phase: event.after_commit\n      event: object.updated\n      order: 21\n      condition: 'event_type == "object.updated"'\n      input: { event: '$event' }\n  axi: {}\n`,
   );
   await Deno.writeTextFile(
     `${root}/hooks/deliver_b.ts`,
@@ -1866,6 +1959,45 @@ function errorOutput(
     ? JSON.parse(result.stderr)
     : decodeToon(result.stderr)) as Record<string, any>;
 }
+async function assertExactDrain(
+  harness: LiveHarness,
+  provider: ReturnType<typeof startHttpProvider>,
+  result: Record<string, any>,
+  deliveryId: string,
+) {
+  assertEquals(result.executions.length, 1);
+  const execution = result.executions[0];
+  assertEquals(execution.delivery_id, deliveryId);
+  assertEquals(execution.status, "succeeded");
+  assertEquals(isUuidV7(execution.attempt_id), true);
+  const attempt = (await query<{
+    id: string;
+    delivery_id: string;
+    outcome: string;
+    retry_generation: number;
+    attempt_number: number;
+    total_attempt_number: number;
+  }>(
+    harness.server.sql,
+    `select id,delivery_id,outcome,retry_generation,attempt_number,
+       total_attempt_number from outbox_attempts where id=$1`,
+    [execution.attempt_id],
+  )).rows[0];
+  assertEquals(attempt, {
+    id: execution.attempt_id,
+    delivery_id: deliveryId,
+    outcome: "succeeded",
+    retry_generation: 0,
+    attempt_number: 1,
+    total_attempt_number: 1,
+  });
+  assertEquals(
+    provider.effects.filter((effect) => effect.idempotencyKey === deliveryId)
+      .length,
+    1,
+  );
+}
+
 async function collectListPages(
   harness: LiveHarness,
   asJson: boolean,
