@@ -57,6 +57,7 @@ export type LiveHarness = {
   baseUrl: string;
   databaseUrl: string;
   binaryPath: string;
+  binarySourceDigest: string;
   /** Test-support SQL is only for focused setup/assertions, never acceptance actions. */
   server: { sql: Sql };
   runOptctl(args: string[], stdin?: string): Promise<CliResult>;
@@ -78,6 +79,7 @@ export type LiveHarness = {
   createProcessTreeLauncher(kind: ProcessTreeKind): Promise<CliLauncher>;
   createAgentLauncher(): Promise<CliLauncher>;
   runConcurrent(requests: ConcurrentCliRequest[]): Promise<CliResult[]>;
+  crash(): Promise<void>;
   restart(options?: {
     bootstrapToken?: string | null;
     environment?: Record<string, string | null>;
@@ -96,6 +98,7 @@ type RunningServer = {
   url: string;
   log: LogSink;
   pumps: Promise<void>[];
+  cancelPumps(): Promise<void>;
 };
 
 const MAX_DIAGNOSTIC_BYTES = 1024 * 1024;
@@ -105,6 +108,7 @@ export async function startLiveHarness(
     externalDatabaseUrl?: string;
     bootstrapToken?: string | null;
     environment?: Record<string, string | null>;
+    forceFreshCompile?: boolean;
   } = {},
 ): Promise<LiveHarness> {
   if (!options.externalDatabaseUrl && !await findPostgresBins()) {
@@ -124,7 +128,12 @@ export async function startLiveHarness(
     ),
   );
 
-  const binaryPath = await compileOptctl();
+  const binarySourceDigest = await sourceDigest();
+  const binaryPath = await compileOptctl({
+    digest: binarySourceDigest,
+    forceFresh: options.forceFreshCompile ?? false,
+    isolation: rootDir,
+  });
   const env = Deno.env.toObject();
   env.OPERANT_DATA_DIR = dataDir;
   env.OPERANT_PORT = String(freePort());
@@ -155,6 +164,7 @@ export async function startLiveHarness(
     );
   }
   let serverRunning = true;
+  let crashedPostgresPid: number | undefined;
   const legacyAuthBridge = testAuthStoreBridge(
     homeDir,
     xdgConfig,
@@ -194,6 +204,7 @@ export async function startLiveHarness(
     baseUrl: running.url,
     databaseUrl,
     binaryPath,
+    binarySourceDigest,
     server: { sql },
     runOptctl: runBinary,
     async bootstrap(input) {
@@ -300,6 +311,12 @@ export async function startLiveHarness(
         ),
       );
     },
+    async crash() {
+      if (!serverRunning) return;
+      crashedPostgresPid = await readPostgresPid(dataDir);
+      await crashServer(running);
+      serverRunning = false;
+    },
     async restart(restartOptions = {}) {
       if (restartOptions.bootstrapToken === null) {
         delete env.OPERANT_BOOTSTRAP_TOKEN;
@@ -343,6 +360,10 @@ export async function startLiveHarness(
       launchers.clear();
       await closePostgresClient(sql).catch(() => undefined);
       if (serverRunning) await stopServer(running);
+      if (crashedPostgresPid !== undefined) {
+        await stopCrashedPostgres(crashedPostgresPid, running.log.text());
+        crashedPostgresPid = undefined;
+      }
       if (!closeOptions.retain) {
         await Deno.remove(rootDir, { recursive: true }).catch(() => undefined);
       }
@@ -360,19 +381,25 @@ export async function assertHealth(baseUrl: string) {
   return body;
 }
 
-async function compileOptctl(): Promise<string> {
+async function compileOptctl(options: {
+  digest: string;
+  forceFresh: boolean;
+  isolation: string;
+}): Promise<string> {
   const cat = await Deno.stat("/bin/cat").catch(() => undefined);
   if (!cat?.isFile || ((cat.mode ?? 0) & 0o111) === 0) {
     throw new Error(
       "compiled Linux process inspection requires reviewed executable /bin/cat",
     );
   }
-  const digest = await sourceDigest();
-  const cacheDir = join(
-    Deno.env.get("TMPDIR") ?? "/tmp",
-    "operant-optctl-cache",
-    digest,
-  );
+  const digest = options.digest;
+  const cacheDir = options.forceFresh
+    ? join(options.isolation, "forced-fresh-optctl", digest)
+    : join(
+      Deno.env.get("TMPDIR") ?? "/tmp",
+      "operant-optctl-cache",
+      digest,
+    );
   const binary = join(cacheDir, "optctl");
   try {
     await Deno.stat(binary);
@@ -401,7 +428,7 @@ async function compileOptctl(): Promise<string> {
         await Deno.remove(compileLock, { recursive: true }).catch(() =>
           undefined
         );
-        return await compileOptctl();
+        return await compileOptctl(options);
       }
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
@@ -495,7 +522,8 @@ async function launchServer(
     stderr: "piped",
   }).spawn();
   const reader = process.stdout.getReader();
-  const stderrPump = pipeToLog(process.stderr, log);
+  const stderrReader = process.stderr.getReader();
+  const stderrPump = pump(stderrReader, log);
   const decoder = new TextDecoder();
   let buffered = "";
   const deadline = Date.now() + 60_000;
@@ -527,6 +555,12 @@ async function launchServer(
               url: message.listening,
               log,
               pumps: [stdoutPump, stderrPump],
+              async cancelPumps() {
+                await Promise.all([
+                  reader.cancel().catch(() => undefined),
+                  stderrReader.cancel().catch(() => undefined),
+                ]);
+              },
             };
           }
         } catch {
@@ -564,12 +598,62 @@ async function pump(
   }
 }
 
-async function pipeToLog(
-  stream: ReadableStream<Uint8Array>,
-  writer: Pick<LogSink, "write">,
-) {
-  const reader = stream.getReader();
-  await pump(reader, writer);
+async function readPostgresPid(dataDir: string): Promise<number | undefined> {
+  const text = await Deno.readTextFile(
+    join(dataDir, "postgres", "data", "postmaster.pid"),
+  ).catch(() => "");
+  const pid = Number(text.split("\n", 1)[0]);
+  return Number.isSafeInteger(pid) && pid > 1 ? pid : undefined;
+}
+
+async function stopCrashedPostgres(pid: number, diagnostics: string) {
+  try {
+    Deno.kill(pid, "SIGTERM");
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) return;
+    throw error;
+  }
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    try {
+      Deno.kill(pid, "SIGCONT");
+    } catch (error) {
+      if (error instanceof Deno.errors.NotFound) return;
+      throw error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  try {
+    Deno.kill(pid, "SIGKILL");
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) return;
+    throw error;
+  }
+  console.error("crashed harness postgres required SIGKILL", {
+    pid,
+    diagnostics: diagnostics.slice(-MAX_DIAGNOSTIC_BYTES),
+  });
+}
+
+async function crashServer(server: RunningServer): Promise<void> {
+  try {
+    server.process.kill("SIGKILL");
+  } catch {
+    // Already exited.
+  }
+  await raceWithTimeout(
+    server.process.status,
+    10_000,
+    "server crash reap timed out",
+  ).catch((error) => {
+    const tail = server.log.text().slice(-MAX_DIAGNOSTIC_BYTES);
+    throw new Error(
+      `${error instanceof Error ? error.message : String(error)}\n${tail}`,
+    );
+  });
+  await server.cancelPumps();
+  await Promise.all(server.pumps.map((pump) => pump.catch(() => undefined)));
+  await server.log.close().catch(() => undefined);
 }
 
 async function stopServer(server: RunningServer): Promise<void> {
@@ -591,6 +675,7 @@ async function stopServer(server: RunningServer): Promise<void> {
     }
   }
   await server.process.status.catch(() => undefined);
+  await server.cancelPumps();
   await Promise.all(server.pumps.map((pump) => pump.catch(() => undefined)));
   await server.log.close().catch(() => undefined);
 }

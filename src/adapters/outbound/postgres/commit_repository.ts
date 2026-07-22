@@ -1552,12 +1552,13 @@ async function enqueueAfterCommitDeliveries(
   };
   for (const attachment of attachments) {
     const config = record(attachment.hook_normalized_config);
-    const spec = record(config.spec);
+    const nestedSpec = record(config.spec);
+    const spec = Object.keys(nestedSpec).length > 0 ? nestedSpec : config;
     const output = record(spec.output);
     if (output.schema !== "delivery.v1") {
       throw new Error("event.after_commit hook must use delivery.v1");
     }
-    const timeoutMs = durationMilliseconds(spec.timeout);
+    const timeoutMs = durationMilliseconds(spec.timeout_ms ?? spec.timeout);
     const permissions = record(spec.permissions);
     const secrets = Array.isArray(spec.secrets) ? spec.secrets.map(record) : [];
     const grants: Array<Record<string, unknown>> = [];
@@ -1571,9 +1572,9 @@ async function enqueueAfterCommitDeliveries(
       if (!slot || !env) throw new Error("hook secret declaration is invalid");
       const grant = (await query<{ grant_id: string; secret_id: string }>(
         tx,
-        `select head.grant_id,grant.secret_id
+        `select head.grant_id,g.secret_id
          from hook_secret_grant_heads head
-         join hook_secret_grants grant on grant.id=head.grant_id
+         join hook_secret_grants g on g.id=head.grant_id
          where head.hook_revision_id=$1 and head.slot=$2`,
         [attachment.hook_revision_id, slot],
       )).rows[0];
@@ -1668,6 +1669,10 @@ function materializeAfterCommitInput(
 }
 
 function durationMilliseconds(value: unknown): number {
+  if (
+    typeof value === "number" && Number.isSafeInteger(value) && value >= 1 &&
+    value <= 600_000
+  ) return value;
   if (typeof value !== "string") throw new Error("hook timeout is invalid");
   const match = /^(\d+)(ms|s|m)$/.exec(value);
   if (!match) throw new Error("hook timeout is invalid");

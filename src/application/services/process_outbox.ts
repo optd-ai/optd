@@ -432,7 +432,10 @@ async function loadPinned(sql: Queryable, claim: ClaimedDelivery) {
     throw permanent("pinned_hook_disabled", "pinned hook revision is disabled");
   }
   const config = record(row.hook_normalized_config);
-  const configSpec = record(config.spec);
+  const nestedConfigSpec = record(config.spec);
+  const configSpec = Object.keys(nestedConfigSpec).length > 0
+    ? nestedConfigSpec
+    : config;
   const output = record(configSpec.output);
   if (
     row.hook_script_digest !== claim.script_digest ||
@@ -461,7 +464,8 @@ function hookDefinition(
   config: Record<string, unknown>,
   source: string,
 ): HookDefinition {
-  const spec = record(config.spec);
+  const nestedSpec = record(config.spec);
+  const spec = Object.keys(nestedSpec).length > 0 ? nestedSpec : config;
   return {
     namespace: claim.hook_identity.split(":")[0],
     name: claim.hook_identity,

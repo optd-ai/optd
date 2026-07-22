@@ -7,7 +7,8 @@ export type ProviderBehavior =
     retryAfterSeconds: number;
     body?: unknown;
   }
-  | { kind: "permanent_failure"; status?: number; body?: unknown };
+  | { kind: "permanent_failure"; status?: number; body?: unknown }
+  | { kind: "hold"; token: string; status?: number; body?: unknown };
 
 export type ProviderAttempt = {
   id: number;
@@ -25,6 +26,7 @@ export type HttpProvider = {
   attempts: ProviderAttempt[];
   effects: ProviderAttempt[];
   enqueue(...behaviors: ProviderBehavior[]): void;
+  release(token: string): void;
   waitForAttempts(
     count: number,
     timeoutMs?: number,
@@ -41,6 +43,7 @@ export function startHttpProvider(
   const effects: ProviderAttempt[] = [];
   const effectedKeys = new Set<string>();
   const waiters = new Set<() => void>();
+  const holds = new Map<string, () => void>();
   const server = Deno.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -62,7 +65,8 @@ export function startHttpProvider(
     };
     attempts.push(attempt);
     if (
-      !duplicate && (behavior.kind === "success" || behavior.kind === "delay")
+      !duplicate && (behavior.kind === "success" || behavior.kind === "delay" ||
+        behavior.kind === "hold")
     ) {
       effects.push(attempt);
       if (key !== null) effectedKeys.add(key);
@@ -73,6 +77,12 @@ export function startHttpProvider(
       await abortableDelay(behavior.delayMs, controller.signal).catch(() =>
         undefined
       );
+    } else if (behavior.kind === "hold") {
+      await new Promise<void>((resolve) => {
+        holds.set(behavior.token, resolve);
+        if (controller.signal.aborted) resolve();
+      });
+      holds.delete(behavior.token);
     }
     const status = behavior.kind === "retry"
       ? behavior.status ?? 503
@@ -96,6 +106,11 @@ export function startHttpProvider(
     effects,
     enqueue(...behaviors) {
       queue.push(...behaviors);
+    },
+    release(token) {
+      const release = holds.get(token);
+      if (!release) throw new Error(`provider hold ${token} is not active`);
+      release();
     },
     async waitForAttempts(count, timeoutMs = 5_000) {
       if (attempts.length >= count) return attempts.slice(0, count);
@@ -124,6 +139,8 @@ export function startHttpProvider(
     },
     async close() {
       controller.abort();
+      for (const release of holds.values()) release();
+      holds.clear();
       for (const notify of waiters) notify();
       waiters.clear();
       await server.finished.catch((error) => {
