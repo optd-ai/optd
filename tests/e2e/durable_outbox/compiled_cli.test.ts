@@ -471,6 +471,150 @@ for (const logLevel of ["info", "trace"] as const) {
         );
         provider.release("slow-earlier");
         await waitStatus(harness, slowDelivery.id, "succeeded");
+
+        await addHookB(pack, provider.url);
+        await successful(
+          harness.runOptctl(["--json", "pack", "apply", pack, "--safe"]),
+          outputs,
+        );
+        const normalObjectId = String(
+          (await query<{ object_id: string }>(
+            harness.server.sql,
+            "select object_id from events where id=$1",
+            [normalDelivery.event_id],
+          )).rows[0].object_id,
+        );
+        provider.enqueue({ kind: "success" });
+        const hookBUpdate = await stageUpdateCommit(
+          harness,
+          pack,
+          projectId,
+          normalObjectId,
+        );
+        const hookBDelivery = await deliveryForStage(
+          harness,
+          hookBUpdate.stageId,
+        );
+        await waitStatus(harness, hookBDelivery.id, "succeeded");
+        const hookBIdentity = String(
+          (await query<{ hook_identity: string }>(
+            harness.server.sql,
+            "select hook_identity from outbox_deliveries where id=$1",
+            [hookBDelivery.id],
+          )).rows[0].hook_identity,
+        );
+        assertEquals(hookBIdentity, "test/durableoutbox:deliver_b");
+
+        await installPauseTrigger(harness);
+        const statusPending = await stageCommit(
+          harness,
+          pack,
+          projectId,
+          "normal",
+          "status-pending",
+        );
+        const statusPendingDelivery = await deliveryForStage(
+          harness,
+          statusPending.stageId,
+        );
+        const statusCancelled = await stageCommit(
+          harness,
+          pack,
+          projectId,
+          "normal",
+          "status-cancelled",
+        );
+        const statusCancelledDelivery = await deliveryForStage(
+          harness,
+          statusCancelled.stageId,
+        );
+        await successful(
+          harness.runOptctl([
+            "--json",
+            "outbox",
+            "cancel",
+            statusCancelledDelivery.id,
+            "--reason",
+            "status fixture",
+          ]),
+          outputs,
+        );
+        const statusSucceeded = await stageCommit(
+          harness,
+          pack,
+          projectId,
+          "normal",
+          "status-succeeded",
+        );
+        const statusSucceededDelivery = await deliveryForStage(
+          harness,
+          statusSucceeded.stageId,
+        );
+        provider.enqueue({ kind: "success" });
+        await releasePaused(harness, statusSucceededDelivery.id);
+        await waitStatus(harness, statusSucceededDelivery.id, "succeeded");
+
+        await installPauseTrigger(harness);
+        const statusDead = await stageCommit(
+          harness,
+          pack,
+          projectId,
+          "normal",
+          "status-dead",
+        );
+        const statusDeadDelivery = await deliveryForStage(
+          harness,
+          statusDead.stageId,
+        );
+        provider.enqueue({ kind: "permanent_failure" });
+        await releasePaused(harness, statusDeadDelivery.id);
+        await waitStatus(harness, statusDeadDelivery.id, "dead_letter");
+
+        await installPauseTrigger(harness);
+        const statusRetry = await stageCommit(
+          harness,
+          pack,
+          projectId,
+          "normal",
+          "status-retry",
+        );
+        const statusRetryDelivery = await deliveryForStage(
+          harness,
+          statusRetry.stageId,
+        );
+        provider.enqueue({ kind: "retry", retryAfterSeconds: 60 });
+        await releasePaused(harness, statusRetryDelivery.id);
+        await waitStatus(harness, statusRetryDelivery.id, "retry_wait");
+        await query(
+          harness.server.sql,
+          "update outbox_deliveries set available_at=now()+interval '1 day' where id=$1",
+          [statusRetryDelivery.id],
+        );
+
+        await installPauseTrigger(harness);
+        const statusRunning = await stageCommit(
+          harness,
+          pack,
+          projectId,
+          "normal",
+          "status-running",
+        );
+        const statusRunningDelivery = await deliveryForStage(
+          harness,
+          statusRunning.stageId,
+        );
+        provider.enqueue({ kind: "hold", token: "status-running" });
+        await releasePaused(harness, statusRunningDelivery.id);
+        await waitStatus(harness, statusRunningDelivery.id, "running");
+        const statusFixtures: Record<string, string> = {
+          pending: statusPendingDelivery.id,
+          running: statusRunningDelivery.id,
+          retry_wait: statusRetryDelivery.id,
+          succeeded: statusSucceededDelivery.id,
+          dead_letter: statusDeadDelivery.id,
+          cancelled: statusCancelledDelivery.id,
+        };
+
         const listed = await successful(
           harness.runOptctl([
             "--json",
@@ -553,6 +697,18 @@ for (const logLevel of ["info", "trace"] as const) {
             jsonContinuation.data.items[0]?.id,
             firstListItem.id,
           );
+          const pageIds = [
+            firstListItem.id,
+            ...jsonContinuation.data.items.map((
+              item: Record<string, unknown>,
+            ) => item.id),
+          ];
+          assertEquals(new Set(pageIds).size, pageIds.length);
+          assertEquals(
+            new Date(firstListItem.created_at).getTime() >=
+              new Date(jsonContinuation.data.items[0].created_at).getTime(),
+            true,
+          );
           for (const asJson of [true, false]) {
             const mismatch = await harness.runOptctl([
               ...asJson ? ["--json"] : [],
@@ -570,12 +726,19 @@ for (const logLevel of ["info", "trace"] as const) {
             outputs.push(mismatch.stdout, mismatch.stderr);
           }
         }
+        const insideInstant = new Date(statusSucceededDelivery.created_at)
+          .getTime();
+        const insideFrom = new Date(insideInstant - 1).toISOString();
+        const insideTo = new Date(insideInstant + 1).toISOString();
         const filterCases = [
           ["--status", "succeeded"],
           ["--hook", "test/durableoutbox:deliver"],
+          ["--hook", "test/durableoutbox:deliver_b"],
           ["--event", normalDelivery.event_id],
-          ["--from", "2000-01-01T00:00:00Z"],
-          ["--to", "2100-01-01T00:00:00Z"],
+          ["--event", hookBDelivery.event_id],
+          ["--from", insideFrom],
+          ["--to", insideTo],
+          ["--from", insideFrom, "--to", insideTo],
           [
             "--status",
             "succeeded",
@@ -609,6 +772,32 @@ for (const logLevel of ["info", "trace"] as const) {
           );
           assertEquals(toonFiltered.data, jsonFiltered.data);
           assertEquals(jsonFiltered.data.page.limit, 50);
+          assertEquals(jsonFiltered.data.filters, expectedFilters(filters));
+          assert(jsonFiltered.data.items.length > 0);
+          const ids = jsonFiltered.data.items.map((
+            item: Record<string, unknown>,
+          ) => item.id);
+          if (filters.includes(insideFrom) && filters.includes(insideTo)) {
+            assertEquals(ids, [statusSucceededDelivery.id]);
+            assertEquals(ids.includes(normalDelivery.id), false);
+          } else if (filters.includes(normalDelivery.event_id)) {
+            assertEquals(ids, [normalDelivery.id]);
+            assertEquals(ids.includes(statusPendingDelivery.id), false);
+          } else if (filters.includes(hookBDelivery.event_id)) {
+            assertEquals(ids, [hookBDelivery.id]);
+            assertEquals(ids.includes(normalDelivery.id), false);
+          } else if (filters.includes("test/durableoutbox:deliver_b")) {
+            assertEquals(ids.includes(hookBDelivery.id), true);
+            assertEquals(ids.includes(normalDelivery.id), false);
+          } else if (filters.includes(insideFrom)) {
+            assertEquals(ids.includes(statusSucceededDelivery.id), true);
+            assertEquals(ids.includes(normalDelivery.id), false);
+          } else {
+            assertEquals(ids.includes(normalDelivery.id), true);
+            if (filters.includes("succeeded")) {
+              assertEquals(ids.includes(statusPendingDelivery.id), false);
+            }
+          }
         }
         for (
           const status of [
@@ -626,13 +815,22 @@ for (const logLevel of ["info", "trace"] as const) {
               outputs,
             ),
           );
+          assert(result.data.items.length > 0, `${status} list was empty`);
           assertEquals(
             result.data.items.every((item: Record<string, unknown>) =>
               item.status === status
             ),
             true,
           );
+          assertEquals(
+            result.data.items.some((item: Record<string, unknown>) =>
+              item.id === statusFixtures[status]
+            ),
+            true,
+          );
         }
+        provider.release("status-running");
+        await waitStatus(harness, statusRunningDelivery.id, "succeeded");
         const deliveryInspection = json(
           await successful(
             harness.runOptctl([
@@ -881,8 +1079,50 @@ for (const logLevel of ["info", "trace"] as const) {
           ),
         ).data;
         assertEquals(typeof toonDrain.worker_id, "string");
-        assertEquals(typeof toonDrain.claimed, "number");
-        assertEquals(Array.isArray(toonDrain.executions), true);
+        assertEquals(toonDrain.claimed, 0);
+        assertEquals(toonDrain.processed, 0);
+        assertEquals(toonDrain.succeeded, 0);
+        assertEquals(toonDrain.retried, 0);
+        assertEquals(toonDrain.dead_lettered, 0);
+        assertEquals(toonDrain.executions, []);
+
+        await harness.restart({
+          environment: { OPERANT_OUTBOX_POLL_INTERVAL_MS: "60000" },
+        });
+        await installPauseTrigger(harness);
+        const drainOneWork = await stageCommit(
+          harness,
+          pack,
+          projectId,
+          "normal",
+          "drain-exact-one",
+        );
+        const drainOneDelivery = await deliveryForStage(
+          harness,
+          drainOneWork.stageId,
+        );
+        provider.enqueue({ kind: "success" });
+        await releasePaused(harness, drainOneDelivery.id);
+        const drainOne = toon(
+          await successful(
+            harness.runOptctl(["outbox", "drain", "--limit", "1"]),
+            outputs,
+          ),
+        ).data;
+        assertEquals(drainOne.claimed, 1);
+        assertEquals(drainOne.processed, 1);
+        assertEquals(drainOne.succeeded, 1);
+        assertEquals(drainOne.retried, 0);
+        assertEquals(drainOne.dead_lettered, 0);
+        assertEquals(drainOne.executions.length, 1);
+        assertEquals(drainOne.executions[0].delivery_id, drainOneDelivery.id);
+        await waitStatus(harness, drainOneDelivery.id, "succeeded");
+        assertEquals(
+          provider.effects.some((effect) =>
+            effect.idempotencyKey === drainOneDelivery.id
+          ),
+          true,
+        );
         const jsonDrain = json(
           await successful(
             harness.runOptctl([
@@ -895,7 +1135,15 @@ for (const logLevel of ["info", "trace"] as const) {
             outputs,
           ),
         ).data;
-        assertEquals(typeof jsonDrain.claimed, "number");
+        assertEquals(jsonDrain.claimed, 0);
+        assertEquals(jsonDrain.processed, 0);
+        assertEquals(jsonDrain.succeeded, 0);
+        assertEquals(jsonDrain.retried, 0);
+        assertEquals(jsonDrain.dead_lettered, 0);
+        assertEquals(jsonDrain.executions, []);
+        await harness.restart({
+          environment: { OPERANT_OUTBOX_POLL_INTERVAL_MS: "10" },
+        });
         for (const asJson of [true, false]) {
           const legacy = await harness.runOptctl([
             ...(asJson ? ["--json"] : []),
@@ -1248,6 +1496,12 @@ for (const logLevel of ["info", "trace"] as const) {
             assertEquals(existingError, missingError);
             assertEquals(existingError.error.code, "policy_denied");
             assertEquals(existingError.error.details.resource, "system:outbox");
+            assertEquals(
+              JSON.stringify(existingError.error.details).match(
+                /auth_context|session|principal|request|token/i,
+              ),
+              null,
+            );
             outputs.push(
               existingDenied.stdout,
               existingDenied.stderr,
@@ -1357,6 +1611,61 @@ else console.log(JSON.stringify({outcome:"succeeded",external_id:"provider-effec
   );
 }
 
+async function addHookB(root: string, providerUrl: string) {
+  for await (const entry of Deno.readDir(root)) {
+    if (entry.isFile && entry.name.startsWith("operation-")) {
+      await Deno.remove(`${root}/${entry.name}`);
+    }
+  }
+  const manifest = await Deno.readTextFile(`${root}/pack.yaml`);
+  await Deno.writeTextFile(
+    `${root}/pack.yaml`,
+    manifest.replace(/version: [^ }]+/, "version: 3.0.0"),
+  );
+  const host = new URL(providerUrl).host;
+  await Deno.writeTextFile(
+    `${root}/hooks/deliver_b.yaml`,
+    `kind: Hook\napiVersion: operant.dev/v1\nmetadata: { name: deliver_b }\nspec:\n  script: deliver_b.ts\n  timeout: 10s\n  permissions: { net: [${host}], env: false, read: false, write: false, run: false }\n  secrets: []\n  effects: { operations: [] }\n  output: { schema: delivery.v1 }\n  attachments:\n    - phase: event.after_commit\n      event: object.updated\n      order: 20\n      condition: 'event_type == "object.updated"'\n      input: { event: '$event' }\n  axi: {}\n`,
+  );
+  await Deno.writeTextFile(
+    `${root}/hooks/deliver_b.ts`,
+    `const envelope=JSON.parse(await new Response(Deno.stdin.readable).text());\nconst delivery=envelope.metadata.delivery;\nawait fetch(${
+      JSON.stringify(`${providerUrl}/effect`)
+    },{method:"POST",headers:{"content-type":"application/json","idempotency-key":delivery.idempotency_key},body:JSON.stringify({script:"B",attempt_id:delivery.attempt_id})});\nconsole.log(JSON.stringify({outcome:"succeeded",external_id:"provider-effect-b"}));\n`,
+  );
+}
+
+async function stageUpdateCommit(
+  harness: LiveHarness,
+  pack: string,
+  projectId: string,
+  objectId: string,
+) {
+  const file = `${pack}/operation-${crypto.randomUUID()}.json`;
+  await Deno.writeTextFile(
+    file,
+    JSON.stringify({
+      operations: [{
+        op: "update",
+        project_id: projectId,
+        resource: "test/durableoutbox:item",
+        object_id: objectId,
+        set: { mode: "updated-for-hook-b" },
+      }],
+    }),
+  );
+  const staged = json(
+    await successful(harness.runOptctl(["--json", "changeset", "stage", file])),
+  );
+  const stageId = String(staged.data.id);
+  const commit = json(
+    await successful(
+      harness.runOptctl(["--json", "changeset", "commit", stageId]),
+    ),
+  );
+  return { stageId, commit };
+}
+
 async function stageCommit(
   harness: LiveHarness,
   pack: string,
@@ -1417,17 +1726,20 @@ function errorOutput(
     ? JSON.parse(result.stderr)
     : decodeToon(result.stderr)) as Record<string, any>;
 }
+function expectedFilters(args: string[]): Record<string, string> {
+  const filters: Record<string, string> = {};
+  for (let index = 0; index < args.length; index += 2) {
+    const key = args[index].slice(2);
+    const value = args[index + 1];
+    filters[key] = key === "from" || key === "to"
+      ? new Date(value).toISOString()
+      : value;
+  }
+  return filters;
+}
 function withoutRequestId(value: Record<string, any>): Record<string, any> {
   return {
     ...value,
-    error: {
-      ...value.error,
-      details: {
-        ...value.error?.details,
-        // Each public token authentication creates a fresh immutable context.
-        auth_context_id: "<request-auth-context>",
-      },
-    },
     meta: { ...value.meta, request_id: "<removed>" },
   };
 }
@@ -1436,6 +1748,7 @@ type DeliveryRow = {
   event_id: string;
   status: string;
   available_at: string;
+  created_at: string;
 };
 async function deliveryForStage(
   harness: LiveHarness,
@@ -1443,7 +1756,7 @@ async function deliveryForStage(
 ): Promise<DeliveryRow> {
   return await waitRow<DeliveryRow>(
     harness,
-    `select d.id,d.event_id,d.status,d.available_at::text from outbox_deliveries d join changeset_commits c on c.id=d.changeset_commit_id where c.stage_id=$1 order by d.created_at limit 1`,
+    `select d.id,d.event_id,d.status,d.available_at::text,d.created_at::text from outbox_deliveries d join changeset_commits c on c.id=d.changeset_commit_id where c.stage_id=$1 order by d.created_at limit 1`,
     [stageId],
   );
 }
@@ -1453,7 +1766,7 @@ async function delivery(
 ): Promise<DeliveryRow> {
   return await waitRow<DeliveryRow>(
     harness,
-    "select id,event_id,status,available_at::text from outbox_deliveries where id=$1",
+    "select id,event_id,status,available_at::text,created_at::text from outbox_deliveries where id=$1",
     [id],
   );
 }

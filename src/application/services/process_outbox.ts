@@ -12,7 +12,10 @@ import {
   parseDeliveryOutput,
   retryDelayMs,
 } from "../../domain/outbox/delivery.ts";
-import { OutboxCursorSigner } from "../../domain/outbox/cursor.ts";
+import {
+  normalizeFilters,
+  OutboxCursorSigner,
+} from "../../domain/outbox/cursor.ts";
 import { attemptDto, deliveryDto } from "../../domain/outbox/dto.ts";
 import {
   DenoHookRunner,
@@ -218,12 +221,13 @@ export function makeProcessOutboxService(deps: {
     auth: AuthContext,
     action: string,
   ): Promise<Result<unknown>> {
-    return await deps.authorization.authorize({
+    const result = await deps.authorization.authorize({
       auth,
       boundary: { type: "system" },
       action,
       resource: "system:outbox",
     });
+    return sanitizeOutboxAuthorizationResult(result);
   }
 
   return {
@@ -300,7 +304,11 @@ export function makeProcessOutboxService(deps: {
           filters,
         )
         : null;
-      return ok({ items, page: { limit, next_cursor: nextCursor } });
+      return ok({
+        items,
+        filters: normalizeFilters(filters),
+        page: { limit, next_cursor: nextCursor },
+      });
     },
     async inspect(id: string, auth: AuthContext): Promise<Result<unknown>> {
       const allowed = await authorize(auth, "outbox.inspect");
@@ -425,9 +433,40 @@ export function makeProcessOutboxService(deps: {
         return err(validationError("bad_request", "drain limit is invalid"));
       }
       await deps.repository.auditDrain(auth.id, limit ?? config.batchSize);
-      return ok(await processBatch(limit));
+      const batch = await processBatch(limit);
+      const statuses = batch.executions.map((execution) => execution.status);
+      return ok({
+        ...batch,
+        processed: batch.executions.length,
+        succeeded: statuses.filter((status) => status === "succeeded").length,
+        retried: statuses.filter((status) => status === "retry_wait").length,
+        dead_lettered: statuses.filter((status) => status === "dead_letter")
+          .length,
+      });
     },
   };
+}
+
+export function sanitizeOutboxAuthorizationResult<T>(
+  result: Result<T>,
+): Result<T> {
+  if (result.ok || result.error.severity !== "authorization") return result;
+  const details = record(result.error.details);
+  return err({
+    ...result.error,
+    details: Object.fromEntries(
+      [
+        "action",
+        "boundary",
+        "checked_policies",
+        "effective_roles",
+        "resource",
+      ].filter((key) => Object.hasOwn(details, key)).map((key) => [
+        key,
+        details[key],
+      ]),
+    ),
+  });
 }
 
 async function loadPinned(sql: Queryable, claim: ClaimedDelivery) {

@@ -193,11 +193,17 @@ export async function commitAfterObservedLifecycleBarrier(
 }
 
 export async function assertNoIdleClients(sql: Sql) {
-  const rows = await query<{ pid: number; query: string }>(
-    sql,
-    `select pid,query from pg_stat_activity
-    where datname=current_database() and state='idle in transaction' and pid<>pg_backend_pid()`,
-  );
+  const deadline = Date.now() + 5_000;
+  let rows: { rows: Array<{ pid: number; query: string }> };
+  do {
+    rows = await query<{ pid: number; query: string }>(
+      sql,
+      `select pid,query from pg_stat_activity
+      where datname=current_database() and state='idle in transaction' and pid<>pg_backend_pid()`,
+    );
+    if (rows.rows.length === 0) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  } while (Date.now() < deadline);
   assertEquals(rows.rows, []);
 }
 
