@@ -37,7 +37,7 @@ export class OutboxCursorSigner {
     const bytes = new Uint8Array(signature.length + payload.length);
     bytes.set(signature);
     bytes.set(payload, signature.length);
-    return encodeBase64Url(bytes);
+    return `c${encodeBase64Url(bytes)}`;
   }
 
   async encodeAttempt(
@@ -89,15 +89,16 @@ export class OutboxCursorSigner {
     const bytes = new Uint8Array(signature.length + payload.length);
     bytes.set(signature);
     bytes.set(payload, signature.length);
-    return encodeBase64Url(bytes);
+    return `c${encodeBase64Url(bytes)}`;
   }
 
   async #decode(cursor: string): Promise<Record<string, unknown>> {
-    if (cursor.length > 4096 || !/^[A-Za-z0-9_-]+$/.test(cursor)) {
+    if (cursor.length > 4096 || !/^c[A-Za-z0-9_-]+$/.test(cursor)) {
       throw new Error("bad cursor");
     }
-    const bytes = decodeBase64Url(cursor);
-    if (encodeBase64Url(bytes) !== cursor || bytes.length <= 32) {
+    const encoded = cursor.slice(1);
+    const bytes = decodeBase64Url(encoded);
+    if (encodeBase64Url(bytes) !== encoded || bytes.length <= 32) {
       throw new Error("bad cursor");
     }
     const signature = bytes.slice(0, 32);

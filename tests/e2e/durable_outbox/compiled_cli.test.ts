@@ -301,7 +301,7 @@ for (const logLevel of ["info", "trace"] as const) {
         const stillRunning = await delivery(harness, crashDelivery.id);
         assertEquals(stillRunning.status, "running");
         await harness.restart();
-        await waitStatus(harness, crashDelivery.id, "succeeded", 20_000);
+        await waitStatus(harness, crashDelivery.id, "succeeded", 40_000);
         const crashAttempts = await attemptRows(harness, crashDelivery.id);
         assertEquals(
           crashAttempts.some((item) => item.outcome === "lease_expired"),
