@@ -1,32 +1,19 @@
-{
-  "kind": "Relationship",
-  "apiVersion": "operant.dev/v1",
-  "metadata": {
-    "name": "opportunity_contact",
-  },
-  "spec": {
-    "from": {
-      "resource": "operant/crm:opportunity",
-    },
-    "to": {
-      "resource": "operant/crm:contact",
-    },
-    "fields": {
-      "role": {
-        "type": "string",
-      },
-      "primary": {
-        "type": "boolean",
-      },
-    },
-    "axi": {
-      "help": [
-        "optctl metadata relationship operant/crm:opportunity_contact",
-      ],
-    },
-    "unique": [
-      "from",
-      "to",
-    ],
-  },
-}
+kind: Relationship
+apiVersion: operant.dev/v1
+metadata:
+  name: opportunity_contact
+spec:
+  from:
+    resource: operant/crm:opportunity
+  to:
+    resource: operant/crm:contact
+  fields:
+    role:
+      type: string
+    primary:
+      type: boolean
+  axi:
+    purpose: opportunity contact guidance for the operant/crm pack.
+  unique:
+    - from
+    - to

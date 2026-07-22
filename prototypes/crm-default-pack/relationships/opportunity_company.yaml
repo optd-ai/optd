@@ -1,29 +1,17 @@
-{
-  "kind": "Relationship",
-  "apiVersion": "operant.dev/v1",
-  "metadata": {
-    "name": "opportunity_company",
-  },
-  "spec": {
-    "from": {
-      "resource": "operant/crm:opportunity",
-    },
-    "to": {
-      "resource": "operant/crm:company",
-    },
-    "fields": {
-      "role": {
-        "type": "string",
-      },
-    },
-    "axi": {
-      "help": [
-        "optctl metadata relationship operant/crm:opportunity_company",
-      ],
-    },
-    "unique": [
-      "from",
-      "to",
-    ],
-  },
-}
+kind: Relationship
+apiVersion: operant.dev/v1
+metadata:
+  name: opportunity_company
+spec:
+  from:
+    resource: operant/crm:opportunity
+  to:
+    resource: operant/crm:company
+  fields:
+    role:
+      type: string
+  axi:
+    purpose: opportunity company guidance for the operant/crm pack.
+  unique:
+    - from
+    - to

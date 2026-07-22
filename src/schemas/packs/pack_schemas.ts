@@ -13,7 +13,94 @@ const ApiVersion = Type.Literal("operant.dev/v1");
 const ChildMetadata = Type.Object({ name: Name }, {
   additionalProperties: false,
 });
-const Axi = Type.Unknown();
+const NonEmptyString = Type.String({ minLength: 1, maxLength: 4096 });
+const Help = Type.Array(NonEmptyString, { minItems: 1, uniqueItems: true });
+const NameArray = Type.Array(Name, { minItems: 1, uniqueItems: true });
+const AxiIdentity = Type.Object({
+  title: NonEmptyString,
+  subtitle: Type.Optional(NonEmptyString),
+  labelFields: Type.Optional(NameArray),
+}, { additionalProperties: false });
+const AxiEmpty = Type.Object({
+  message: NonEmptyString,
+  help: Help,
+}, { additionalProperties: false });
+const AxiList = Type.Object({
+  defaultFields: Type.Array(Name, {
+    minItems: 3,
+    maxItems: 5,
+    uniqueItems: true,
+  }),
+  availableFields: Type.Optional(NameArray),
+  sort: Type.Optional(NonEmptyString),
+  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 })),
+  empty: AxiEmpty,
+  aggregates: Type.Optional(NameArray),
+}, { additionalProperties: false });
+const AxiDetail = Type.Object({
+  sections: Type.Optional(Type.Array(Type.Object({
+    title: NonEmptyString,
+    fields: NameArray,
+  }, { additionalProperties: false }), { minItems: 1 })),
+  help: Help,
+}, { additionalProperties: false });
+const AxiSearch = Type.Object({
+  fields: NameArray,
+  examples: Help,
+  resultFields: Type.Optional(NameArray),
+}, { additionalProperties: false });
+const ResourceAxi = Type.Object({
+  purpose: NonEmptyString,
+  whenToUse: Help,
+  doNotUseFor: Type.Optional(Help),
+  identity: AxiIdentity,
+  list: AxiList,
+  detail: AxiDetail,
+  search: Type.Optional(AxiSearch),
+  actions: Type.Optional(Type.Object({
+    primary: Type.Optional(Type.Array(Identity, {
+      minItems: 1,
+      uniqueItems: true,
+    })),
+    byState: Type.Optional(Type.Record(Name, Type.Array(Identity, {
+      minItems: 1,
+      uniqueItems: true,
+    }))),
+  }, { additionalProperties: false })),
+  help: Type.Object({
+    list: Help,
+    view: Help,
+    created: Type.Optional(Help),
+    primaryAction: Type.Optional(Help),
+    updated: Type.Optional(Help),
+    deleted: Type.Optional(Help),
+    validation_failed: Type.Optional(Help),
+    not_found: Type.Optional(Help),
+  }, { additionalProperties: false }),
+}, { additionalProperties: false });
+const ActionAxi = Type.Object({
+  purpose: NonEmptyString,
+  whenToUse: Type.Optional(Help),
+  stageFirst: Type.Optional(Type.Boolean()),
+  examples: Help,
+  successHelp: Help,
+}, { additionalProperties: false });
+const PackAxi = Type.Object({
+  purpose: NonEmptyString,
+  home: Type.Object({
+    resources: Type.Array(Identity, { minItems: 1, uniqueItems: true }),
+    actions: Type.Optional(Type.Array(Identity, {
+      minItems: 1,
+      uniqueItems: true,
+    })),
+    help: Help,
+  }, { additionalProperties: false }),
+}, { additionalProperties: false });
+const DefinitionAxi = Type.Object({
+  purpose: Type.Optional(NonEmptyString),
+  whenToUse: Type.Optional(Help),
+  help: Type.Optional(Help),
+}, { additionalProperties: false });
 const StringArray = Type.Array(Type.String({ minLength: 1 }), {
   uniqueItems: true,
 });
@@ -115,7 +202,7 @@ export const PackSchema = Type.Object({
   }, { additionalProperties: false }),
   spec: Type.Object({
     purpose: Type.String({ minLength: 1, maxLength: 4096 }),
-    axi: Axi,
+    axi: PackAxi,
   }, { additionalProperties: false }),
 }, { additionalProperties: false });
 
@@ -139,7 +226,7 @@ export const ResourceSchema = Type.Object({
         fields: Type.Array(Name, { minItems: 1, uniqueItems: true }),
       }, { additionalProperties: false }),
     ),
-    axi: Axi,
+    axi: ResourceAxi,
   }, { additionalProperties: false }),
 }, { additionalProperties: false });
 
@@ -160,7 +247,7 @@ export const RelationshipSchema = Type.Object({
         { minItems: 1, uniqueItems: true },
       ),
     ),
-    axi: Axi,
+    axi: DefinitionAxi,
   }, { additionalProperties: false }),
 }, { additionalProperties: false });
 
@@ -191,7 +278,7 @@ export const LifecycleSchema = Type.Object({
     initial: Name,
     states: Type.Array(State, { minItems: 2 }),
     transitions: Type.Array(Transition),
-    axi: Axi,
+    axi: DefinitionAxi,
   }, { additionalProperties: false }),
 }, { additionalProperties: false });
 
@@ -207,7 +294,7 @@ export const ActionSchema = Type.Object({
   kind: Type.Literal("Action"),
   ...Base,
   spec: Type.Object({
-    input: Type.Optional(Fields),
+    input: Fields,
     reads: Type.Optional(Type.Record(Name, Read)),
     availability: Type.Optional(
       Type.Object({
@@ -218,7 +305,7 @@ export const ActionSchema = Type.Object({
         condition: Type.Optional(Type.String({ minLength: 1 })),
       }, { additionalProperties: false }),
     ),
-    axi: Axi,
+    axi: ActionAxi,
   }, { additionalProperties: false }),
 }, { additionalProperties: false });
 
@@ -286,7 +373,7 @@ export const HookSchema = Type.Object({
       ]),
     }, { additionalProperties: false }),
     attachments: Type.Array(Attachment, { minItems: 1 }),
-    axi: Axi,
+    axi: DefinitionAxi,
   }, { additionalProperties: false }),
 }, { additionalProperties: false });
 
@@ -321,7 +408,7 @@ export const PolicySchema = Type.Object({
       Type.Literal("all_projects"),
     ]),
     rules: Type.Array(PolicyRule, { minItems: 1 }),
-    axi: Axi,
+    axi: DefinitionAxi,
   }, { additionalProperties: false }),
 }, { additionalProperties: false });
 
@@ -331,7 +418,7 @@ export const RoleSchema = Type.Object({
   spec: Type.Object({
     display_name: Type.String({ minLength: 1 }),
     description: Type.String({ minLength: 1 }),
-    axi: Axi,
+    axi: DefinitionAxi,
   }, { additionalProperties: false }),
 }, { additionalProperties: false });
 
@@ -349,7 +436,7 @@ export const SeedSchema = Type.Object({
       ),
       { minItems: 1 },
     ),
-    axi: Axi,
+    axi: DefinitionAxi,
   }, { additionalProperties: false }),
 }, { additionalProperties: false });
 

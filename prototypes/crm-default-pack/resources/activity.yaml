@@ -1,58 +1,67 @@
-{
-  "kind": "Resource",
-  "apiVersion": "operant.dev/v1",
-  "metadata": {
-    "name": "activity"
-  },
-  "spec": {
-    "fields": {
-      "subject": {
-        "type": "string",
-        "required": true
-      },
-      "type": {
-        "type": "string",
-        "required": true
-      },
-      "status": {
-        "type": "string",
-        "required": true
-      },
-      "due_at": {
-        "type": "timestamp"
-      },
-      "completed_at": {
-        "type": "timestamp"
-      },
-      "owner_id": {
-        "type": "string"
-      },
-      "lead_id": {
-        "type": "string",
-        "ref": "operant/crm:lead"
-      },
-      "opportunity_id": {
-        "type": "string",
-        "ref": "operant/crm:opportunity"
-      },
-      "contact_id": {
-        "type": "string",
-        "ref": "operant/crm:contact"
-      }
-    },
-    "axi": {
-      "list": {
-        "fields": [
-          "id",
-          "subject",
-          "type",
-          "status"
-        ]
-      },
-      "help": [
-        "optctl query operant/crm:activity",
-        "optctl metadata resource operant/crm:activity"
-      ]
-    }
-  }
-}
+kind: Resource
+apiVersion: operant.dev/v1
+metadata:
+  name: activity
+spec:
+  fields:
+    subject:
+      type: string
+      required: true
+    type:
+      type: string
+      required: true
+    status:
+      type: string
+      required: true
+    due_at:
+      type: timestamp
+    completed_at:
+      type: timestamp
+    owner_id:
+      type: string
+    lead_id:
+      type: string
+      ref: operant/crm:lead
+    opportunity_id:
+      type: string
+      ref: operant/crm:opportunity
+    contact_id:
+      type: string
+      ref: operant/crm:contact
+  axi:
+    purpose: activity guidance for the operant/crm pack.
+    whenToUse:
+      - Use operant/crm:activity when working with activity records.
+    identity:
+      title: ${subject}
+      labelFields:
+        - subject
+    list:
+      defaultFields:
+        - id
+        - subject
+        - type
+        - status
+        - due_at
+      empty:
+        message: No activity records found.
+        help:
+          - optctl --project ${project} create operant/crm:activity --input object.json --stage
+    detail:
+      sections:
+        - title: activity
+          fields:
+            - subject
+            - type
+            - status
+            - due_at
+            - completed_at
+      help:
+        - optctl --project ${project} query operant/crm:activity --where 'id == "${id}"'
+    help:
+      list:
+        - optctl --project ${project} query operant/crm:activity
+      view:
+        - optctl --project ${project} view operant/crm:activity ${id}
+      created:
+        - optctl --project ${project} view operant/crm:activity ${id}

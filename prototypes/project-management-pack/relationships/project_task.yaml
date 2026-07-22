@@ -1,26 +1,16 @@
-{
-  "kind": "Relationship",
-  "apiVersion": "operant.dev/v1",
-  "metadata": {
-    "name": "project_task",
-  },
-  "spec": {
-    "from": {
-      "resource": "operant/projects:project",
-    },
-    "to": {
-      "resource": "operant/projects:task",
-    },
-    "fields": {
-      "role": {
-        "type": "string",
-      },
-    },
-    "axi": {
-      "purpose": "Optional explicit project-to-task link for history and navigation.",
-    },
-    "unique": [
-      "to",
-    ],
-  },
-}
+kind: Relationship
+apiVersion: operant.dev/v1
+metadata:
+  name: project_task
+spec:
+  from:
+    resource: operant/projects:project
+  to:
+    resource: operant/projects:task
+  fields:
+    role:
+      type: string
+  axi:
+    purpose: project task guidance for the operant/projects pack.
+  unique:
+    - to

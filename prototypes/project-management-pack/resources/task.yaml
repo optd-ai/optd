@@ -1,81 +1,81 @@
-{
-  "kind": "Resource",
-  "apiVersion": "operant.dev/v1",
-  "metadata": {
-    "name": "task",
-  },
-  "spec": {
-    "fields": {
-      "title": {
-        "type": "string",
-        "required": true,
-      },
-      "description": {
-        "type": "string",
-      },
-      "work_project_id": {
-        "type": "string",
-        "required": true,
-        "ref": "operant/projects:project",
-      },
-      "stage_id": {
-        "type": "string",
-        "required": true,
-        "ref": "operant/projects:task_stage",
-      },
-      "state": {
-        "type": "string",
-        "required": true,
-        "enum": [
-          "todo",
-          "in_progress",
-          "blocked",
-          "done",
-        ],
-      },
-      "assignee_id": {
-        "type": "string",
-      },
-      "priority": {
-        "type": "string",
-        "enum": [
-          "low",
-          "normal",
-          "high",
-          "urgent",
-        ],
-      },
-      "deadline": {
-        "type": "date",
-      },
-      "blocked_reason": {
-        "type": "string",
-      },
-      "estimated_hours": {
-        "type": "decimal",
-      },
-      "spent_hours": {
-        "type": "decimal",
-      },
-    },
-    "axi": {
-      "purpose": "Manage assigned work within projects; use actions for task state changes.",
-      "lifecycle": "todo -> in_progress -> blocked -> in_progress -> done; todo may also move to blocked.",
-      "list": {
-        "fields": [
-          "id",
-          "title",
-          "work_project_id",
-          "state",
-          "assignee_id",
-          "priority",
-        ],
-      },
-      "help": [
-        "optctl action stage operant/projects:start_task --input '{\"task_id\":\"TASK_ID\",\"stage_id\":\"in_progress\"}'",
-        "optctl action commit operant/projects:block_task --input '{\"task_id\":\"TASK_ID\",\"stage_id\":\"blocked\",\"blocked_reason\":\"Waiting on review\"}'",
-        "optctl history operant/projects:task TASK_ID",
-      ],
-    },
-  },
-}
+kind: Resource
+apiVersion: operant.dev/v1
+metadata:
+  name: task
+spec:
+  fields:
+    title:
+      type: string
+      required: true
+    description:
+      type: string
+    work_project_id:
+      type: string
+      required: true
+      ref: operant/projects:project
+    stage_id:
+      type: string
+      required: true
+      ref: operant/projects:task_stage
+    state:
+      type: string
+      required: true
+      enum:
+        - todo
+        - in_progress
+        - blocked
+        - done
+    assignee_id:
+      type: string
+    priority:
+      type: string
+      enum:
+        - low
+        - normal
+        - high
+        - urgent
+    deadline:
+      type: date
+    blocked_reason:
+      type: string
+    estimated_hours:
+      type: decimal
+    spent_hours:
+      type: decimal
+  axi:
+    purpose: task guidance for the operant/projects pack.
+    whenToUse:
+      - Use operant/projects:task when working with task records.
+    identity:
+      title: ${title}
+      labelFields:
+        - title
+    list:
+      defaultFields:
+        - id
+        - title
+        - description
+        - work_project_id
+        - stage_id
+      empty:
+        message: No task records found.
+        help:
+          - optctl --project ${project} create operant/projects:task --input object.json --stage
+    detail:
+      sections:
+        - title: task
+          fields:
+            - title
+            - description
+            - work_project_id
+            - stage_id
+            - state
+      help:
+        - optctl --project ${project} query operant/projects:task --where 'id == "${id}"'
+    help:
+      list:
+        - optctl --project ${project} query operant/projects:task
+      view:
+        - optctl --project ${project} view operant/projects:task ${id}
+      created:
+        - optctl --project ${project} view operant/projects:task ${id}

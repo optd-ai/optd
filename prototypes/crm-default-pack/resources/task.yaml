@@ -1,43 +1,56 @@
-{
-  "kind": "Resource",
-  "apiVersion": "operant.dev/v1",
-  "metadata": {
-    "name": "task"
-  },
-  "spec": {
-    "fields": {
-      "title": {
-        "type": "string",
-        "required": true
-      },
-      "status": {
-        "type": "string",
-        "required": true
-      },
-      "due_at": {
-        "type": "timestamp"
-      },
-      "owner_id": {
-        "type": "string"
-      },
-      "opportunity_id": {
-        "type": "string",
-        "ref": "operant/crm:opportunity"
-      }
-    },
-    "axi": {
-      "list": {
-        "fields": [
-          "id",
-          "title",
-          "status",
-          "due_at"
-        ]
-      },
-      "help": [
-        "optctl query operant/crm:task",
-        "optctl metadata resource operant/crm:task"
-      ]
-    }
-  }
-}
+kind: Resource
+apiVersion: operant.dev/v1
+metadata:
+  name: task
+spec:
+  fields:
+    title:
+      type: string
+      required: true
+    status:
+      type: string
+      required: true
+    due_at:
+      type: timestamp
+    owner_id:
+      type: string
+    opportunity_id:
+      type: string
+      ref: operant/crm:opportunity
+  axi:
+    purpose: task guidance for the operant/crm pack.
+    whenToUse:
+      - Use operant/crm:task when working with task records.
+    identity:
+      title: ${title}
+      labelFields:
+        - title
+    list:
+      defaultFields:
+        - id
+        - title
+        - status
+        - due_at
+        - owner_id
+      empty:
+        message: No task records found.
+        help:
+          - optctl --project ${project} create operant/crm:task --input object.json --stage
+    detail:
+      sections:
+        - title: task
+          fields:
+            - title
+            - status
+            - due_at
+            - owner_id
+            - opportunity_id
+      help:
+        - optctl --project ${project} query operant/crm:task --where 'id == "${id}"'
+    help:
+      list:
+        - optctl --project ${project} query operant/crm:task
+      view:
+        - optctl --project ${project} view operant/crm:task ${id}
+      created:
+        - optctl --project ${project} view operant/crm:task ${id}

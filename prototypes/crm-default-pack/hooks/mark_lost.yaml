@@ -1,49 +1,30 @@
-{
-  "kind": "Hook",
-  "apiVersion": "operant.dev/v1",
-  "metadata": {
-    "name": "mark_lost",
-  },
-  "spec": {
-    "script": "mark_lost.ts",
-    "timeout": "2s",
-    "permissions": {
-      "net": false,
-      "read": false,
-      "write": false,
-      "env": false,
-      "run": false,
-    },
-    "output": {
-      "schema": "changeset.operations.v1",
-    },
-    "attachments": [
-      {
-        "phase": "action.stage",
-        "input": {},
-        "action": "operant/crm:mark_lost",
-      },
-    ],
-    "axi": {
-      "purpose": "mark_lost hook for CRM prototype.",
-      "whenToUse": "Runs from metadata-driven attachment points; agents normally invoke actions instead.",
-    },
-    "secrets": [],
-    "effects": {
-      "operations": [
-        {
-          "resource": "operant/crm:note",
-          "ops": [
-            "create",
-          ],
-        },
-        {
-          "resource": "operant/crm:opportunity",
-          "ops": [
-            "transition",
-          ],
-        },
-      ],
-    },
-  },
-}
+kind: Hook
+apiVersion: operant.dev/v1
+metadata:
+  name: mark_lost
+spec:
+  script: mark_lost.ts
+  timeout: 2s
+  permissions:
+    net: false
+    read: false
+    write: false
+    env: false
+    run: false
+  output:
+    schema: changeset.operations.v1
+  attachments:
+    - phase: action.stage
+      input: {}
+      action: operant/crm:mark_lost
+  axi:
+    purpose: mark lost guidance for the operant/crm pack.
+  secrets: []
+  effects:
+    operations:
+      - resource: operant/crm:note
+        ops:
+          - create
+      - resource: operant/crm:opportunity
+        ops:
+          - transition

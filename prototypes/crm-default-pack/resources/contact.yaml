@@ -1,41 +1,54 @@
-{
-  "kind": "Resource",
-  "apiVersion": "operant.dev/v1",
-  "metadata": {
-    "name": "contact"
-  },
-  "spec": {
-    "fields": {
-      "name": {
-        "type": "string",
-        "required": true
-      },
-      "email": {
-        "type": "string"
-      },
-      "phone": {
-        "type": "string"
-      },
-      "title": {
-        "type": "string"
-      },
-      "owner_id": {
-        "type": "string"
-      }
-    },
-    "axi": {
-      "list": {
-        "fields": [
-          "id",
-          "name",
-          "email",
-          "phone"
-        ]
-      },
-      "help": [
-        "optctl query operant/crm:contact",
-        "optctl metadata resource operant/crm:contact"
-      ]
-    }
-  }
-}
+kind: Resource
+apiVersion: operant.dev/v1
+metadata:
+  name: contact
+spec:
+  fields:
+    name:
+      type: string
+      required: true
+    email:
+      type: string
+    phone:
+      type: string
+    title:
+      type: string
+    owner_id:
+      type: string
+  axi:
+    purpose: contact guidance for the operant/crm pack.
+    whenToUse:
+      - Use operant/crm:contact when working with contact records.
+    identity:
+      title: ${name}
+      labelFields:
+        - name
+    list:
+      defaultFields:
+        - id
+        - name
+        - email
+        - phone
+        - title
+      empty:
+        message: No contact records found.
+        help:
+          - optctl --project ${project} create operant/crm:contact --input object.json --stage
+    detail:
+      sections:
+        - title: contact
+          fields:
+            - name
+            - email
+            - phone
+            - title
+            - owner_id
+      help:
+        - optctl --project ${project} query operant/crm:contact --where 'id == "${id}"'
+    help:
+      list:
+        - optctl --project ${project} query operant/crm:contact
+      view:
+        - optctl --project ${project} view operant/crm:contact ${id}
+      created:
+        - optctl --project ${project} view operant/crm:contact ${id}

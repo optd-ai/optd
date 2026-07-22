@@ -1,38 +1,26 @@
-{
-  "kind": "Hook",
-  "apiVersion": "operant.dev/v1",
-  "metadata": {
-    "name": "notify_project_change",
-  },
-  "spec": {
-    "script": "notify_project_change.ts",
-    "timeout": "2s",
-    "permissions": {
-      "net": false,
-      "read": false,
-      "write": false,
-      "env": false,
-      "run": false,
-    },
-    "output": {
-      "schema": "delivery.v1",
-    },
-    "attachments": [
-      {
-        "phase": "event.after_commit",
-        "event": "object.changed",
-        "order": 100,
-        "input": {
-          "event": "$event",
-        },
-      },
-    ],
-    "axi": {
-      "purpose": "Durable no-network project notification hook executed from outbox.",
-    },
-    "secrets": [],
-    "effects": {
-      "operations": [],
-    },
-  },
-}
+kind: Hook
+apiVersion: operant.dev/v1
+metadata:
+  name: notify_project_change
+spec:
+  script: notify_project_change.ts
+  timeout: 2s
+  permissions:
+    net: false
+    read: false
+    write: false
+    env: false
+    run: false
+  output:
+    schema: delivery.v1
+  attachments:
+    - phase: event.after_commit
+      event: object.changed
+      order: 100
+      input:
+        event: $event
+  axi:
+    purpose: notify project change guidance for the operant/projects pack.
+  secrets: []
+  effects:
+    operations: []

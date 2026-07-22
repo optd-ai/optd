@@ -1,37 +1,49 @@
-{
-  "kind": "Resource",
-  "apiVersion": "operant.dev/v1",
-  "metadata": {
-    "name": "lost_reason"
-  },
-  "spec": {
-    "fields": {
-      "name": {
-        "type": "string",
-        "required": true,
-        "unique": true
-      },
-      "label": {
-        "type": "string",
-        "required": true
-      },
-      "active": {
-        "type": "boolean"
-      }
-    },
-    "axi": {
-      "list": {
-        "fields": [
-          "id",
-          "name",
-          "label",
-          "active"
-        ]
-      },
-      "help": [
-        "optctl query operant/crm:lost_reason",
-        "optctl metadata resource operant/crm:lost_reason"
-      ]
-    }
-  }
-}
+kind: Resource
+apiVersion: operant.dev/v1
+metadata:
+  name: lost_reason
+spec:
+  fields:
+    name:
+      type: string
+      required: true
+      unique: true
+    label:
+      type: string
+      required: true
+    active:
+      type: boolean
+  axi:
+    purpose: lost reason guidance for the operant/crm pack.
+    whenToUse:
+      - Use operant/crm:lost_reason when working with lost reason records.
+    identity:
+      title: ${name}
+      labelFields:
+        - name
+    list:
+      defaultFields:
+        - id
+        - name
+        - label
+        - active
+      empty:
+        message: No lost reason records found.
+        help:
+          - optctl --project ${project} create operant/crm:lost_reason --input object.json --stage
+    detail:
+      sections:
+        - title: lost reason
+          fields:
+            - name
+            - label
+            - active
+      help:
+        - optctl --project ${project} query operant/crm:lost_reason --where 'id == "${id}"'
+    help:
+      list:
+        - optctl --project ${project} query operant/crm:lost_reason
+      view:
+        - optctl --project ${project} view operant/crm:lost_reason ${id}
+      created:
+        - optctl --project ${project} view operant/crm:lost_reason ${id}

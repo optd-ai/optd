@@ -1,14 +1,9 @@
-{
-  "kind": "Role",
-  "apiVersion": "operant.dev/v1",
-  "metadata": {
-    "name": "projects_admin",
-  },
-  "spec": {
-    "display_name": "Projects Admin",
-    "description": "projects_admin responsibility for the projects proof pack.",
-    "axi": {
-      "summary": "Use for projects_admin responsibilities.",
-    },
-  },
-}
+kind: Role
+apiVersion: operant.dev/v1
+metadata:
+  name: projects_admin
+spec:
+  display_name: Projects Admin
+  description: projects_admin responsibility for the projects proof pack.
+  axi:
+    purpose: projects admin guidance for the operant/projects pack.

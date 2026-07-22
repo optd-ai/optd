@@ -1,37 +1,23 @@
-{
-  "kind": "Seed",
-  "apiVersion": "operant.dev/v1",
-  "metadata": {
-    "name": "activity_types",
-  },
-  "spec": {
-    "resource": "operant/crm:activity_type",
-    "key": "name",
-    "mode": "changeset",
-    "rows": [
-      {
-        "name": "call",
-        "label": "Call",
-        "default_deadline_days": 1,
-      },
-      {
-        "name": "email",
-        "label": "Email",
-        "default_deadline_days": 1,
-      },
-      {
-        "name": "meeting",
-        "label": "Meeting",
-        "default_deadline_days": 3,
-      },
-      {
-        "name": "todo",
-        "label": "To Do",
-        "default_deadline_days": 2,
-      },
-    ],
-    "axi": {
-      "purpose": "Seed activity_type reference data through ordinary changeset operations.",
-    },
-  },
-}
+kind: Seed
+apiVersion: operant.dev/v1
+metadata:
+  name: activity_types
+spec:
+  resource: operant/crm:activity_type
+  key: name
+  mode: changeset
+  rows:
+    - name: call
+      label: Call
+      default_deadline_days: 1
+    - name: email
+      label: Email
+      default_deadline_days: 1
+    - name: meeting
+      label: Meeting
+      default_deadline_days: 3
+    - name: todo
+      label: To Do
+      default_deadline_days: 2
+  axi:
+    purpose: activity types guidance for the operant/crm pack.

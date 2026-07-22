@@ -1530,10 +1530,10 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
         data: { project_id: project.id, slug: project.slug },
       };
     } else if (cmd === "home") {
-      result = await getJson(`${parsed.server}/metadata/home`);
+      result = await getJson(`${parsed.server}/api/v1/metadata/home`);
     } else if (cmd === "pack" && sub === "preview" && value) {
       result = await postMultipart(
-        `${parsed.server}/packs/preview`,
+        `${parsed.server}/api/v1/packs/preview`,
         value,
       );
     } else if (cmd === "pack" && sub === "apply" && value) {
@@ -1544,14 +1544,14 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
         );
       }
       const preview = await postMultipart(
-        `${parsed.server}/packs/preview`,
+        `${parsed.server}/api/v1/packs/preview`,
         value,
       ) as {
         data: { plan: { id: string; plan_digest: string; class: string } };
       };
       const plan = preview.data.plan;
       const validation = await postJson(
-        `${parsed.server}/migrations/${plan.id}/validate`,
+        `${parsed.server}/api/v1/migrations/${plan.id}/validate`,
         {},
       ) as { data: Record<string, unknown> };
       if (plan.class === "destructive") {
@@ -1578,7 +1578,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
           );
         }
         const application = await postJson(
-          `${parsed.server}/migrations/${plan.id}/apply`,
+          `${parsed.server}/api/v1/migrations/${plan.id}/apply`,
           {
             acknowledgement: expected,
             confirmation_token: null,
@@ -1677,7 +1677,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       if (!secret) throw usageError(`unknown secret ${value}`);
       const [publisher, pack, hookName] = splitDefinitionIdentity(hookIdentity);
       const metadata = await getJson(
-        `${parsed.server}/metadata/packs/${publisher}/${pack}/hooks/${hookName}?include_security=true`,
+        `${parsed.server}/api/v1/metadata/packs/${publisher}/${pack}/hooks/${hookName}?include_security=true`,
       ) as {
         data?: {
           hook_revision_id?: string;
@@ -1772,7 +1772,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       );
     } else if (cmd === "migration" && sub === "validate" && value) {
       result = await postJson(
-        `${parsed.server}/migrations/${value}/validate`,
+        `${parsed.server}/api/v1/migrations/${value}/validate`,
         {},
       );
     } else if (cmd === "migration" && sub === "apply" && value) {
@@ -1789,7 +1789,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
           "migration apply requires exactly one of --safe, --reviewed, or --confirm-token <token>",
         );
       }
-      result = await postJson(`${parsed.server}/migrations/${value}/apply`, {
+      result = await postJson(`${parsed.server}/api/v1/migrations/${value}/apply`, {
         acknowledgement,
         confirmation_token: confirmationToken ?? null,
         ...lockTimeout ? { lock_timeout: lockTimeout } : {},
@@ -1801,7 +1801,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
         ? "violations"
         : "";
       result = await getJson(
-        `${parsed.server}/migrations/${value}${
+        `${parsed.server}/api/v1/migrations/${value}${
           projection ? `/${projection}` : ""
         }`,
       );
@@ -1917,11 +1917,11 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       );
     } else if (cmd === "metadata" && !sub) {
       result = await getJson(
-        `${parsed.server}/metadata/packs${await metadataQuery(parsed, [])}`,
+        `${parsed.server}/api/v1/metadata/packs${await metadataQuery(parsed, [])}`,
       );
     } else if (cmd === "metadata" && sub === "packs") {
       result = await getJson(
-        `${parsed.server}/metadata/packs${await metadataQuery(
+        `${parsed.server}/api/v1/metadata/packs${await metadataQuery(
           parsed,
           parsed.positional.slice(2),
         )}`,
@@ -1929,7 +1929,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
     } else if (cmd === "metadata" && sub === "pack" && value) {
       const [publisher, pack] = splitPackIdentity(value);
       result = await getJson(
-        `${parsed.server}/metadata/packs/${publisher}/${pack}${await metadataQuery(
+        `${parsed.server}/api/v1/metadata/packs/${publisher}/${pack}${await metadataQuery(
           parsed,
           parsed.positional.slice(3),
         )}`,
@@ -1948,7 +1948,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       } as Record<string, string>)[sub];
       if (!routeKind) throw usageError(`unknown metadata kind ${sub}`);
       result = await getJson(
-        `${parsed.server}/metadata/packs/${publisher}/${pack}/${routeKind}/${name}${await metadataQuery(
+        `${parsed.server}/api/v1/metadata/packs/${publisher}/${pack}/${routeKind}/${name}${await metadataQuery(
           parsed,
           parsed.positional.slice(3),
         )}`,

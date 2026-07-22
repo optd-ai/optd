@@ -1,31 +1,26 @@
-{
-  "kind": "Action",
-  "apiVersion": "operant.dev/v1",
-  "metadata": {
-    "name": "complete_task",
-  },
-  "spec": {
-    "input": {
-      "task_id": {
-        "type": "string",
-        "required": true,
-        "format": "uuid",
-      },
-      "stage_id": {
-        "type": "string",
-        "required": true,
-        "format": "uuid",
-      },
-      "spent_hours": {
-        "type": "string",
-        "required": true,
-      },
-    },
-    "axi": {
-      "purpose": "Complete assigned project work and optionally write a spent_hours summary.",
-      "help": [
-        "optctl action stage operant/projects:complete_task --input '{\"task_id\":\"TASK_ID\",\"stage_id\":\"done\"}'",
-      ],
-    },
-  },
-}
+kind: Action
+apiVersion: operant.dev/v1
+metadata:
+  name: complete_task
+spec:
+  input:
+    task_id:
+      type: string
+      required: true
+      format: uuid
+    stage_id:
+      type: string
+      required: true
+      format: uuid
+    spent_hours:
+      type: string
+      required: true
+  axi:
+    purpose: complete task guidance for the operant/projects pack.
+    whenToUse:
+      - Use operant/projects:complete_task when its declared operation should be staged.
+    stageFirst: true
+    examples:
+      - optctl --project ${project} action stage operant/projects:complete_task --input action.json
+    successHelp:
+      - optctl changeset inspect ${stage_id}

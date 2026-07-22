@@ -1,114 +1,93 @@
-{
-  "kind": "Policy",
-  "apiVersion": "operant.dev/v1",
-  "metadata": {
-    "name": "sales_access",
-  },
-  "spec": {
-    "default_assignment": "all_projects",
-    "rules": [
-      {
-        "name": "crm_admin_access_1",
-        "effect": "allow",
-        "roles": [
-          "operant/crm:crm_admin",
-        ],
-        "actions": [
-          "read",
-          "create",
-          "update",
-          "archive",
-          "transition",
-          "link",
-          "unlink",
-          "comment",
-        ],
-        "resources": [
-          "operant/crm:company",
-          "operant/crm:sales_team",
-          "operant/crm:task",
-          "operant/crm:activity",
-          "operant/crm:note",
-          "operant/crm:lead_status",
-          "operant/crm:contact",
-          "operant/crm:lost_reason",
-          "operant/crm:lead",
-          "operant/crm:opportunity",
-          "operant/crm:opportunity_stage",
-          "operant/crm:activity_type",
-        ],
-      },
-      {
-        "name": "sales_manager_access_2",
-        "effect": "allow",
-        "roles": [
-          "operant/crm:sales_manager",
-        ],
-        "actions": [
-          "read",
-          "create",
-          "update",
-          "archive",
-          "transition",
-          "comment",
-          "action:operant/crm:mark_lost",
-          "action:operant/crm:log_activity",
-          "action:operant/crm:mark_won",
-          "action:operant/crm:convert_lead",
-        ],
-        "resources": [
-          "operant/crm:company",
-          "operant/crm:sales_team",
-          "operant/crm:task",
-          "operant/crm:activity",
-          "operant/crm:note",
-          "operant/crm:lead_status",
-          "operant/crm:contact",
-          "operant/crm:lost_reason",
-          "operant/crm:lead",
-          "operant/crm:opportunity",
-          "operant/crm:opportunity_stage",
-          "operant/crm:activity_type",
-        ],
-        "where": "true",
-      },
-      {
-        "name": "sales_rep_access_3",
-        "effect": "allow",
-        "roles": [
-          "operant/crm:sales_rep",
-        ],
-        "actions": [
-          "read",
-          "create",
-          "update",
-          "archive",
-          "transition",
-          "comment",
-          "action:operant/crm:mark_lost",
-          "action:operant/crm:log_activity",
-          "action:operant/crm:mark_won",
-          "action:operant/crm:convert_lead",
-        ],
-        "resources": [
-          "operant/crm:company",
-          "operant/crm:sales_team",
-          "operant/crm:task",
-          "operant/crm:activity",
-          "operant/crm:note",
-          "operant/crm:lead_status",
-          "operant/crm:contact",
-          "operant/crm:lost_reason",
-          "operant/crm:lead",
-          "operant/crm:opportunity",
-          "operant/crm:opportunity_stage",
-          "operant/crm:activity_type",
-        ],
-        "where": "owner_id == actor.id",
-      },
-    ],
-    "axi": {
-      "purpose": "Minimal CRM RBAC/ABAC policy fixture.",
-    },
-  },
-}
+kind: Policy
+apiVersion: operant.dev/v1
+metadata:
+  name: sales_access
+spec:
+  default_assignment: all_projects
+  rules:
+    - name: crm_admin_access_1
+      effect: allow
+      roles:
+        - operant/crm:crm_admin
+      actions:
+        - read
+        - create
+        - update
+        - archive
+        - transition
+        - link
+        - unlink
+        - comment
+      resources:
+        - operant/crm:company
+        - operant/crm:sales_team
+        - operant/crm:task
+        - operant/crm:activity
+        - operant/crm:note
+        - operant/crm:lead_status
+        - operant/crm:contact
+        - operant/crm:lost_reason
+        - operant/crm:lead
+        - operant/crm:opportunity
+        - operant/crm:opportunity_stage
+        - operant/crm:activity_type
+    - name: sales_manager_access_2
+      effect: allow
+      roles:
+        - operant/crm:sales_manager
+      actions:
+        - read
+        - create
+        - update
+        - archive
+        - transition
+        - comment
+        - action:operant/crm:mark_lost
+        - action:operant/crm:log_activity
+        - action:operant/crm:mark_won
+        - action:operant/crm:convert_lead
+      resources:
+        - operant/crm:company
+        - operant/crm:sales_team
+        - operant/crm:task
+        - operant/crm:activity
+        - operant/crm:note
+        - operant/crm:lead_status
+        - operant/crm:contact
+        - operant/crm:lost_reason
+        - operant/crm:lead
+        - operant/crm:opportunity
+        - operant/crm:opportunity_stage
+        - operant/crm:activity_type
+      where: "true"
+    - name: sales_rep_access_3
+      effect: allow
+      roles:
+        - operant/crm:sales_rep
+      actions:
+        - read
+        - create
+        - update
+        - archive
+        - transition
+        - comment
+        - action:operant/crm:mark_lost
+        - action:operant/crm:log_activity
+        - action:operant/crm:mark_won
+        - action:operant/crm:convert_lead
+      resources:
+        - operant/crm:company
+        - operant/crm:sales_team
+        - operant/crm:task
+        - operant/crm:activity
+        - operant/crm:note
+        - operant/crm:lead_status
+        - operant/crm:contact
+        - operant/crm:lost_reason
+        - operant/crm:lead
+        - operant/crm:opportunity
+        - operant/crm:opportunity_stage
+        - operant/crm:activity_type
+      where: owner_id == actor.id
+  axi:
+    purpose: sales access guidance for the operant/crm pack.

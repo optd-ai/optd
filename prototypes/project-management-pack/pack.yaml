@@ -1,32 +1,26 @@
-{
-  "kind": "Pack",
-  "apiVersion": "operant.dev/v1",
-  "metadata": {
-    "publisher": "operant",
-    "name": "projects",
-    "version": "0.1.0",
-  },
-  "spec": {
-    "purpose": "Project and task management resources for agent-operated work tracking.",
-    "axi": {
-      "home": {
-        "title": "Project management pack",
-        "resources": [
-          "operant/projects:project",
-          "operant/projects:task",
-          "operant/projects:timesheet_entry",
-        ],
-        "actions": [
-          "operant/projects:start_task",
-          "operant/projects:block_task",
-          "operant/projects:complete_task",
-        ],
-      },
-      "help": [
-        "optctl metadata resource operant/projects:task",
-        "optctl query operant/projects:task --where 'work_project_id == \"PROJECT_ID\"'",
-        "optctl action stage operant/projects:start_task --input '{\"task_id\":\"TASK_ID\"}'",
-      ],
-    },
-  },
-}
+kind: Pack
+apiVersion: operant.dev/v1
+metadata:
+  publisher: operant
+  name: projects
+  version: 0.1.0
+spec:
+  purpose: Project and task management resources for agent-operated work tracking.
+  axi:
+    purpose: Project and task management resources for agent-operated work tracking.
+    home:
+      resources:
+        - operant/projects:project
+        - operant/projects:project_milestone
+        - operant/projects:task
+        - operant/projects:task_stage
+        - operant/projects:task_tag
+        - operant/projects:timesheet_entry
+      actions:
+        - operant/projects:block_task
+        - operant/projects:complete_task
+        - operant/projects:start_task
+      help:
+        - optctl resources
+        - optctl --project ${project} query operant/projects:project
+        - optctl metadata pack operant/projects

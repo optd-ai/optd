@@ -1,14 +1,9 @@
-{
-  "kind": "Role",
-  "apiVersion": "operant.dev/v1",
-  "metadata": {
-    "name": "project_member",
-  },
-  "spec": {
-    "display_name": "Project Member",
-    "description": "project_member responsibility for the projects proof pack.",
-    "axi": {
-      "summary": "Use for project_member responsibilities.",
-    },
-  },
-}
+kind: Role
+apiVersion: operant.dev/v1
+metadata:
+  name: project_member
+spec:
+  display_name: Project Member
+  description: project_member responsibility for the projects proof pack.
+  axi:
+    purpose: project member guidance for the operant/projects pack.

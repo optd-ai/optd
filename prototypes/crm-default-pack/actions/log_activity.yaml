@@ -1,38 +1,31 @@
-{
-  "kind": "Action",
-  "apiVersion": "operant.dev/v1",
-  "metadata": {
-    "name": "log_activity",
-  },
-  "spec": {
-    "input": {
-      "resource": {
-        "type": "string",
-        "required": true,
-      },
-      "object_id": {
-        "type": "string",
-        "required": true,
-        "format": "uuid",
-      },
-      "type": {
-        "type": "string",
-        "required": true,
-      },
-      "subject": {
-        "type": "string",
-        "required": true,
-      },
-      "note": {
-        "type": "string",
-        "required": true,
-      },
-    },
-    "axi": {
-      "purpose": "Log an activity and optional note against a CRM object.",
-      "help": [
-        "optctl action stage operant/crm:log_activity --input ...",
-      ],
-    },
-  },
-}
+kind: Action
+apiVersion: operant.dev/v1
+metadata:
+  name: log_activity
+spec:
+  input:
+    resource:
+      type: string
+      required: true
+    object_id:
+      type: string
+      required: true
+      format: uuid
+    type:
+      type: string
+      required: true
+    subject:
+      type: string
+      required: true
+    note:
+      type: string
+      required: true
+  axi:
+    purpose: log activity guidance for the operant/crm pack.
+    whenToUse:
+      - Use operant/crm:log_activity when its declared operation should be staged.
+    stageFirst: true
+    examples:
+      - optctl --project ${project} action stage operant/crm:log_activity --input action.json
+    successHelp:
+      - optctl changeset inspect ${stage_id}

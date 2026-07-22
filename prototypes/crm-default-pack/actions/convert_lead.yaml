@@ -1,39 +1,33 @@
-{
-  "kind": "Action",
-  "apiVersion": "operant.dev/v1",
-  "metadata": {
-    "name": "convert_lead",
-  },
-  "spec": {
-    "input": {
-      "lead_id": {
-        "type": "string",
-        "required": true,
-        "format": "uuid",
-      },
-    },
-    "reads": {
-      "lead": {
-        "resource": "lead",
-        "id_from": "$action.input.lead_id",
-        "fields": [
-          "id",
-          "version",
-          "name",
-          "company_name",
-          "email",
-          "phone",
-          "owner_id",
-          "sales_team_id",
-        ],
-        "required": true,
-      },
-    },
-    "axi": {
-      "purpose": "Convert a qualified lead into company, contact, and opportunity records.",
-      "help": [
-        "optctl action stage operant/crm:convert_lead --input ...",
-      ],
-    },
-  },
-}
+kind: Action
+apiVersion: operant.dev/v1
+metadata:
+  name: convert_lead
+spec:
+  input:
+    lead_id:
+      type: string
+      required: true
+      format: uuid
+  reads:
+    lead:
+      resource: lead
+      id_from: $action.input.lead_id
+      fields:
+        - id
+        - version
+        - name
+        - company_name
+        - email
+        - phone
+        - owner_id
+        - sales_team_id
+      required: true
+  axi:
+    purpose: convert lead guidance for the operant/crm pack.
+    whenToUse:
+      - Use operant/crm:convert_lead when its declared operation should be staged.
+    stageFirst: true
+    examples:
+      - optctl --project ${project} action stage operant/crm:convert_lead --input action.json
+    successHelp:
+      - optctl changeset inspect ${stage_id}

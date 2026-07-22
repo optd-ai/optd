@@ -1,25 +1,15 @@
-{
-  "kind": "Relationship",
-  "apiVersion": "operant.dev/v1",
-  "metadata": {
-    "name": "note_lead",
-  },
-  "spec": {
-    "from": {
-      "resource": "operant/crm:note",
-    },
-    "to": {
-      "resource": "operant/crm:lead",
-    },
-    "fields": {},
-    "axi": {
-      "help": [
-        "optctl metadata relationship operant/crm:note_lead",
-      ],
-    },
-    "unique": [
-      "from",
-      "to",
-    ],
-  },
-}
+kind: Relationship
+apiVersion: operant.dev/v1
+metadata:
+  name: note_lead
+spec:
+  from:
+    resource: operant/crm:note
+  to:
+    resource: operant/crm:lead
+  fields: {}
+  axi:
+    purpose: note lead guidance for the operant/crm pack.
+  unique:
+    - from
+    - to

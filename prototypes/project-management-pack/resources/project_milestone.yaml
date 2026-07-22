@@ -1,35 +1,60 @@
-{
-  "kind": "Resource",
-  "apiVersion": "operant.dev/v1",
-  "metadata": {
-    "name": "project_milestone",
-  },
-  "spec": {
-    "fields": {
-      "name": {
-        "type": "string",
-        "required": true,
-      },
-      "work_project_id": {
-        "type": "string",
-        "required": true,
-        "ref": "operant/projects:project",
-      },
-      "deadline": {
-        "type": "date",
-      },
-      "status": {
-        "type": "string",
-        "required": true,
-        "enum": [
-          "planned",
-          "at_risk",
-          "done",
-        ],
-      },
-    },
-    "axi": {
-      "purpose": "Track milestone deadlines and status for a project.",
-    },
-  },
-}
+kind: Resource
+apiVersion: operant.dev/v1
+metadata:
+  name: project_milestone
+spec:
+  fields:
+    name:
+      type: string
+      required: true
+    work_project_id:
+      type: string
+      required: true
+      ref: operant/projects:project
+    deadline:
+      type: date
+    status:
+      type: string
+      required: true
+      enum:
+        - planned
+        - at_risk
+        - done
+  axi:
+    purpose: project milestone guidance for the operant/projects pack.
+    whenToUse:
+      - Use operant/projects:project_milestone when working with project milestone records.
+    identity:
+      title: ${name}
+      labelFields:
+        - name
+    list:
+      defaultFields:
+        - id
+        - name
+        - work_project_id
+        - deadline
+        - status
+      empty:
+        message: No project milestone records found.
+        help:
+          - optctl --project ${project} create operant/projects:project_milestone --input
+            object.json --stage
+    detail:
+      sections:
+        - title: project milestone
+          fields:
+            - name
+            - work_project_id
+            - deadline
+            - status
+      help:
+        - optctl --project ${project} query operant/projects:project_milestone --where 'id ==
+          "${id}"'
+    help:
+      list:
+        - optctl --project ${project} query operant/projects:project_milestone
+      view:
+        - optctl --project ${project} view operant/projects:project_milestone ${id}
+      created:
+        - optctl --project ${project} view operant/projects:project_milestone ${id}

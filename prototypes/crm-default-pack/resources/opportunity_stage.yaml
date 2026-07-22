@@ -1,44 +1,58 @@
-{
-  "kind": "Resource",
-  "apiVersion": "operant.dev/v1",
-  "metadata": {
-    "name": "opportunity_stage"
-  },
-  "spec": {
-    "fields": {
-      "name": {
-        "type": "string",
-        "required": true,
-        "unique": true
-      },
-      "label": {
-        "type": "string",
-        "required": true
-      },
-      "probability": {
-        "type": "integer"
-      },
-      "sort_order": {
-        "type": "integer",
-        "required": true
-      },
-      "terminal": {
-        "type": "boolean"
-      }
-    },
-    "axi": {
-      "list": {
-        "fields": [
-          "id",
-          "name",
-          "label",
-          "probability"
-        ]
-      },
-      "help": [
-        "optctl query operant/crm:opportunity_stage",
-        "optctl metadata resource operant/crm:opportunity_stage"
-      ]
-    }
-  }
-}
+kind: Resource
+apiVersion: operant.dev/v1
+metadata:
+  name: opportunity_stage
+spec:
+  fields:
+    name:
+      type: string
+      required: true
+      unique: true
+    label:
+      type: string
+      required: true
+    probability:
+      type: integer
+    sort_order:
+      type: integer
+      required: true
+    terminal:
+      type: boolean
+  axi:
+    purpose: opportunity stage guidance for the operant/crm pack.
+    whenToUse:
+      - Use operant/crm:opportunity_stage when working with opportunity stage records.
+    identity:
+      title: ${name}
+      labelFields:
+        - name
+    list:
+      defaultFields:
+        - id
+        - name
+        - label
+        - probability
+        - sort_order
+      empty:
+        message: No opportunity stage records found.
+        help:
+          - optctl --project ${project} create operant/crm:opportunity_stage --input object.json
+            --stage
+    detail:
+      sections:
+        - title: opportunity stage
+          fields:
+            - name
+            - label
+            - probability
+            - sort_order
+            - terminal
+      help:
+        - optctl --project ${project} query operant/crm:opportunity_stage --where 'id == "${id}"'
+    help:
+      list:
+        - optctl --project ${project} query operant/crm:opportunity_stage
+      view:
+        - optctl --project ${project} view operant/crm:opportunity_stage ${id}
+      created:
+        - optctl --project ${project} view operant/crm:opportunity_stage ${id}

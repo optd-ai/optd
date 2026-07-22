@@ -1,44 +1,56 @@
-{
-  "kind": "Resource",
-  "apiVersion": "operant.dev/v1",
-  "metadata": {
-    "name": "company"
-  },
-  "spec": {
-    "fields": {
-      "name": {
-        "type": "string",
-        "required": true
-      },
-      "website": {
-        "type": "string"
-      },
-      "email": {
-        "type": "string"
-      },
-      "phone": {
-        "type": "string"
-      },
-      "industry": {
-        "type": "string"
-      },
-      "owner_id": {
-        "type": "string"
-      }
-    },
-    "axi": {
-      "list": {
-        "fields": [
-          "id",
-          "name",
-          "website",
-          "email"
-        ]
-      },
-      "help": [
-        "optctl query operant/crm:company",
-        "optctl metadata resource operant/crm:company"
-      ]
-    }
-  }
-}
+kind: Resource
+apiVersion: operant.dev/v1
+metadata:
+  name: company
+spec:
+  fields:
+    name:
+      type: string
+      required: true
+    website:
+      type: string
+    email:
+      type: string
+    phone:
+      type: string
+    industry:
+      type: string
+    owner_id:
+      type: string
+  axi:
+    purpose: company guidance for the operant/crm pack.
+    whenToUse:
+      - Use operant/crm:company when working with company records.
+    identity:
+      title: ${name}
+      labelFields:
+        - name
+    list:
+      defaultFields:
+        - id
+        - name
+        - website
+        - email
+        - phone
+      empty:
+        message: No company records found.
+        help:
+          - optctl --project ${project} create operant/crm:company --input object.json --stage
+    detail:
+      sections:
+        - title: company
+          fields:
+            - name
+            - website
+            - email
+            - phone
+            - industry
+      help:
+        - optctl --project ${project} query operant/crm:company --where 'id == "${id}"'
+    help:
+      list:
+        - optctl --project ${project} query operant/crm:company
+      view:
+        - optctl --project ${project} view operant/crm:company ${id}
+      created:
+        - optctl --project ${project} view operant/crm:company ${id}

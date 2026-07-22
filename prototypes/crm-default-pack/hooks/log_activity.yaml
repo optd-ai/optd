@@ -1,49 +1,30 @@
-{
-  "kind": "Hook",
-  "apiVersion": "operant.dev/v1",
-  "metadata": {
-    "name": "log_activity",
-  },
-  "spec": {
-    "script": "log_activity.ts",
-    "timeout": "2s",
-    "permissions": {
-      "net": false,
-      "read": false,
-      "write": false,
-      "env": false,
-      "run": false,
-    },
-    "output": {
-      "schema": "changeset.operations.v1",
-    },
-    "attachments": [
-      {
-        "phase": "action.stage",
-        "input": {},
-        "action": "operant/crm:log_activity",
-      },
-    ],
-    "axi": {
-      "purpose": "log_activity hook for CRM prototype.",
-      "whenToUse": "Runs from metadata-driven attachment points; agents normally invoke actions instead.",
-    },
-    "secrets": [],
-    "effects": {
-      "operations": [
-        {
-          "resource": "operant/crm:activity",
-          "ops": [
-            "create",
-          ],
-        },
-        {
-          "resource": "operant/crm:note",
-          "ops": [
-            "create",
-          ],
-        },
-      ],
-    },
-  },
-}
+kind: Hook
+apiVersion: operant.dev/v1
+metadata:
+  name: log_activity
+spec:
+  script: log_activity.ts
+  timeout: 2s
+  permissions:
+    net: false
+    read: false
+    write: false
+    env: false
+    run: false
+  output:
+    schema: changeset.operations.v1
+  attachments:
+    - phase: action.stage
+      input: {}
+      action: operant/crm:log_activity
+  axi:
+    purpose: log activity guidance for the operant/crm pack.
+  secrets: []
+  effects:
+    operations:
+      - resource: operant/crm:activity
+        ops:
+          - create
+      - resource: operant/crm:note
+        ops:
+          - create

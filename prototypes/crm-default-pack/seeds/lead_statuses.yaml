@@ -1,47 +1,31 @@
-{
-  "kind": "Seed",
-  "apiVersion": "operant.dev/v1",
-  "metadata": {
-    "name": "lead_statuses",
-  },
-  "spec": {
-    "resource": "operant/crm:lead_status",
-    "key": "name",
-    "mode": "changeset",
-    "rows": [
-      {
-        "name": "new",
-        "label": "New",
-        "sort_order": 10,
-        "terminal": false,
-      },
-      {
-        "name": "contacted",
-        "label": "Contacted",
-        "sort_order": 20,
-        "terminal": false,
-      },
-      {
-        "name": "qualified",
-        "label": "Qualified",
-        "sort_order": 30,
-        "terminal": false,
-      },
-      {
-        "name": "converted",
-        "label": "Converted",
-        "sort_order": 40,
-        "terminal": true,
-      },
-      {
-        "name": "disqualified",
-        "label": "Disqualified",
-        "sort_order": 50,
-        "terminal": true,
-      },
-    ],
-    "axi": {
-      "purpose": "Seed lead_status reference data through ordinary changeset operations.",
-    },
-  },
-}
+kind: Seed
+apiVersion: operant.dev/v1
+metadata:
+  name: lead_statuses
+spec:
+  resource: operant/crm:lead_status
+  key: name
+  mode: changeset
+  rows:
+    - name: new
+      label: New
+      sort_order: 10
+      terminal: false
+    - name: contacted
+      label: Contacted
+      sort_order: 20
+      terminal: false
+    - name: qualified
+      label: Qualified
+      sort_order: 30
+      terminal: false
+    - name: converted
+      label: Converted
+      sort_order: 40
+      terminal: true
+    - name: disqualified
+      label: Disqualified
+      sort_order: 50
+      terminal: true
+  axi:
+    purpose: lead statuses guidance for the operant/crm pack.

@@ -1,25 +1,15 @@
-{
-  "kind": "Relationship",
-  "apiVersion": "operant.dev/v1",
-  "metadata": {
-    "name": "activity_opportunity",
-  },
-  "spec": {
-    "from": {
-      "resource": "operant/crm:activity",
-    },
-    "to": {
-      "resource": "operant/crm:opportunity",
-    },
-    "fields": {},
-    "axi": {
-      "help": [
-        "optctl metadata relationship operant/crm:activity_opportunity",
-      ],
-    },
-    "unique": [
-      "from",
-      "to",
-    ],
-  },
-}
+kind: Relationship
+apiVersion: operant.dev/v1
+metadata:
+  name: activity_opportunity
+spec:
+  from:
+    resource: operant/crm:activity
+  to:
+    resource: operant/crm:opportunity
+  fields: {}
+  axi:
+    purpose: activity opportunity guidance for the operant/crm pack.
+  unique:
+    - from
+    - to

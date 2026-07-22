@@ -1,22 +1,44 @@
-{
-  "kind": "Resource",
-  "apiVersion": "operant.dev/v1",
-  "metadata": {
-    "name": "task_tag",
-  },
-  "spec": {
-    "fields": {
-      "name": {
-        "type": "string",
-        "required": true,
-        "unique": true,
-      },
-      "color": {
-        "type": "string",
-      },
-    },
-    "axi": {
-      "purpose": "Seeded labels for task categorization.",
-    },
-  },
-}
+kind: Resource
+apiVersion: operant.dev/v1
+metadata:
+  name: task_tag
+spec:
+  fields:
+    name:
+      type: string
+      required: true
+      unique: true
+    color:
+      type: string
+  axi:
+    purpose: task tag guidance for the operant/projects pack.
+    whenToUse:
+      - Use operant/projects:task_tag when working with task tag records.
+    identity:
+      title: ${name}
+      labelFields:
+        - name
+    list:
+      defaultFields:
+        - id
+        - name
+        - color
+      empty:
+        message: No task tag records found.
+        help:
+          - optctl --project ${project} create operant/projects:task_tag --input object.json --stage
+    detail:
+      sections:
+        - title: task tag
+          fields:
+            - name
+            - color
+      help:
+        - optctl --project ${project} query operant/projects:task_tag --where 'id == "${id}"'
+    help:
+      list:
+        - optctl --project ${project} query operant/projects:task_tag
+      view:
+        - optctl --project ${project} view operant/projects:task_tag ${id}
+      created:
+        - optctl --project ${project} view operant/projects:task_tag ${id}

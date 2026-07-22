@@ -1,32 +1,19 @@
-{
-  "kind": "Relationship",
-  "apiVersion": "operant.dev/v1",
-  "metadata": {
-    "name": "contact_company",
-  },
-  "spec": {
-    "from": {
-      "resource": "operant/crm:contact",
-    },
-    "to": {
-      "resource": "operant/crm:company",
-    },
-    "fields": {
-      "role": {
-        "type": "string",
-      },
-      "primary": {
-        "type": "boolean",
-      },
-    },
-    "axi": {
-      "help": [
-        "optctl metadata relationship operant/crm:contact_company",
-      ],
-    },
-    "unique": [
-      "from",
-      "to",
-    ],
-  },
-}
+kind: Relationship
+apiVersion: operant.dev/v1
+metadata:
+  name: contact_company
+spec:
+  from:
+    resource: operant/crm:contact
+  to:
+    resource: operant/crm:company
+  fields:
+    role:
+      type: string
+    primary:
+      type: boolean
+  axi:
+    purpose: contact company guidance for the operant/crm pack.
+  unique:
+    - from
+    - to

@@ -1,22 +1,19 @@
-{
-  "kind": "Action",
-  "apiVersion": "operant.dev/v1",
-  "metadata": {
-    "name": "mark_won",
-  },
-  "spec": {
-    "input": {
-      "opportunity_id": {
-        "type": "string",
-        "required": true,
-        "format": "uuid",
-      },
-    },
-    "axi": {
-      "purpose": "Mark an opportunity as won.",
-      "help": [
-        "optctl action stage operant/crm:mark_won --input ...",
-      ],
-    },
-  },
-}
+kind: Action
+apiVersion: operant.dev/v1
+metadata:
+  name: mark_won
+spec:
+  input:
+    opportunity_id:
+      type: string
+      required: true
+      format: uuid
+  axi:
+    purpose: mark won guidance for the operant/crm pack.
+    whenToUse:
+      - Use operant/crm:mark_won when its declared operation should be staged.
+    stageFirst: true
+    examples:
+      - optctl --project ${project} action stage operant/crm:mark_won --input action.json
+    successHelp:
+      - optctl changeset inspect ${stage_id}

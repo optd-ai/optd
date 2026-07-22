@@ -1,25 +1,15 @@
-{
-  "kind": "Relationship",
-  "apiVersion": "operant.dev/v1",
-  "metadata": {
-    "name": "activity_lead",
-  },
-  "spec": {
-    "from": {
-      "resource": "operant/crm:activity",
-    },
-    "to": {
-      "resource": "operant/crm:lead",
-    },
-    "fields": {},
-    "axi": {
-      "help": [
-        "optctl metadata relationship operant/crm:activity_lead",
-      ],
-    },
-    "unique": [
-      "from",
-      "to",
-    ],
-  },
-}
+kind: Relationship
+apiVersion: operant.dev/v1
+metadata:
+  name: activity_lead
+spec:
+  from:
+    resource: operant/crm:activity
+  to:
+    resource: operant/crm:lead
+  fields: {}
+  axi:
+    purpose: activity lead guidance for the operant/crm pack.
+  unique:
+    - from
+    - to

@@ -1,43 +1,27 @@
-{
-  "kind": "Hook",
-  "apiVersion": "operant.dev/v1",
-  "metadata": {
-    "name": "mark_won",
-  },
-  "spec": {
-    "script": "mark_won.ts",
-    "timeout": "2s",
-    "permissions": {
-      "net": false,
-      "read": false,
-      "write": false,
-      "env": false,
-      "run": false,
-    },
-    "output": {
-      "schema": "changeset.operations.v1",
-    },
-    "attachments": [
-      {
-        "phase": "action.stage",
-        "input": {},
-        "action": "operant/crm:mark_won",
-      },
-    ],
-    "axi": {
-      "purpose": "mark_won hook for CRM prototype.",
-      "whenToUse": "Runs from metadata-driven attachment points; agents normally invoke actions instead.",
-    },
-    "secrets": [],
-    "effects": {
-      "operations": [
-        {
-          "resource": "operant/crm:opportunity",
-          "ops": [
-            "transition",
-          ],
-        },
-      ],
-    },
-  },
-}
+kind: Hook
+apiVersion: operant.dev/v1
+metadata:
+  name: mark_won
+spec:
+  script: mark_won.ts
+  timeout: 2s
+  permissions:
+    net: false
+    read: false
+    write: false
+    env: false
+    run: false
+  output:
+    schema: changeset.operations.v1
+  attachments:
+    - phase: action.stage
+      input: {}
+      action: operant/crm:mark_won
+  axi:
+    purpose: mark won guidance for the operant/crm pack.
+  secrets: []
+  effects:
+    operations:
+      - resource: operant/crm:opportunity
+        ops:
+          - transition

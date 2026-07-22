@@ -1,44 +1,60 @@
-{
-  "kind": "Resource",
-  "apiVersion": "operant.dev/v1",
-  "metadata": {
-    "name": "task_stage",
-  },
-  "spec": {
-    "fields": {
-      "name": {
-        "type": "string",
-        "required": true,
-        "unique": true,
-      },
-      "state": {
-        "type": "string",
-        "required": true,
-        "enum": [
-          "todo",
-          "in_progress",
-          "blocked",
-          "done",
-        ],
-      },
-      "sequence": {
-        "type": "integer",
-        "required": true,
-      },
-      "folded": {
-        "type": "boolean",
-      },
-    },
-    "axi": {
-      "purpose": "Seeded reference stages used by task stage_id and task lifecycle state.",
-      "list": {
-        "fields": [
-          "id",
-          "name",
-          "state",
-          "sequence",
-        ],
-      },
-    },
-  },
-}
+kind: Resource
+apiVersion: operant.dev/v1
+metadata:
+  name: task_stage
+spec:
+  fields:
+    name:
+      type: string
+      required: true
+      unique: true
+    state:
+      type: string
+      required: true
+      enum:
+        - todo
+        - in_progress
+        - blocked
+        - done
+    sequence:
+      type: integer
+      required: true
+    folded:
+      type: boolean
+  axi:
+    purpose: task stage guidance for the operant/projects pack.
+    whenToUse:
+      - Use operant/projects:task_stage when working with task stage records.
+    identity:
+      title: ${name}
+      labelFields:
+        - name
+    list:
+      defaultFields:
+        - id
+        - name
+        - state
+        - sequence
+        - folded
+      empty:
+        message: No task stage records found.
+        help:
+          - optctl --project ${project} create operant/projects:task_stage --input object.json
+            --stage
+    detail:
+      sections:
+        - title: task stage
+          fields:
+            - name
+            - state
+            - sequence
+            - folded
+      help:
+        - optctl --project ${project} query operant/projects:task_stage --where 'id == "${id}"'
+    help:
+      list:
+        - optctl --project ${project} query operant/projects:task_stage
+      view:
+        - optctl --project ${project} view operant/projects:task_stage ${id}
+      created:
+        - optctl --project ${project} view operant/projects:task_stage ${id}

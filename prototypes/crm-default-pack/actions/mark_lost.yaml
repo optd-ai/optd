@@ -1,31 +1,26 @@
-{
-  "kind": "Action",
-  "apiVersion": "operant.dev/v1",
-  "metadata": {
-    "name": "mark_lost",
-  },
-  "spec": {
-    "input": {
-      "opportunity_id": {
-        "type": "string",
-        "required": true,
-        "format": "uuid",
-      },
-      "lost_reason_id": {
-        "type": "string",
-        "required": true,
-        "format": "uuid",
-      },
-      "note": {
-        "type": "string",
-        "required": true,
-      },
-    },
-    "axi": {
-      "purpose": "Mark an opportunity as lost with a reason.",
-      "help": [
-        "optctl action stage operant/crm:mark_lost --input ...",
-      ],
-    },
-  },
-}
+kind: Action
+apiVersion: operant.dev/v1
+metadata:
+  name: mark_lost
+spec:
+  input:
+    opportunity_id:
+      type: string
+      required: true
+      format: uuid
+    lost_reason_id:
+      type: string
+      required: true
+      format: uuid
+    note:
+      type: string
+      required: true
+  axi:
+    purpose: mark lost guidance for the operant/crm pack.
+    whenToUse:
+      - Use operant/crm:mark_lost when its declared operation should be staged.
+    stageFirst: true
+    examples:
+      - optctl --project ${project} action stage operant/crm:mark_lost --input action.json
+    successHelp:
+      - optctl changeset inspect ${stage_id}

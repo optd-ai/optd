@@ -1,42 +1,55 @@
-{
-  "kind": "Resource",
-  "apiVersion": "operant.dev/v1",
-  "metadata": {
-    "name": "sales_team"
-  },
-  "spec": {
-    "fields": {
-      "name": {
-        "type": "string",
-        "required": true,
-        "unique": true
-      },
-      "label": {
-        "type": "string"
-      },
-      "leader_id": {
-        "type": "string"
-      },
-      "email_alias": {
-        "type": "string"
-      },
-      "monthly_target": {
-        "type": "decimal"
-      }
-    },
-    "axi": {
-      "list": {
-        "fields": [
-          "id",
-          "name",
-          "leader_id",
-          "email_alias"
-        ]
-      },
-      "help": [
-        "optctl query operant/crm:sales_team",
-        "optctl metadata resource operant/crm:sales_team"
-      ]
-    }
-  }
-}
+kind: Resource
+apiVersion: operant.dev/v1
+metadata:
+  name: sales_team
+spec:
+  fields:
+    name:
+      type: string
+      required: true
+      unique: true
+    label:
+      type: string
+    leader_id:
+      type: string
+    email_alias:
+      type: string
+    monthly_target:
+      type: decimal
+  axi:
+    purpose: sales team guidance for the operant/crm pack.
+    whenToUse:
+      - Use operant/crm:sales_team when working with sales team records.
+    identity:
+      title: ${name}
+      labelFields:
+        - name
+    list:
+      defaultFields:
+        - id
+        - name
+        - label
+        - leader_id
+        - email_alias
+      empty:
+        message: No sales team records found.
+        help:
+          - optctl --project ${project} create operant/crm:sales_team --input object.json --stage
+    detail:
+      sections:
+        - title: sales team
+          fields:
+            - name
+            - label
+            - leader_id
+            - email_alias
+            - monthly_target
+      help:
+        - optctl --project ${project} query operant/crm:sales_team --where 'id == "${id}"'
+    help:
+      list:
+        - optctl --project ${project} query operant/crm:sales_team
+      view:
+        - optctl --project ${project} view operant/crm:sales_team ${id}
+      created:
+        - optctl --project ${project} view operant/crm:sales_team ${id}

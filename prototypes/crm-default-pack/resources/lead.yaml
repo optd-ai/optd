@@ -1,62 +1,69 @@
-{
-  "kind": "Resource",
-  "apiVersion": "operant.dev/v1",
-  "metadata": {
-    "name": "lead"
-  },
-  "spec": {
-    "fields": {
-      "name": {
-        "type": "string",
-        "required": true
-      },
-      "email": {
-        "type": "string"
-      },
-      "phone": {
-        "type": "string"
-      },
-      "company_name": {
-        "type": "string"
-      },
-      "source": {
-        "type": "string"
-      },
-      "score": {
-        "type": "integer"
-      },
-      "status": {
-        "type": "string",
-        "required": true
-      },
-      "owner_id": {
-        "type": "string"
-      },
-      "sales_team_id": {
-        "type": "string",
-        "ref": "operant/crm:sales_team"
-      },
-      "lost_reason_id": {
-        "type": "string",
-        "ref": "operant/crm:lost_reason"
-      },
-      "next_activity_at": {
-        "type": "timestamp"
-      }
-    },
-    "axi": {
-      "list": {
-        "fields": [
-          "id",
-          "name",
-          "email",
-          "phone"
-        ]
-      },
-      "help": [
-        "optctl query operant/crm:lead",
-        "optctl metadata resource operant/crm:lead"
-      ]
-    }
-  }
-}
+kind: Resource
+apiVersion: operant.dev/v1
+metadata:
+  name: lead
+spec:
+  fields:
+    name:
+      type: string
+      required: true
+    email:
+      type: string
+    phone:
+      type: string
+    company_name:
+      type: string
+    source:
+      type: string
+    score:
+      type: integer
+    status:
+      type: string
+      required: true
+    owner_id:
+      type: string
+    sales_team_id:
+      type: string
+      ref: operant/crm:sales_team
+    lost_reason_id:
+      type: string
+      ref: operant/crm:lost_reason
+    next_activity_at:
+      type: timestamp
+  axi:
+    purpose: lead guidance for the operant/crm pack.
+    whenToUse:
+      - Use operant/crm:lead when working with lead records.
+    identity:
+      title: ${name}
+      labelFields:
+        - name
+    list:
+      defaultFields:
+        - id
+        - name
+        - email
+        - phone
+        - company_name
+      empty:
+        message: No lead records found.
+        help:
+          - optctl --project ${project} create operant/crm:lead --input object.json --stage
+    detail:
+      sections:
+        - title: lead
+          fields:
+            - name
+            - email
+            - phone
+            - company_name
+            - source
+      help:
+        - optctl --project ${project} query operant/crm:lead --where 'id == "${id}"'
+    help:
+      list:
+        - optctl --project ${project} query operant/crm:lead
+      view:
+        - optctl --project ${project} view operant/crm:lead ${id}
+      created:
+        - optctl --project ${project} view operant/crm:lead ${id}

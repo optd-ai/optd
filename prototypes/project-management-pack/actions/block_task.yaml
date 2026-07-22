@@ -1,31 +1,26 @@
-{
-  "kind": "Action",
-  "apiVersion": "operant.dev/v1",
-  "metadata": {
-    "name": "block_task",
-  },
-  "spec": {
-    "input": {
-      "task_id": {
-        "type": "string",
-        "required": true,
-        "format": "uuid",
-      },
-      "stage_id": {
-        "type": "string",
-        "required": true,
-        "format": "uuid",
-      },
-      "blocked_reason": {
-        "type": "string",
-        "required": true,
-      },
-    },
-    "axi": {
-      "purpose": "Block a task with an explicit blocked_reason.",
-      "help": [
-        "optctl action commit operant/projects:block_task --input '{\"task_id\":\"TASK_ID\",\"stage_id\":\"blocked\",\"blocked_reason\":\"Waiting on customer\"}'",
-      ],
-    },
-  },
-}
+kind: Action
+apiVersion: operant.dev/v1
+metadata:
+  name: block_task
+spec:
+  input:
+    task_id:
+      type: string
+      required: true
+      format: uuid
+    stage_id:
+      type: string
+      required: true
+      format: uuid
+    blocked_reason:
+      type: string
+      required: true
+  axi:
+    purpose: block task guidance for the operant/projects pack.
+    whenToUse:
+      - Use operant/projects:block_task when its declared operation should be staged.
+    stageFirst: true
+    examples:
+      - optctl --project ${project} action stage operant/projects:block_task --input action.json
+    successHelp:
+      - optctl changeset inspect ${stage_id}

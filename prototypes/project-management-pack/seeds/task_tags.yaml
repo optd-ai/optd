@@ -1,33 +1,19 @@
-{
-  "kind": "Seed",
-  "apiVersion": "operant.dev/v1",
-  "metadata": {
-    "name": "task_tags",
-  },
-  "spec": {
-    "resource": "operant/projects:task_tag",
-    "key": "name",
-    "mode": "changeset",
-    "rows": [
-      {
-        "name": "Bug",
-        "color": "red",
-      },
-      {
-        "name": "Feature",
-        "color": "blue",
-      },
-      {
-        "name": "Chore",
-        "color": "gray",
-      },
-      {
-        "name": "Research",
-        "color": "purple",
-      },
-    ],
-    "axi": {
-      "purpose": "Seed common task tags through audited changesets.",
-    },
-  },
-}
+kind: Seed
+apiVersion: operant.dev/v1
+metadata:
+  name: task_tags
+spec:
+  resource: operant/projects:task_tag
+  key: name
+  mode: changeset
+  rows:
+    - name: Bug
+      color: red
+    - name: Feature
+      color: blue
+    - name: Chore
+      color: gray
+    - name: Research
+      color: purple
+  axi:
+    purpose: task tags guidance for the operant/projects pack.

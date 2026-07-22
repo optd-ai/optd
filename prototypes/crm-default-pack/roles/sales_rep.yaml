@@ -1,14 +1,9 @@
-{
-  "kind": "Role",
-  "apiVersion": "operant.dev/v1",
-  "metadata": {
-    "name": "sales_rep",
-  },
-  "spec": {
-    "display_name": "Sales Rep",
-    "description": "sales_rep responsibility for the crm proof pack.",
-    "axi": {
-      "summary": "Use for sales_rep responsibilities.",
-    },
-  },
-}
+kind: Role
+apiVersion: operant.dev/v1
+metadata:
+  name: sales_rep
+spec:
+  display_name: Sales Rep
+  description: sales_rep responsibility for the crm proof pack.
+  axi:
+    purpose: sales rep guidance for the operant/crm pack.

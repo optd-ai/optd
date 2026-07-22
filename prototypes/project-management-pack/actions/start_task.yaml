@@ -1,27 +1,23 @@
-{
-  "kind": "Action",
-  "apiVersion": "operant.dev/v1",
-  "metadata": {
-    "name": "start_task",
-  },
-  "spec": {
-    "input": {
-      "task_id": {
-        "type": "string",
-        "required": true,
-        "format": "uuid",
-      },
-      "stage_id": {
-        "type": "string",
-        "required": true,
-        "format": "uuid",
-      },
-    },
-    "axi": {
-      "purpose": "Start or unblock assigned project work.",
-      "help": [
-        "optctl action stage operant/projects:start_task --input '{\"task_id\":\"TASK_ID\",\"stage_id\":\"in_progress\"}'",
-      ],
-    },
-  },
-}
+kind: Action
+apiVersion: operant.dev/v1
+metadata:
+  name: start_task
+spec:
+  input:
+    task_id:
+      type: string
+      required: true
+      format: uuid
+    stage_id:
+      type: string
+      required: true
+      format: uuid
+  axi:
+    purpose: start task guidance for the operant/projects pack.
+    whenToUse:
+      - Use operant/projects:start_task when its declared operation should be staged.
+    stageFirst: true
+    examples:
+      - optctl --project ${project} action stage operant/projects:start_task --input action.json
+    successHelp:
+      - optctl changeset inspect ${stage_id}

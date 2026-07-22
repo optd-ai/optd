@@ -1,37 +1,23 @@
-{
-  "kind": "Seed",
-  "apiVersion": "operant.dev/v1",
-  "metadata": {
-    "name": "lost_reasons",
-  },
-  "spec": {
-    "resource": "operant/crm:lost_reason",
-    "key": "name",
-    "mode": "changeset",
-    "rows": [
-      {
-        "name": "too_expensive",
-        "label": "Too expensive",
-        "active": true,
-      },
-      {
-        "name": "no_budget",
-        "label": "No budget",
-        "active": true,
-      },
-      {
-        "name": "competitor",
-        "label": "Chose competitor",
-        "active": true,
-      },
-      {
-        "name": "no_response",
-        "label": "No response",
-        "active": true,
-      },
-    ],
-    "axi": {
-      "purpose": "Seed lost_reason reference data through ordinary changeset operations.",
-    },
-  },
-}
+kind: Seed
+apiVersion: operant.dev/v1
+metadata:
+  name: lost_reasons
+spec:
+  resource: operant/crm:lost_reason
+  key: name
+  mode: changeset
+  rows:
+    - name: too_expensive
+      label: Too expensive
+      active: true
+    - name: no_budget
+      label: No budget
+      active: true
+    - name: competitor
+      label: Chose competitor
+      active: true
+    - name: no_response
+      label: No response
+      active: true
+  axi:
+    purpose: lost reasons guidance for the operant/crm pack.

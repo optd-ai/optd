@@ -1,27 +1,17 @@
-{
-  "kind": "Relationship",
-  "apiVersion": "operant.dev/v1",
-  "metadata": {
-    "name": "task_tag_assignment",
-  },
-  "spec": {
-    "from": {
-      "resource": "operant/projects:task",
-    },
-    "to": {
-      "resource": "operant/projects:task_tag",
-    },
-    "fields": {
-      "source": {
-        "type": "string",
-      },
-    },
-    "axi": {
-      "purpose": "Assign seeded tags such as Bug, Feature, Chore, or Research to tasks.",
-    },
-    "unique": [
-      "from",
-      "to",
-    ],
-  },
-}
+kind: Relationship
+apiVersion: operant.dev/v1
+metadata:
+  name: task_tag_assignment
+spec:
+  from:
+    resource: operant/projects:task
+  to:
+    resource: operant/projects:task_tag
+  fields:
+    source:
+      type: string
+  axi:
+    purpose: task tag assignment guidance for the operant/projects pack.
+  unique:
+    - from
+    - to

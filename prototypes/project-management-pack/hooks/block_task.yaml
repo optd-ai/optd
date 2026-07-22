@@ -1,43 +1,28 @@
-{
-  "kind": "Hook",
-  "apiVersion": "operant.dev/v1",
-  "metadata": {
-    "name": "block_task",
-  },
-  "spec": {
-    "script": "block_task.ts",
-    "timeout": "2s",
-    "permissions": {
-      "net": false,
-      "read": false,
-      "write": false,
-      "env": false,
-      "run": false,
-    },
-    "output": {
-      "schema": "changeset.operations.v1",
-    },
-    "attachments": [
-      {
-        "phase": "action.stage",
-        "action": "operant/projects:block_task",
-        "order": 100,
-        "input": {},
-      },
-    ],
-    "axi": {
-      "purpose": "Generate a task update to state=blocked and require blocked_reason.",
-    },
-    "secrets": [],
-    "effects": {
-      "operations": [
-        {
-          "resource": "operant/projects:task",
-          "ops": [
-            "update",
-          ],
-        },
-      ],
-    },
-  },
-}
+kind: Hook
+apiVersion: operant.dev/v1
+metadata:
+  name: block_task
+spec:
+  script: block_task.ts
+  timeout: 2s
+  permissions:
+    net: false
+    read: false
+    write: false
+    env: false
+    run: false
+  output:
+    schema: changeset.operations.v1
+  attachments:
+    - phase: action.stage
+      action: operant/projects:block_task
+      order: 100
+      input: {}
+  axi:
+    purpose: block task guidance for the operant/projects pack.
+  secrets: []
+  effects:
+    operations:
+      - resource: operant/projects:task
+        ops:
+          - update

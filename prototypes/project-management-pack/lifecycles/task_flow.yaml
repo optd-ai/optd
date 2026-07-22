@@ -1,74 +1,41 @@
-{
-  "kind": "Lifecycle",
-  "apiVersion": "operant.dev/v1",
-  "metadata": {
-    "name": "task_flow",
-  },
-  "spec": {
-    "resource": "operant/projects:task",
-    "field": "state",
-    "states": [
-      {
-        "name": "todo",
-      },
-      {
-        "name": "in_progress",
-      },
-      {
-        "name": "blocked",
-      },
-      {
-        "name": "done",
-        "terminal": true,
-      },
-    ],
-    "transitions": [
-      {
-        "name": "todo_to_in_progress_1",
-        "from": [
-          "todo",
-        ],
-        "to": "in_progress",
-      },
-      {
-        "name": "blocked_to_in_progress_2",
-        "from": [
-          "blocked",
-        ],
-        "to": "in_progress",
-      },
-      {
-        "name": "todo_to_blocked_3",
-        "from": [
-          "todo",
-        ],
-        "to": "blocked",
-      },
-      {
-        "name": "in_progress_to_blocked_4",
-        "from": [
-          "in_progress",
-        ],
-        "to": "blocked",
-      },
-      {
-        "name": "in_progress_to_done_5",
-        "from": [
-          "in_progress",
-        ],
-        "to": "done",
-      },
-      {
-        "name": "blocked_to_done_6",
-        "from": [
-          "blocked",
-        ],
-        "to": "done",
-      },
-    ],
-    "axi": {
-      "purpose": "Task lifecycle documentation consumed by metadata; validation is enforced by validate_task hook.",
-    },
-    "initial": "todo",
-  },
-}
+kind: Lifecycle
+apiVersion: operant.dev/v1
+metadata:
+  name: task_flow
+spec:
+  resource: operant/projects:task
+  field: state
+  states:
+    - name: todo
+    - name: in_progress
+    - name: blocked
+    - name: done
+      terminal: true
+  transitions:
+    - name: todo_to_in_progress_1
+      from:
+        - todo
+      to: in_progress
+    - name: blocked_to_in_progress_2
+      from:
+        - blocked
+      to: in_progress
+    - name: todo_to_blocked_3
+      from:
+        - todo
+      to: blocked
+    - name: in_progress_to_blocked_4
+      from:
+        - in_progress
+      to: blocked
+    - name: in_progress_to_done_5
+      from:
+        - in_progress
+      to: done
+    - name: blocked_to_done_6
+      from:
+        - blocked
+      to: done
+  axi:
+    purpose: task flow guidance for the operant/projects pack.
+  initial: todo

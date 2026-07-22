@@ -1,42 +1,59 @@
-{
-  "kind": "Resource",
-  "apiVersion": "operant.dev/v1",
-  "metadata": {
-    "name": "timesheet_entry",
-  },
-  "spec": {
-    "fields": {
-      "task_id": {
-        "type": "string",
-        "required": true,
-        "ref": "operant/projects:task",
-      },
-      "actor_id": {
-        "type": "string",
-        "required": true,
-      },
-      "hours": {
-        "type": "decimal",
-        "required": true,
-      },
-      "description": {
-        "type": "string",
-      },
-      "entry_date": {
-        "type": "date",
-        "required": true,
-      },
-    },
-    "axi": {
-      "purpose": "Log auditable time spent against tasks.",
-      "create": {
-        "required_fields": [
-          "task_id",
-          "actor_id",
-          "hours",
-          "entry_date",
-        ],
-      },
-    },
-  },
-}
+kind: Resource
+apiVersion: operant.dev/v1
+metadata:
+  name: timesheet_entry
+spec:
+  fields:
+    task_id:
+      type: string
+      required: true
+      ref: operant/projects:task
+    actor_id:
+      type: string
+      required: true
+    hours:
+      type: decimal
+      required: true
+    description:
+      type: string
+    entry_date:
+      type: date
+      required: true
+  axi:
+    purpose: timesheet entry guidance for the operant/projects pack.
+    whenToUse:
+      - Use operant/projects:timesheet_entry when working with timesheet entry records.
+    identity:
+      title: ${task_id}
+      labelFields:
+        - task_id
+    list:
+      defaultFields:
+        - id
+        - task_id
+        - actor_id
+        - hours
+        - description
+      empty:
+        message: No timesheet entry records found.
+        help:
+          - optctl --project ${project} create operant/projects:timesheet_entry --input object.json
+            --stage
+    detail:
+      sections:
+        - title: timesheet entry
+          fields:
+            - task_id
+            - actor_id
+            - hours
+            - description
+            - entry_date
+      help:
+        - optctl --project ${project} query operant/projects:timesheet_entry --where 'id == "${id}"'
+    help:
+      list:
+        - optctl --project ${project} query operant/projects:timesheet_entry
+      view:
+        - optctl --project ${project} view operant/projects:timesheet_entry ${id}
+      created:
+        - optctl --project ${project} view operant/projects:timesheet_entry ${id}

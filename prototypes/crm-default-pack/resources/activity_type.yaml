@@ -1,37 +1,49 @@
-{
-  "kind": "Resource",
-  "apiVersion": "operant.dev/v1",
-  "metadata": {
-    "name": "activity_type"
-  },
-  "spec": {
-    "fields": {
-      "name": {
-        "type": "string",
-        "required": true,
-        "unique": true
-      },
-      "label": {
-        "type": "string",
-        "required": true
-      },
-      "default_deadline_days": {
-        "type": "integer"
-      }
-    },
-    "axi": {
-      "list": {
-        "fields": [
-          "id",
-          "name",
-          "label",
-          "default_deadline_days"
-        ]
-      },
-      "help": [
-        "optctl query operant/crm:activity_type",
-        "optctl metadata resource operant/crm:activity_type"
-      ]
-    }
-  }
-}
+kind: Resource
+apiVersion: operant.dev/v1
+metadata:
+  name: activity_type
+spec:
+  fields:
+    name:
+      type: string
+      required: true
+      unique: true
+    label:
+      type: string
+      required: true
+    default_deadline_days:
+      type: integer
+  axi:
+    purpose: activity type guidance for the operant/crm pack.
+    whenToUse:
+      - Use operant/crm:activity_type when working with activity type records.
+    identity:
+      title: ${name}
+      labelFields:
+        - name
+    list:
+      defaultFields:
+        - id
+        - name
+        - label
+        - default_deadline_days
+      empty:
+        message: No activity type records found.
+        help:
+          - optctl --project ${project} create operant/crm:activity_type --input object.json --stage
+    detail:
+      sections:
+        - title: activity type
+          fields:
+            - name
+            - label
+            - default_deadline_days
+      help:
+        - optctl --project ${project} query operant/crm:activity_type --where 'id == "${id}"'
+    help:
+      list:
+        - optctl --project ${project} query operant/crm:activity_type
+      view:
+        - optctl --project ${project} view operant/crm:activity_type ${id}
+      created:
+        - optctl --project ${project} view operant/crm:activity_type ${id}

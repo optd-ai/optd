@@ -252,6 +252,7 @@ export async function loadPackFromFiles(
     }
   }
   validateReferences(pack as LoadedPack);
+  validateAxiGuidance(pack as LoadedPack);
   pack.normalized = canonicalize({
     pack: pack.manifest,
     resources: docs(pack.resources),
@@ -436,6 +437,129 @@ function qualifyDocument(
           }`
           : action
       ) as JsonValue[];
+    }
+  }
+}
+
+function validateAxiGuidance(pack: LoadedPack) {
+  const platformFields = new Set(["id", "project"]);
+  const validateTemplates = (
+    value: JsonValue,
+    allowed: Set<string>,
+    path: string,
+  ) => {
+    if (typeof value === "string") {
+      for (const match of value.matchAll(/\$\{([^}]*)\}/g)) {
+        const placeholder = match[1];
+        if (!/^[a-z][a-z0-9_]{0,62}$/.test(placeholder)) {
+          throw new Error(
+            `${path}: unsafe AXI placeholder '${placeholder}'`,
+          );
+        }
+        if (!allowed.has(placeholder)) {
+          throw new Error(
+            `${path}: unknown AXI placeholder '${placeholder}'`,
+          );
+        }
+      }
+      if (/\$\{/.test(value.replace(/\$\{[^}]*\}/g, ""))) {
+        throw new Error(`${path}: unterminated AXI placeholder`);
+      }
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.forEach((child, index) =>
+        validateTemplates(child, allowed, `${path}.${index}`)
+      );
+      return;
+    }
+    if (value && typeof value === "object") {
+      for (const [key, child] of Object.entries(value)) {
+        validateTemplates(child, allowed, `${path}.${key}`);
+      }
+    }
+  };
+  const requireCommands = (values: JsonValue, path: string) => {
+    for (const [index, value] of asArray(values, path).entries()) {
+      if (typeof value !== "string" || !value.startsWith("optctl ")) {
+        throw new Error(`${path}.${index}: AXI help must be a concrete optctl command`);
+      }
+    }
+  };
+
+  const manifestSpec = asRecord(pack.manifest.spec, "pack.yaml.spec");
+  const packAxi = asRecord(manifestSpec.axi, "pack.yaml.spec.axi");
+  const home = asRecord(packAxi.home, "pack.yaml.spec.axi.home");
+  validateTemplates(packAxi, new Set(["project"]), "pack.yaml.spec.axi");
+  requireCommands(home.help, "pack.yaml.spec.axi.home.help");
+  for (const identity of asArray(home.resources, "pack.yaml.spec.axi.home.resources")) {
+    if (typeof identity !== "string" || !pack.resources[identity.split(":").pop()!]) {
+      throw new Error(`pack.yaml.spec.axi.home.resources: unknown resource ${identity}`);
+    }
+  }
+  for (const identity of asArray(home.actions ?? [], "pack.yaml.spec.axi.home.actions")) {
+    if (typeof identity !== "string" || !pack.actions[identity.split(":").pop()!]) {
+      throw new Error(`pack.yaml.spec.axi.home.actions: unknown action ${identity}`);
+    }
+  }
+
+  for (const def of Object.values(pack.resources)) {
+    const axi = asRecord(def.spec.axi, `${def.path}.spec.axi`);
+    const fields = asRecord(def.spec.fields, `${def.path}.spec.fields`);
+    const allowed = new Set([...platformFields, ...Object.keys(fields)]);
+    validateTemplates(axi, allowed, `${def.path}.spec.axi`);
+    const list = asRecord(axi.list, `${def.path}.spec.axi.list`);
+    for (const field of asArray(list.defaultFields, `${def.path}.spec.axi.list.defaultFields`)) {
+      if (typeof field !== "string" || !allowed.has(field)) {
+        throw new Error(`${def.path}.spec.axi.list.defaultFields: unknown field ${field}`);
+      }
+    }
+    const identity = asRecord(axi.identity, `${def.path}.spec.axi.identity`);
+    for (const field of asArray(identity.labelFields ?? [], `${def.path}.spec.axi.identity.labelFields`)) {
+      if (typeof field !== "string" || !Object.hasOwn(fields, field)) {
+        throw new Error(`${def.path}.spec.axi.identity.labelFields: unknown field ${field}`);
+      }
+    }
+    const help = asRecord(axi.help, `${def.path}.spec.axi.help`);
+    if (!help.created && !help.primaryAction) {
+      throw new Error(`${def.path}.spec.axi.help: created or primaryAction guidance is required`);
+    }
+    requireCommands(help.list, `${def.path}.spec.axi.help.list`);
+    requireCommands(help.view, `${def.path}.spec.axi.help.view`);
+    if (help.created) requireCommands(help.created, `${def.path}.spec.axi.help.created`);
+    if (help.primaryAction) requireCommands(help.primaryAction, `${def.path}.spec.axi.help.primaryAction`);
+    const detail = asRecord(axi.detail, `${def.path}.spec.axi.detail`);
+    requireCommands(detail.help, `${def.path}.spec.axi.detail.help`);
+    const empty = asRecord(list.empty, `${def.path}.spec.axi.list.empty`);
+    requireCommands(empty.help, `${def.path}.spec.axi.list.empty.help`);
+  }
+
+  for (const def of Object.values(pack.actions)) {
+    const axi = asRecord(def.spec.axi, `${def.path}.spec.axi`);
+    const input = asRecord(def.spec.input, `${def.path}.spec.input`);
+    validateTemplates(
+      axi,
+      new Set([...platformFields, "stage_id", ...Object.keys(input)]),
+      `${def.path}.spec.axi`,
+    );
+    requireCommands(axi.examples, `${def.path}.spec.axi.examples`);
+    requireCommands(axi.successHelp, `${def.path}.spec.axi.successHelp`);
+  }
+
+  for (const collection of [
+    pack.relationships,
+    pack.lifecycles,
+    pack.hooks,
+    pack.roles,
+    pack.policies,
+    pack.seeds,
+  ]) {
+    for (const def of Object.values(collection)) {
+      validateTemplates(
+        asRecord(def.spec.axi, `${def.path}.spec.axi`),
+        platformFields,
+        `${def.path}.spec.axi`,
+      );
     }
   }
 }

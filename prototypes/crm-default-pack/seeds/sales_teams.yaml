@@ -1,29 +1,19 @@
-{
-  "kind": "Seed",
-  "apiVersion": "operant.dev/v1",
-  "metadata": {
-    "name": "sales_teams",
-  },
-  "spec": {
-    "resource": "operant/crm:sales_team",
-    "key": "name",
-    "mode": "changeset",
-    "rows": [
-      {
-        "name": "direct",
-        "label": "Direct Sales",
-        "email_alias": "sales@example.com",
-        "monthly_target": "50000",
-      },
-      {
-        "name": "enterprise",
-        "label": "Enterprise Sales",
-        "email_alias": "enterprise@example.com",
-        "monthly_target": "250000",
-      },
-    ],
-    "axi": {
-      "purpose": "Seed sales_team reference data through ordinary changeset operations.",
-    },
-  },
-}
+kind: Seed
+apiVersion: operant.dev/v1
+metadata:
+  name: sales_teams
+spec:
+  resource: operant/crm:sales_team
+  key: name
+  mode: changeset
+  rows:
+    - name: direct
+      label: Direct Sales
+      email_alias: sales@example.com
+      monthly_target: "50000"
+    - name: enterprise
+      label: Enterprise Sales
+      email_alias: enterprise@example.com
+      monthly_target: "250000"
+  axi:
+    purpose: sales teams guidance for the operant/crm pack.

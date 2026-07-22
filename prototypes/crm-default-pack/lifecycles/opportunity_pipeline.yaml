@@ -1,67 +1,35 @@
-{
-  "kind": "Lifecycle",
-  "apiVersion": "operant.dev/v1",
-  "metadata": {
-    "name": "opportunity_pipeline",
-  },
-  "spec": {
-    "resource": "operant/crm:opportunity",
-    "field": "stage",
-    "states": [
-      {
-        "name": "new",
-      },
-      {
-        "name": "qualified",
-      },
-      {
-        "name": "proposal",
-      },
-      {
-        "name": "won",
-        "terminal": true,
-      },
-      {
-        "name": "lost",
-        "terminal": true,
-      },
-    ],
-    "transitions": [
-      {
-        "name": "new_to_qualified_1",
-        "from": [
-          "new",
-        ],
-        "to": "qualified",
-      },
-      {
-        "name": "qualified_to_proposal_2",
-        "from": [
-          "qualified",
-        ],
-        "to": "proposal",
-      },
-      {
-        "name": "proposal_to_won_3",
-        "from": [
-          "proposal",
-        ],
-        "to": "won",
-      },
-      {
-        "name": "proposal_to_lost_4",
-        "from": [
-          "proposal",
-        ],
-        "to": "lost",
-      },
-    ],
-    "axi": {
-      "help": [
-        "optctl action stage operant/crm:mark_won --input ...",
-        "optctl action stage operant/crm:mark_lost --input ...",
-      ],
-    },
-    "initial": "new",
-  },
-}
+kind: Lifecycle
+apiVersion: operant.dev/v1
+metadata:
+  name: opportunity_pipeline
+spec:
+  resource: operant/crm:opportunity
+  field: stage
+  states:
+    - name: new
+    - name: qualified
+    - name: proposal
+    - name: won
+      terminal: true
+    - name: lost
+      terminal: true
+  transitions:
+    - name: new_to_qualified_1
+      from:
+        - new
+      to: qualified
+    - name: qualified_to_proposal_2
+      from:
+        - qualified
+      to: proposal
+    - name: proposal_to_won_3
+      from:
+        - proposal
+      to: won
+    - name: proposal_to_lost_4
+      from:
+        - proposal
+      to: lost
+  axi:
+    purpose: opportunity pipeline guidance for the operant/crm pack.
+  initial: new

@@ -7,7 +7,13 @@ import {
 const root = `kind: Pack
 apiVersion: operant.dev/v1
 metadata: { publisher: operant, name: test, version: 0.1.0 }
-spec: { purpose: Strict test pack., axi: {} }
+spec:
+  purpose: Strict test pack.
+  axi:
+    purpose: Strict test pack guidance.
+    home:
+      resources: [operant/test:lead]
+      help: ["optctl resources"]
 `;
 const resource = `kind: Resource
 apiVersion: operant.dev/v1
@@ -15,7 +21,21 @@ metadata: { name: lead }
 spec:
   fields:
     name: { type: string, required: true }
-  axi: {}
+  axi:
+    purpose: Test leads.
+    whenToUse: [Use test leads.]
+    identity: { title: "\${name}", labelFields: [name] }
+    list:
+      defaultFields: [id, project, name]
+      empty:
+        message: No test leads found.
+        help: ["optctl --project \${project} create operant/test:lead --input object.json --stage"]
+    detail:
+      help: ["optctl --project \${project} view operant/test:lead \${id}"]
+    help:
+      list: ["optctl --project \${project} query operant/test:lead"]
+      view: ["optctl --project \${project} view operant/test:lead \${id}"]
+      created: ["optctl --project \${project} view operant/test:lead \${id}"]
 `;
 
 Deno.test("strict pack loader rejects legacy identities and unknown fields", async () => {
@@ -32,7 +52,7 @@ Deno.test("strict pack loader rejects legacy identities and unknown fields", asy
     () =>
       loadPackFromFiles([{ path: "pack.yaml", text: root }, {
         path: "resources/lead.yaml",
-        text: resource.replace("axi: {}", "lifecycle: {}\n  axi: {}"),
+        text: resource.replace("  axi:\n", "  lifecycle: {}\n  axi:\n"),
       }]),
     Error,
     "additional properties",
@@ -150,7 +170,7 @@ Deno.test("strict pack loader broadly rejects superseded schema and unsafe sourc
       name: "extension bags",
       files: [{ path: "pack.yaml", text: root }, {
         path: "resources/lead.yaml",
-        text: resource.replace("axi: {}", "extensions: {}\n  axi: {}"),
+        text: resource.replace("  axi:\n", "  extensions: {}\n  axi:\n"),
       }],
       message: "additional properties",
     },
@@ -256,7 +276,7 @@ Deno.test("strict pack loader broadly rejects superseded schema and unsafe sourc
 
 Deno.test("lifecycle cross-invariants reject every invalid graph and mutation", async () => {
   const lifecycleResource =
-    `kind: Resource\napiVersion: operant.dev/v1\nmetadata: {name: ticket}\nspec:\n  fields:\n    state: {type: string, required: true, enum: [open, closed]}\n    title: {type: string, required: true, maxLength: 8}\n    count: {type: integer, minimum: 0, maximum: 10}\n    amount: {type: decimal, precision: 4, scale: 2}\n    note: {type: string}\n  axi: {}\n`;
+    `kind: Resource\napiVersion: operant.dev/v1\nmetadata: {name: ticket}\nspec:\n  fields:\n    state: {type: string, required: true, enum: [open, closed]}\n    title: {type: string, required: true, maxLength: 8}\n    count: {type: integer, minimum: 0, maximum: 10}\n    amount: {type: decimal, precision: 4, scale: 2}\n    note: {type: string}\n  axi:\n    purpose: Test tickets.\n    whenToUse: [Use test tickets.]\n    identity: {title: "\${title}", labelFields: [title]}\n    list:\n      defaultFields: [id, state, title]\n      empty: {message: No tickets found., help: ["optctl --project \${project} create operant/test:ticket --input object.json --stage"]}\n    detail: {help: ["optctl --project \${project} view operant/test:ticket \${id}"]}\n    help:\n      list: ["optctl --project \${project} query operant/test:ticket"]\n      view: ["optctl --project \${project} view operant/test:ticket \${id}"]\n      created: ["optctl --project \${project} view operant/test:ticket \${id}"]\n`;
   const lifecycle = (
     states: string,
     transitions: string,
@@ -491,6 +511,47 @@ Deno.test("strict pack loader canonicalizes bounded YAML aliases", async () => {
     name: { required: true, type: "string" },
   });
   assert(pack.revision.startsWith("operant/test@0.1.0:sha256:"));
+});
+
+Deno.test("strict AXI readiness and safe placeholders fail pack preview", async () => {
+  await assertRejects(
+    () =>
+      loadPackFromFiles([{ path: "pack.yaml", text: root }, {
+        path: "resources/lead.yaml",
+        text: resource.replace("    whenToUse: [Use test leads.]\n", ""),
+      }]),
+    Error,
+    "whenToUse",
+  );
+  await assertRejects(
+    () =>
+      loadPackFromFiles([{ path: "pack.yaml", text: root }, {
+        path: "resources/lead.yaml",
+        text: resource.replace("${name}", "${name.value}"),
+      }]),
+    Error,
+    "unsafe AXI placeholder 'name.value'",
+  );
+  await assertRejects(
+    () =>
+      loadPackFromFiles([{ path: "pack.yaml", text: root }, {
+        path: "resources/lead.yaml",
+        text: resource.replace("${name}", "${missing}"),
+      }]),
+    Error,
+    "unknown AXI placeholder 'missing'",
+  );
+  const action = `kind: Action\napiVersion: operant.dev/v1\nmetadata: {name: run}\nspec:\n  input: {value: {type: string, required: true}}\n  axi:\n    purpose: Run the test action.\n    successHelp: ["optctl changeset inspect \${stage_id}"]\n`;
+  await assertRejects(
+    () =>
+      loadPackFromFiles([
+        { path: "pack.yaml", text: root },
+        { path: "resources/lead.yaml", text: resource },
+        { path: "actions/run.yaml", text: action },
+      ]),
+    Error,
+    "examples",
+  );
 });
 
 Deno.test("strict pack loader accepts both publisher-qualified proof packs", async () => {

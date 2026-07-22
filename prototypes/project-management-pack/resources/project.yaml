@@ -1,71 +1,70 @@
-{
-  "kind": "Resource",
-  "apiVersion": "operant.dev/v1",
-  "metadata": {
-    "name": "project",
-  },
-  "spec": {
-    "fields": {
-      "name": {
-        "type": "string",
-        "required": true,
-      },
-      "description": {
-        "type": "string",
-      },
-      "status": {
-        "type": "string",
-        "required": true,
-        "enum": [
-          "active",
-          "on_hold",
-          "done",
-          "archived",
-        ],
-      },
-      "owner_id": {
-        "type": "string",
-        "required": true,
-      },
-      "visibility": {
-        "type": "string",
-        "required": true,
-        "enum": [
-          "private",
-          "members",
-          "internal",
-        ],
-      },
-      "start_date": {
-        "type": "date",
-      },
-      "target_date": {
-        "type": "date",
-      },
-    },
-    "axi": {
-      "purpose": "Track project ownership, visibility, target dates, and health.",
-      "create": {
-        "required_fields": [
-          "name",
-          "status",
-          "owner_id",
-          "visibility",
-        ],
-      },
-      "list": {
-        "fields": [
-          "id",
-          "name",
-          "status",
-          "owner_id",
-          "target_date",
-        ],
-      },
-      "help": [
-        "optctl changeset stage --input create-project.json",
-        "optctl query operant/projects:project --where 'status == \"active\"' --fields id,name,status,owner_id",
-      ],
-    },
-  },
-}
+kind: Resource
+apiVersion: operant.dev/v1
+metadata:
+  name: project
+spec:
+  fields:
+    name:
+      type: string
+      required: true
+    description:
+      type: string
+    status:
+      type: string
+      required: true
+      enum:
+        - active
+        - on_hold
+        - done
+        - archived
+    owner_id:
+      type: string
+      required: true
+    visibility:
+      type: string
+      required: true
+      enum:
+        - private
+        - members
+        - internal
+    start_date:
+      type: date
+    target_date:
+      type: date
+  axi:
+    purpose: project guidance for the operant/projects pack.
+    whenToUse:
+      - Use operant/projects:project when working with project records.
+    identity:
+      title: ${name}
+      labelFields:
+        - name
+    list:
+      defaultFields:
+        - id
+        - name
+        - description
+        - status
+        - owner_id
+      empty:
+        message: No project records found.
+        help:
+          - optctl --project ${project} create operant/projects:project --input object.json --stage
+    detail:
+      sections:
+        - title: project
+          fields:
+            - name
+            - description
+            - status
+            - owner_id
+            - visibility
+      help:
+        - optctl --project ${project} query operant/projects:project --where 'id == "${id}"'
+    help:
+      list:
+        - optctl --project ${project} query operant/projects:project
+      view:
+        - optctl --project ${project} view operant/projects:project ${id}
+      created:
+        - optctl --project ${project} view operant/projects:project ${id}

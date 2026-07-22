@@ -1,34 +1,35 @@
-{
-  "kind": "Pack",
-  "apiVersion": "operant.dev/v1",
-  "metadata": {
-    "publisher": "operant",
-    "name": "crm",
-    "version": "0.1.0",
-  },
-  "spec": {
-    "purpose": "Prototype headless CRM pack for leads, contacts, companies, opportunities, activities, tasks, and safe agent operations.",
-    "axi": {
-      "home": {
-        "resources": [
-          "operant/crm:lead",
-          "operant/crm:opportunity",
-          "operant/crm:contact",
-          "operant/crm:company",
-          "operant/crm:activity",
-        ],
-        "actions": [
-          "operant/crm:convert_lead",
-          "operant/crm:mark_won",
-          "operant/crm:mark_lost",
-          "operant/crm:log_activity",
-        ],
-        "help": [
-          "optctl query operant/crm:lead --where 'active()'",
-          "optctl action stage operant/crm:convert_lead --input lead_123",
-          "optctl metadata resource operant/crm:opportunity",
-        ],
-      },
-    },
-  },
-}
+kind: Pack
+apiVersion: operant.dev/v1
+metadata:
+  publisher: operant
+  name: crm
+  version: 0.1.0
+spec:
+  purpose: Prototype headless CRM pack for leads, contacts, companies, opportunities, activities,
+    tasks, and safe agent operations.
+  axi:
+    purpose: Prototype headless CRM pack for leads, contacts, companies, opportunities, activities,
+      tasks, and safe agent operations.
+    home:
+      resources:
+        - operant/crm:activity
+        - operant/crm:activity_type
+        - operant/crm:company
+        - operant/crm:contact
+        - operant/crm:lead
+        - operant/crm:lead_status
+        - operant/crm:lost_reason
+        - operant/crm:note
+        - operant/crm:opportunity
+        - operant/crm:opportunity_stage
+        - operant/crm:sales_team
+        - operant/crm:task
+      actions:
+        - operant/crm:convert_lead
+        - operant/crm:log_activity
+        - operant/crm:mark_lost
+        - operant/crm:mark_won
+      help:
+        - optctl resources
+        - optctl --project ${project} query operant/crm:activity
+        - optctl metadata pack operant/crm

@@ -295,12 +295,6 @@ export function makeHttpApp(
     (c) => c.json(successEnvelope({ status: "live", version: deps.version })),
   );
 
-  // Kept temporarily for legacy diagnostics; readiness is the dependency check.
-  app.get("/health", async (c) => {
-    const health = await deps.health.inspect();
-    return c.json(successEnvelope({ version: deps.version, ...health }));
-  });
-
   app.get("/ready", async (c) => {
     const health = await deps.health.inspect();
     const ready = health.status === "ready";
@@ -320,7 +314,7 @@ export function makeHttpApp(
   registerAuthorizationRoutes(app, deps.authorization);
 
   app.get(
-    "/metadata/home",
+    "/api/v1/metadata/home",
     async (c) =>
       Object.keys(c.req.queries()).length
         ? resultJson(
@@ -334,13 +328,13 @@ export function makeHttpApp(
         )
         : resultJson(c, await deps.metadata.home()),
   );
-  app.get("/metadata/packs", async (c) => {
+  app.get("/api/v1/metadata/packs", async (c) => {
     const options = metadataOptions(c);
     return options.ok
       ? resultJson(c, await deps.metadata.packs(options.value))
       : resultJson(c, options);
   });
-  app.get("/metadata/packs/:publisher/:pack", async (c) => {
+  app.get("/api/v1/metadata/packs/:publisher/:pack", async (c) => {
     const options = metadataOptions(c);
     return options.ok
       ? resultJson(
@@ -365,7 +359,7 @@ export function makeHttpApp(
   } as const;
   for (const [plural, inspect] of Object.entries(metadataChildren)) {
     app.get(
-      `/metadata/packs/:publisher/:pack/${plural}/:name`,
+      `/api/v1/metadata/packs/:publisher/:pack/${plural}/:name`,
       async (c) => {
         const options = metadataOptions(c);
         return options.ok
@@ -383,7 +377,7 @@ export function makeHttpApp(
     );
   }
 
-  app.post("/packs/preview", async (c) => {
+  app.post("/api/v1/packs/preview", async (c) => {
     try {
       return resultJson(
         c,
@@ -405,7 +399,7 @@ export function makeHttpApp(
     }
   });
   app.get(
-    "/migrations/:id",
+    "/api/v1/migrations/:id",
     async (c) =>
       resultJson(
         c,
@@ -413,7 +407,7 @@ export function makeHttpApp(
       ),
   );
   app.get(
-    "/migrations/:id/violations",
+    "/api/v1/migrations/:id/violations",
     async (c) =>
       resultJson(
         c,
@@ -421,7 +415,7 @@ export function makeHttpApp(
       ),
   );
   app.get(
-    "/migrations/:id/sql",
+    "/api/v1/migrations/:id/sql",
     async (c) =>
       resultJson(
         c,
@@ -429,14 +423,14 @@ export function makeHttpApp(
       ),
   );
   app.post(
-    "/migrations/:id/validate",
+    "/api/v1/migrations/:id/validate",
     async (c) =>
       resultJson(
         c,
         await deps.migrations.validate(c.req.param("id"), c.get("auth")),
       ),
   );
-  app.post("/migrations/:id/apply", async (c) => {
+  app.post("/api/v1/migrations/:id/apply", async (c) => {
     try {
       const value = await c.req.json();
       if (!value || typeof value !== "object" || Array.isArray(value)) {
