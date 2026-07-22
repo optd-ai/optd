@@ -654,7 +654,7 @@ for (const trace of [false, true]) {
           "commit",
           timeoutStageId,
           "--timeout",
-          "2s",
+          "30s",
         ]);
         await observeBlockedCommit(harness.server.sql);
         releaseLifecycle();

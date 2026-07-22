@@ -726,6 +726,41 @@ for (const logLevel of ["info", "trace"] as const) {
             outputs.push(mismatch.stdout, mismatch.stderr);
           }
         }
+        const expectedSucceededIds = (await query<{ id: string }>(
+          harness.server.sql,
+          `select id from outbox_deliveries
+           where status='succeeded' order by created_at desc,id desc`,
+        )).rows.map((row) => row.id);
+        const jsonListPages = await collectListPages(
+          harness,
+          true,
+          ["--status", "succeeded", "--limit", "2"],
+          outputs,
+        );
+        const toonListPages = await collectListPages(
+          harness,
+          false,
+          ["--status", "succeeded", "--limit", "2"],
+          outputs,
+        );
+        assert(jsonListPages.pageCount >= 3);
+        assert(toonListPages.pageCount >= 3);
+        assertEquals(jsonListPages.terminalCursor, null);
+        assertEquals(toonListPages.terminalCursor, null);
+        assertEquals(jsonListPages.ids, expectedSucceededIds);
+        assertEquals(toonListPages.ids, expectedSucceededIds);
+        assertEquals(toonListPages.items, jsonListPages.items);
+        assertEquals(new Set(jsonListPages.ids).size, jsonListPages.ids.length);
+        assertEquals(
+          jsonListPages.items.map((item: Record<string, unknown>) => [
+            item.created_at,
+            item.id,
+          ]),
+          [...jsonListPages.items].sort(compareDeliveryRows).map(
+            (item: Record<string, unknown>) => [item.created_at, item.id],
+          ),
+        );
+
         const insideInstant = new Date(statusSucceededDelivery.created_at)
           .getTime();
         const insideFrom = new Date(insideInstant - 1).toISOString();
@@ -880,13 +915,67 @@ for (const logLevel of ["info", "trace"] as const) {
           null,
         );
 
+        provider.enqueue(
+          { kind: "success", body: { directive: "retry" } },
+          { kind: "success", body: { directive: "retry" } },
+          { kind: "success" },
+        );
+        const pagedAttemptWork = await stageCommit(
+          harness,
+          pack,
+          projectId,
+          "ambiguous",
+          "attempt-pagination",
+        );
+        const pagedAttemptDelivery = await deliveryForStage(
+          harness,
+          pagedAttemptWork.stageId,
+        );
+        await waitStatus(harness, pagedAttemptDelivery.id, "succeeded");
+        const expectedAttemptIds = (await query<{ id: string }>(
+          harness.server.sql,
+          `select id from outbox_attempts where delivery_id=$1
+           order by total_attempt_number,id`,
+          [pagedAttemptDelivery.id],
+        )).rows.map((row) => row.id);
+        assert(expectedAttemptIds.length >= 3);
+        const jsonAttemptPages = await collectAttemptPages(
+          harness,
+          true,
+          pagedAttemptDelivery.id,
+          outputs,
+        );
+        const toonAttemptPages = await collectAttemptPages(
+          harness,
+          false,
+          pagedAttemptDelivery.id,
+          outputs,
+        );
+        assert(jsonAttemptPages.pageCount >= 3);
+        assert(toonAttemptPages.pageCount >= 3);
+        assertEquals(jsonAttemptPages.terminalCursor, null);
+        assertEquals(toonAttemptPages.terminalCursor, null);
+        assertEquals(jsonAttemptPages.ids, expectedAttemptIds);
+        assertEquals(toonAttemptPages.ids, expectedAttemptIds);
+        assertEquals(toonAttemptPages.items, jsonAttemptPages.items);
+        assertEquals(
+          new Set(jsonAttemptPages.ids).size,
+          jsonAttemptPages.ids.length,
+        );
+        assertEquals(
+          jsonAttemptPages.items.map((item: Record<string, unknown>) =>
+            item.total_attempt_number
+          ),
+          [1, 2, 3],
+        );
+
         const firstAttempts = json(
           await successful(
             harness.runOptctl([
               "--json",
               "outbox",
               "attempts",
-              ambiguousDelivery.id,
+              pagedAttemptDelivery.id,
               "--limit",
               "1",
             ]),
@@ -922,7 +1011,7 @@ for (const logLevel of ["info", "trace"] as const) {
         assertEquals(typeof safeAttempt.grants[0].grant_id, "string");
         assertEquals(safeAttempt.grants[0].slot, "token");
         assertEquals(typeof safeAttempt.grants[0].secret_id, "string");
-        assertEquals(safeAttempt.grants[0].value_version, 1);
+        assertEquals(safeAttempt.grants[0].value_version, 2);
         assertEquals(
           JSON.stringify(safeAttempt).match(
             /"(?:env|name|value|ciphertext|nonce|key_id)"/i,
@@ -934,7 +1023,7 @@ for (const logLevel of ["info", "trace"] as const) {
             harness.runOptctl([
               "outbox",
               "attempts",
-              ambiguousDelivery.id,
+              pagedAttemptDelivery.id,
               "--limit",
               "1",
             ]),
@@ -950,7 +1039,7 @@ for (const logLevel of ["info", "trace"] as const) {
               "--json",
               "outbox",
               "attempts",
-              ambiguousDelivery.id,
+              pagedAttemptDelivery.id,
               "--limit",
               "1",
               "--cursor",
@@ -967,7 +1056,7 @@ for (const logLevel of ["info", "trace"] as const) {
             harness.runOptctl([
               "outbox",
               "attempts",
-              ambiguousDelivery.id,
+              pagedAttemptDelivery.id,
               "--limit",
               "1",
               "--cursor",
@@ -1123,6 +1212,49 @@ for (const logLevel of ["info", "trace"] as const) {
           ),
           true,
         );
+        await installPauseTrigger(harness);
+        const jsonDrainWork = await stageCommit(
+          harness,
+          pack,
+          projectId,
+          "normal",
+          "json-drain-exact-one",
+        );
+        const jsonDrainDelivery = await deliveryForStage(
+          harness,
+          jsonDrainWork.stageId,
+        );
+        provider.enqueue({ kind: "success" });
+        await releasePaused(harness, jsonDrainDelivery.id);
+        const jsonDrainOne = json(
+          await successful(
+            harness.runOptctl([
+              "--json",
+              "outbox",
+              "drain",
+              "--limit",
+              "1",
+            ]),
+            outputs,
+          ),
+        ).data;
+        assertEquals(jsonDrainOne.claimed, 1);
+        assertEquals(jsonDrainOne.processed, 1);
+        assertEquals(jsonDrainOne.succeeded, 1);
+        assertEquals(jsonDrainOne.retried, 0);
+        assertEquals(jsonDrainOne.dead_lettered, 0);
+        assertEquals(jsonDrainOne.executions.length, 1);
+        assertEquals(
+          jsonDrainOne.executions[0].delivery_id,
+          jsonDrainDelivery.id,
+        );
+        await waitStatus(harness, jsonDrainDelivery.id, "succeeded");
+        assertEquals(
+          provider.effects.some((effect) =>
+            effect.idempotencyKey === jsonDrainDelivery.id
+          ),
+          true,
+        );
         const jsonDrain = json(
           await successful(
             harness.runOptctl([
@@ -1135,12 +1267,20 @@ for (const logLevel of ["info", "trace"] as const) {
             outputs,
           ),
         ).data;
-        assertEquals(jsonDrain.claimed, 0);
-        assertEquals(jsonDrain.processed, 0);
-        assertEquals(jsonDrain.succeeded, 0);
-        assertEquals(jsonDrain.retried, 0);
-        assertEquals(jsonDrain.dead_lettered, 0);
-        assertEquals(jsonDrain.executions, []);
+        const toonEmptyDrain = toon(
+          await successful(
+            harness.runOptctl(["outbox", "drain", "--limit", "1"]),
+            outputs,
+          ),
+        ).data;
+        for (const emptyDrain of [jsonDrain, toonEmptyDrain]) {
+          assertEquals(emptyDrain.claimed, 0);
+          assertEquals(emptyDrain.processed, 0);
+          assertEquals(emptyDrain.succeeded, 0);
+          assertEquals(emptyDrain.retried, 0);
+          assertEquals(emptyDrain.dead_lettered, 0);
+          assertEquals(emptyDrain.executions, []);
+        }
         await harness.restart({
           environment: { OPERANT_OUTBOX_POLL_INTERVAL_MS: "10" },
         });
@@ -1726,6 +1866,106 @@ function errorOutput(
     ? JSON.parse(result.stderr)
     : decodeToon(result.stderr)) as Record<string, any>;
 }
+async function collectListPages(
+  harness: LiveHarness,
+  asJson: boolean,
+  args: string[],
+  outputs: string[],
+) {
+  const items: Array<Record<string, any>> = [];
+  const ids: string[] = [];
+  const cursors = new Set<string>();
+  let cursor: string | null = null;
+  let pageCount = 0;
+  do {
+    if (++pageCount > 100) {
+      throw new Error(
+        `list pagination exceeded bound: ${JSON.stringify({ ids, cursor })}`,
+      );
+    }
+    const result = await successful(
+      harness.runOptctl([
+        ...(asJson ? ["--json"] : []),
+        "outbox",
+        "list",
+        ...args,
+        ...(cursor === null ? [] : ["--cursor", cursor]),
+      ]),
+      outputs,
+    );
+    const data = (asJson ? json(result) : toon(result)).data;
+    for (const item of data.items) {
+      if (ids.includes(item.id)) {
+        throw new Error(`duplicate list ID ${item.id}`);
+      }
+      ids.push(item.id);
+      items.push(item);
+    }
+    const next = data.page.next_cursor as string | null;
+    if (next !== null) {
+      if (cursors.has(next)) throw new Error(`repeated list cursor ${next}`);
+      cursors.add(next);
+    }
+    cursor = next;
+  } while (cursor !== null);
+  return { items, ids, pageCount, terminalCursor: cursor };
+}
+
+async function collectAttemptPages(
+  harness: LiveHarness,
+  asJson: boolean,
+  deliveryId: string,
+  outputs: string[],
+) {
+  const items: Array<Record<string, any>> = [];
+  const ids: string[] = [];
+  const cursors = new Set<string>();
+  let cursor: string | null = null;
+  let pageCount = 0;
+  do {
+    if (++pageCount > 100) {
+      throw new Error(
+        `attempt pagination exceeded bound: ${JSON.stringify({ ids, cursor })}`,
+      );
+    }
+    const result = await successful(
+      harness.runOptctl([
+        ...(asJson ? ["--json"] : []),
+        "outbox",
+        "attempts",
+        deliveryId,
+        "--limit",
+        "1",
+        ...(cursor === null ? [] : ["--cursor", cursor]),
+      ]),
+      outputs,
+    );
+    const data = (asJson ? json(result) : toon(result)).data;
+    for (const item of data.items) {
+      if (ids.includes(item.id)) {
+        throw new Error(`duplicate attempt ID ${item.id}`);
+      }
+      ids.push(item.id);
+      items.push(item);
+    }
+    const next = data.page.next_cursor as string | null;
+    if (next !== null) {
+      if (cursors.has(next)) throw new Error(`repeated attempt cursor ${next}`);
+      cursors.add(next);
+    }
+    cursor = next;
+  } while (cursor !== null);
+  return { items, ids, pageCount, terminalCursor: cursor };
+}
+
+function compareDeliveryRows(
+  left: Record<string, any>,
+  right: Record<string, any>,
+): number {
+  const time = String(right.created_at).localeCompare(String(left.created_at));
+  return time !== 0 ? time : String(right.id).localeCompare(String(left.id));
+}
+
 function expectedFilters(args: string[]): Record<string, string> {
   const filters: Record<string, string> = {};
   for (let index = 0; index < args.length; index += 2) {
