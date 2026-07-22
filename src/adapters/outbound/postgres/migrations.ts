@@ -1356,6 +1356,173 @@ export const platformMigrations: PlatformMigration[] = [
       create index object_versions_commit_idx on object_versions(changeset_commit_id,created_at,id);
     `,
   },
+  {
+    id: "1028_durable_outbox",
+    sql: `
+      do $$ begin
+        if exists(select 1 from outbox limit 1) then
+          raise exception 'incompatible populated legacy outbox; export or clear legacy operational rows before upgrade';
+        end if;
+      end $$;
+      drop table outbox;
+
+      create table outbox_deliveries(
+        id uuid primary key check(uuid_extract_version(id)=7),
+        event_id text not null references events(id),
+        attachment_id uuid not null references pack_hook_attachment_revisions(id),
+        candidate_revision_id uuid not null references pack_candidate_revisions(id),
+        hook_revision_id uuid not null references pack_component_revisions(id),
+        hook_identity text not null,
+        script_digest text not null check(script_digest ~ '^sha256:[0-9a-f]{64}$'),
+        security_digest text not null check(security_digest ~ '^sha256:[0-9a-f]{64}$'),
+        attachment_digest text not null check(attachment_digest ~ '^sha256:[0-9a-f]{64}$'),
+        config_digest text not null check(config_digest ~ '^sha256:[0-9a-f]{64}$'),
+        envelope_schema text not null check(envelope_schema='delivery.v1'),
+        output_schema text not null check(output_schema='delivery.v1'),
+        envelope_json jsonb not null check(jsonb_typeof(envelope_json)='object'),
+        attachment_spec_json jsonb not null check(jsonb_typeof(attachment_spec_json)='object'),
+        hook_config_json jsonb not null check(jsonb_typeof(hook_config_json)='object'),
+        capabilities_json jsonb not null check(jsonb_typeof(capabilities_json)='object'),
+        effects_json jsonb not null check(jsonb_typeof(effects_json) in ('array','object')),
+        pinned_grants_json jsonb not null check(jsonb_typeof(pinned_grants_json)='array'),
+        auth_context_id uuid references auth_contexts(id),
+        changeset_commit_id uuid references changeset_commits(id),
+        status text not null check(status in ('pending','running','retry_wait','succeeded','dead_letter','cancelled')),
+        retry_generation integer not null default 0 check(retry_generation >= 0),
+        attempts_in_generation integer not null default 0 check(attempts_in_generation >= 0),
+        total_attempts integer not null default 0 check(total_attempts >= attempts_in_generation),
+        max_attempts integer not null check(max_attempts between 1 and 1000),
+        timeout_ms integer not null check(timeout_ms between 1 and 600000),
+        available_at timestamptz not null,
+        lease_owner uuid,
+        lease_attempt_id uuid,
+        lease_expires_at timestamptz,
+        last_error_code text,
+        last_error_message text check(last_error_message is null or char_length(last_error_message)<=1000),
+        created_at timestamptz not null default now(),
+        updated_at timestamptz not null default now(),
+        unique(event_id,attachment_id),
+        check((status='running') = (lease_owner is not null and lease_attempt_id is not null and lease_expires_at is not null))
+      );
+
+      create table hook_revision_delivery_controls(
+        hook_revision_id uuid primary key references pack_component_revisions(id),
+        enabled boolean not null,
+        reason text check(reason is null or char_length(reason) between 1 and 1000),
+        changed_auth_context_id uuid not null references auth_contexts(id),
+        changed_at timestamptz not null default now()
+      );
+
+      create table outbox_hook_executions(
+        id uuid primary key check(uuid_extract_version(id)=7),
+        delivery_id uuid not null references outbox_deliveries(id),
+        attempt_id uuid not null unique,
+        hook_revision_id uuid not null references pack_component_revisions(id),
+        attachment_id uuid not null references pack_hook_attachment_revisions(id),
+        script_digest text not null,
+        security_digest text not null,
+        attachment_digest text not null,
+        config_digest text not null,
+        duration_ms integer not null check(duration_ms>=0),
+        exit_code integer,
+        logs text not null check(char_length(logs)<=1000000),
+        logs_truncated boolean not null,
+        secrets_redacted boolean not null,
+        grant_evidence_json jsonb not null check(jsonb_typeof(grant_evidence_json)='array'),
+        executor_identity text not null default 'system:outbox',
+        created_at timestamptz not null default now(),
+        completed_at timestamptz not null default now()
+      );
+
+      create table outbox_attempts(
+        id uuid primary key check(uuid_extract_version(id)=7),
+        delivery_id uuid not null references outbox_deliveries(id),
+        retry_generation integer not null check(retry_generation>=0),
+        attempt_number integer not null check(attempt_number>0),
+        total_attempt_number integer not null check(total_attempt_number>0),
+        worker_instance_id uuid not null check(uuid_extract_version(worker_instance_id)=7),
+        hook_revision_id uuid not null references pack_component_revisions(id),
+        grant_evidence_json jsonb not null default '[]'::jsonb check(jsonb_typeof(grant_evidence_json)='array'),
+        idempotency_key uuid not null,
+        started_at timestamptz not null,
+        lease_expires_at timestamptz not null check(lease_expires_at>started_at),
+        completed_at timestamptz,
+        outcome text not null check(outcome in ('running','succeeded','retry','dead_letter','lease_expired','late_succeeded','late_failed')),
+        error_code text,
+        error_message text check(error_message is null or char_length(error_message)<=1000),
+        external_id text check(external_id is null or char_length(external_id)<=512),
+        hook_execution_id uuid unique references outbox_hook_executions(id),
+        unique(delivery_id,retry_generation,attempt_number),
+        unique(delivery_id,total_attempt_number),
+        check(idempotency_key=delivery_id),
+        check((outcome='running')=(completed_at is null))
+      );
+      alter table outbox_deliveries add constraint outbox_active_attempt_fk
+        foreign key(lease_attempt_id) references outbox_attempts(id) deferrable initially deferred;
+      alter table outbox_hook_executions add constraint outbox_execution_attempt_fk
+        foreign key(attempt_id) references outbox_attempts(id) deferrable initially deferred;
+
+      create index outbox_claim_idx on outbox_deliveries(available_at,id)
+        where status in ('pending','retry_wait');
+      create index outbox_expired_lease_idx on outbox_deliveries(lease_expires_at,id)
+        where status='running';
+      create index outbox_delivery_timeline_idx on outbox_deliveries(created_at,id);
+      create index outbox_delivery_status_timeline_idx on outbox_deliveries(status,created_at,id);
+      create index outbox_delivery_hook_idx on outbox_deliveries(hook_identity,created_at,id);
+      create index outbox_delivery_event_idx on outbox_deliveries(event_id);
+      create index outbox_attempt_timeline_idx on outbox_attempts(delivery_id,total_attempt_number,id);
+
+      create function operant_guard_outbox_delivery() returns trigger language plpgsql as $$
+      begin
+        if tg_op='DELETE' then raise exception 'outbox deliveries cannot be deleted'; end if;
+        if row(old.id,old.event_id,old.attachment_id,old.candidate_revision_id,old.hook_revision_id,
+          old.hook_identity,old.script_digest,old.security_digest,old.attachment_digest,old.config_digest,
+          old.envelope_schema,old.output_schema,old.envelope_json,old.attachment_spec_json,old.hook_config_json,
+          old.capabilities_json,old.effects_json,old.pinned_grants_json,old.auth_context_id,old.changeset_commit_id,
+          old.max_attempts,old.timeout_ms,old.created_at) is distinct from
+          row(new.id,new.event_id,new.attachment_id,new.candidate_revision_id,new.hook_revision_id,
+          new.hook_identity,new.script_digest,new.security_digest,new.attachment_digest,new.config_digest,
+          new.envelope_schema,new.output_schema,new.envelope_json,new.attachment_spec_json,new.hook_config_json,
+          new.capabilities_json,new.effects_json,new.pinned_grants_json,new.auth_context_id,new.changeset_commit_id,
+          new.max_attempts,new.timeout_ms,new.created_at) then
+          raise exception 'outbox pinned evidence is immutable';
+        end if;
+        if new.total_attempts < old.total_attempts or new.retry_generation < old.retry_generation then
+          raise exception 'outbox counters are monotonic';
+        end if;
+        return new;
+      end $$;
+      create trigger outbox_delivery_guard before update or delete on outbox_deliveries
+        for each row execute function operant_guard_outbox_delivery();
+
+      create function operant_guard_outbox_attempt() returns trigger language plpgsql as $$
+      begin
+        if tg_op='DELETE' then raise exception 'outbox attempts cannot be deleted'; end if;
+        if row(old.id,old.delivery_id,old.retry_generation,old.attempt_number,old.total_attempt_number,
+          old.worker_instance_id,old.hook_revision_id,old.idempotency_key,old.started_at,old.lease_expires_at) is distinct from
+          row(new.id,new.delivery_id,new.retry_generation,new.attempt_number,new.total_attempt_number,
+          new.worker_instance_id,new.hook_revision_id,new.idempotency_key,new.started_at,new.lease_expires_at) then
+          raise exception 'outbox attempt identity is immutable';
+        end if;
+        if old.outcome<>'running' and not(old.outcome='lease_expired' and new.outcome in ('late_succeeded','late_failed')) then
+          raise exception 'completed outbox attempts are immutable';
+        end if;
+        return new;
+      end $$;
+      create trigger outbox_attempt_guard before update or delete on outbox_attempts
+        for each row execute function operant_guard_outbox_attempt();
+      create function operant_reject_outbox_execution_mutation() returns trigger language plpgsql as $$
+      begin raise exception 'outbox execution evidence is immutable'; end $$;
+      create trigger outbox_execution_immutable before update or delete on outbox_hook_executions
+        for each row execute function operant_reject_outbox_execution_mutation();
+
+      insert into policy_rules(id,policy_definition_version_id,role_id,capability,resource,condition_kind,summary) values
+        ('01900000-0000-7000-8000-000000000261','01900000-0000-7000-8000-000000000201','system:admin','outbox.inspect','system:outbox','unconditional','Inspect durable deliveries.'),
+        ('01900000-0000-7000-8000-000000000262','01900000-0000-7000-8000-000000000201','system:admin','outbox.retry','system:outbox','unconditional','Retry dead-letter deliveries.'),
+        ('01900000-0000-7000-8000-000000000263','01900000-0000-7000-8000-000000000201','system:admin','outbox.cancel','system:outbox','unconditional','Cancel unclaimed deliveries.'),
+        ('01900000-0000-7000-8000-000000000264','01900000-0000-7000-8000-000000000201','system:admin','outbox.drain','system:outbox','unconditional','Drain durable deliveries.');
+    `,
+  },
 ];
 
 async function backfillTrustedHookSecurity(sql: Queryable): Promise<void> {

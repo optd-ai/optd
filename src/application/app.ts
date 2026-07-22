@@ -8,6 +8,7 @@ import { makePackServices } from "./services/pack_services.ts";
 import { makeQueryObjectsService } from "./services/query_objects.ts";
 import { makeMigrationServices } from "./services/migration_services.ts";
 import { makeProcessOutboxService } from "./services/process_outbox.ts";
+import { PostgresOutboxRepository } from "../adapters/outbound/postgres/outbox_repository.ts";
 import {
   DenoHookRunner,
   type DenoHookRunnerOptions,
@@ -71,9 +72,13 @@ export function makeApplication(
       }),
   });
   const hookRunner = new DenoHookRunner(options.hookRunnerOptions);
+  const hookSecretRepository = new PostgresHookSecretRepository(
+    sql,
+    cryptoAdapter,
+  );
   const stageHookCoordinator = options.stageHookCoordinator ??
     new TrustedStageHookCoordinator(
-      new PostgresHookSecretRepository(sql, cryptoAdapter),
+      hookSecretRepository,
       options.hookRunnerOptions,
     );
   const stageRepository = new PostgresStageRepository(sql);
@@ -136,8 +141,10 @@ export function makeApplication(
     expressions: makeExpressionService(sql as Queryable),
     outbox: makeProcessOutboxService({
       sql: sql as Queryable,
-      tx,
-      hookRunner,
+      repository: new PostgresOutboxRepository(sql),
+      authorization: authorizationRepository,
+      secrets: hookSecretRepository,
+      hookRunnerOptions: options.hookRunnerOptions,
     }),
     secrets,
     actions: stageHookCoordinator instanceof TrustedStageHookCoordinator

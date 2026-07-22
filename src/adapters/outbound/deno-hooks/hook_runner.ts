@@ -1,3 +1,5 @@
+import { parseDeliveryOutput } from "../../../domain/outbox/delivery.ts";
+
 type JsonRecord = Record<string, unknown>;
 
 export type HookOutputSchema =
@@ -523,10 +525,9 @@ export function validateOutputShape(
       )
     ) return "changeset operation is invalid";
   } else if (schema === "delivery.v1") {
-    if (
-      !exactKeys(output, ["outcome"]) ||
-      !["success", "retry", "dead_letter"].includes(String(output.outcome))
-    ) return "delivery.v1 output has an invalid shape";
+    if (parseDeliveryOutput(output) === null) {
+      return "delivery.v1 output has an invalid shape";
+    }
   }
   return null;
 }

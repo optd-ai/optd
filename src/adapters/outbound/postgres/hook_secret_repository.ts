@@ -23,7 +23,12 @@ export class PostgresHookSecretRepository {
   async resolve(
     hookRevisionId: string,
     securityDigest: string,
-    slots: readonly Readonly<{ slot: string; env: string }>[],
+    slots: readonly Readonly<{
+      slot: string;
+      env: string;
+      grant_id?: string | null;
+      secret_id?: string | null;
+    }>[],
   ): Promise<ResolvedHookSecrets> {
     return await this.sql.begin(async (tx) => {
       const values: Record<string, string> = {};
@@ -53,7 +58,11 @@ export class PostgresHookSecretRepository {
         )).rows[0];
         if (
           !row || row.status !== "active" ||
-          row.hook_security_digest !== securityDigest
+          row.hook_security_digest !== securityDigest ||
+          (declaration.grant_id !== undefined &&
+            row.grant_id !== declaration.grant_id) ||
+          (declaration.secret_id !== undefined &&
+            row.secret_id !== declaration.secret_id)
         ) throw new HookSecretUnavailableError(declaration.slot);
         const valueVersion = Number(row.value_version);
         let value: string;

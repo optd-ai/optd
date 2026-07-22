@@ -19,6 +19,7 @@ import {
   type PostgresRuntime,
   startPostgresRuntime,
 } from "./adapters/outbound/postgres-process/lifecycle.ts";
+import { startOutboxPollLoop } from "./application/services/outbox/poll_loop.ts";
 
 export type StartedServer = {
   url: string;
@@ -58,6 +59,13 @@ export async function createFetchHandler(
       ),
     },
   });
+  const outboxLoop = startOutboxPollLoop(
+    () => application.outbox.processBatch(),
+    {
+      intervalMs: application.outbox.config.pollIntervalMs,
+      shutdownGraceMs: application.outbox.config.shutdownGraceMs,
+    },
+  );
   const app = makeHttpApp({
     authentication: application.authentication,
     bootstrap: application.bootstrap,
@@ -84,6 +92,7 @@ export async function createFetchHandler(
     fetch: app.fetch,
     sql,
     async shutdown() {
+      await outboxLoop.stop();
       await application.authentication.close();
       await closePostgresClient(sql);
       await postgresRuntime.stop();

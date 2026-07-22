@@ -1720,22 +1720,56 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
         `${parsed.server}/api/v1/hook-secret-grants/${value}/revoke`,
         {},
       );
-    } else if (cmd === "outbox" && sub === "status") {
-      result = await getJson(`${parsed.server}/outbox`);
-    } else if (cmd === "outbox" && sub === "drain") {
-      const limitFlag = parsed.positional.findIndex((arg) =>
-        arg === "--limit" || arg.startsWith("--limit=")
+    } else if (cmd === "outbox" && sub === "list") {
+      const options = cliOptions(parsed.positional.slice(2), [
+        "status",
+        "hook",
+        "event",
+        "since",
+        "until",
+        "limit",
+        "cursor",
+      ]);
+      const query = new URLSearchParams(options).toString();
+      result = await getJson(
+        `${parsed.server}/api/v1/outbox${query ? `?${query}` : ""}`,
       );
-      const limit = limitFlag >= 0
-        ? Number(
-          parsed.positional[limitFlag] === "--limit"
-            ? parsed.positional[limitFlag + 1]
-            : parsed.positional[limitFlag].slice("--limit=".length),
-        )
-        : undefined;
-      result = await postJson(`${parsed.server}/outbox/drain`, { limit });
+    } else if (cmd === "outbox" && sub === "inspect" && value) {
+      if (parsed.positional.length !== 3) {
+        throw usageError("outbox inspect accepts exactly one delivery ID");
+      }
+      result = await getJson(`${parsed.server}/api/v1/outbox/${value}`);
+    } else if (cmd === "outbox" && sub === "attempts" && value) {
+      const options = cliOptions(parsed.positional.slice(3), [
+        "limit",
+        "after",
+      ]);
+      const query = new URLSearchParams(options).toString();
+      result = await getJson(
+        `${parsed.server}/api/v1/outbox/${value}/attempts${
+          query ? `?${query}` : ""
+        }`,
+      );
+    } else if (cmd === "outbox" && sub === "drain") {
+      const options = cliOptions(parsed.positional.slice(2), ["limit"]);
+      result = await postJson(`${parsed.server}/api/v1/outbox/drain`, {
+        ...(options.limit === undefined
+          ? {}
+          : { limit: Number(options.limit) }),
+      });
     } else if (cmd === "outbox" && sub === "retry" && value) {
-      result = await postJson(`${parsed.server}/outbox/${value}/retry`, {});
+      const options = cliOptions(parsed.positional.slice(3), ["reason"]);
+      result = await postJson(`${parsed.server}/api/v1/outbox/${value}/retry`, {
+        ...(options.reason === undefined ? {} : { reason: options.reason }),
+      });
+    } else if (cmd === "outbox" && sub === "cancel" && value) {
+      const options = cliOptions(parsed.positional.slice(3), ["reason"]);
+      result = await postJson(
+        `${parsed.server}/api/v1/outbox/${value}/cancel`,
+        {
+          ...(options.reason === undefined ? {} : { reason: options.reason }),
+        },
+      );
     } else if (cmd === "migration" && sub === "validate" && value) {
       result = await postJson(
         `${parsed.server}/migrations/${value}/validate`,
@@ -1921,7 +1955,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       );
     } else {
       throw usageError(
-        "usage: optctl status live/ready/bootstrap | bootstrap init | home | project list/create/view/update/archive/select | context set-project | pack preview <dir> | pack apply <dir> [--safe|--reviewed] [--timeout duration] | metadata [packs] | metadata pack <publisher/pack> | metadata resource/relationship/lifecycle/action/hook/role/policy/seed <publisher/pack:name> | secret list/create/rotate/disable/grants/grant/replace-grant/revoke-grant | action preview/commit <namespace.action> --input '{...}' | outbox status/drain/retry | migration inspect <id> [--sql|--violations] | migration validate <id> | migration apply <id> (--safe|--reviewed|--confirm-token <token>) [--timeout duration] | query <namespace.resource> [--where expr] [--fields a,b] [--sort field:desc] [--limit n] [--cursor c] | changeset stage <json-file> | changeset commit <stage-id> [--timeout duration] | changeset inspect <stage-id> | changeset cancel <stage-id> [--reason text] | --project <selector> view publisher/pack:name <uuid> | --project <selector> history publisher/pack:name <uuid> [--limit n] [--cursor c] | --project <selector> view relationship publisher/pack:name <uuid> | --project <selector> history relationship publisher/pack:name <uuid> [--limit n] [--cursor c]",
+        "usage: optctl status live/ready/bootstrap | bootstrap init | home | project list/create/view/update/archive/select | context set-project | pack preview <dir> | pack apply <dir> [--safe|--reviewed] [--timeout duration] | metadata [packs] | metadata pack <publisher/pack> | metadata resource/relationship/lifecycle/action/hook/role/policy/seed <publisher/pack:name> | secret list/create/rotate/disable/grants/grant/replace-grant/revoke-grant | action preview/commit <namespace.action> --input '{...}' | outbox list/inspect/attempts/retry/cancel/drain | migration inspect <id> [--sql|--violations] | migration validate <id> | migration apply <id> (--safe|--reviewed|--confirm-token <token>) [--timeout duration] | query <namespace.resource> [--where expr] [--fields a,b] [--sort field:desc] [--limit n] [--cursor c] | changeset stage <json-file> | changeset commit <stage-id> [--timeout duration] | changeset inspect <stage-id> | changeset cancel <stage-id> [--reason text] | --project <selector> view publisher/pack:name <uuid> | --project <selector> history publisher/pack:name <uuid> [--limit n] [--cursor c] | --project <selector> view relationship publisher/pack:name <uuid> | --project <selector> history relationship publisher/pack:name <uuid> [--limit n] [--cursor c]",
       );
     }
     const output = parsed.verbose
@@ -1968,4 +2002,26 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
     });
     return { stdout: "", stderr: render(envelope, parse(args).json), code: 1 };
   }
+}
+
+function cliOptions(args: string[], allowed: string[]): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (let index = 0; index < args.length; index++) {
+    const argument = args[index];
+    if (!argument.startsWith("--")) {
+      throw usageError(`unexpected argument ${argument}`);
+    }
+    const separator = argument.indexOf("=");
+    const name = argument.slice(2, separator < 0 ? undefined : separator);
+    if (!allowed.includes(name)) throw usageError(`unknown option --${name}`);
+    if (Object.hasOwn(result, name)) {
+      throw usageError(`duplicate option --${name}`);
+    }
+    const value = separator < 0 ? args[++index] : argument.slice(separator + 1);
+    if (value === undefined || value.startsWith("--") || value.length === 0) {
+      throw usageError(`--${name} requires a value`);
+    }
+    result[name] = value;
+  }
+  return result;
 }

@@ -4,338 +4,546 @@ import {
   type Result,
   validationError,
 } from "../../domain/errors/result.ts";
+import type { AuthContext } from "../../domain/auth/model.ts";
+import { uuidV7 } from "../../domain/ids/uuid_v7.ts";
+import { canonicalSha256 } from "../../domain/ids/canonical_json.ts";
+import {
+  type DeliveryOutcome,
+  parseDeliveryOutput,
+  retryDelayMs,
+} from "../../domain/outbox/delivery.ts";
+import {
+  decodeOutboxCursor,
+  encodeOutboxCursor,
+} from "../../domain/outbox/cursor.ts";
+import {
+  DenoHookRunner,
+  type DenoHookRunnerOptions,
+  type HookDefinition,
+} from "../../adapters/outbound/deno-hooks/hook_runner.ts";
+import {
+  type ClaimedDelivery,
+  PostgresOutboxRepository,
+} from "../../adapters/outbound/postgres/outbox_repository.ts";
+import type { PostgresHookSecretRepository } from "../../adapters/outbound/postgres/hook_secret_repository.ts";
+import type { AuthorizationRepository } from "../ports/authorization.ts";
 import {
   query,
   type Queryable,
 } from "../../adapters/outbound/postgres/client.ts";
-import type { TransactionManager } from "../ports/transaction_manager.ts";
-import type {
-  DenoHookRunner,
-  HookDefinition,
-  HookRunResult,
-} from "../../adapters/outbound/deno-hooks/hook_runner.ts";
-import { loadHook, recordHookExecution } from "./run_action.ts";
 
-type JsonRecord = Record<string, unknown>;
+export type OutboxConfig = ReturnType<typeof loadOutboxConfig>;
 
-type OutboxStatus =
-  | "pending"
-  | "running"
-  | "succeeded"
-  | "failed"
-  | "dead_letter";
-
-type ClaimedOutboxRow = {
-  id: string;
-  event_id: string | null;
-  hook: string;
-  phase: string;
-  attempts: number;
-  payload_json: unknown;
-  envelope_json: unknown;
-};
-
-export type OutboxListDto = {
-  rows: Array<{
-    id: string;
-    event_id: string | null;
-    hook: string;
-    phase: string;
-    status: OutboxStatus;
-    attempts: number;
-    available_at: string;
-    locked_by: string | null;
-    locked_at: string | null;
-    last_error: string | null;
-    created_at: string;
-    updated_at: string | null;
-  }>;
-  totals: Record<OutboxStatus, number>;
-};
-
-export type OutboxDrainDto = {
-  worker_id: string;
-  claimed: number;
-  succeeded: number;
-  failed: number;
-  dead_lettered: number;
-  executions: Array<{
-    outbox_id: string;
-    hook_execution_id: string | null;
-    status: "succeeded" | "failed" | "dead_letter";
-    attempts: number;
-    error: string | null;
-  }>;
-};
-
-export type OutboxRetryDto = {
-  id: string;
-  status: OutboxStatus;
-  attempts: number;
-};
+export function loadOutboxConfig(env = Deno.env.toObject()) {
+  return {
+    pollIntervalMs: integer(
+      env.OPERANT_OUTBOX_POLL_INTERVAL_MS,
+      1_000,
+      10,
+      60_000,
+    ),
+    batchSize: integer(env.OPERANT_OUTBOX_BATCH_SIZE, 25, 1, 100),
+    leaseMarginMs: integer(
+      env.OPERANT_OUTBOX_LEASE_MARGIN_MS,
+      30_000,
+      1_000,
+      600_000,
+    ),
+    initialBackoffMs: integer(
+      env.OPERANT_OUTBOX_INITIAL_BACKOFF_MS,
+      5_000,
+      1,
+      3_600_000,
+    ),
+    maximumBackoffMs: integer(
+      env.OPERANT_OUTBOX_MAX_BACKOFF_MS,
+      3_600_000,
+      1,
+      86_400_000,
+    ),
+    maximumRetryAfterMs: integer(
+      env.OPERANT_OUTBOX_MAX_RETRY_AFTER_MS,
+      3_600_000,
+      1,
+      86_400_000,
+    ),
+    shutdownGraceMs: integer(
+      env.OPERANT_OUTBOX_SHUTDOWN_GRACE_MS,
+      30_000,
+      1,
+      600_000,
+    ),
+  };
+}
 
 export function makeProcessOutboxService(deps: {
   sql: Queryable;
-  tx: TransactionManager<Queryable>;
-  hookRunner: DenoHookRunner;
-  maxAttempts?: number;
-  claimLimitDefault?: number;
+  repository: PostgresOutboxRepository;
+  authorization: AuthorizationRepository;
+  secrets: PostgresHookSecretRepository;
+  hookRunnerOptions?: DenoHookRunnerOptions;
+  config?: OutboxConfig;
+  random?: () => number;
+  workerId?: string;
 }) {
-  const maxAttempts = deps.maxAttempts ?? 3;
-  const claimLimitDefault = deps.claimLimitDefault ?? 25;
-  return {
-    async list(): Promise<Result<OutboxListDto>> {
-      try {
-        const rows = await query<OutboxListDto["rows"][number]>(
-          deps.sql,
-          `select id,event_id,hook,phase,status,attempts,available_at::text,locked_by,locked_at::text,last_error,created_at::text,updated_at::text
-           from outbox order by created_at desc limit 200`,
-        );
-        const totalsRows = await query<{ status: OutboxStatus; count: string }>(
-          deps.sql,
-          "select status, count(*)::text as count from outbox group by status",
-        );
-        const totals: Record<OutboxStatus, number> = {
-          pending: 0,
-          running: 0,
-          succeeded: 0,
-          failed: 0,
-          dead_letter: 0,
-        };
-        for (const row of totalsRows.rows) {
-          totals[row.status] = Number(row.count);
-        }
-        return ok({ rows: rows.rows, totals });
-      } catch (error) {
-        return err(validationError("bad_outbox_list", message(error)));
-      }
-    },
-
-    async drain(input: { limit?: number; worker_id?: string } = {}): Promise<
-      Result<OutboxDrainDto>
-    > {
-      const workerId = input.worker_id ?? `worker-${crypto.randomUUID()}`;
-      const limit = Math.max(
-        1,
-        Math.min(input.limit ?? claimLimitDefault, 100),
-      );
-      try {
-        const claimed = await deps.tx.transaction((tx) =>
-          claimOutbox(tx, workerId, limit)
-        );
-        const executions: OutboxDrainDto["executions"] = [];
-        let succeeded = 0;
-        let failed = 0;
-        let deadLettered = 0;
-        for (const row of claimed) {
-          const result = await processOne(
-            deps.sql,
-            deps.hookRunner,
-            row,
-            maxAttempts,
-          );
-          executions.push(result);
-          if (result.status === "succeeded") succeeded++;
-          else if (result.status === "dead_letter") deadLettered++;
-          else failed++;
-        }
-        return ok({
-          worker_id: workerId,
-          claimed: claimed.length,
-          succeeded,
-          failed,
-          dead_lettered: deadLettered,
-          executions,
-        });
-      } catch (error) {
-        return err(validationError("bad_outbox_drain", message(error)));
-      }
-    },
-
-    async retry(id: string): Promise<Result<OutboxRetryDto>> {
-      try {
-        const rows = await query<OutboxRetryDto>(
-          deps.sql,
-          `update outbox
-           set status='pending', attempts=0, available_at=now(), locked_by=null, locked_at=null, last_error=null, updated_at=now()
-           where id=$1 and status in ('failed','dead_letter')
-           returning id,status,attempts`,
-          [id],
-        );
-        const row = rows.rows[0];
-        if (!row) {
-          return err({
-            code: "not_found",
-            message: `retryable outbox row ${id} not found`,
-            severity: "not_found",
-          });
-        }
-        return ok(row);
-      } catch (error) {
-        return err(validationError("bad_outbox_retry", message(error)));
-      }
-    },
-  };
-}
-
-async function claimOutbox(
-  sql: Queryable,
-  workerId: string,
-  limit: number,
-): Promise<ClaimedOutboxRow[]> {
-  const rows = await query<ClaimedOutboxRow>(
-    sql,
-    `with claimable as (
-       select id from outbox
-       where status in ('pending','failed') and available_at <= now()
-       order by created_at, id
-       limit $1
-       for update skip locked
-     )
-     update outbox o
-     set status='running', attempts=o.attempts + 1, locked_by=$2, locked_at=now(), updated_at=now()
-     from claimable
-     where o.id = claimable.id
-     returning o.id,o.event_id,o.hook,o.phase,o.attempts,o.payload_json,o.envelope_json`,
-    [limit, workerId],
-  );
-  return rows.rows;
-}
-
-async function processOne(
-  sql: Queryable,
-  hookRunner: DenoHookRunner,
-  row: ClaimedOutboxRow,
-  maxAttempts: number,
-): Promise<OutboxDrainDto["executions"][number]> {
-  const hook = await loadHook(sql, row.hook);
-  if (!hook) {
-    const error = `hook ${row.hook} not found`;
-    await markFailure(sql, row, maxAttempts, error);
-    return {
-      outbox_id: row.id,
-      hook_execution_id: null,
-      status: row.attempts >= maxAttempts ? "dead_letter" : "failed",
-      attempts: row.attempts,
-      error,
-    };
-  }
-
-  const envelope = envelopeOf(row, hook);
-  const result = await hookRunner.run(hook, envelope);
-  const executionId = await recordHookExecution(
-    sql,
-    hook,
-    result,
-    actorIdOf(envelope.input),
-    row.phase,
-  );
-  if (result.ok) {
-    await query(
-      sql,
-      `update outbox
-       set status='succeeded', locked_by=null, locked_at=null, last_error=null, updated_at=now()
-       where id=$1`,
-      [row.id],
+  const config = deps.config ?? loadOutboxConfig();
+  if (config.maximumBackoffMs < config.initialBackoffMs) {
+    throw new Error(
+      "OPERANT_OUTBOX_MAX_BACKOFF_MS must not be below initial backoff",
     );
-    return {
-      outbox_id: row.id,
-      hook_execution_id: executionId,
-      status: "succeeded",
-      attempts: row.attempts,
-      error: null,
-    };
+  }
+  const workerId = deps.workerId ?? uuidV7();
+  const random = deps.random ?? Math.random;
+
+  async function processBatch(limit = config.batchSize) {
+    const claims = await deps.repository.claim(
+      workerId,
+      Math.max(1, Math.min(limit, config.batchSize)),
+      config.leaseMarginMs,
+    );
+    const executions = await Promise.all(claims.map(processOne));
+    return { worker_id: workerId, claimed: claims.length, executions };
   }
 
-  const error = result.error?.message ?? (result.logs || "hook failed");
-  const status = await markFailure(sql, row, maxAttempts, error, result);
-  return {
-    outbox_id: row.id,
-    hook_execution_id: executionId,
-    status,
-    attempts: row.attempts,
-    error,
-  };
-}
-
-function envelopeOf(row: ClaimedOutboxRow, hook: HookDefinition) {
-  const stored = asRecord(row.envelope_json);
-  const payload = asRecord(row.payload_json);
-  const input = asRecord(stored.input);
-  return {
-    hook: typeof stored.hook === "string" ? stored.hook : hook.name,
-    phase: typeof stored.phase === "string" ? stored.phase : row.phase,
-    input: {
-      ...payload,
-      ...input,
-      outbox_id: row.id,
-      event_id: row.event_id ?? input.event_id ?? payload.event_id,
-      event: asRecord(input.event ?? payload.event ?? { id: row.event_id }),
-    },
-    metadata: {
-      ...asRecord(stored.metadata),
-      pack_revision: hook.revision,
-      script_digest: hook.scriptDigest,
-      outbox_id: row.id,
-      event_id: row.event_id,
-    },
-  };
-}
-
-async function markFailure(
-  sql: Queryable,
-  row: ClaimedOutboxRow,
-  maxAttempts: number,
-  error: string,
-  result?: HookRunResult,
-): Promise<"failed" | "dead_letter"> {
-  const dead = row.attempts >= maxAttempts;
-  const status = dead ? "dead_letter" : "failed";
-  await query(
-    sql,
-    `update outbox
-     set status=$2, locked_by=null, locked_at=null, last_error=$3,
-         available_at=case when $2='failed' then now() + ($4::text || ' seconds')::interval else available_at end,
-         updated_at=now()
-     where id=$1`,
-    [
-      row.id,
-      status,
-      result?.error?.message ?? error,
-      String(backoffSeconds(row.attempts)),
-    ],
-  );
-  return status;
-}
-
-function backoffSeconds(attempts: number): number {
-  return Math.min(60, Math.max(1, 2 ** Math.max(0, attempts - 1)));
-}
-
-function actorIdOf(input: JsonRecord): string {
-  const actor = input.actor;
-  if (typeof input.actor_id === "string") return input.actor_id;
-  if (actor && typeof actor === "object" && !Array.isArray(actor)) {
-    const id = (actor as JsonRecord).id;
-    if (typeof id === "string") return id;
-  }
-  return "system:outbox";
-}
-
-function asRecord(value: unknown): JsonRecord {
-  if (typeof value === "string") {
+  async function processOne(claim: ClaimedDelivery) {
+    let outcome: DeliveryOutcome;
+    let evidence: ReturnType<typeof emptyEvidence> = emptyEvidence();
     try {
-      const parsed = JSON.parse(value);
-      return isRecord(parsed) ? parsed : {};
-    } catch {
-      return {};
+      const loaded = await loadPinned(deps.sql, claim);
+      const grants = await deps.secrets.resolve(
+        claim.hook_revision_id,
+        claim.security_digest,
+        pinnedGrants(claim.pinned_grants_json),
+      );
+      const secretValues: Record<string, string> = {};
+      for (const [env, value] of Object.entries(grants.values)) {
+        secretValues[env] = value;
+      }
+      const hook = hookDefinition(claim, loaded.config, loaded.source);
+      hook.secrets = pinnedGrants(claim.pinned_grants_json).map((slot) => ({
+        name: slot.env,
+        env: slot.env,
+        slot: slot.slot,
+      }));
+      const runner = new DenoHookRunner({
+        ...deps.hookRunnerOptions,
+        secretValues,
+      });
+      const envelope = record(claim.envelope_json);
+      const metadata = record(envelope.metadata);
+      envelope.metadata = {
+        ...metadata,
+        delivery: {
+          delivery_id: claim.id,
+          idempotency_key: claim.id,
+          attempt_id: claim.attempt_id,
+          retry_generation: Number(claim.retry_generation),
+          attempt_number: claim.attempt_number,
+          total_attempt_number: claim.total_attempt_number,
+        },
+      };
+      const result = await runner.run(hook, envelope as never);
+      evidence = {
+        duration_ms: result.durationMs,
+        exit_code: result.exitCode,
+        logs: result.logs,
+        logs_truncated: result.logsTruncated ?? false,
+        secrets_redacted: result.secretsRedacted ?? false,
+        grants: grants.evidence,
+      };
+      if (!result.ok) {
+        const runnerCode = result.error?.code ?? "hook_execution_failed";
+        const permanentRunnerCode = [
+          "hook_capability_denied",
+          "hook_import_denied",
+          "hook_env_unavailable",
+          "hook_secret_unavailable",
+          "hook_invalid_output",
+          "hook_stdout_limit",
+        ].includes(runnerCode);
+        outcome = permanentRunnerCode
+          ? {
+            outcome: "dead_letter",
+            code: runnerCode === "hook_invalid_output" ||
+                runnerCode === "hook_stdout_limit"
+              ? "delivery_output_invalid"
+              : runnerCode === "hook_capability_denied"
+              ? "capability_unavailable"
+              : runnerCode,
+            message: result.error?.message ?? "pinned hook cannot execute",
+          }
+          : {
+            outcome: "retry",
+            code: runnerCode,
+            message: result.error?.message ?? "hook execution was interrupted",
+          };
+      } else {
+        outcome = parseDeliveryOutput(result.output) ?? {
+          outcome: "dead_letter",
+          code: "delivery_output_invalid",
+          message: "hook returned invalid delivery.v1 output",
+        };
+      }
+    } catch (error) {
+      outcome = permanentFailure(error);
     }
+    const delay = outcome.outcome === "retry"
+      ? retryDelayMs(
+        claim.attempt_number,
+        outcome.retry_after_ms,
+        config.maximumRetryAfterMs,
+        random,
+        config.initialBackoffMs,
+        config.maximumBackoffMs,
+      )
+      : 0;
+    const status = await deps.repository.complete(
+      claim,
+      outcome,
+      evidence,
+      delay,
+    );
+    return { delivery_id: claim.id, attempt_id: claim.attempt_id, status };
   }
-  return isRecord(value) ? value : {};
+
+  async function authorize(
+    auth: AuthContext,
+    action: string,
+  ): Promise<Result<unknown>> {
+    return await deps.authorization.authorize({
+      auth,
+      boundary: { type: "system" },
+      action,
+      resource: "system:outbox",
+    });
+  }
+
+  return {
+    workerId,
+    config,
+    processBatch,
+    async list(
+      input: Record<string, unknown>,
+      auth: AuthContext,
+    ): Promise<Result<unknown>> {
+      const allowed = await authorize(auth, "outbox.inspect");
+      if (!allowed.ok) return allowed;
+      const limit = optionalInteger(input.limit, 50, 1, 100);
+      if (limit === null) {
+        return err(validationError("bad_request", "limit is invalid"));
+      }
+      const filters = {
+        status: input.status,
+        hook: input.hook,
+        event: input.event,
+        since: input.since,
+        until: input.until,
+      };
+      if (
+        typeof filters.status === "string" &&
+        ![
+          "pending",
+          "running",
+          "retry_wait",
+          "succeeded",
+          "dead_letter",
+          "cancelled",
+        ].includes(filters.status)
+      ) {
+        return err(validationError("bad_request", "status is invalid"));
+      }
+      const cursor = typeof input.cursor === "string"
+        ? await decodeOutboxCursor(input.cursor, filters)
+        : undefined;
+      if (typeof input.cursor === "string" && !cursor) {
+        return err(
+          validationError(
+            "invalid_cursor",
+            "outbox cursor is invalid for these filters",
+          ),
+        );
+      }
+      const rows = await deps.repository.list(
+        filters,
+        limit,
+        cursor ?? undefined,
+      );
+      const hasMore = rows.length > limit;
+      const items = rows.slice(0, limit);
+      const last = items.at(-1) as
+        | { created_at?: string; id?: string }
+        | undefined;
+      const nextCursor = hasMore && last?.created_at && last.id
+        ? await encodeOutboxCursor(
+          { created_at: last.created_at, id: last.id },
+          filters,
+        )
+        : null;
+      return ok({ items, page: { limit, next_cursor: nextCursor } });
+    },
+    async inspect(id: string, auth: AuthContext): Promise<Result<unknown>> {
+      const allowed = await authorize(auth, "outbox.inspect");
+      if (!allowed.ok) return allowed;
+      const row = await deps.repository.inspect(id);
+      return row ? ok(row) : deliveryError("delivery_not_found", "not_found");
+    },
+    async attempts(
+      id: string,
+      input: Record<string, unknown>,
+      auth: AuthContext,
+    ): Promise<Result<unknown>> {
+      const allowed = await authorize(auth, "outbox.inspect");
+      if (!allowed.ok) return allowed;
+      const limit = optionalInteger(input.limit, 50, 1, 100);
+      const after = optionalInteger(input.after, 0, 0, Number.MAX_SAFE_INTEGER);
+      if (limit === null || after === null) {
+        return err(
+          validationError("bad_request", "attempt pagination is invalid"),
+        );
+      }
+      if (!await deps.repository.inspect(id)) {
+        return deliveryError("delivery_not_found", "not_found");
+      }
+      const rows = await deps.repository.attempts(id, limit + 1, after);
+      return ok({
+        items: rows.slice(0, limit),
+        page: {
+          limit,
+          next_after: rows.length > limit
+            ? (rows[limit - 1] as { total_attempt_number: number })
+              .total_attempt_number
+            : null,
+        },
+      });
+    },
+    async retry(
+      id: string,
+      _reason: string | undefined,
+      auth: AuthContext,
+    ): Promise<Result<unknown>> {
+      const allowed = await authorize(auth, "outbox.retry");
+      if (!allowed.ok) return allowed;
+      const status = await deps.repository.retry(id, {
+        authContextId: auth.id,
+        ...(_reason === undefined ? {} : { reason: _reason }),
+      });
+      if (status !== "pending") {
+        return deliveryError(
+          status,
+          status === "delivery_not_found" ? "not_found" : "conflict",
+        );
+      }
+      return ok(await deps.repository.inspect(id));
+    },
+    async cancel(
+      id: string,
+      _reason: string | undefined,
+      auth: AuthContext,
+    ): Promise<Result<unknown>> {
+      const allowed = await authorize(auth, "outbox.cancel");
+      if (!allowed.ok) return allowed;
+      const status = await deps.repository.cancel(id, {
+        authContextId: auth.id,
+        ...(_reason === undefined ? {} : { reason: _reason }),
+      });
+      if (
+        status === "delivery_not_found" || status === "delivery_in_progress"
+      ) {
+        return deliveryError(
+          status,
+          status === "delivery_not_found" ? "not_found" : "conflict",
+        );
+      }
+      return ok(await deps.repository.inspect(id));
+    },
+    async drain(
+      limit: number | undefined,
+      auth: AuthContext,
+    ): Promise<Result<unknown>> {
+      const allowed = await authorize(auth, "outbox.drain");
+      if (!allowed.ok) return allowed;
+      if (
+        limit !== undefined &&
+        (!Number.isSafeInteger(limit) || limit < 1 || limit > config.batchSize)
+      ) {
+        return err(validationError("bad_request", "drain limit is invalid"));
+      }
+      await deps.repository.auditDrain(auth.id, limit ?? config.batchSize);
+      return ok(await processBatch(limit));
+    },
+  };
 }
-function isRecord(value: unknown): value is JsonRecord {
-  return !!value && typeof value === "object" && !Array.isArray(value);
+
+async function loadPinned(sql: Queryable, claim: ClaimedDelivery) {
+  const row = (await query<{
+    hook_script_content: string;
+    hook_script_digest: string;
+    hook_security_digest: string;
+    hook_normalized_config: unknown;
+    declaration_digest: string;
+    declaration_spec: unknown;
+    enabled: boolean;
+  }>(
+    sql,
+    `select hook.hook_script_content,hook.hook_script_digest,
+    hook.hook_security_digest,hook.hook_normalized_config,
+    attachment.declaration_digest,attachment.declaration_spec,
+    coalesce(control.enabled,true) enabled
+    from pack_component_revisions hook
+    join pack_hook_attachment_revisions attachment on attachment.id=$2
+      and attachment.hook_revision_id=hook.id and attachment.candidate_revision_id=$3
+    left join hook_revision_delivery_controls control on control.hook_revision_id=hook.id
+    where hook.id=$1`,
+    [claim.hook_revision_id, claim.attachment_id, claim.candidate_revision_id],
+  )).rows[0];
+  if (!row) {
+    throw permanent("pinned_hook_missing", "pinned hook revision is missing");
+  }
+  if (!row.enabled) {
+    throw permanent("pinned_hook_disabled", "pinned hook revision is disabled");
+  }
+  if (
+    row.hook_script_digest !== claim.script_digest ||
+    row.hook_security_digest !== claim.security_digest ||
+    row.declaration_digest !== claim.attachment_digest ||
+    `sha256:${await canonicalSha256(record(row.hook_normalized_config))}` !==
+      claim.config_digest
+  ) {
+    throw permanent(
+      "pinned_hook_digest_mismatch",
+      "pinned hook evidence does not match",
+    );
+  }
+  return {
+    source: row.hook_script_content,
+    config: record(row.hook_normalized_config),
+  };
 }
-function message(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+
+function hookDefinition(
+  claim: ClaimedDelivery,
+  config: Record<string, unknown>,
+  source: string,
+): HookDefinition {
+  const spec = record(config.spec);
+  return {
+    namespace: claim.hook_identity.split(":")[0],
+    name: claim.hook_identity,
+    revision: claim.hook_revision_id,
+    scriptPath: "pinned.ts",
+    scriptDigest: claim.script_digest,
+    securityDigest: claim.security_digest,
+    scriptContent: source,
+    outputSchema: "delivery.v1",
+    timeoutMs: claim.timeout_ms,
+    permissions: record(spec.permissions),
+  } as HookDefinition;
+}
+
+function pinnedGrants(
+  value: unknown,
+): Array<
+  {
+    slot: string;
+    env: string;
+    grant_id: string | null;
+    secret_id: string | null;
+  }
+> {
+  if (!Array.isArray(value)) {
+    throw permanent(
+      "hook_secret_grant_unavailable",
+      "pinned grants are invalid",
+    );
+  }
+  return value.map((item) => {
+    const row = record(item);
+    if (
+      typeof row.slot !== "string" || typeof row.env !== "string" ||
+      typeof row.grant_id !== "string" || typeof row.secret_id !== "string"
+    ) {
+      throw permanent(
+        "hook_secret_grant_unavailable",
+        "pinned hook-secret grant is unavailable",
+      );
+    }
+    return {
+      slot: row.slot,
+      env: row.env,
+      grant_id: row.grant_id,
+      secret_id: row.secret_id,
+    };
+  });
+}
+
+function permanent(code: string, message: string) {
+  return Object.assign(new Error(message), { outboxCode: code });
+}
+function permanentFailure(error: unknown): DeliveryOutcome {
+  const code = error && typeof error === "object" && "outboxCode" in error
+    ? String((error as { outboxCode: unknown }).outboxCode)
+    : error && typeof error === "object" && "code" in error &&
+        String((error as { code: unknown }).code) === "hook_secret_unavailable"
+    ? "hook_secret_unavailable"
+    : "pinned_hook_missing";
+  return {
+    outcome: "dead_letter",
+    code,
+    message: error instanceof Error
+      ? error.message
+      : "pinned execution is unavailable",
+  };
+}
+function emptyEvidence() {
+  return {
+    duration_ms: 0,
+    exit_code: null as number | null,
+    logs: "",
+    logs_truncated: false,
+    secrets_redacted: false,
+    grants: [] as unknown[],
+  };
+}
+function record(value: unknown): Record<string, unknown> {
+  if (typeof value === "string") value = JSON.parse(value);
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+function integer(
+  value: string | undefined,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+): number {
+  const number = value === undefined ? fallback : Number(value);
+  if (!Number.isSafeInteger(number) || number < minimum || number > maximum) {
+    throw new Error("invalid outbox operator configuration");
+  }
+  return number;
+}
+function optionalInteger(
+  value: unknown,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+): number | null {
+  if (value === undefined) return fallback;
+  const number = typeof value === "string" ? Number(value) : value;
+  return typeof number === "number" && Number.isSafeInteger(number) &&
+      number >= minimum && number <= maximum
+    ? number
+    : null;
+}
+function deliveryError(
+  code: string,
+  severity: "not_found" | "conflict",
+): Result<never> {
+  return err({
+    code,
+    message: code === "delivery_in_progress"
+      ? "delivery is already running and cannot be cancelled"
+      : "delivery operation is unavailable",
+    severity,
+  });
 }

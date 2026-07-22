@@ -1451,12 +1451,225 @@ async function event(
   resource: string | null,
   objectId: string | null,
   payload: unknown,
-) {
+): Promise<string> {
+  const eventId = uuidV7();
   await query(
     tx,
     `insert into events(id,changeset_commit_id,project_id,object_version_id,schema_version,event_type,resource_identity,object_id,payload_json) values($1,$2,$3,$4,1,$5,$6,$7,$8::jsonb)`,
-    [uuidV7(), commitId, project, version, type, resource, objectId, payload],
+    [eventId, commitId, project, version, type, resource, objectId, payload],
   );
+  await enqueueAfterCommitDeliveries(tx, {
+    id: eventId,
+    commitId,
+    project,
+    version,
+    type,
+    resource,
+    objectId,
+    payload,
+  });
+  return eventId;
+}
+
+type AfterCommitAttachment = {
+  attachment_id: string;
+  candidate_revision_id: string;
+  hook_revision_id: string;
+  hook_identity: string;
+  declaration_digest: string;
+  declaration_spec: unknown;
+  hook_script_digest: string;
+  hook_security_digest: string;
+  hook_normalized_config: unknown;
+};
+
+async function enqueueAfterCommitDeliveries(
+  tx: Queryable,
+  event: {
+    id: string;
+    commitId: string;
+    project: string | null;
+    version: string | null;
+    type: string;
+    resource: string | null;
+    objectId: string | null;
+    payload: unknown;
+  },
+): Promise<void> {
+  const attachments = (await query<AfterCommitAttachment>(
+    tx,
+    `select attachment.id attachment_id,attachment.candidate_revision_id,
+       attachment.hook_revision_id,attachment.hook_identity,
+       attachment.declaration_digest,attachment.declaration_spec,
+       hook.hook_script_digest,hook.hook_security_digest,hook.hook_normalized_config
+     from pack_hook_attachment_revisions attachment
+     join pack_active_revisions active
+       on active.candidate_revision_id=attachment.candidate_revision_id
+     join pack_component_revisions hook on hook.id=attachment.hook_revision_id
+     where attachment.phase='event.after_commit'
+       and attachment.declaration_spec->>'event'=$1
+       and (attachment.declaration_spec->'resource'='null'::jsonb or
+            attachment.declaration_spec->>'resource'=$2)
+       and (attachment.declaration_spec->'condition'='null'::jsonb or
+            attachment.declaration_spec->>'condition'='true' or
+            (attachment.declaration_spec->>'condition'='active()' and $3 <> 'object.archived'))
+     order by attachment.ordinal,attachment.id`,
+    [event.type, event.resource, event.type],
+  )).rows;
+  if (attachments.length === 0) return;
+  const authContextId = (await query<{ committed_auth_context_id: string }>(
+    tx,
+    "select committed_auth_context_id from changeset_commits where id=$1",
+    [event.commitId],
+  )).rows[0]?.committed_auth_context_id;
+  if (!authContextId) throw new Error("commit auth context is unavailable");
+
+  const objectVersion = event.version
+    ? (await query<{ snapshot_json: unknown }>(
+      tx,
+      "select snapshot_json from object_versions where id=$1",
+      [event.version],
+    )).rows[0]?.snapshot_json ?? null
+    : null;
+  const eventValue = {
+    id: event.id,
+    type: event.type,
+    project_id: event.project,
+    object_version_id: event.version,
+    resource: event.resource,
+    object_id: event.objectId,
+    payload: event.payload,
+  };
+  for (const attachment of attachments) {
+    const config = record(attachment.hook_normalized_config);
+    const spec = record(config.spec);
+    const output = record(spec.output);
+    if (output.schema !== "delivery.v1") {
+      throw new Error("event.after_commit hook must use delivery.v1");
+    }
+    const timeoutMs = durationMilliseconds(spec.timeout);
+    const permissions = record(spec.permissions);
+    const secrets = Array.isArray(spec.secrets) ? spec.secrets.map(record) : [];
+    const grants: Array<Record<string, unknown>> = [];
+    for (const secret of secrets) {
+      const slot = typeof secret.slot === "string"
+        ? secret.slot
+        : typeof secret.name === "string"
+        ? secret.name
+        : null;
+      const env = typeof secret.env === "string" ? secret.env : null;
+      if (!slot || !env) throw new Error("hook secret declaration is invalid");
+      const grant = (await query<{ grant_id: string; secret_id: string }>(
+        tx,
+        `select head.grant_id,grant.secret_id
+         from hook_secret_grant_heads head
+         join hook_secret_grants grant on grant.id=head.grant_id
+         where head.hook_revision_id=$1 and head.slot=$2`,
+        [attachment.hook_revision_id, slot],
+      )).rows[0];
+      grants.push({
+        slot,
+        env,
+        grant_id: grant?.grant_id ?? null,
+        secret_id: grant?.secret_id ?? null,
+      });
+    }
+    const deliveryId = uuidV7();
+    const envelope = {
+      hook: attachment.hook_identity,
+      phase: "event.after_commit",
+      input: materializeAfterCommitInput(
+        record(attachment.declaration_spec).input,
+        {
+          event: eventValue,
+          objectVersion,
+          actor: { auth_context_id: authContextId },
+        },
+      ),
+      metadata: {
+        delivery: { delivery_id: deliveryId, idempotency_key: deliveryId },
+      },
+    };
+    await query(
+      tx,
+      `insert into outbox_deliveries(
+        id,event_id,attachment_id,candidate_revision_id,hook_revision_id,hook_identity,
+        script_digest,security_digest,attachment_digest,config_digest,
+        envelope_schema,output_schema,envelope_json,attachment_spec_json,hook_config_json,
+        capabilities_json,effects_json,pinned_grants_json,auth_context_id,changeset_commit_id,
+        status,max_attempts,timeout_ms,available_at)
+       values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'delivery.v1','delivery.v1',$11::jsonb,
+        $12::jsonb,$13::jsonb,$14::jsonb,$15::jsonb,$16::jsonb,$17,$18,
+        'pending',$19,$20,now())`,
+      [
+        deliveryId,
+        event.id,
+        attachment.attachment_id,
+        attachment.candidate_revision_id,
+        attachment.hook_revision_id,
+        attachment.hook_identity,
+        attachment.hook_script_digest,
+        attachment.hook_security_digest,
+        attachment.declaration_digest,
+        `sha256:${await canonicalSha256(config)}`,
+        envelope,
+        attachment.declaration_spec,
+        config,
+        permissions,
+        spec.effects ?? {},
+        grants,
+        authContextId,
+        event.commitId,
+        boundedInt(Deno.env.get("OPERANT_OUTBOX_MAX_ATTEMPTS"), 10, 1, 1000),
+        timeoutMs,
+      ],
+    );
+  }
+}
+
+function materializeAfterCommitInput(
+  value: unknown,
+  context: {
+    event: Record<string, unknown>;
+    objectVersion: unknown;
+    actor: Record<string, unknown>;
+  },
+): unknown {
+  if (value === "$event") return context.event;
+  if (value === "$object_version") return context.objectVersion;
+  if (value === "$actor") return context.actor;
+  if (typeof value === "string" && value.startsWith("$")) {
+    throw new Error(
+      "after-commit input mapping references unavailable context",
+    );
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => materializeAfterCommitInput(item, context));
+  }
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [
+        key,
+        materializeAfterCommitInput(item, context),
+      ]),
+    );
+  }
+  return value;
+}
+
+function durationMilliseconds(value: unknown): number {
+  if (typeof value !== "string") throw new Error("hook timeout is invalid");
+  const match = /^(\d+)(ms|s|m)$/.exec(value);
+  if (!match) throw new Error("hook timeout is invalid");
+  const milliseconds = Number(match[1]) *
+    (match[2] === "ms" ? 1 : match[2] === "s" ? 1_000 : 60_000);
+  if (
+    !Number.isSafeInteger(milliseconds) || milliseconds < 1 ||
+    milliseconds > 600_000
+  ) {
+    throw new Error("hook timeout is invalid");
+  }
+  return milliseconds;
 }
 async function audit(
   tx: Queryable,

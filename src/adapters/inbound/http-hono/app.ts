@@ -197,11 +197,30 @@ export type HttpDependencies = {
     ): Promise<Result<StageDto>>;
   };
   outbox: {
-    list(): Promise<Result<unknown>>;
-    drain(
-      input?: { limit?: number; worker_id?: string },
+    list(
+      input: Record<string, unknown>,
+      auth: AuthVariables["auth"],
     ): Promise<Result<unknown>>;
-    retry(id: string): Promise<Result<unknown>>;
+    inspect(id: string, auth: AuthVariables["auth"]): Promise<Result<unknown>>;
+    attempts(
+      id: string,
+      input: Record<string, unknown>,
+      auth: AuthVariables["auth"],
+    ): Promise<Result<unknown>>;
+    drain(
+      limit: number | undefined,
+      auth: AuthVariables["auth"],
+    ): Promise<Result<unknown>>;
+    retry(
+      id: string,
+      reason: string | undefined,
+      auth: AuthVariables["auth"],
+    ): Promise<Result<unknown>>;
+    cancel(
+      id: string,
+      reason: string | undefined,
+      auth: AuthVariables["auth"],
+    ): Promise<Result<unknown>>;
   };
   secrets: {
     list(input: { auth: AuthVariables["auth"] }): Promise<Result<unknown>>;
@@ -675,23 +694,103 @@ export function makeHttpApp(
   registerObjectReads("resource", "objects");
   registerObjectReads("relationship", "relationships");
 
-  app.get("/outbox", async (c) => resultJson(c, await deps.outbox.list()));
-  app.post("/outbox/drain", async (c) => {
-    const body = await c.req.json().catch(() => ({}));
+  app.get("/api/v1/outbox", async (c) => {
+    const allowed = [
+      "status",
+      "hook",
+      "event",
+      "since",
+      "until",
+      "limit",
+      "cursor",
+    ];
+    const input = c.req.query();
+    const unknown = Object.keys(input).find((key) => !allowed.includes(key));
+    if (unknown) {
+      return resultJson(
+        c,
+        err(
+          validationError(
+            "bad_request",
+            `unknown outbox query parameter ${unknown}`,
+          ),
+        ),
+      );
+    }
+    return resultJson(c, await deps.outbox.list(input, c.get("auth")));
+  });
+  app.post("/api/v1/outbox/drain", async (c) => {
+    const body = await requestJson(c);
+    if (Object.keys(body).some((key) => key !== "limit")) {
+      throw new SyntaxError("request body contains unknown fields");
+    }
     return resultJson(
       c,
-      await deps.outbox.drain({
-        limit: typeof body?.limit === "number" ? body.limit : undefined,
-        worker_id: typeof body?.worker_id === "string"
-          ? body.worker_id
-          : undefined,
-      }),
+      await deps.outbox.drain(
+        typeof body.limit === "number" ? body.limit : undefined,
+        c.get("auth"),
+      ),
     );
   });
-  app.post(
-    "/outbox/:id/retry",
-    async (c) => resultJson(c, await deps.outbox.retry(c.req.param("id"))),
+  app.get(
+    "/api/v1/outbox/:id",
+    async (c) =>
+      resultJson(
+        c,
+        await deps.outbox.inspect(c.req.param("id"), c.get("auth")),
+      ),
   );
+  app.get("/api/v1/outbox/:id/attempts", async (c) => {
+    const input = c.req.query();
+    const unknown = Object.keys(input).find((key) =>
+      !["limit", "after"].includes(key)
+    );
+    if (unknown) {
+      return resultJson(
+        c,
+        err(
+          validationError(
+            "bad_request",
+            `unknown attempts query parameter ${unknown}`,
+          ),
+        ),
+      );
+    }
+    return resultJson(
+      c,
+      await deps.outbox.attempts(c.req.param("id"), input, c.get("auth")),
+    );
+  });
+  app.post("/api/v1/outbox/:id/retry", async (c) => {
+    const body = await requestJson(c);
+    if (
+      Object.keys(body).some((key) => key !== "reason") ||
+      (body.reason !== undefined && typeof body.reason !== "string")
+    ) throw new SyntaxError("request body contains unknown fields");
+    return resultJson(
+      c,
+      await deps.outbox.retry(
+        c.req.param("id"),
+        body.reason as string | undefined,
+        c.get("auth"),
+      ),
+    );
+  });
+  app.post("/api/v1/outbox/:id/cancel", async (c) => {
+    const body = await requestJson(c);
+    if (
+      Object.keys(body).some((key) => key !== "reason") ||
+      (body.reason !== undefined && typeof body.reason !== "string")
+    ) throw new SyntaxError("request body contains unknown fields");
+    return resultJson(
+      c,
+      await deps.outbox.cancel(
+        c.req.param("id"),
+        body.reason as string | undefined,
+        c.get("auth"),
+      ),
+    );
+  });
 
   app.get(
     "/api/v1/secrets",
