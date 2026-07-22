@@ -27,6 +27,7 @@ import {
   type HookEnvelope,
 } from "../../../adapters/outbound/deno-hooks/hook_runner.ts";
 import {
+  HookSecretGrantUnavailableError,
   HookSecretUnavailableError,
   type ResolvedHookSecrets,
 } from "../../../adapters/outbound/postgres/hook_secret_repository.ts";
@@ -115,7 +116,10 @@ export class TrustedStageHookCoordinator implements StageHookCoordinator {
         declaration.secret_slots,
       );
     } catch (error) {
-      if (error instanceof HookSecretUnavailableError) {
+      if (
+        error instanceof HookSecretUnavailableError ||
+        error instanceof HookSecretGrantUnavailableError
+      ) {
         throw new StageHookError("hook_secret_unavailable", error.message, {
           hook: declaration.hook,
           slot: error.slot,
@@ -317,7 +321,10 @@ export class TrustedStageHookCoordinator implements StageHookCoordinator {
           declaration.secret_slots,
         );
       } catch (error) {
-        if (error instanceof HookSecretUnavailableError) {
+        if (
+          error instanceof HookSecretUnavailableError ||
+          error instanceof HookSecretGrantUnavailableError
+        ) {
           throw new StageHookError("hook_secret_unavailable", error.message, {
             hook: declaration.hook,
             slot: error.slot,

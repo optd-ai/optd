@@ -675,7 +675,6 @@ async function stopServer(server: RunningServer): Promise<void> {
     }
   }
   await server.process.status.catch(() => undefined);
-  await server.cancelPumps();
   await Promise.all(server.pumps.map((pump) => pump.catch(() => undefined)));
   await server.log.close().catch(() => undefined);
 }
