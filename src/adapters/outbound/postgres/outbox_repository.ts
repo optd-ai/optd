@@ -19,6 +19,7 @@ export type ClaimedDelivery = {
   security_digest: string;
   attachment_digest: string;
   config_digest: string;
+  output_schema: string;
   envelope_json: unknown;
   attachment_spec_json: unknown;
   hook_config_json: unknown;
@@ -45,6 +46,13 @@ export class PostgresOutboxRepository {
       auth: AuthContext,
       action: "outbox.retry" | "outbox.cancel",
     ) => Promise<boolean>,
+    private readonly observer?: {
+      afterClaimRowsLocked?(ids: readonly string[]): Promise<void>;
+      afterMutationRowLocked?(
+        id: string,
+        operation: "retry" | "cancel",
+      ): Promise<void>;
+    },
   ) {}
 
   async claim(
@@ -73,6 +81,7 @@ export class PostgresOutboxRepository {
         order by available_at,id limit $2 for update skip locked`,
         [now, limit],
       )).rows;
+      await this.observer?.afterClaimRowsLocked?.(rows.map((row) => row.id));
       const claims: ClaimedDelivery[] = [];
       for (const row of rows) {
         const attemptId = uuidV7();
@@ -315,6 +324,7 @@ export class PostgresOutboxRepository {
         [id],
       )).rows[0];
       if (!row) return "delivery_not_found" as const;
+      await this.observer?.afterMutationRowLocked?.(id, "retry");
       if (
         audit?.auth && this.authorizeMutation &&
         !await this.authorizeMutation(tx, audit.auth, "outbox.retry")
@@ -347,6 +357,7 @@ export class PostgresOutboxRepository {
         [id],
       )).rows[0];
       if (!row) return "delivery_not_found" as const;
+      await this.observer?.afterMutationRowLocked?.(id, "cancel");
       if (
         audit?.auth && this.authorizeMutation &&
         !await this.authorizeMutation(tx, audit.auth, "outbox.cancel")

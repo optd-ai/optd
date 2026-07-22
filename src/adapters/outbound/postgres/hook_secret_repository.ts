@@ -2,6 +2,13 @@ import type { HookSecretGrantEvidence } from "../../../domain/changesets/stage.t
 import type { EnvelopeCrypto } from "../crypto/envelope.ts";
 import { query, type Sql } from "./client.ts";
 
+export class HookSecretGrantUnavailableError extends Error {
+  readonly code = "hook_secret_grant_unavailable";
+  constructor(readonly slot: string) {
+    super("pinned hook-secret grant is unavailable");
+  }
+}
+
 export class HookSecretUnavailableError extends Error {
   readonly code = "hook_secret_unavailable";
   constructor(readonly slot: string) {
@@ -57,13 +64,15 @@ export class PostgresHookSecretRepository {
           [hookRevisionId, declaration.slot],
         )).rows[0];
         if (
-          !row || row.status !== "active" ||
-          row.hook_security_digest !== securityDigest ||
+          !row || row.hook_security_digest !== securityDigest ||
           (declaration.grant_id !== undefined &&
             row.grant_id !== declaration.grant_id) ||
           (declaration.secret_id !== undefined &&
             row.secret_id !== declaration.secret_id)
-        ) throw new HookSecretUnavailableError(declaration.slot);
+        ) throw new HookSecretGrantUnavailableError(declaration.slot);
+        if (row.status !== "active") {
+          throw new HookSecretUnavailableError(declaration.slot);
+        }
         const valueVersion = Number(row.value_version);
         let value: string;
         try {

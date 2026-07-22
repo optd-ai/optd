@@ -82,7 +82,11 @@ export function makeProcessOutboxService(deps: {
   hookRunnerOptions?: DenoHookRunnerOptions;
   config?: OutboxConfig;
   random?: () => number;
+  now?: () => Date;
   workerId?: string;
+  runnerFactory?: (
+    options: DenoHookRunnerOptions,
+  ) => Pick<DenoHookRunner, "run">;
 }) {
   const config = deps.config ?? loadOutboxConfig();
   if (config.maximumBackoffMs < config.initialBackoffMs) {
@@ -92,6 +96,9 @@ export function makeProcessOutboxService(deps: {
   }
   const workerId = deps.workerId ?? uuidV7();
   const random = deps.random ?? Math.random;
+  const now = deps.now ?? (() => new Date());
+  const runnerFactory = deps.runnerFactory ??
+    ((options: DenoHookRunnerOptions) => new DenoHookRunner(options));
   let cursors: OutboxCursorSigner | undefined;
 
   async function processBatch(limit = config.batchSize) {
@@ -99,6 +106,7 @@ export function makeProcessOutboxService(deps: {
       workerId,
       Math.max(1, Math.min(limit, config.batchSize)),
       config.leaseMarginMs,
+      now(),
     );
     const executions = await Promise.all(claims.map(processOne));
     return { worker_id: workerId, claimed: claims.length, executions };
@@ -124,7 +132,7 @@ export function makeProcessOutboxService(deps: {
         env: slot.env,
         slot: slot.slot,
       }));
-      const runner = new DenoHookRunner({
+      const runner = runnerFactory({
         ...deps.hookRunnerOptions,
         secretValues,
       });
@@ -201,6 +209,7 @@ export function makeProcessOutboxService(deps: {
       outcome,
       evidence,
       delay,
+      now(),
     );
     return { delivery_id: claim.id, attempt_id: claim.attempt_id, status };
   }
@@ -422,12 +431,19 @@ async function loadPinned(sql: Queryable, claim: ClaimedDelivery) {
   if (!row.enabled) {
     throw permanent("pinned_hook_disabled", "pinned hook revision is disabled");
   }
+  const config = record(row.hook_normalized_config);
+  const configSpec = record(config.spec);
+  const output = record(configSpec.output);
   if (
     row.hook_script_digest !== claim.script_digest ||
     row.hook_security_digest !== claim.security_digest ||
     row.declaration_digest !== claim.attachment_digest ||
-    `sha256:${await canonicalSha256(record(row.hook_normalized_config))}` !==
-      claim.config_digest
+    `sha256:${await canonicalSha256(row.declaration_spec)}` !==
+      row.declaration_digest ||
+    await canonicalSha256(row.declaration_spec) !==
+      await canonicalSha256(claim.attachment_spec_json) ||
+    `sha256:${await canonicalSha256(config)}` !== claim.config_digest ||
+    claim.output_schema !== "delivery.v1" || output.schema !== "delivery.v1"
   ) {
     throw permanent(
       "pinned_hook_digest_mismatch",
@@ -436,7 +452,7 @@ async function loadPinned(sql: Queryable, claim: ClaimedDelivery) {
   }
   return {
     source: row.hook_script_content,
-    config: record(row.hook_normalized_config),
+    config,
   };
 }
 
@@ -503,8 +519,10 @@ function permanentFailure(error: unknown): DeliveryOutcome {
   const code = error && typeof error === "object" && "outboxCode" in error
     ? String((error as { outboxCode: unknown }).outboxCode)
     : error && typeof error === "object" && "code" in error &&
-        String((error as { code: unknown }).code) === "hook_secret_unavailable"
-    ? "hook_secret_unavailable"
+        ["hook_secret_unavailable", "hook_secret_grant_unavailable"].includes(
+          String((error as { code: unknown }).code),
+        )
+    ? String((error as { code: unknown }).code)
     : "pinned_hook_missing";
   return {
     outcome: "dead_letter",
