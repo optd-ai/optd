@@ -699,8 +699,8 @@ export function makeHttpApp(
       "status",
       "hook",
       "event",
-      "since",
-      "until",
+      "from",
+      "to",
       "limit",
       "cursor",
     ];
@@ -743,7 +743,7 @@ export function makeHttpApp(
   app.get("/api/v1/outbox/:id/attempts", async (c) => {
     const input = c.req.query();
     const unknown = Object.keys(input).find((key) =>
-      !["limit", "after"].includes(key)
+      !["limit", "cursor"].includes(key)
     );
     if (unknown) {
       return resultJson(

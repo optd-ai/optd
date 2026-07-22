@@ -128,13 +128,16 @@ export async function startLiveHarness(
     ),
   );
 
+  const dependencyCache = await ensureDenoDependencies();
   const binarySourceDigest = await sourceDigest();
   const binaryPath = await compileOptctl({
     digest: binarySourceDigest,
     forceFresh: options.forceFreshCompile ?? false,
     isolation: rootDir,
+    denoDir: dependencyCache,
   });
   const env = Deno.env.toObject();
+  env.DENO_DIR = dependencyCache;
   env.OPERANT_DATA_DIR = dataDir;
   env.OPERANT_PORT = String(freePort());
   env.OPERANT_PG_PORT = String(freePort());
@@ -381,10 +384,63 @@ export async function assertHealth(baseUrl: string) {
   return body;
 }
 
+async function ensureDenoDependencies(): Promise<string> {
+  const root = join(
+    Deno.env.get("TMPDIR") ?? "/tmp",
+    "operant-deno-dependencies-v1",
+  );
+  const lock = `${root}.warm-lock`;
+  await Deno.mkdir(root, { recursive: true, mode: 0o700 });
+  const deadline = Date.now() + 300_000;
+  while (true) {
+    try {
+      await Deno.mkdir(lock, { mode: 0o700 });
+      break;
+    } catch (error) {
+      if (!(error instanceof Deno.errors.AlreadyExists)) throw error;
+      const existing = await Deno.stat(lock).catch(() => undefined);
+      if (existing?.mtime && Date.now() - existing.mtime.getTime() > 300_000) {
+        await Deno.remove(lock, { recursive: true }).catch(() => undefined);
+        continue;
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(
+          "timed out waiting for deterministic dependency warmup",
+        );
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+  try {
+    const command = await new Deno.Command(Deno.execPath(), {
+      args: [
+        "cache",
+        "--lock=deno.lock",
+        "src/main_server.ts",
+        "src/main_optctl.ts",
+      ],
+      env: { ...Deno.env.toObject(), DENO_DIR: root },
+      stdout: "piped",
+      stderr: "piped",
+    }).output();
+    if (!command.success) {
+      throw new Error(
+        `dependency warmup failed before server readiness: ${
+          new TextDecoder().decode(command.stderr).slice(-16_384)
+        }`,
+      );
+    }
+    return root;
+  } finally {
+    await Deno.remove(lock, { recursive: true }).catch(() => undefined);
+  }
+}
+
 async function compileOptctl(options: {
   digest: string;
   forceFresh: boolean;
   isolation: string;
+  denoDir: string;
 }): Promise<string> {
   const cat = await Deno.stat("/bin/cat").catch(() => undefined);
   if (!cat?.isFile || ((cat.mode ?? 0) & 0o111) === 0) {
@@ -441,6 +497,7 @@ async function compileOptctl(options: {
       args: [
         "compile",
         "--no-prompt",
+        "--cached-only",
         "--allow-read",
         "--allow-write",
         "--allow-env",
@@ -451,6 +508,7 @@ async function compileOptctl(options: {
         temporary,
         "src/main_optctl.ts",
       ],
+      env: { ...Deno.env.toObject(), DENO_DIR: options.denoDir },
       stdout: "piped",
       stderr: "piped",
     }).output();
@@ -510,6 +568,7 @@ async function launchServer(
   const process = new Deno.Command(Deno.execPath(), {
     args: [
       "run",
+      "--cached-only",
       "--allow-read",
       "--allow-write",
       "--allow-env",
@@ -526,7 +585,7 @@ async function launchServer(
   const stderrPump = pump(stderrReader, log);
   const decoder = new TextDecoder();
   let buffered = "";
-  const deadline = Date.now() + 60_000;
+  const deadline = Date.now() + 120_000;
   try {
     while (Date.now() < deadline) {
       const next = await raceWithTimeout(

@@ -1,3 +1,4 @@
+// deno-lint-ignore-file no-import-prefix no-unversioned-import
 import { parse } from "npm:@bufbuild/cel";
 import { canonicalJson } from "../ids/canonical_json.ts";
 
@@ -26,6 +27,7 @@ export type ExpressionContext = Readonly<{
   parameterOffset?: number;
   maxLength?: number;
   maxNodes?: number;
+  allowNull?: boolean;
 }>;
 export type LoweredExpression = Readonly<
   { sql: string; params: unknown[]; normalized: unknown }
@@ -37,7 +39,7 @@ type KindValue<C extends ExprKind["case"]> = Extract<
   ExprKind,
   { case: C }
 >["value"];
-type Scalar = FieldType;
+type Scalar = FieldType | "null";
 type Value = {
   sql: string;
   type: Scalar | "array";
@@ -234,6 +236,17 @@ function call(node: KindValue<"callExpr">, state: State): Value {
 
 function comparison(fn: string, left: Value, right: Value): Value {
   compatible(left, right, fn);
+  if (left.type === "null" || right.type === "null") {
+    if (!["_==_", "_!=_"].includes(fn)) {
+      throw new ExpressionError("expression_type", "null is not ordered");
+    }
+    const value = left.type === "null" ? right : left;
+    return {
+      sql: `(${typedSql(value)} is ${fn === "_!=_" ? "not " : ""}null)`,
+      type: "boolean",
+      normalized: [fn === "_!=_" ? "is-not-null" : "is-null", value.normalized],
+    };
+  }
   if (
     (left.type === "boolean" || right.type === "boolean") &&
     !["_==_", "_!=_"].includes(fn)
@@ -256,6 +269,10 @@ function comparison(fn: string, left: Value, right: Value): Value {
 
 function compatible(a: Value, b: Value, operation: string) {
   if (a.type === b.type) return;
+  if (a.type === "null" || b.type === "null") {
+    if (operation === "_==_" || operation === "_!=_") return;
+    throw new ExpressionError("expression_type", "null is not ordered");
+  }
   if (
     (a.type === "decimal" && b.type === "integer") ||
     (a.type === "integer" && b.type === "decimal")
@@ -279,6 +296,21 @@ function compatible(a: Value, b: Value, operation: string) {
     `incompatible operands for ${operation}`,
     { left: a.type, right: b.type },
   );
+}
+function typedSql(value: Value): string {
+  if (value.field) return value.sql;
+  const cast = value.type === "integer"
+    ? "bigint"
+    : value.type === "decimal"
+    ? "numeric"
+    : value.type === "boolean"
+    ? "boolean"
+    : value.type === "date"
+    ? "date"
+    : value.type === "timestamp"
+    ? "timestamptz"
+    : "text";
+  return `(${value.sql})::${cast}`;
 }
 function castPair(a: Value, b: Value): [string, string] {
   if (a.type === "decimal" && b.type === "integer") {
@@ -374,7 +406,15 @@ function constant(node: KindValue<"constExpr">, state: State): Value {
     return parameter(value, "integer", state, ["integer", value], value);
   }
   if (kind.case === "doubleValue") throw unsupported("fractional literal");
-  if (kind.case === "nullValue") throw unsupported("null literal");
+  if (kind.case === "nullValue") {
+    if (!state.context.allowNull) throw unsupported("null literal");
+    return {
+      sql: "null",
+      type: "null",
+      normalized: ["null"],
+      literal: null,
+    };
+  }
   throw unsupported("literal", kind.case);
 }
 function list(node: KindValue<"listExpr">, state: State): Value {
@@ -403,7 +443,7 @@ function list(node: KindValue<"listExpr">, state: State): Value {
 }
 function parameter(
   value: unknown,
-  type: Scalar,
+  type: Exclude<Scalar, "null">,
   state: State,
   normalized: unknown,
   literal?: unknown,

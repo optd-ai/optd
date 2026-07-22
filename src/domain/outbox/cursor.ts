@@ -40,10 +40,59 @@ export class OutboxCursorSigner {
     return encodeBase64Url(bytes);
   }
 
+  async encodeAttempt(
+    deliveryId: string,
+    totalAttemptNumber: number,
+  ): Promise<string> {
+    return await this.#encode({
+      v: 1,
+      delivery_id: deliveryId,
+      total_attempt_number: totalAttemptNumber,
+    });
+  }
+
+  async decodeAttempt(cursor: string, deliveryId: string): Promise<number> {
+    const value = await this.#decode(cursor);
+    if (
+      Object.keys(value).sort().join(",") !==
+        "delivery_id,total_attempt_number,v" ||
+      value.v !== 1 || value.delivery_id !== deliveryId ||
+      !isUuidV7(value.delivery_id) ||
+      !Number.isSafeInteger(value.total_attempt_number) ||
+      Number(value.total_attempt_number) < 1
+    ) throw new Error("attempt cursor mismatch");
+    return Number(value.total_attempt_number);
+  }
+
   async decode(
     cursor: string,
     filters: Record<string, unknown>,
   ): Promise<OutboxCursorPosition> {
+    const value = await this.#decode(cursor);
+    if (
+      Object.keys(value).sort().join(",") !== "created_at,filters,id,v" ||
+      value.v !== 1 ||
+      canonicalJson(value.filters) !==
+        canonicalJson(normalizeFilters(filters)) ||
+      typeof value.created_at !== "string" ||
+      !Number.isFinite(Date.parse(value.created_at)) ||
+      !isUuidV7(value.id)
+    ) throw new Error("cursor mismatch");
+    return { created_at: value.created_at as string, id: value.id as string };
+  }
+
+  async #encode(value: Record<string, unknown>): Promise<string> {
+    const payload = encoder.encode(canonicalJson(value));
+    const signature = new Uint8Array(
+      await crypto.subtle.sign("HMAC", await this.#key, payload),
+    );
+    const bytes = new Uint8Array(signature.length + payload.length);
+    bytes.set(signature);
+    bytes.set(payload, signature.length);
+    return encodeBase64Url(bytes);
+  }
+
+  async #decode(cursor: string): Promise<Record<string, unknown>> {
     if (cursor.length > 4096 || !/^[A-Za-z0-9_-]+$/.test(cursor)) {
       throw new Error("bad cursor");
     }
@@ -60,17 +109,8 @@ export class OutboxCursorSigner {
       throw new Error("bad cursor signature");
     }
     const value = JSON.parse(new TextDecoder().decode(payload));
-    if (
-      !isRecord(value) ||
-      Object.keys(value).sort().join(",") !== "created_at,filters,id,v" ||
-      value.v !== 1 ||
-      canonicalJson(value.filters) !==
-        canonicalJson(normalizeFilters(filters)) ||
-      typeof value.created_at !== "string" ||
-      !Number.isFinite(Date.parse(value.created_at)) ||
-      !isUuidV7(value.id)
-    ) throw new Error("cursor mismatch");
-    return { created_at: value.created_at, id: value.id };
+    if (!isRecord(value)) throw new Error("bad cursor payload");
+    return value;
   }
 }
 

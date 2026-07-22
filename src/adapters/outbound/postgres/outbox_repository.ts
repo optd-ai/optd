@@ -249,12 +249,12 @@ export class PostgresOutboxRepository {
         clauses.push(`${column}=$${values.length}`);
       }
     }
-    if (typeof filters.since === "string") {
-      values.push(filters.since);
+    if (typeof filters.from === "string") {
+      values.push(filters.from);
       clauses.push(`created_at >= $${values.length}::timestamptz`);
     }
-    if (typeof filters.until === "string") {
-      values.push(filters.until);
+    if (typeof filters.to === "string") {
+      values.push(filters.to);
       clauses.push(`created_at <= $${values.length}::timestamptz`);
     }
     if (cursor) {
@@ -282,11 +282,29 @@ export class PostgresOutboxRepository {
   async inspect(id: string) {
     return (await query(
       this.sql,
-      `select id,event_id,attachment_id,hook_identity,
-      hook_revision_id,candidate_revision_id,status,retry_generation,
-      attempts_in_generation,total_attempts,max_attempts,available_at::text,
-      last_error_code,last_error_message,created_at::text,updated_at::text
-      from outbox_deliveries where id=$1`,
+      `select delivery.id,delivery.event_id,event.object_version_id,
+      delivery.attachment_id,delivery.hook_identity,delivery.hook_revision_id,
+      delivery.candidate_revision_id,delivery.script_digest,delivery.security_digest,
+      delivery.attachment_digest,delivery.config_digest,delivery.envelope_schema,
+      delivery.output_schema,delivery.auth_context_id,delivery.changeset_commit_id,
+      delivery.status,delivery.retry_generation,delivery.attempts_in_generation,
+      delivery.total_attempts,delivery.max_attempts,delivery.available_at::text,
+      delivery.last_error_code,delivery.last_error_message,
+      delivery.created_at::text,delivery.updated_at::text,
+      coalesce(summary.by_outcome,'{}'::jsonb) attempts_by_outcome,
+      summary.latest_attempt_id,summary.latest_outcome,summary.latest_completed_at::text
+      from outbox_deliveries delivery
+      join events event on event.id=delivery.event_id
+      left join lateral (
+        select jsonb_object_agg(outcome,count) by_outcome,
+          (array_agg(id order by total_attempt_number desc))[1] latest_attempt_id,
+          (array_agg(outcome order by total_attempt_number desc))[1] latest_outcome,
+          (array_agg(completed_at order by total_attempt_number desc))[1] latest_completed_at
+        from (select id,outcome,completed_at,total_attempt_number,
+          count(*) over(partition by outcome) count
+          from outbox_attempts where delivery_id=delivery.id) attempts
+      ) summary on true
+      where delivery.id=$1`,
       [id],
     )).rows[0] ?? null;
   }
@@ -294,9 +312,12 @@ export class PostgresOutboxRepository {
   async attempts(id: string, limit: number, after = 0) {
     return (await query(
       this.sql,
-      `select id,retry_generation,attempt_number,
-      total_attempt_number,started_at::text,lease_expires_at::text,completed_at::text,
-      outcome,error_code,error_message,external_id from outbox_attempts
+      `select id,retry_generation,attempt_number,total_attempt_number,
+      worker_instance_id,hook_revision_id,idempotency_key,
+      started_at::text,lease_expires_at::text,completed_at::text,
+      outcome,error_code,error_message,external_id,hook_execution_id,
+      grant_evidence_json
+      from outbox_attempts
       where delivery_id=$1 and total_attempt_number>$2
       order by total_attempt_number,id limit $3`,
       [id, after, limit],

@@ -12,6 +12,7 @@ import {
   lowerCelToSql,
 } from "../../../domain/queries/expression_lowerer.ts";
 import { uuidV7 } from "../../../domain/ids/uuid_v7.ts";
+import { lowerAfterCommitCondition } from "../../../domain/outbox/condition.ts";
 import { err, ok, type Result } from "../../../domain/errors/result.ts";
 import { query, type Queryable, quoteIdentifier, type Sql } from "./client.ts";
 
@@ -1512,34 +1513,42 @@ async function enqueueAfterCommitDeliveries(
        and (attachment.declaration_spec->'resource'='null'::jsonb or
             attachment.declaration_spec->>'resource'=$2)
        and (attachment.declaration_spec->'action'='null'::jsonb or
-            attachment.declaration_spec->>'action'=$4)
-       and (attachment.declaration_spec->'condition'='null'::jsonb or
-            attachment.declaration_spec->>'condition'='true' or
-            (attachment.declaration_spec->>'condition'='active()' and $3 <> 'object.archived'))
+            attachment.declaration_spec->>'action'=$3)
      order by attachment.ordinal,attachment.id`,
     [
       event.type,
       event.resource,
-      event.type,
       typeof record(event.payload).action === "string"
         ? record(event.payload).action
         : null,
     ],
   )).rows;
   if (attachments.length === 0) return;
-  const authContextId = (await query<{ committed_auth_context_id: string }>(
+  const committedIdentity = (await query<{
+    committed_auth_context_id: string;
+    principal_id: string;
+    human_user_id: string;
+  }>(
     tx,
-    "select committed_auth_context_id from changeset_commits where id=$1",
+    `select commit.committed_auth_context_id,context.principal_id,context.human_user_id
+     from changeset_commits commit
+     join auth_contexts context on context.id=commit.committed_auth_context_id
+     where commit.id=$1`,
     [event.commitId],
-  )).rows[0]?.committed_auth_context_id;
-  if (!authContextId) throw new Error("commit auth context is unavailable");
+  )).rows[0];
+  if (!committedIdentity) throw new Error("commit auth context is unavailable");
+  const authContextId = committedIdentity.committed_auth_context_id;
 
   const objectVersion = event.version
-    ? (await query<{ snapshot_json: unknown }>(
+    ? (await query<{
+      snapshot_json: unknown;
+      version: number;
+      operation: string;
+    }>(
       tx,
-      "select snapshot_json from object_versions where id=$1",
+      "select snapshot_json,version,operation from object_versions where id=$1",
       [event.version],
-    )).rows[0]?.snapshot_json ?? null
+    )).rows[0] ?? null
     : null;
   const eventValue = {
     id: event.id,
@@ -1551,6 +1560,42 @@ async function enqueueAfterCommitDeliveries(
     payload: event.payload,
   };
   for (const attachment of attachments) {
+    const declaration = record(attachment.declaration_spec);
+    const condition = declaration.condition;
+    if (typeof condition === "string") {
+      const lowered = lowerAfterCommitCondition(condition, {
+        alias: "condition_context",
+        parameterOffset: 9,
+        actor: {
+          id: committedIdentity.principal_id,
+          human_user_id: committedIdentity.human_user_id,
+          auth_context_id: authContextId,
+        },
+      });
+      const matches = (await query<{ matches: boolean }>(
+        tx,
+        `select ${lowered.sql} matches from (select
+           $1::uuid event_id,$2::text event_type,$3::uuid project_id,
+           $4::text resource,$5::uuid object_id,$6::uuid object_version_id,
+           $7::integer version,$8::text operation,$9::timestamptz archived_at
+         ) condition_context`,
+        [
+          event.id,
+          event.type,
+          event.project,
+          event.resource,
+          event.objectId,
+          event.version,
+          objectVersion?.version ?? null,
+          objectVersion?.operation ?? null,
+          typeof record(objectVersion?.snapshot_json).archived_at === "string"
+            ? record(objectVersion?.snapshot_json).archived_at
+            : null,
+          ...lowered.params,
+        ],
+      )).rows[0]?.matches === true;
+      if (!matches) continue;
+    }
     const config = record(attachment.hook_normalized_config);
     const nestedSpec = record(config.spec);
     const spec = Object.keys(nestedSpec).length > 0 ? nestedSpec : config;
@@ -1593,8 +1638,12 @@ async function enqueueAfterCommitDeliveries(
         record(attachment.declaration_spec).input,
         {
           event: eventValue,
-          objectVersion,
-          actor: { auth_context_id: authContextId },
+          objectVersion: objectVersion?.snapshot_json ?? null,
+          actor: {
+            id: committedIdentity.principal_id,
+            human_user_id: committedIdentity.human_user_id,
+            auth_context_id: authContextId,
+          },
         },
       ),
       metadata: {

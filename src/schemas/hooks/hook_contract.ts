@@ -1,3 +1,5 @@
+import { lowerAfterCommitCondition } from "../../domain/outbox/condition.ts";
+
 type JsonRecord = Record<string, unknown>;
 
 const OUTPUT_BY_PHASE: Record<string, string> = {
@@ -26,7 +28,11 @@ const INPUT_REFS: Record<string, Set<string>> = {
     "$reads",
     "$object_version",
   ]),
-  "event.after_commit": new Set(["$event"]),
+  "event.after_commit": new Set([
+    "$actor",
+    "$event",
+    "$object_version",
+  ]),
 };
 
 export type ValidatedHookSecurity = {
@@ -263,6 +269,17 @@ function validateCondition(value: unknown, phase: string, index: number): void {
     const ref of value.match(/\$(?:[a-z_]+)(?:\.[a-z_][a-z0-9_]*)*/g) ?? []
   ) {
     validateReference(ref, phase, `spec.attachments[${index}].condition`);
+  }
+  if (phase === "event.after_commit") {
+    try {
+      lowerAfterCommitCondition(value);
+    } catch (error) {
+      fail(
+        `spec.attachments[${index}].condition ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
   }
 }
 function validateInputValue(value: unknown, phase: string, path: string): void {

@@ -1725,8 +1725,8 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
         "status",
         "hook",
         "event",
-        "since",
-        "until",
+        "from",
+        "to",
         "limit",
         "cursor",
       ]);
@@ -1742,7 +1742,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
     } else if (cmd === "outbox" && sub === "attempts" && value) {
       const options = cliOptions(parsed.positional.slice(3), [
         "limit",
-        "after",
+        "cursor",
       ]);
       const query = new URLSearchParams(options).toString();
       result = await getJson(

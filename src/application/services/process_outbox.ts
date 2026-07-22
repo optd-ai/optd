@@ -5,7 +5,7 @@ import {
   validationError,
 } from "../../domain/errors/result.ts";
 import type { AuthContext } from "../../domain/auth/model.ts";
-import { uuidV7 } from "../../domain/ids/uuid_v7.ts";
+import { isUuidV7, uuidV7 } from "../../domain/ids/uuid_v7.ts";
 import { canonicalSha256 } from "../../domain/ids/canonical_json.ts";
 import {
   type DeliveryOutcome,
@@ -244,9 +244,19 @@ export function makeProcessOutboxService(deps: {
         status: input.status,
         hook: input.hook,
         event: input.event,
-        since: input.since,
-        until: input.until,
+        from: canonicalInstant(input.from),
+        to: canonicalInstant(input.to),
       };
+      if (
+        (input.from !== undefined && filters.from === null) ||
+        (input.to !== undefined && filters.to === null) ||
+        (typeof input.hook === "string" &&
+          !/^[a-z][a-z0-9-]{0,62}\/[a-z][a-z0-9_]{0,62}:[a-z][a-z0-9_]{0,62}$/
+            .test(
+              input.hook,
+            )) ||
+        (typeof input.event === "string" && !isUuidV7(input.event))
+      ) return err(validationError("bad_request", "outbox filter is invalid"));
       if (
         typeof filters.status === "string" &&
         ![
@@ -308,8 +318,7 @@ export function makeProcessOutboxService(deps: {
       const allowed = await authorize(auth, "outbox.inspect");
       if (!allowed.ok) return allowed;
       const limit = optionalInteger(input.limit, 50, 1, 100);
-      const after = optionalInteger(input.after, 0, 0, Number.MAX_SAFE_INTEGER);
-      if (limit === null || after === null) {
+      if (limit === null) {
         return err(
           validationError("bad_request", "attempt pagination is invalid"),
         );
@@ -317,14 +326,32 @@ export function makeProcessOutboxService(deps: {
       if (!await deps.repository.inspect(id)) {
         return deliveryError("delivery_not_found", "not_found");
       }
+      let after = 0;
+      if (typeof input.cursor === "string") {
+        try {
+          cursors ??= OutboxCursorSigner.fromEnvironment();
+          after = await cursors.decodeAttempt(input.cursor, id);
+        } catch {
+          return err(
+            validationError(
+              "invalid_cursor",
+              "attempt cursor is invalid for this delivery",
+            ),
+          );
+        }
+      }
       const rows = await deps.repository.attempts(id, limit + 1, after);
+      const items = rows.slice(0, limit).map(attemptDto);
+      const last = rows.slice(0, limit).at(-1) as
+        | { total_attempt_number?: number }
+        | undefined;
       return ok({
-        items: rows.slice(0, limit).map(attemptDto),
+        items,
         page: {
           limit,
-          next_after: rows.length > limit
-            ? (rows[limit - 1] as { total_attempt_number: number })
-              .total_attempt_number
+          next_cursor: rows.length > limit && last?.total_attempt_number
+            ? await (cursors ??= OutboxCursorSigner.fromEnvironment())
+              .encodeAttempt(id, last.total_attempt_number)
             : null,
         },
       });
@@ -563,6 +590,13 @@ function integer(
     throw new Error("invalid outbox operator configuration");
   }
   return number;
+}
+function canonicalInstant(value: unknown): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || !Number.isFinite(Date.parse(value))) {
+    return null;
+  }
+  return new Date(value).toISOString();
 }
 function optionalInteger(
   value: unknown,

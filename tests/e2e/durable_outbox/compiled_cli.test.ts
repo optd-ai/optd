@@ -80,6 +80,27 @@ for (const logLevel of ["info", "trace"] as const) {
           ]),
           outputs,
         );
+        const validHookYaml = await Deno.readTextFile(
+          `${pack}/hooks/deliver.yaml`,
+        );
+        for (const invalid of ["version ==", 'version == "one"']) {
+          await Deno.writeTextFile(
+            `${pack}/hooks/deliver.yaml`,
+            validHookYaml.replace(
+              `active() && event_type == "object.created" && version == 1 && object_version_id != null && actor.id != null`,
+              invalid,
+            ),
+          );
+          const rejectedPreview = await harness.runOptctl([
+            "--json",
+            "pack",
+            "preview",
+            pack,
+          ]);
+          assertNotEquals(rejectedPreview.code, 0);
+          outputs.push(rejectedPreview.stdout, rejectedPreview.stderr);
+        }
+        await Deno.writeTextFile(`${pack}/hooks/deliver.yaml`, validHookYaml);
         await successful(
           harness.runOptctl([
             "--json",
@@ -126,6 +147,19 @@ for (const logLevel of ["info", "trace"] as const) {
         await waitStatus(harness, normalDelivery.id, "succeeded");
         assertEquals(provider.attempts.length, 1);
         assertEquals(provider.attempts[0].idempotencyKey, normalDelivery.id);
+        const normalBody = JSON.parse(provider.attempts[0].body);
+        assertEquals(normalBody.actor_keys, [
+          "auth_context_id",
+          "human_user_id",
+          "id",
+        ]);
+        assertEquals(normalBody.object_version_present, true);
+        assertEquals(
+          JSON.stringify(normalBody).match(
+            /token|bearer|session|roles|capabilities|credential/i,
+          ),
+          null,
+        );
         assert(normal.commit.data);
         provider.enqueue(
           { kind: "success", body: { directive: "retry" } },
@@ -464,25 +498,129 @@ for (const logLevel of ["info", "trace"] as const) {
           assertStringIncludes(mismatch.stderr, "invalid_cursor");
           outputs.push(mismatch.stdout, mismatch.stderr);
         }
-        await successful(
-          harness.runOptctl([
-            "outbox",
-            "inspect",
-            queuedDelivery.id,
-          ]),
+        const deliveryInspection = json(
+          await successful(
+            harness.runOptctl([
+              "--json",
+              "outbox",
+              "inspect",
+              queuedDelivery.id,
+            ]),
+            outputs,
+          ),
+        ).data;
+        for (
+          const field of [
+            "attachment_id",
+            "hook_identity",
+            "hook_revision_id",
+            "candidate_revision_id",
+            "script_digest",
+            "security_digest",
+            "attachment_digest",
+            "config_digest",
+            "envelope_schema",
+            "output_schema",
+            "event_id",
+            "object_version_id",
+            "attempts_summary",
+            "available_actions",
+            "help",
+          ]
+        ) {
+          assert(
+            Object.hasOwn(deliveryInspection, field),
+            `inspect omitted ${field}`,
+          );
+        }
+        const toonInspect = await successful(
+          harness.runOptctl(["outbox", "inspect", queuedDelivery.id]),
           outputs,
         );
-        await successful(
-          harness.runOptctl([
-            "--json",
-            "outbox",
-            "attempts",
-            queuedDelivery.id,
-            "--limit",
-            "1",
-          ]),
-          outputs,
+        assertStringIncludes(
+          toonInspect.stdout,
+          String(deliveryInspection.id),
         );
+        assertStringIncludes(
+          toonInspect.stdout,
+          String(deliveryInspection.status),
+        );
+
+        const firstAttempts = json(
+          await successful(
+            harness.runOptctl([
+              "--json",
+              "outbox",
+              "attempts",
+              ambiguousDelivery.id,
+              "--limit",
+              "1",
+            ]),
+            outputs,
+          ),
+        ).data;
+        assertEquals(firstAttempts.items.length, 1);
+        const safeAttempt = firstAttempts.items[0];
+        for (
+          const field of [
+            "id",
+            "retry_generation",
+            "attempt_number",
+            "total_attempt_number",
+            "worker_instance_id",
+            "hook_revision_id",
+            "started_at",
+            "lease_expires_at",
+            "completed_at",
+            "outcome",
+            "hook_execution_id",
+            "state",
+            "grants",
+          ]
+        ) assert(Object.hasOwn(safeAttempt, field), `attempt omitted ${field}`);
+        const attemptCursor = firstAttempts.page.next_cursor;
+        assertEquals(typeof attemptCursor, "string");
+        const secondAttempts = json(
+          await successful(
+            harness.runOptctl([
+              "--json",
+              "outbox",
+              "attempts",
+              ambiguousDelivery.id,
+              "--limit",
+              "1",
+              "--cursor",
+              attemptCursor,
+            ]),
+            outputs,
+          ),
+        ).data;
+        assertEquals(secondAttempts.items.length, 1);
+        assertNotEquals(secondAttempts.items[0].id, safeAttempt.id);
+        const mismatchedAttemptCursor = await harness.runOptctl([
+          "--json",
+          "outbox",
+          "attempts",
+          queuedDelivery.id,
+          "--cursor",
+          attemptCursor,
+        ]);
+        assertNotEquals(mismatchedAttemptCursor.code, 0);
+        assertStringIncludes(mismatchedAttemptCursor.stderr, "invalid_cursor");
+        outputs.push(
+          mismatchedAttemptCursor.stdout,
+          mismatchedAttemptCursor.stderr,
+        );
+        const attemptsAlias = await harness.runOptctl([
+          "--json",
+          "outbox",
+          "attempts",
+          ambiguousDelivery.id,
+          "--after",
+          "1",
+        ]);
+        assertNotEquals(attemptsAlias.code, 0);
+        outputs.push(attemptsAlias.stdout, attemptsAlias.stderr);
         await successful(
           harness.runOptctl([
             "--json",
@@ -499,6 +637,151 @@ for (const logLevel of ["info", "trace"] as const) {
         const legacyHttp = await fetch(`${harness.baseUrl}/outbox`);
         assertEquals([401, 404].includes(legacyHttp.status), true);
         await legacyHttp.body?.cancel();
+
+        const ordinaryPassword = `ordinary-outbox-${crypto.randomUUID()}`;
+        const ordinaryUsername = `ordinary-outbox-${
+          crypto.randomUUID().slice(0, 8)
+        }`;
+        await successful(
+          harness.runOptctl([
+            "--json",
+            "auth",
+            "user",
+            "create",
+            "--username",
+            ordinaryUsername,
+            "--password-stdin",
+          ], `${ordinaryPassword}\n`),
+          outputs,
+        );
+        const ordinaryPrincipal = String(
+          (await query<{ principal_id: string }>(
+            harness.server.sql,
+            "select principal_id from human_users where username=$1",
+            [ordinaryUsername],
+          )).rows[0].principal_id,
+        );
+        const ordinaryAssignment = crypto.randomUUID();
+        await query(
+          harness.server.sql,
+          `insert into role_assignments(id,principal_id,role_id,boundary_type,project_id,active)
+           values($1,$2,'system:admin','system',null,true)`,
+          [ordinaryAssignment, ordinaryPrincipal],
+        );
+        await query(
+          harness.server.sql,
+          `insert into policy_assignments(
+             id,policy_definition_version_id,boundary_type,project_id,active)
+           values($1,'01900000-0000-7000-8000-000000000201','system',null,true)
+           on conflict do nothing`,
+          [crypto.randomUUID()],
+        );
+        const ordinaryLogin = await harness.loginProcess({
+          username: ordinaryUsername,
+          password: ordinaryPassword,
+        });
+        assertEquals(
+          ordinaryLogin.result.code,
+          0,
+          ordinaryLogin.result.stderr,
+        );
+        const ordinary = ordinaryLogin.launcher;
+        await successful(
+          ordinary.runOptctl([
+            "--json",
+            "outbox",
+            "inspect",
+            normalDelivery.id,
+          ]),
+          outputs,
+        );
+        await successful(
+          ordinary.runOptctl([
+            "--json",
+            "outbox",
+            "list",
+            "--status",
+            "succeeded",
+            "--hook",
+            "test/durableoutbox:deliver",
+            "--event",
+            normalDelivery.event_id,
+            "--from",
+            "2000-01-01T00:00:00Z",
+            "--to",
+            "2100-01-01T00:00:00Z",
+          ]),
+          outputs,
+        );
+        await successful(
+          ordinary.runOptctl(["--json", "outbox", "drain", "--limit", "1"]),
+          outputs,
+        );
+        await installPauseTrigger(harness);
+        const ordinaryMutation = await stageCommit(
+          harness,
+          pack,
+          projectId,
+          "normal",
+          "ordinary-mutation",
+        );
+        const ordinaryDelivery = await deliveryForStage(
+          harness,
+          ordinaryMutation.stageId,
+        );
+        await successful(
+          ordinary.runOptctl([
+            "--json",
+            "outbox",
+            "cancel",
+            ordinaryDelivery.id,
+          ]),
+          outputs,
+        );
+        const ordinaryRetryWork = await stageCommit(
+          harness,
+          pack,
+          projectId,
+          "normal",
+          "ordinary-retry",
+        );
+        const ordinaryRetryDelivery = await deliveryForStage(
+          harness,
+          ordinaryRetryWork.stageId,
+        );
+        provider.enqueue({ kind: "permanent_failure" });
+        await releasePaused(harness, ordinaryRetryDelivery.id);
+        await waitStatus(harness, ordinaryRetryDelivery.id, "dead_letter");
+        provider.enqueue({ kind: "success" });
+        await successful(
+          ordinary.runOptctl([
+            "--json",
+            "outbox",
+            "retry",
+            ordinaryRetryDelivery.id,
+          ]),
+          outputs,
+        );
+        await waitStatus(harness, ordinaryRetryDelivery.id, "succeeded");
+        await query(
+          harness.server.sql,
+          "update role_assignments set active=false,disabled_at=now() where id=$1",
+          [ordinaryAssignment],
+        );
+        for (
+          const args of [
+            ["--json", "outbox", "inspect", normalDelivery.id],
+            ["--json", "outbox", "retry", ordinaryRetryDelivery.id],
+            ["--json", "outbox", "cancel", normalDelivery.id],
+            ["--json", "outbox", "drain", "--limit", "1"],
+          ]
+        ) {
+          const denied = await ordinary.runOptctl(args);
+          assertNotEquals(denied.code, 0);
+          assertStringIncludes(denied.stderr, "policy_denied");
+          outputs.push(denied.stdout, denied.stderr);
+        }
+        await ordinary.close();
 
         const diagnostics = await harness.diagnostics();
         const databaseText = JSON.stringify(
@@ -562,7 +845,7 @@ async function writePack(
     `${root}/hooks/deliver.yaml`,
     `kind: Hook\napiVersion: operant.dev/v1\nmetadata: { name: deliver }\nspec:\n  script: deliver.ts\n  timeout: ${
       marker === "V2" ? "10s" : "1s"
-    }\n  permissions: { net: [${host}], env: false, read: false, write: false, run: false }\n  secrets: [{ slot: token, env: OUTBOX_TOKEN }]\n  effects: { operations: [] }\n  output: { schema: delivery.v1 }\n  attachments:\n    - phase: event.after_commit\n      event: object.created\n      order: 10\n      input: { event: '$event' }\n  axi: {}\n`,
+    }\n  permissions: { net: [${host}], env: false, read: false, write: false, run: false }\n  secrets: [{ slot: token, env: OUTBOX_TOKEN }]\n  effects: { operations: [] }\n  output: { schema: delivery.v1 }\n  attachments:\n    - phase: event.after_commit\n      event: object.created\n      order: 10\n      condition: 'active() && event_type == "object.created" && version == 1 && object_version_id != null && actor.id != null'\n      input: { event: '$event', object_version: '$object_version', actor: '$actor' }\n    - phase: event.after_commit\n      event: object.created\n      order: 11\n      condition: 'false && event_type == "object.created"'\n      input: { event: '$event' }\n  axi: {}\n`,
   );
   await Deno.writeTextFile(
     `${root}/hooks/deliver.ts`,
@@ -574,7 +857,7 @@ const response=await fetch(${
       JSON.stringify(`${providerUrl}/effect`)
     },{method:"POST",headers:{"content-type":"application/json","idempotency-key":delivery.idempotency_key},body:JSON.stringify({script:${
       JSON.stringify(marker)
-    },secret_version:token.includes("v2-")?"v2":"v1",attempt_id:delivery.attempt_id})});
+    },secret_version:token.includes("v2-")?"v2":"v1",attempt_id:delivery.attempt_id,actor_keys:Object.keys(envelope.input.actor).sort(),object_version_present:envelope.input.object_version!==null})});
 const responseBody=await response.json();
 if(responseBody.directive==="retry") console.log(JSON.stringify({outcome:"retry",code:"ambiguous",message:"effect may have completed"}));
 else if(response.status===503) console.log(JSON.stringify({outcome:"retry",code:"provider_unavailable",message:"provider unavailable",retry_after:(response.headers.get("retry-after")??"1")+"s"}));
@@ -633,14 +916,19 @@ async function successful(
 function json(result: { stdout: string }) {
   return JSON.parse(result.stdout);
 }
-type DeliveryRow = { id: string; status: string; available_at: string };
+type DeliveryRow = {
+  id: string;
+  event_id: string;
+  status: string;
+  available_at: string;
+};
 async function deliveryForStage(
   harness: LiveHarness,
   stageId: string,
 ): Promise<DeliveryRow> {
   return await waitRow<DeliveryRow>(
     harness,
-    `select d.id,d.status,d.available_at::text from outbox_deliveries d join changeset_commits c on c.id=d.changeset_commit_id where c.stage_id=$1 order by d.created_at limit 1`,
+    `select d.id,d.event_id,d.status,d.available_at::text from outbox_deliveries d join changeset_commits c on c.id=d.changeset_commit_id where c.stage_id=$1 order by d.created_at limit 1`,
     [stageId],
   );
 }
@@ -650,7 +938,7 @@ async function delivery(
 ): Promise<DeliveryRow> {
   return await waitRow<DeliveryRow>(
     harness,
-    "select id,status,available_at::text from outbox_deliveries where id=$1",
+    "select id,event_id,status,available_at::text from outbox_deliveries where id=$1",
     [id],
   );
 }

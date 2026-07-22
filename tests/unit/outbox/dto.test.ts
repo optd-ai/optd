@@ -36,6 +36,42 @@ Deno.test("outbox DTOs use strict allowlists and redact all credential material"
       id: "attempt",
       outcome: "dead_letter",
       error_code: "hook_secret_unavailable",
+      state: "completed",
+      grants: [{}],
+    },
+  );
+  assertEquals(
+    attemptDto({
+      id: "attempt-safe",
+      completed_at: "2026-01-01T00:00:00Z",
+      worker_instance_id: "worker",
+      hook_revision_id: "hook",
+      hook_execution_id: "execution",
+      grant_evidence_json: [{
+        grant_id: "grant",
+        slot: "token",
+        secret_id: "stable-secret",
+        value_version: 2,
+        env: "PROVIDER_TOKEN",
+        name: "provider",
+        value: "plaintext",
+        ciphertext: "ciphertext",
+        key_id: "key",
+      }],
+    }),
+    {
+      id: "attempt-safe",
+      worker_instance_id: "worker",
+      hook_revision_id: "hook",
+      completed_at: "2026-01-01T00:00:00Z",
+      hook_execution_id: "execution",
+      state: "completed",
+      grants: [{
+        grant_id: "grant",
+        slot: "token",
+        secret_id: "stable-secret",
+        value_version: 2,
+      }],
     },
   );
 });
