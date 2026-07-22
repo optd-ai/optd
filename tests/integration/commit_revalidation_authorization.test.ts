@@ -5,8 +5,358 @@ import { query } from "../../src/adapters/outbound/postgres/client.ts";
 import { uuidV7 } from "../../src/domain/ids/uuid_v7.ts";
 import {
   assertNoIdleClients,
+  commitAfterObservedLifecycleBarrier,
   startCommitMatrix,
 } from "../support/commit_revalidation_harness.ts";
+
+Deno.test({
+  name:
+    "production authorization facts mutate only after the exact lifecycle waiter is observed",
+  sanitizeOps: false,
+  sanitizeResources: false,
+  async fn() {
+    const matrix = await startCommitMatrix();
+    try {
+      for (const mutation of ["session", "principal", "human"] as const) {
+        const stage = await matrix.stage([{
+          op: "create",
+          project_id: matrix.projectId,
+          resource: "test/commitmatrix:gamma",
+          fields: { key: `observed-actor-${mutation}`, status: "ready" },
+        }]);
+        const result = await commitAfterObservedLifecycleBarrier(
+          matrix,
+          stage.id,
+          async () => {
+            if (mutation === "session") {
+              await query(
+                matrix.harness.server.sql,
+                "update auth_sessions set revoked_at=now() where id=$1",
+                [matrix.auth.sessionId],
+              );
+            } else if (mutation === "principal") {
+              await query(
+                matrix.harness.server.sql,
+                "update principals set active=false where id=$1",
+                [matrix.auth.principalId],
+              );
+            } else {await query(
+                matrix.harness.server.sql,
+                "update human_users set status='disabled',disabled_at=now() where id=$1",
+                [matrix.auth.humanUserId],
+              );}
+          },
+        );
+        await assertAuthFailure(
+          matrix,
+          stage.id,
+          result,
+          "authorization_changed",
+        );
+        await restoreHuman(matrix, matrix.auth);
+      }
+
+      const actionSource = await matrix.stage([{
+        op: "create",
+        project_id: matrix.projectId,
+        resource: "test/commitmatrix:alpha",
+        fields: { key: "observed-source-action-object", status: "ready" },
+      }]);
+      assertEquals((await matrix.commit(actionSource.id)).ok, true);
+      const actionSourceId = String(actionSource.operations[0].object_id);
+      const sourceStages: Array<{ kind: string; id: string }> = [];
+      const directSource = await matrix.stage([{
+        op: "create",
+        project_id: matrix.projectId,
+        resource: "test/commitmatrix:gamma",
+        fields: { key: "observed-source-direct", status: "ready" },
+      }]);
+      sourceStages.push({ kind: "direct", id: directSource.id });
+      const actionResult = await matrix.harness.runOptctl([
+        "--json",
+        "--project",
+        matrix.projectId,
+        "action",
+        "stage",
+        "test/commitmatrix:generate",
+        "--input",
+        JSON.stringify({
+          project_id: matrix.projectId,
+          source_id: actionSourceId,
+        }),
+      ]);
+      assertEquals(actionResult.code, 0, actionResult.stderr);
+      sourceStages.push({
+        kind: "action",
+        id: JSON.parse(actionResult.stdout).data.id,
+      });
+      const seedResult = await matrix.harness.runOptctl([
+        "--json",
+        "--project",
+        matrix.projectId,
+        "seed",
+        "stage",
+        "test/commitmatrix",
+        "--seed",
+        "alpha",
+      ]);
+      assertEquals(seedResult.code, 0, seedResult.stderr);
+      sourceStages.push({
+        kind: "seed",
+        id: JSON.parse(seedResult.stdout).data.stage.id,
+      });
+      const superAssignment = (await query<{ id: string }>(
+        matrix.harness.server.sql,
+        `select id from role_assignments where principal_id=$1 and role_id='system:super_admin' and active limit 1`,
+        [matrix.auth.principalId],
+      )).rows[0].id;
+      for (const source of sourceStages) {
+        const result = await commitAfterObservedLifecycleBarrier(
+          matrix,
+          source.id,
+          async () => {
+            await query(
+              matrix.harness.server.sql,
+              "update role_assignments set active=false where id=$1",
+              [superAssignment],
+            );
+          },
+        );
+        await assertAuthFailure(
+          matrix,
+          source.id,
+          result,
+          "authorization_changed",
+        );
+        await query(
+          matrix.harness.server.sql,
+          "update role_assignments set active=true where id=$1",
+          [superAssignment],
+        );
+      }
+
+      const agent = await createAgent(matrix);
+      for (const authorization of [agent.root, agent.leaf]) {
+        const stage = await matrix.stage([{
+          op: "create",
+          project_id: matrix.projectId,
+          resource: "test/commitmatrix:gamma",
+          fields: {
+            key: `observed-agent-${authorization.slice(-8)}`,
+            status: "ready",
+          },
+        }], agent.auth);
+        const result = await commitAfterObservedLifecycleBarrier(
+          matrix,
+          stage.id,
+          async () => {
+            await query(
+              matrix.harness.server.sql,
+              "update agent_authorizations set revoked_at=now() where id=$1",
+              [authorization],
+            );
+          },
+          agent.auth,
+        );
+        await assertAuthFailure(
+          matrix,
+          stage.id,
+          result,
+          "authorization_ancestor_invalid",
+        );
+        await query(
+          matrix.harness.server.sql,
+          "update agent_authorizations set revoked_at=null where id=$1",
+          [authorization],
+        );
+      }
+
+      const ordinary = await createHuman(matrix, false);
+      const authority = await grantWriter(matrix, ordinary.principalId);
+      const cases: Array<
+        { name: string; mutate(): Promise<void>; restore(): Promise<void> }
+      > = [{
+        name: "role-assignment",
+        mutate: () =>
+          query(
+            matrix.harness.server.sql,
+            "update role_assignments set active=false where id=$1",
+            [authority.roleAssignment],
+          ).then(() => undefined),
+        restore: () =>
+          query(
+            matrix.harness.server.sql,
+            "update role_assignments set active=true where id=$1",
+            [authority.roleAssignment],
+          ).then(() => undefined),
+      }, {
+        name: "role-definition",
+        mutate: () =>
+          query(
+            matrix.harness.server.sql,
+            "update role_definition_versions set active=false where role_id=$1",
+            [authority.role],
+          ).then(() => undefined),
+        restore: () =>
+          query(
+            matrix.harness.server.sql,
+            "update role_definition_versions set active=true where role_id=$1",
+            [authority.role],
+          ).then(() => undefined),
+      }, {
+        name: "policy-assignment",
+        mutate: () =>
+          query(
+            matrix.harness.server.sql,
+            "update policy_assignments set active=false where id=$1",
+            [authority.policyAssignment],
+          ).then(() => undefined),
+        restore: () =>
+          query(
+            matrix.harness.server.sql,
+            "update policy_assignments set active=true where id=$1",
+            [authority.policyAssignment],
+          ).then(() => undefined),
+      }, {
+        name: "policy-definition",
+        mutate: () =>
+          query(
+            matrix.harness.server.sql,
+            "update policy_definition_versions set active=false where id=$1",
+            [authority.policyDefinition],
+          ).then(() => undefined),
+        restore: () =>
+          query(
+            matrix.harness.server.sql,
+            "update policy_definition_versions set active=true where id=$1",
+            [authority.policyDefinition],
+          ).then(() => undefined),
+      }, {
+        name: "abac",
+        mutate: () =>
+          query(
+            matrix.harness.server.sql,
+            "update policy_rules set predicate='note == \"deny\"' where id=$1",
+            [authority.abacRule],
+          ).then(() => undefined),
+        restore: () =>
+          query(
+            matrix.harness.server.sql,
+            "update policy_rules set predicate='note == \"allow\"' where id=$1",
+            [authority.abacRule],
+          ).then(() => undefined),
+      }];
+      for (const authorityCase of cases) {
+        const stage = await matrix.stage([{
+          op: "create",
+          project_id: matrix.projectId,
+          resource: "test/commitmatrix:alpha",
+          fields: {
+            key: `observed-${authorityCase.name}`,
+            status: "ready",
+            note: "allow",
+          },
+        }], ordinary);
+        const result = await commitAfterObservedLifecycleBarrier(
+          matrix,
+          stage.id,
+          authorityCase.mutate,
+          ordinary,
+        );
+        await assertAuthFailure(
+          matrix,
+          stage.id,
+          result,
+          "authorization_changed",
+        );
+        await authorityCase.restore();
+      }
+
+      const unconditionalStage = await matrix.stage([{
+        op: "create",
+        project_id: matrix.projectId,
+        resource: "test/commitmatrix:gamma",
+        fields: { key: "observed-unconditional", status: "ready" },
+      }], ordinary);
+      const unconditionalResult = await commitAfterObservedLifecycleBarrier(
+        matrix,
+        unconditionalStage.id,
+        async () => {
+          await query(
+            matrix.harness.server.sql,
+            "update policy_rules set capability='archive' where id=$1",
+            [authority.unconditionalRule],
+          );
+        },
+        ordinary,
+      );
+      await assertAuthFailure(
+        matrix,
+        unconditionalStage.id,
+        unconditionalResult,
+        "authorization_changed",
+      );
+
+      const secondProject = await matrix.harness.runOptctl([
+        "--json",
+        "project",
+        "create",
+        `matrix-second-${crypto.randomUUID().slice(0, 8)}`,
+        "--display-name",
+        "Matrix Second Project",
+      ]);
+      assertEquals(secondProject.code, 0, secondProject.stderr);
+      const secondProjectId = JSON.parse(secondProject.stdout).data
+        .id as string;
+      await query(
+        matrix.harness.server.sql,
+        "update role_assignments set boundary_type='all_projects',project_id=null where id=$1",
+        [authority.roleAssignment],
+      );
+      await query(
+        matrix.harness.server.sql,
+        "update policy_assignments set boundary_type='all_projects',project_id=null where id=$1",
+        [authority.policyAssignment],
+      );
+      const multiProject = await matrix.stage([{
+        op: "create",
+        project_id: matrix.projectId,
+        resource: "test/commitmatrix:alpha",
+        fields: { key: "observed-multi-first", status: "ready", note: "allow" },
+      }, {
+        op: "create",
+        project_id: secondProjectId,
+        resource: "test/commitmatrix:alpha",
+        fields: {
+          key: "observed-multi-second",
+          status: "ready",
+          note: "allow",
+        },
+      }], ordinary);
+      const multiResult = await commitAfterObservedLifecycleBarrier(
+        matrix,
+        multiProject.id,
+        async () => {
+          await query(
+            matrix.harness.server.sql,
+            "update role_assignments set boundary_type='project',project_id=$2 where id=$1",
+            [authority.roleAssignment, matrix.projectId],
+          );
+        },
+        ordinary,
+      );
+      await assertAuthFailure(
+        matrix,
+        multiProject.id,
+        multiResult,
+        "authorization_changed",
+      );
+      await assertNoIdleClients(matrix.harness.server.sql);
+    } finally {
+      await matrix.close();
+    }
+  },
+});
 
 Deno.test({
   name:
@@ -193,14 +543,26 @@ Deno.test({
         object_id: objectId,
         set: { note: "staged owner update" },
       }], ordinary);
-      const unlink = await matrix.stage([{
-        op: "unlink",
-        project_id: matrix.projectId,
-        relationship: "test/commitmatrix:alpha_owner",
-        relationship_id: relationshipId,
-      }]);
-      assertEquals((await matrix.commit(unlink.id)).ok, true);
-      await assertAuthorizationChanged(matrix, rebacDenied.id, ordinary);
+      const rebacResult = await commitAfterObservedLifecycleBarrier(
+        matrix,
+        rebacDenied.id,
+        async () => {
+          const unlink = await matrix.stage([{
+            op: "unlink",
+            project_id: matrix.projectId,
+            relationship: "test/commitmatrix:alpha_owner",
+            relationship_id: relationshipId,
+          }]);
+          assertEquals((await matrix.commit(unlink.id)).ok, true);
+        },
+        ordinary,
+      );
+      await assertAuthFailure(
+        matrix,
+        rebacDenied.id,
+        rebacResult,
+        "authorization_changed",
+      );
 
       const cutoffs = (await query<{ cutoff: string }>(
         matrix.harness.server.sql,
@@ -337,10 +699,11 @@ async function grantWriter(
   principal: string,
 ) {
   const role = "test/commitmatrix:reviewer";
+  const roleAssignment = uuidV7();
   await query(
     matrix.harness.server.sql,
     "insert into role_assignments(id,principal_id,role_id,boundary_type,project_id,active) values($1,$2,$3,'project',$4,true)",
-    [uuidV7(), principal, role, matrix.projectId],
+    [roleAssignment, principal, role, matrix.projectId],
   );
   const definition = uuidV7(), assignment = uuidV7(), abacRule = uuidV7();
   const revision = (await query<{ id: string }>(
@@ -372,12 +735,65 @@ async function grantWriter(
      values($1,$2,$3,'update','test/commitmatrix:alpha','rebac','test/commitmatrix:alpha_owner','from','to','actor.id')`,
     [uuidV7(), definition, role],
   );
+  const unconditionalRule = uuidV7();
+  await query(
+    matrix.harness.server.sql,
+    `insert into policy_rules(id,policy_definition_version_id,role_id,capability,resource,condition_kind)
+     values($1,$2,$3,'create','test/commitmatrix:gamma','unconditional')`,
+    [unconditionalRule, definition, role],
+  );
   await query(
     matrix.harness.server.sql,
     "insert into policy_assignments(id,policy_definition_version_id,boundary_type,project_id,active) values($1,$2,'project',$3,true)",
     [assignment, definition, matrix.projectId],
   );
-  return { abacRule };
+  return {
+    abacRule,
+    role,
+    roleAssignment,
+    policyAssignment: assignment,
+    policyDefinition: definition,
+    unconditionalRule,
+  };
+}
+
+async function restoreHuman(
+  matrix: Awaited<ReturnType<typeof startCommitMatrix>>,
+  auth: AuthContext,
+) {
+  await query(
+    matrix.harness.server.sql,
+    "update auth_sessions set revoked_at=null where id=$1",
+    [auth.sessionId],
+  );
+  await query(
+    matrix.harness.server.sql,
+    "update principals set active=true where id=$1",
+    [auth.principalId],
+  );
+  await query(
+    matrix.harness.server.sql,
+    "update human_users set status='active',disabled_at=null where id=$1",
+    [auth.humanUserId],
+  );
+}
+
+async function assertAuthFailure(
+  matrix: Awaited<ReturnType<typeof startCommitMatrix>>,
+  stageId: string,
+  result: Awaited<ReturnType<typeof matrix.commit>>,
+  code: string,
+) {
+  assertEquals(result.ok, false);
+  if (!result.ok) assertEquals(result.error.code, code);
+  assertEquals(
+    (await query<{ count: string }>(
+      matrix.harness.server.sql,
+      "select count(*)::text count from changeset_commits where stage_id=$1",
+      [stageId],
+    )).rows[0].count,
+    "0",
+  );
 }
 
 async function assertAuthorizationChanged(

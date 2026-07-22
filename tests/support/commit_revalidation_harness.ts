@@ -12,10 +12,12 @@ import {
 } from "../../src/adapters/outbound/postgres/client.ts";
 import { startAuthenticatedHarness } from "./authenticated_harness.ts";
 
-export async function startCommitMatrix() {
+export async function startCommitMatrix(
+  options: { providerUrl?: string } = {},
+) {
   const harness = await startAuthenticatedHarness();
   const pack = await Deno.makeTempDir({ prefix: "commit-matrix-pack-" });
-  await writePack(pack);
+  await writePack(pack, options.providerUrl);
   const applied = await harness.runOptctl([
     "--json",
     "pack",
@@ -140,6 +142,56 @@ export async function observeWaiters(
   throw new Error(`bounded waiter observation failed: ${JSON.stringify(last)}`);
 }
 
+export async function commitAfterObservedLifecycleBarrier(
+  matrix: Awaited<ReturnType<typeof startCommitMatrix>>,
+  stageId: string,
+  mutate: () => Promise<void>,
+  actor = matrix.auth,
+) {
+  const blocker = matrix.client();
+  const committer = matrix.client();
+  let release: (() => void) | undefined;
+  try {
+    let held!: (pid: number) => void;
+    const heldPromise = new Promise<number>((resolve) => held = resolve);
+    const releasePromise = new Promise<void>((resolve) => release = resolve);
+    const blocking = blocker.begin(async (tx) => {
+      const pid = Number(
+        (await tx.unsafe("select pg_backend_pid() pid"))[0].pid,
+      );
+      const rows = await tx.unsafe(
+        "select stage_id from staged_changeset_lifecycle where stage_id=$1 for update",
+        [stageId],
+      );
+      assertEquals(String(rows[0]?.stage_id), stageId);
+      held(pid);
+      await releasePromise;
+    });
+    const blockerPid = await heldPromise;
+    const committing = commitRepository(committer).commit(stageId, actor, {
+      lockTimeoutMs: 30_000,
+    });
+    const waiter = await observeWaiters(
+      matrix.harness.server.sql,
+      "staged_changeset_lifecycle",
+      1,
+      blockerPid,
+    );
+    assertEquals(waiter[0].blockers, [blockerPid]);
+    await mutate();
+    release?.();
+    release = undefined;
+    await blocking;
+    return await committing;
+  } finally {
+    release?.();
+    await Promise.all([
+      blocker.end().catch(() => undefined),
+      committer.end().catch(() => undefined),
+    ]);
+  }
+}
+
 export async function assertNoIdleClients(sql: Sql) {
   const rows = await query<{ pid: number; query: string }>(
     sql,
@@ -149,26 +201,35 @@ export async function assertNoIdleClients(sql: Sql) {
   assertEquals(rows.rows, []);
 }
 
-export async function writePack(root: string) {
+export async function writePack(root: string, providerUrl?: string) {
   await Deno.mkdir(`${root}/resources`);
   await Deno.mkdir(`${root}/relationships`);
   await Deno.mkdir(`${root}/lifecycles`);
   await Deno.mkdir(`${root}/roles`);
   await Deno.mkdir(`${root}/hooks`);
   await Deno.mkdir(`${root}/seeds`);
+  await Deno.mkdir(`${root}/actions`);
   await Deno.writeTextFile(
     `${root}/pack.yaml`,
     `kind: Pack\napiVersion: operant.dev/v1\nmetadata: { publisher: test, name: commitmatrix, version: 1.0.0 }\nspec: { purpose: Production commit matrix., axi: {} }\n`,
   );
-  for (const name of ["alpha", "beta"]) {
+  for (const name of ["alpha", "beta", "gamma"]) {
     await Deno.writeTextFile(
       `${root}/resources/${name}.yaml`,
-      `kind: Resource\napiVersion: operant.dev/v1\nmetadata: { name: ${name} }\nspec:\n  fields:\n    key: { type: string, required: true, unique: true }\n    status: { type: string, required: true }\n    note: { type: string }\n    parent_key: { type: string }\n  axi: {}\n`,
+      `kind: Resource\napiVersion: operant.dev/v1\nmetadata: { name: ${name} }\nspec:\n  fields:\n    key: { type: string, required: true, unique: true }\n    status: { type: string, required: true }\n    note: { type: string }\n    parent_key: { type: string }\n    beta_id: { type: string, ref: 'test/commitmatrix:beta' }\n  constraints:\n    - { name: ${name}_beta_fk, kind: foreign_key, fields: [beta_id], target: { resource: 'test/commitmatrix:beta', fields: [id] }, onDelete: restrict }\n  axi: {}\n`,
     );
   }
   await Deno.writeTextFile(
     `${root}/resources/approval_case.yaml`,
     `kind: Resource\napiVersion: operant.dev/v1\nmetadata: { name: approval_case }\nspec:\n  fields:\n    key: { type: string, required: true, unique: true }\n  axi: {}\n`,
+  );
+  await Deno.writeTextFile(
+    `${root}/resources/approval_agent.yaml`,
+    `kind: Resource\napiVersion: operant.dev/v1\nmetadata: { name: approval_agent }\nspec:\n  fields:\n    key: { type: string, required: true, unique: true }\n  axi: {}\n`,
+  );
+  await Deno.writeTextFile(
+    `${root}/resources/approval_expiring.yaml`,
+    `kind: Resource\napiVersion: operant.dev/v1\nmetadata: { name: approval_expiring }\nspec:\n  fields:\n    key: { type: string, required: true, unique: true }\n  axi: {}\n`,
   );
   await Deno.writeTextFile(
     `${root}/roles/reviewer.yaml`,
@@ -177,6 +238,45 @@ export async function writePack(root: string) {
   await Deno.writeTextFile(
     `${root}/hooks/approval.yaml`,
     `kind: Hook\napiVersion: operant.dev/v1\nmetadata: { name: approval }\nspec:\n  script: approval.ts\n  permissions: { net: false, env: false, read: false, write: false, run: false }\n  secrets: []\n  effects: { operations: [] }\n  output: { schema: validation.v1 }\n  attachments:\n    - { phase: changeset.validate, resource: approval_case, input: { proposed: '$proposed' } }\n  axi: {}\n`,
+  );
+  await Deno.writeTextFile(
+    `${root}/hooks/approval_agent.yaml`,
+    `kind: Hook\napiVersion: operant.dev/v1\nmetadata: { name: approval_agent }\nspec:\n  script: approval_agent.ts\n  permissions: { net: false, env: false, read: false, write: false, run: false }\n  secrets: []\n  effects: { operations: [] }\n  output: { schema: validation.v1 }\n  attachments:\n    - { phase: changeset.validate, resource: approval_agent, input: { proposed: '$proposed' } }\n  axi: {}\n`,
+  );
+  await Deno.writeTextFile(
+    `${root}/hooks/approval_agent.ts`,
+    `console.log(JSON.stringify({allow:true,errors:[],warnings:[],required_approvals:[{key:"agent_review",role:"test/commitmatrix:reviewer",boundary:{type:"system"},minimum:1,principal_types:["agent_user"],allow_initiator:true,expires_at:null,reason:"agent matrix review"}]}));`,
+  );
+  await Deno.writeTextFile(
+    `${root}/hooks/approval_expiring.yaml`,
+    `kind: Hook\napiVersion: operant.dev/v1\nmetadata: { name: approval_expiring }\nspec:\n  script: approval_expiring.ts\n  permissions: { net: false, env: false, read: false, write: false, run: false }\n  secrets: []\n  effects: { operations: [] }\n  output: { schema: validation.v1 }\n  attachments:\n    - { phase: changeset.validate, resource: approval_expiring, input: { proposed: '$proposed' } }\n  axi: {}\n`,
+  );
+  await Deno.writeTextFile(
+    `${root}/hooks/approval_expiring.ts`,
+    `console.log(JSON.stringify({allow:true,errors:[],warnings:[],required_approvals:[{key:"expiring_review",role:"test/commitmatrix:reviewer",boundary:{type:"system"},minimum:1,principal_types:["human_user"],allow_initiator:true,expires_at:new Date(Date.now()+5000).toISOString(),reason:"expiring matrix review"}]}));`,
+  );
+  await Deno.writeTextFile(
+    `${root}/actions/generate.yaml`,
+    `kind: Action\napiVersion: operant.dev/v1\nmetadata: { name: generate }\nspec:\n  input:\n    project_id: { type: string, required: true, format: uuid }\n    source_id: { type: string, required: true, format: uuid }\n  reads:\n    source:\n      resource: alpha\n      id_from: '$action.input.source_id'\n      fields: [key, status]\n      required: true\n  availability: { resource: alpha, states: [ready], condition: 'status == "ready"' }\n  axi: {}\n`,
+  );
+  const endpoint = providerUrl ? new URL(providerUrl).host : "";
+  await Deno.writeTextFile(
+    `${root}/hooks/generate.yaml`,
+    `kind: Hook\napiVersion: operant.dev/v1\nmetadata: { name: generate }\nspec:\n  script: generate.ts\n  permissions: { net: ${
+      providerUrl ? `[${endpoint}]` : "false"
+    }, env: false, read: false, write: false, run: false }\n  secrets: ${
+      providerUrl ? "[{ slot: token, env: TOKEN }]" : "[]"
+    }\n  effects:\n    operations:\n      - { resource: test/commitmatrix:gamma, ops: [create] }\n  output: { schema: changeset.operations.v1 }\n  attachments:\n    - { phase: action.stage, action: test/commitmatrix:generate, order: 10, input: { read: '$reads.source', request: '$action.input' } }\n  axi: {}\n`,
+  );
+  await Deno.writeTextFile(
+    `${root}/hooks/generate.ts`,
+    `const e=JSON.parse(await new Response(Deno.stdin.readable).text()); ${
+      providerUrl
+        ? `await fetch(${
+          JSON.stringify(`${providerUrl}/action`)
+        },{headers:{authorization:"Bearer "+Deno.env.get("TOKEN")}});`
+        : ""
+    } console.log(JSON.stringify({operations:[{op:"create",project_id:e.input.request.project_id,resource:"test/commitmatrix:gamma",fields:{key:"action-"+e.input.read.key,status:"ready"}}]}));`,
   );
   await Deno.writeTextFile(
     `${root}/hooks/approval.ts`,

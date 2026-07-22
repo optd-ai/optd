@@ -4,6 +4,7 @@ import {
   query,
   quoteIdentifier,
 } from "../../src/adapters/outbound/postgres/client.ts";
+import { makeCommitChangesetService } from "../../src/application/services/commit/commit_changeset.ts";
 import {
   assertNoIdleClients,
   commitRepository,
@@ -50,6 +51,19 @@ Deno.test({
       );
       assertEquals(busy.ok, false);
       if (!busy.ok) assertEquals(busy.error.code, "commit_busy");
+      const priorDefault = Deno.env.get("OPERANT_COMMIT_LOCK_TIMEOUT");
+      Deno.env.set("OPERANT_COMMIT_LOCK_TIMEOUT", "5ms");
+      try {
+        const configured = await makeCommitChangesetService(
+          commitRepository(shortClient),
+        ).commit(stage.id, {}, matrix.auth);
+        assertEquals(configured.ok, false);
+        if (!configured.ok) assertEquals(configured.error.code, "commit_busy");
+      } finally {
+        if (priorDefault === undefined) {
+          Deno.env.delete("OPERANT_COMMIT_LOCK_TIMEOUT");
+        } else Deno.env.set("OPERANT_COMMIT_LOCK_TIMEOUT", priorDefault);
+      }
       assertEquals(
         (await query<{ count: string }>(
           matrix.harness.server.sql,
@@ -169,6 +183,114 @@ Deno.test({
 
 Deno.test({
   name:
+    "production 40P01 exhausts exactly while 55P03 and domain conflicts attempt once",
+  sanitizeOps: false,
+  sanitizeResources: false,
+  async fn() {
+    const matrix = await startCommitMatrix();
+    const client = matrix.client();
+    try {
+      await query(
+        matrix.harness.server.sql,
+        "create sequence matrix_state_attempts",
+      );
+      await query(
+        matrix.harness.server.sql,
+        `create function matrix_state_failure() returns trigger
+        language plpgsql as $$ begin perform nextval('matrix_state_attempts');
+        raise exception 'matrix state' using errcode='40P01'; end $$`,
+      );
+      await query(
+        matrix.harness.server.sql,
+        `create trigger matrix_state_failure before insert on changeset_commits
+        for each row execute function matrix_state_failure()`,
+      );
+      const deadlock = await matrix.stage([{
+        op: "create",
+        project_id: matrix.projectId,
+        resource: "test/commitmatrix:gamma",
+        fields: { key: "deadlock-exhaust", status: "ready" },
+      }]);
+      const exhausted = await commitRepository(client).commit(
+        deadlock.id,
+        matrix.auth,
+        { lockTimeoutMs: 2_000 },
+      );
+      assertEquals(exhausted.ok, false);
+      if (!exhausted.ok) {
+        assertEquals(exhausted.error.code, "commit_retry_exhausted");
+        assertEquals(
+          (exhausted.error.details as Record<string, unknown>).attempts,
+          4,
+        );
+      }
+      assertEquals(await stateAttempts(matrix), 4);
+
+      await query(
+        matrix.harness.server.sql,
+        `create or replace function matrix_state_failure() returns trigger
+        language plpgsql as $$ begin perform nextval('matrix_state_attempts');
+        raise exception 'matrix busy' using errcode='55P03'; end $$`,
+      );
+      const busyStage = await matrix.stage([{
+        op: "create",
+        project_id: matrix.projectId,
+        resource: "test/commitmatrix:gamma",
+        fields: { key: "busy-once", status: "ready" },
+      }]);
+      const beforeBusy = await stateAttempts(matrix);
+      const busy = await commitRepository(client).commit(
+        busyStage.id,
+        matrix.auth,
+        { lockTimeoutMs: 2_000 },
+      );
+      assertEquals(busy.ok, false);
+      if (!busy.ok) assertEquals(busy.error.code, "commit_busy");
+      assertEquals((await stateAttempts(matrix)) - beforeBusy, 1);
+
+      await query(
+        matrix.harness.server.sql,
+        `create or replace function matrix_state_failure() returns trigger
+        language plpgsql as $$ begin perform nextval('matrix_state_attempts');
+        raise exception 'matrix domain' using errcode='23505'; end $$`,
+      );
+      const domainStage = await matrix.stage([{
+        op: "create",
+        project_id: matrix.projectId,
+        resource: "test/commitmatrix:gamma",
+        fields: { key: "domain-once", status: "ready" },
+      }]);
+      const beforeDomain = await stateAttempts(matrix);
+      const domain = await commitRepository(client).commit(
+        domainStage.id,
+        matrix.auth,
+        { lockTimeoutMs: 2_000 },
+      );
+      assertEquals(domain.ok, false);
+      if (!domain.ok) assertEquals(domain.error.code, "constraint_conflict");
+      assertEquals((await stateAttempts(matrix)) - beforeDomain, 1);
+      await query(
+        matrix.harness.server.sql,
+        "drop trigger matrix_state_failure on changeset_commits",
+      );
+      await query(
+        matrix.harness.server.sql,
+        "drop function matrix_state_failure()",
+      );
+      await query(
+        matrix.harness.server.sql,
+        "drop sequence matrix_state_attempts",
+      );
+      await assertNoIdleClients(matrix.harness.server.sql);
+    } finally {
+      await client.end().catch(() => undefined);
+      await matrix.close();
+    }
+  },
+});
+
+Deno.test({
+  name:
     "production commit is the deterministic PostgreSQL 40P01 victim and retries the whole transaction",
   sanitizeOps: false,
   sanitizeResources: false,
@@ -244,8 +366,8 @@ Deno.test({
             matrix.harness.server.sql,
             "select last_value::text value from matrix_deadlock_attempts",
           )).rows[0].value,
-        ) >= 2,
-        true,
+        ),
+        2,
       );
       assertEquals(
         (await query<{ count: string }>(
@@ -376,6 +498,31 @@ Deno.test({
       assertEquals((await matrix.commit(dependency.id)).ok, true);
       const alphaId = String(dependency.operations[0].object_id);
       const betaId = String(dependency.operations[1].object_id);
+      const unlinkBase = await matrix.stage([{
+        op: "create",
+        key: "alpha",
+        project_id: matrix.projectId,
+        resource: "test/commitmatrix:alpha",
+        fields: { key: "failure-unlink-alpha", status: "ready" },
+      }, {
+        op: "create",
+        key: "beta",
+        project_id: matrix.projectId,
+        resource: "test/commitmatrix:beta",
+        fields: { key: "failure-unlink-beta", status: "ready" },
+      }, {
+        op: "link",
+        key: "relationship",
+        project_id: matrix.projectId,
+        relationship: "test/commitmatrix:alpha_beta",
+        from: { $ref: "alpha.object_id" },
+        to: { $ref: "beta.object_id" },
+        fields: {},
+      }]);
+      assertEquals((await matrix.commit(unlinkBase.id)).ok, true);
+      const unlinkRelationship = String(
+        unlinkBase.operations[2].relationship_id,
+      );
       const runtimes = (await query<
         {
           definition_kind: string;
@@ -402,40 +549,31 @@ Deno.test({
         { point: "object_versions", kind: "link" },
         { point: "comments", kind: "comment" },
         { point: "audit_events", kind: "create" },
+        { point: "audit_events:changeset", kind: "create" },
         { point: "events", kind: "create" },
+        { point: "events:changeset", kind: "create" },
         { point: "staged_changeset_lifecycle", kind: "create" },
+        { point: "events", kind: "update" },
+        { point: "events", kind: "transition" },
+        { point: "events", kind: "archive" },
+        { point: "object_versions", kind: "unlink" },
       ];
       for (const [ordinal, failure] of cases.entries()) {
-        const operations: Record<string, unknown>[] = failure.kind === "link"
-          ? [{
-            op: "link",
-            project_id: matrix.projectId,
-            relationship: "test/commitmatrix:alpha_beta",
-            from: alphaId,
-            to: betaId,
-            fields: { label: `failure-${ordinal}` },
-          }]
-          : failure.kind === "comment"
-          ? [{
-            op: "comment",
-            project_id: matrix.projectId,
-            resource: "test/commitmatrix:alpha",
-            object_id: alphaId,
-            body: `failure-${ordinal}`,
-          }]
-          : [{
-            op: "create",
-            project_id: matrix.projectId,
-            resource: "test/commitmatrix:alpha",
-            fields: { key: `failure-${ordinal}`, status: "ready" },
-          }];
+        const operations = failureOperations(
+          failure.kind,
+          matrix.projectId,
+          ordinal,
+          alphaId,
+          betaId,
+          unlinkRelationship,
+        );
         const stage = await matrix.stage(operations);
-        const before = await allFacts(matrix, stage.id);
+        const before = await completeSnapshot(matrix, stage.id);
         await installFailure(matrix, failure.point);
         const failed = await matrix.commit(stage.id);
         assertEquals(failed.ok, false);
         await removeFailure(matrix, failure.point);
-        assertEquals(await allFacts(matrix, stage.id), before);
+        assertEquals(await completeSnapshot(matrix, stage.id), before);
         const generatedId = failure.kind === "link"
           ? String(stage.operations[0].relationship_id)
           : failure.kind === "create"
@@ -527,9 +665,19 @@ Deno.test({
             "update changeset_commits set committed_at=committed_at where id=$1",
             commitId,
           ],
+          ["delete from changeset_commits where id=$1", commitId],
+          [
+            "update object_versions set snapshot_json=snapshot_json where id=$1",
+            version.id,
+          ],
           ["delete from object_versions where id=$1", version.id],
           [
             "update comments set body=body where changeset_commit_id=$1",
+            commitId,
+          ],
+          ["delete from comments where changeset_commit_id=$1", commitId],
+          [
+            "update audit_events set policy_summary_json=policy_summary_json where changeset_commit_id=$1",
             commitId,
           ],
           ["delete from audit_events where changeset_commit_id=$1", commitId],
@@ -537,8 +685,26 @@ Deno.test({
             "update events set payload_json=payload_json where changeset_commit_id=$1",
             commitId,
           ],
+          ["delete from events where changeset_commit_id=$1", commitId],
           [
             "update staged_changesets set warnings_json=warnings_json where id=$1",
+            successStage.id,
+          ],
+          ["delete from staged_changesets where id=$1", successStage.id],
+          [
+            "update staged_changeset_operations set canonical_operation_json=canonical_operation_json where stage_id=$1",
+            successStage.id,
+          ],
+          [
+            "delete from staged_changeset_operations where stage_id=$1",
+            successStage.id,
+          ],
+          [
+            "update staged_changeset_dependencies set dependency_json=dependency_json where stage_id=$1",
+            successStage.id,
+          ],
+          [
+            "delete from staged_changeset_dependencies where stage_id=$1",
             successStage.id,
           ],
         ] as const
@@ -548,6 +714,147 @@ Deno.test({
         );
       }
       assertEquals(objectId.length > 0, true);
+
+      const chainCreate = await matrix.stage([{
+        op: "create",
+        key: "alpha",
+        project_id: matrix.projectId,
+        resource: "test/commitmatrix:alpha",
+        fields: { key: "complete-chain-alpha", status: "ready" },
+      }, {
+        op: "create",
+        key: "beta",
+        project_id: matrix.projectId,
+        resource: "test/commitmatrix:beta",
+        fields: { key: "complete-chain-beta", status: "ready" },
+      }]);
+      const chainCommits: Array<{ id: string; operations: number }> = [];
+      const createCommit = await matrix.commit(chainCreate.id);
+      assertEquals(createCommit.ok, true);
+      if (!createCommit.ok) {
+        throw new Error("chain create failed");
+      }
+      chainCommits.push({ id: createCommit.value.id, operations: 2 });
+      const chainAlpha = String(chainCreate.operations[0].object_id);
+      const chainBeta = String(chainCreate.operations[1].object_id);
+      const commitChain = async (operations: Record<string, unknown>[]) => {
+        const staged = await matrix.stage(operations);
+        const committed = await matrix.commit(staged.id);
+        assertEquals(committed.ok, true, JSON.stringify(committed));
+        if (!committed.ok) {
+          throw new Error("chain commit failed");
+        }
+        chainCommits.push({
+          id: committed.value.id,
+          operations: operations.length,
+        });
+        return staged;
+      };
+      await commitChain([{
+        op: "update",
+        project_id: matrix.projectId,
+        resource: "test/commitmatrix:alpha",
+        object_id: chainAlpha,
+        set: { note: "updated" },
+      }]);
+      await commitChain([{
+        op: "transition",
+        project_id: matrix.projectId,
+        resource: "test/commitmatrix:alpha",
+        object_id: chainAlpha,
+        to: "done",
+      }]);
+      const linked = await commitChain([{
+        op: "link",
+        project_id: matrix.projectId,
+        relationship: "test/commitmatrix:alpha_beta",
+        from: chainAlpha,
+        to: chainBeta,
+        fields: { label: "first" },
+      }]);
+      const linkedId = String(linked.operations[0].relationship_id);
+      const beforeCommentVersions = Number(
+        (await query<{ count: string }>(
+          matrix.harness.server.sql,
+          "select count(*)::text count from object_versions where object_id=$1",
+          [chainAlpha],
+        )).rows[0].count,
+      );
+      await commitChain([{
+        op: "comment",
+        project_id: matrix.projectId,
+        resource: "test/commitmatrix:alpha",
+        object_id: chainAlpha,
+        body: "no bump",
+      }]);
+      assertEquals(
+        Number(
+          (await query<{ count: string }>(
+            matrix.harness.server.sql,
+            "select count(*)::text count from object_versions where object_id=$1",
+            [chainAlpha],
+          )).rows[0].count,
+        ),
+        beforeCommentVersions,
+      );
+      await commitChain([{
+        op: "unlink",
+        project_id: matrix.projectId,
+        relationship: "test/commitmatrix:alpha_beta",
+        relationship_id: linkedId,
+      }]);
+      const relinked = await commitChain([{
+        op: "link",
+        project_id: matrix.projectId,
+        relationship: "test/commitmatrix:alpha_beta",
+        from: chainAlpha,
+        to: chainBeta,
+        fields: { label: "second" },
+      }]);
+      assertEquals(
+        String(relinked.operations[0].relationship_id) === linkedId,
+        false,
+      );
+      await commitChain([{
+        op: "archive",
+        project_id: matrix.projectId,
+        resource: "test/commitmatrix:alpha",
+        object_id: chainAlpha,
+      }]);
+      const chainVersions = (await query<
+        { id: string; previous_version_id: string | null; operation: string }
+      >(
+        matrix.harness.server.sql,
+        "select id,previous_version_id,operation from object_versions where object_id=$1 order by version",
+        [chainAlpha],
+      )).rows;
+      assertEquals(
+        chainVersions.map((row) =>
+          row.operation
+        ),
+        [
+          "create",
+          "update",
+          "transition",
+          "archive",
+        ],
+      );
+      assertEquals(
+        chainVersions.slice(1).every((row, index) =>
+          row.previous_version_id === chainVersions[index].id
+        ),
+        true,
+      );
+      for (const committed of chainCommits) {
+        assertEquals(
+          (await query<{ count: string }>(
+            matrix.harness.server.sql,
+            "select count(*)::text count from events where changeset_commit_id=$1 and schema_version=1",
+            [committed.id],
+          )).rows[0].count,
+          String(committed.operations + 1),
+        );
+      }
       await assertNoIdleClients(matrix.harness.server.sql);
     } finally {
       await matrix.close();
@@ -573,6 +880,17 @@ async function installSerializationTrigger(
     on changeset_commits for each row execute function matrix_serialization_failure()`,
   );
 }
+async function stateAttempts(
+  matrix: Awaited<ReturnType<typeof startCommitMatrix>>,
+) {
+  return Number(
+    (await query<{ value: string }>(
+      matrix.harness.server.sql,
+      "select last_value::text value from matrix_state_attempts",
+    )).rows[0].value,
+  );
+}
+
 async function sequenceValue(
   matrix: Awaited<ReturnType<typeof startCommitMatrix>>,
 ) {
@@ -598,18 +916,22 @@ async function installFailure(
   matrix: Awaited<ReturnType<typeof startCommitMatrix>>,
   table: string,
 ) {
+  const [actualTable, selector] = table.split(":");
+  const guard = selector === "changeset"
+    ? "if new.event_type <> 'changeset.committed' then return new; end if;"
+    : "";
   await query(
     matrix.harness.server.sql,
     `create function matrix_commit_failure() returns trigger
-    language plpgsql as $$ begin raise exception 'matrix failure'; end $$`,
+    language plpgsql as $$ begin ${guard} raise exception 'matrix failure'; end $$`,
   );
-  const operation = table === "staged_changeset_lifecycle"
+  const operation = actualTable === "staged_changeset_lifecycle"
     ? "after update"
     : "after insert";
   await query(
     matrix.harness.server.sql,
     `create trigger matrix_commit_failure ${operation} on ${
-      quoteIdentifier(table)
+      quoteIdentifier(actualTable)
     }
     for each row execute function matrix_commit_failure()`,
   );
@@ -618,28 +940,120 @@ async function removeFailure(
   matrix: Awaited<ReturnType<typeof startCommitMatrix>>,
   table: string,
 ) {
+  const actualTable = table.split(":")[0];
   await query(
     matrix.harness.server.sql,
-    `drop trigger matrix_commit_failure on ${quoteIdentifier(table)}`,
+    `drop trigger matrix_commit_failure on ${quoteIdentifier(actualTable)}`,
   );
   await query(
     matrix.harness.server.sql,
     "drop function matrix_commit_failure()",
   );
 }
-async function allFacts(
+function failureOperations(
+  kind: string,
+  projectId: string,
+  ordinal: number,
+  alphaId: string,
+  betaId: string,
+  relationshipId: string,
+): Record<string, unknown>[] {
+  if (kind === "link") {
+    return [{
+      op: "link",
+      project_id: projectId,
+      relationship: "test/commitmatrix:alpha_beta",
+      from: alphaId,
+      to: betaId,
+      fields: { label: `failure-${ordinal}` },
+    }];
+  }
+  if (kind === "unlink") {
+    return [{
+      op: "unlink",
+      project_id: projectId,
+      relationship: "test/commitmatrix:alpha_beta",
+      relationship_id: relationshipId,
+    }];
+  }
+  if (kind === "comment") {
+    return [{
+      op: "comment",
+      project_id: projectId,
+      resource: "test/commitmatrix:alpha",
+      object_id: alphaId,
+      body: `failure-${ordinal}`,
+    }];
+  }
+  if (kind === "update") {
+    return [{
+      op: "update",
+      project_id: projectId,
+      resource: "test/commitmatrix:alpha",
+      object_id: alphaId,
+      set: { note: `failure-${ordinal}` },
+    }];
+  }
+  if (kind === "transition") {
+    return [{
+      op: "transition",
+      project_id: projectId,
+      resource: "test/commitmatrix:alpha",
+      object_id: alphaId,
+      to: "done",
+    }];
+  }
+  if (kind === "archive") {
+    return [{
+      op: "archive",
+      project_id: projectId,
+      resource: "test/commitmatrix:alpha",
+      object_id: alphaId,
+    }];
+  }
+  return [{
+    op: "create",
+    project_id: projectId,
+    resource: "test/commitmatrix:alpha",
+    fields: { key: `failure-${ordinal}`, status: "ready" },
+  }];
+}
+
+async function completeSnapshot(
   matrix: Awaited<ReturnType<typeof startCommitMatrix>>,
   stageId: string,
 ) {
-  return (await query(
+  const runtimeTables = (await query<{ table_name: string }>(
     matrix.harness.server.sql,
-    `select
-    (select count(*) from changeset_commits where stage_id=$1)::text commits,
-    (select count(*) from object_versions where changeset_commit_id in (select id from changeset_commits where stage_id=$1))::text versions,
-    (select count(*) from comments where changeset_commit_id in (select id from changeset_commits where stage_id=$1))::text comments,
-    (select count(*) from audit_events where changeset_commit_id in (select id from changeset_commits where stage_id=$1))::text audits,
-    (select count(*) from events where changeset_commit_id in (select id from changeset_commits where stage_id=$1))::text events,
-    (select to_jsonb(lifecycle) from staged_changeset_lifecycle lifecycle where stage_id=$1) lifecycle`,
-    [stageId],
-  )).rows[0];
+    "select table_name from pack_runtime_tables order by table_name",
+  )).rows.map((row) => row.table_name);
+  const tables = [
+    ...runtimeTables,
+    "changeset_commits",
+    "object_versions",
+    "comments",
+    "audit_events",
+    "events",
+    "staged_changeset_lifecycle",
+  ];
+  const snapshot: Record<string, unknown> = {};
+  for (const table of tables) {
+    const where = table === "staged_changeset_lifecycle"
+      ? "stage_id=$1"
+      : ["changeset_commits"].includes(table)
+      ? "stage_id=$1"
+      : ["object_versions", "comments", "audit_events", "events"].includes(
+          table,
+        )
+      ? "changeset_commit_id in (select id from changeset_commits where stage_id=$1)"
+      : "true";
+    snapshot[table] = (await query(
+      matrix.harness.server.sql,
+      `select to_jsonb(value) value from ${
+        quoteIdentifier(table)
+      } value where ${where} order by to_jsonb(value)::text`,
+      where === "true" ? [] : [stageId],
+    )).rows;
+  }
+  return snapshot;
 }

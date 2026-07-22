@@ -3,8 +3,241 @@ import { assertEquals } from "jsr:@std/assert";
 import { query } from "../../src/adapters/outbound/postgres/client.ts";
 import {
   assertNoIdleClients,
+  commitAfterObservedLifecycleBarrier,
   startCommitMatrix,
 } from "../support/commit_revalidation_harness.ts";
+
+Deno.test({
+  name:
+    "production dependency facts mutate only after the commit lifecycle waiter is observed",
+  sanitizeOps: false,
+  sanitizeResources: false,
+  async fn() {
+    const matrix = await startCommitMatrix();
+    try {
+      const base = await createGraph(matrix, "observed-dependencies");
+      const object = await matrix.stage([
+        update(matrix.projectId, base.alpha, "observed-object"),
+      ]);
+      await assertObservedOutcome(
+        matrix,
+        object.id,
+        async () => {
+          await commitOne(matrix, [
+            update(matrix.projectId, base.alpha, "object-current-mutated"),
+          ]);
+        },
+        "stage_stale",
+        "object_version_changed",
+      );
+
+      const actionBase = await createGraph(matrix, "observed-action", false);
+      const action = await matrix.harness.runOptctl([
+        "--json",
+        "--project",
+        matrix.projectId,
+        "action",
+        "stage",
+        "test/commitmatrix:generate",
+        "--input",
+        JSON.stringify({
+          project_id: matrix.projectId,
+          source_id: actionBase.alpha,
+        }),
+      ]);
+      assertEquals(action.code, 0, action.stderr);
+      const actionStage = JSON.parse(action.stdout).data.id as string;
+      await assertObservedOutcome(
+        matrix,
+        actionStage,
+        async () => {
+          await commitOne(matrix, [
+            update(matrix.projectId, actionBase.alpha, "action-read-current"),
+          ]);
+        },
+        "stage_stale",
+        "object_version_changed",
+      );
+
+      const relationshipBase = await createGraph(
+        matrix,
+        "observed-relationship",
+      );
+      const relationship = await matrix.stage([{
+        op: "unlink",
+        project_id: matrix.projectId,
+        relationship: "test/commitmatrix:alpha_beta",
+        relationship_id: relationshipBase.relationship,
+      }]);
+      await assertObservedOutcome(
+        matrix,
+        relationship.id,
+        async () => {
+          await commitOne(matrix, [{
+            op: "unlink",
+            project_id: matrix.projectId,
+            relationship: "test/commitmatrix:alpha_beta",
+            relationship_id: relationshipBase.relationship,
+          }]);
+        },
+        "stage_stale",
+        "relationship_version_changed",
+      );
+
+      for (const endpoint of ["alpha", "beta"] as const) {
+        const graph = await createGraph(
+          matrix,
+          `observed-link-${endpoint}`,
+          false,
+        );
+        const link = await matrix.stage([{
+          op: "link",
+          project_id: matrix.projectId,
+          relationship: "test/commitmatrix:alpha_beta",
+          from: graph.alpha,
+          to: graph.beta,
+          fields: { label: endpoint },
+        }]);
+        await assertObservedOutcome(
+          matrix,
+          link.id,
+          async () => {
+            await commitOne(matrix, [
+              endpoint === "alpha"
+                ? update(matrix.projectId, graph.alpha, "endpoint-current")
+                : updateBeta(matrix.projectId, graph.beta, "endpoint-current"),
+            ]);
+          },
+          "stage_stale",
+          "object_version_changed",
+        );
+      }
+
+      const commentBase = await createGraph(matrix, "observed-comment", false);
+      const comment = await matrix.stage([{
+        op: "comment",
+        project_id: matrix.projectId,
+        resource: "test/commitmatrix:alpha",
+        object_id: commentBase.alpha,
+        body: "observed comment target",
+      }]);
+      await assertObservedOutcome(
+        matrix,
+        comment.id,
+        async () => {
+          await commitOne(matrix, [
+            update(matrix.projectId, commentBase.alpha, "comment-current"),
+          ]);
+        },
+        "stage_stale",
+        "object_version_changed",
+      );
+
+      const fkBase = await createGraph(matrix, "observed-fk", false);
+      const foreignKey = await matrix.stage([{
+        op: "create",
+        project_id: matrix.projectId,
+        resource: "test/commitmatrix:alpha",
+        fields: {
+          key: "observed-fk-child",
+          status: "ready",
+          beta_id: fkBase.beta,
+        },
+      }]);
+      await assertObservedOutcome(
+        matrix,
+        foreignKey.id,
+        async () => {
+          await commitOne(matrix, [
+            updateBeta(matrix.projectId, fkBase.beta, "fk-current"),
+          ]);
+        },
+        "stage_stale",
+        "object_version_changed",
+      );
+
+      const project = await matrix.stage([{
+        op: "create",
+        project_id: matrix.projectId,
+        resource: "test/commitmatrix:gamma",
+        fields: { key: "observed-project", status: "ready" },
+      }]);
+      await assertObservedOutcome(
+        matrix,
+        project.id,
+        async () => {
+          await query(
+            matrix.harness.server.sql,
+            "update projects set version=version+1 where id=$1",
+            [matrix.projectId],
+          );
+        },
+        "stage_stale",
+        "project_changed",
+      );
+
+      const seed = await matrix.harness.runOptctl([
+        "--json",
+        "--project",
+        matrix.projectId,
+        "seed",
+        "stage",
+        "test/commitmatrix",
+        "--seed",
+        "alpha",
+      ]);
+      assertEquals(seed.code, 0, seed.stderr);
+      const seedStage = JSON.parse(seed.stdout).data.stage.id as string;
+      await assertObservedOutcome(matrix, seedStage, async () => {
+        const winner = await matrix.harness.runOptctl([
+          "--json",
+          "--project",
+          matrix.projectId,
+          "seed",
+          "stage",
+          "test/commitmatrix",
+          "--seed",
+          "alpha",
+        ]);
+        assertEquals(winner.code, 0, winner.stderr);
+        const committed = await matrix.commit(
+          JSON.parse(winner.stdout).data.stage.id,
+        );
+        assertEquals(committed.ok, true);
+      }, "constraint_conflict");
+
+      const revision = await matrix.stage([{
+        op: "create",
+        project_id: matrix.projectId,
+        resource: "test/commitmatrix:gamma",
+        fields: { key: "observed-revision", status: "ready" },
+      }]);
+      await assertObservedOutcome(
+        matrix,
+        revision.id,
+        async () => {
+          await Deno.writeTextFile(
+            `${matrix.pack}/pack.yaml`,
+            `kind: Pack\napiVersion: operant.dev/v1\nmetadata: { publisher: test, name: commitmatrix, version: 1.0.9 }\nspec: { purpose: Production observed revision., axi: {} }\n`,
+          );
+          const applied = await matrix.harness.runOptctl([
+            "--json",
+            "pack",
+            "apply",
+            matrix.pack,
+            "--safe",
+          ]);
+          assertEquals(applied.code, 0, applied.stderr);
+        },
+        "stage_stale",
+        "pack_revision_changed",
+      );
+      await assertNoIdleClients(matrix.harness.server.sql);
+    } finally {
+      await matrix.close();
+    }
+  },
+});
 
 Deno.test({
   name:
@@ -199,6 +432,37 @@ function updateBeta(projectId: string, objectId: string, note: string) {
     set: { note },
   };
 }
+async function assertObservedOutcome(
+  matrix: Awaited<ReturnType<typeof startCommitMatrix>>,
+  stageId: string,
+  mutate: () => Promise<void>,
+  code: string,
+  reason?: string,
+) {
+  const result = await commitAfterObservedLifecycleBarrier(
+    matrix,
+    stageId,
+    mutate,
+  );
+  assertEquals(result.ok, false);
+  if (result.ok) throw new Error("expected observed commit failure");
+  assertEquals(result.error.code, code);
+  if (reason) {
+    assertEquals(
+      (result.error.details as Record<string, unknown>).reason,
+      reason,
+    );
+  }
+  assertEquals(
+    (await query<{ count: string }>(
+      matrix.harness.server.sql,
+      "select count(*)::text count from changeset_commits where stage_id=$1",
+      [stageId],
+    )).rows[0].count,
+    "0",
+  );
+}
+
 async function assertStale(
   matrix: Awaited<ReturnType<typeof startCommitMatrix>>,
   stageId: string,

@@ -279,35 +279,78 @@ Deno.test({
         object_id: objectId,
         set: { note: "pack first" },
       }]);
-      let packHeld!: (pid: number) => void;
-      const packHeldPromise = new Promise<number>((resolve) =>
-        packHeld = resolve
+      const runtimeTables = (await query<{ table_name: string }>(
+        matrix.harness.server.sql,
+        `select table_name from pack_runtime_tables where publisher='test' and pack_name='commitmatrix'
+         order by publisher,pack_name,case definition_kind when 'resource' then 0 else 1 end,definition_name,table_name`,
+      )).rows.map((row) => row.table_name);
+      const laterTable = runtimeTables.at(-1)!;
+      let laterHeld!: (pid: number) => void;
+      const laterHeldPromise = new Promise<number>((resolve) =>
+        laterHeld = resolve
       );
       const packReleasePromise = new Promise<void>((resolve) =>
         releasePack = resolve
       );
-      const packTransaction = applyClient.begin(async (tx) => {
+      const laterBlocker = rowClient.begin(async (tx) => {
         const pid = Number(
           (await tx.unsafe("select pg_backend_pid() pid"))[0].pid,
         );
         await tx.unsafe(
-          `lock table ${quoteIdentifier(table)} in access exclusive mode`,
+          `lock table ${quoteIdentifier(laterTable)} in access exclusive mode`,
         );
-        packHeld(pid);
+        laterHeld(pid);
         await packReleasePromise;
+      });
+      const laterPid = await laterHeldPromise;
+      let productionApplyStarted!: (pid: number) => void;
+      const productionApplyPid = new Promise<number>((resolve) =>
+        productionApplyStarted = resolve
+      );
+      const packTransaction = applyClient.begin(async (tx) => {
+        productionApplyStarted(
+          Number((await tx.unsafe("select pg_backend_pid() pid"))[0].pid),
+        );
         return await applyMigrationPlan(tx as never, secondPlan, {
           acknowledgement: "safe",
         }, matrix.auth.id);
       });
-      const packPid = await packHeldPromise;
+      const packPid = await productionApplyPid;
+      await observeWaiters(
+        matrix.harness.server.sql,
+        "lock table",
+        1,
+        laterPid,
+      );
+      const applyLocks =
+        (await query<{ relation: string; mode: string; granted: boolean }>(
+          matrix.harness.server.sql,
+          `select relation::regclass::text relation,mode,granted from pg_locks
+         where pid=$1 and relation=any($2::regclass[])`,
+          [packPid, runtimeTables],
+        )).rows;
+      assertEquals(
+        applyLocks.filter((lock) =>
+          lock.mode === "ShareRowExclusiveLock" && lock.granted
+        ).length >= 2,
+        true,
+      );
+      const commitPid = Number(
+        (await commitClient.unsafe("select pg_backend_pid() pid"))[0].pid,
+      );
       const packBlockedCommit = commitRepository(commitClient).commit(
         packFirstStage.id,
         matrix.auth,
         { lockTimeoutMs: 30_000 },
       );
-      await observeWaiters(matrix.harness.server.sql, "lock table", 1, packPid);
+      assertEquals(
+        (await observeBlockedPid(matrix.harness.server.sql, commitPid))
+          .includes(packPid),
+        true,
+      );
       releasePack?.();
       releasePack = undefined;
+      await laterBlocker;
       await packTransaction;
       const stale = await packBlockedCommit;
       assertEquals(stale.ok, false);
@@ -460,7 +503,10 @@ async function nextPackPlan(
   const alpha = await Deno.readTextFile(alphaPath);
   await Deno.writeTextFile(
     alphaPath,
-    alpha.replace("  axi: {}", `    ${field}: { type: string }\n  axi: {}`),
+    alpha.replace(
+      "  constraints:",
+      `    ${field}: { type: string }\n  constraints:`,
+    ),
   );
   const loaded = await loadPackFromFiles(await packFiles(matrix.pack));
   const created = await createPackMigrationPlan(
@@ -495,7 +541,8 @@ async function observeBlockedPid(
   pid: number,
 ) {
   let last: number[] = [];
-  for (let attempt = 0; attempt < 200; attempt++) {
+  const deadline = Date.now() + 8_000;
+  while (Date.now() < deadline) {
     const row =
       (await query<{ wait_event_type: string | null; blockers: number[] }>(
         sql,
@@ -504,9 +551,151 @@ async function observeBlockedPid(
       )).rows[0];
     last = row?.blockers ?? [];
     if (row?.wait_event_type === "Lock" && last.length > 0) return last;
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    await Promise.resolve();
   }
   throw new Error(
     `backend ${pid} was not observably blocked: ${JSON.stringify(last)}`,
   );
+}
+
+Deno.test({
+  name:
+    "production apply barrier for an unrelated pack never blocks commit runtime tables",
+  sanitizeOps: false,
+  sanitizeResources: false,
+  async fn() {
+    const matrix = await startCommitMatrix();
+    const holder = matrix.client(),
+      applyClient = matrix.client(),
+      commitClient = matrix.client();
+    const pack = await Deno.makeTempDir({ prefix: "commit-unrelated-pack-" });
+    let release: (() => void) | undefined;
+    try {
+      await writeUnrelatedPack(pack, "1.0.0", false);
+      const initial = await matrix.harness.runOptctl([
+        "--json",
+        "pack",
+        "apply",
+        pack,
+        "--safe",
+      ]);
+      assertEquals(initial.code, 0, initial.stderr);
+      const stage = await matrix.stage([{
+        op: "create",
+        project_id: matrix.projectId,
+        resource: "test/commitmatrix:gamma",
+        fields: { key: "unrelated-pack-commit", status: "ready" },
+      }]);
+      await writeUnrelatedPack(pack, "1.0.1", true);
+      const loaded = await loadPackFromFiles(await packFiles(pack));
+      const plan = await createPackMigrationPlan(
+        matrix.harness.server.sql,
+        loaded,
+        matrix.auth.id,
+      );
+      await matrix.harness.server.sql.begin((tx) =>
+        validateMigrationPlan(tx, plan.plan.id, matrix.auth.id)
+      );
+      const tables = (await query<{ table_name: string }>(
+        matrix.harness.server.sql,
+        `select table_name from pack_runtime_tables where publisher='other' and pack_name='independent'
+         order by definition_name`,
+      )).rows.map((row) => row.table_name);
+      let held!: (pid: number) => void;
+      const heldPromise = new Promise<number>((resolve) => held = resolve);
+      const releasePromise = new Promise<void>((resolve) => release = resolve);
+      const blocking = holder.begin(async (tx) => {
+        const pid = Number(
+          (await tx.unsafe("select pg_backend_pid() pid"))[0].pid,
+        );
+        await tx.unsafe(
+          `lock table ${quoteIdentifier(tables[1])} in access exclusive mode`,
+        );
+        held(pid);
+        await releasePromise;
+      });
+      const holderPid = await heldPromise;
+      let started!: (pid: number) => void;
+      const startedPromise = new Promise<number>((resolve) =>
+        started = resolve
+      );
+      const applying = applyClient.begin(async (tx) => {
+        started(
+          Number((await tx.unsafe("select pg_backend_pid() pid"))[0].pid),
+        );
+        return await applyMigrationPlan(tx as never, plan.plan.id, {
+          acknowledgement: "safe",
+        }, matrix.auth.id);
+      });
+      const applyPid = await startedPromise;
+      await observeWaiters(
+        matrix.harness.server.sql,
+        "lock table",
+        1,
+        holderPid,
+      );
+      const locks = (await query<{ mode: string; granted: boolean }>(
+        matrix.harness.server.sql,
+        "select mode,granted from pg_locks where pid=$1 and relation=$2::regclass",
+        [applyPid, tables[0]],
+      )).rows;
+      assertEquals(
+        locks.some((lock) =>
+          lock.mode === "ShareRowExclusiveLock" && lock.granted
+        ),
+        true,
+      );
+      const commitPid = Number(
+        (await commitClient.unsafe("select pg_backend_pid() pid"))[0].pid,
+      );
+      const committed = await commitRepository(commitClient).commit(
+        stage.id,
+        matrix.auth,
+        { lockTimeoutMs: 2_000 },
+      );
+      assertEquals(committed.ok, true);
+      assertEquals(
+        (await query<{ blockers: number[] }>(
+          matrix.harness.server.sql,
+          "select pg_blocking_pids($1) blockers",
+          [commitPid],
+        )).rows[0].blockers,
+        [],
+      );
+      release?.();
+      release = undefined;
+      await blocking;
+      await applying;
+      await assertNoIdleClients(matrix.harness.server.sql);
+    } finally {
+      release?.();
+      await Promise.all(
+        [holder.end(), applyClient.end(), commitClient.end()].map((client) =>
+          client.catch(() => undefined)
+        ),
+      );
+      await matrix.close();
+      await Deno.remove(pack, { recursive: true }).catch(() => undefined);
+    }
+  },
+});
+
+async function writeUnrelatedPack(
+  root: string,
+  version: string,
+  changed: boolean,
+) {
+  await Deno.mkdir(`${root}/resources`, { recursive: true });
+  await Deno.writeTextFile(
+    `${root}/pack.yaml`,
+    `kind: Pack\napiVersion: operant.dev/v1\nmetadata: { publisher: other, name: independent, version: ${version} }\nspec: { purpose: Unrelated lock proof., axi: {} }\n`,
+  );
+  for (const name of ["one", "two"]) {
+    await Deno.writeTextFile(
+      `${root}/resources/${name}.yaml`,
+      `kind: Resource\napiVersion: operant.dev/v1\nmetadata: { name: ${name} }\nspec:\n  fields:\n    key: { type: string, required: true, unique: true }\n${
+        changed && name === "one" ? "    note: { type: string }\n" : ""
+      }  axi: {}\n`,
+    );
+  }
 }
