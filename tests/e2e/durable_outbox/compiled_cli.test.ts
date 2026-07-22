@@ -1,11 +1,13 @@
-// deno-lint-ignore-file no-import-prefix no-unversioned-import
+// deno-lint-ignore-file no-explicit-any no-import-prefix no-unversioned-import
 import {
   assert,
   assertEquals,
   assertNotEquals,
   assertStringIncludes,
 } from "jsr:@std/assert";
+import { decode as decodeToon } from "npm:@toon-format/toon";
 import { query } from "../../../src/adapters/outbound/postgres/client.ts";
+import { uuidV7 } from "../../../src/domain/ids/uuid_v7.ts";
 import { startHttpProvider } from "../../support/http_provider.ts";
 import {
   type LiveHarness,
@@ -483,20 +485,153 @@ for (const logLevel of ["info", "trace"] as const) {
         );
         assertStringIncludes(listed.stdout, "next_cursor");
         const listedJson = json(listed);
+        const firstListItem = listedJson.data.items[0];
+        for (
+          const field of [
+            "id",
+            "event_id",
+            "hook_identity",
+            "status",
+            "retry_generation",
+            "attempts_in_generation",
+            "total_attempts",
+            "max_attempts",
+            "available_at",
+            "created_at",
+            "updated_at",
+          ]
+        ) assert(Object.hasOwn(firstListItem, field), `list omitted ${field}`);
+        const toonListed = toon(
+          await successful(
+            harness.runOptctl([
+              "outbox",
+              "list",
+              "--status",
+              "succeeded",
+              "--limit",
+              "1",
+            ]),
+            outputs,
+          ),
+        );
+        assertEquals(toonListed.data, listedJson.data);
         const nextCursor = listedJson.data.page?.next_cursor;
         if (typeof nextCursor === "string") {
-          const mismatch = await harness.runOptctl([
-            "--json",
-            "outbox",
-            "list",
+          const jsonContinuation = json(
+            await successful(
+              harness.runOptctl([
+                "--json",
+                "outbox",
+                "list",
+                "--status",
+                "succeeded",
+                "--limit",
+                "1",
+                "--cursor",
+                nextCursor,
+              ]),
+              outputs,
+            ),
+          );
+          const toonContinuation = toon(
+            await successful(
+              harness.runOptctl([
+                "outbox",
+                "list",
+                "--status",
+                "succeeded",
+                "--limit",
+                "1",
+                "--cursor",
+                nextCursor,
+              ]),
+              outputs,
+            ),
+          );
+          assertEquals(toonContinuation.data, jsonContinuation.data);
+          assertNotEquals(
+            jsonContinuation.data.items[0]?.id,
+            firstListItem.id,
+          );
+          for (const asJson of [true, false]) {
+            const mismatch = await harness.runOptctl([
+              ...asJson ? ["--json"] : [],
+              "outbox",
+              "list",
+              "--status",
+              "dead_letter",
+              "--cursor",
+              nextCursor,
+            ]);
+            assertNotEquals(mismatch.code, 0);
+            const mismatchEnvelope = errorOutput(mismatch, asJson);
+            assertEquals(mismatchEnvelope.error.code, "invalid_cursor");
+            assertEquals(mismatchEnvelope.error.details, {});
+            outputs.push(mismatch.stdout, mismatch.stderr);
+          }
+        }
+        const filterCases = [
+          ["--status", "succeeded"],
+          ["--hook", "test/durableoutbox:deliver"],
+          ["--event", normalDelivery.event_id],
+          ["--from", "2000-01-01T00:00:00Z"],
+          ["--to", "2100-01-01T00:00:00Z"],
+          [
             "--status",
+            "succeeded",
+            "--hook",
+            "test/durableoutbox:deliver",
+            "--event",
+            normalDelivery.event_id,
+            "--from",
+            "2000-01-01T00:00:00Z",
+            "--to",
+            "2100-01-01T00:00:00Z",
+          ],
+        ];
+        for (const filters of filterCases) {
+          const jsonFiltered = json(
+            await successful(
+              harness.runOptctl([
+                "--json",
+                "outbox",
+                "list",
+                ...filters,
+              ]),
+              outputs,
+            ),
+          );
+          const toonFiltered = toon(
+            await successful(
+              harness.runOptctl(["outbox", "list", ...filters]),
+              outputs,
+            ),
+          );
+          assertEquals(toonFiltered.data, jsonFiltered.data);
+          assertEquals(jsonFiltered.data.page.limit, 50);
+        }
+        for (
+          const status of [
+            "pending",
+            "running",
+            "retry_wait",
+            "succeeded",
             "dead_letter",
-            "--cursor",
-            nextCursor,
-          ]);
-          assertNotEquals(mismatch.code, 0);
-          assertStringIncludes(mismatch.stderr, "invalid_cursor");
-          outputs.push(mismatch.stdout, mismatch.stderr);
+            "cancelled",
+          ]
+        ) {
+          const result = toon(
+            await successful(
+              harness.runOptctl(["outbox", "list", "--status", status]),
+              outputs,
+            ),
+          );
+          assertEquals(
+            result.data.items.every((item: Record<string, unknown>) =>
+              item.status === status
+            ),
+            true,
+          );
         }
         const deliveryInspection = json(
           await successful(
@@ -533,17 +668,18 @@ for (const logLevel of ["info", "trace"] as const) {
             `inspect omitted ${field}`,
           );
         }
-        const toonInspect = await successful(
-          harness.runOptctl(["outbox", "inspect", queuedDelivery.id]),
-          outputs,
-        );
-        assertStringIncludes(
-          toonInspect.stdout,
-          String(deliveryInspection.id),
-        );
-        assertStringIncludes(
-          toonInspect.stdout,
-          String(deliveryInspection.status),
+        const toonInspection = toon(
+          await successful(
+            harness.runOptctl(["outbox", "inspect", queuedDelivery.id]),
+            outputs,
+          ),
+        ).data;
+        assertEquals(toonInspection, deliveryInspection);
+        assertEquals(
+          JSON.stringify(toonInspection).match(
+            /ciphertext|nonce|key_id|secret_value|bearer|session|roles|capabilities/i,
+          ),
+          null,
         );
 
         const firstAttempts = json(
@@ -578,6 +714,36 @@ for (const logLevel of ["info", "trace"] as const) {
             "grants",
           ]
         ) assert(Object.hasOwn(safeAttempt, field), `attempt omitted ${field}`);
+        assertEquals(safeAttempt.total_attempt_number, 1);
+        assertEquals(safeAttempt.attempt_number, 1);
+        assertEquals(safeAttempt.retry_generation, 0);
+        assertEquals(typeof safeAttempt.worker_instance_id, "string");
+        assertEquals(typeof safeAttempt.hook_revision_id, "string");
+        assertEquals(Array.isArray(safeAttempt.grants), true);
+        assertEquals(safeAttempt.grants.length, 1);
+        assertEquals(typeof safeAttempt.grants[0].grant_id, "string");
+        assertEquals(safeAttempt.grants[0].slot, "token");
+        assertEquals(typeof safeAttempt.grants[0].secret_id, "string");
+        assertEquals(safeAttempt.grants[0].value_version, 1);
+        assertEquals(
+          JSON.stringify(safeAttempt).match(
+            /"(?:env|name|value|ciphertext|nonce|key_id)"/i,
+          ),
+          null,
+        );
+        const toonFirstAttempts = toon(
+          await successful(
+            harness.runOptctl([
+              "outbox",
+              "attempts",
+              ambiguousDelivery.id,
+              "--limit",
+              "1",
+            ]),
+            outputs,
+          ),
+        ).data;
+        assertEquals(toonFirstAttempts, firstAttempts);
         const attemptCursor = firstAttempts.page.next_cursor;
         assertEquals(typeof attemptCursor, "string");
         const secondAttempts = json(
@@ -597,20 +763,41 @@ for (const logLevel of ["info", "trace"] as const) {
         ).data;
         assertEquals(secondAttempts.items.length, 1);
         assertNotEquals(secondAttempts.items[0].id, safeAttempt.id);
-        const mismatchedAttemptCursor = await harness.runOptctl([
-          "--json",
-          "outbox",
-          "attempts",
-          queuedDelivery.id,
-          "--cursor",
-          attemptCursor,
-        ]);
-        assertNotEquals(mismatchedAttemptCursor.code, 0);
-        assertStringIncludes(mismatchedAttemptCursor.stderr, "invalid_cursor");
-        outputs.push(
-          mismatchedAttemptCursor.stdout,
-          mismatchedAttemptCursor.stderr,
-        );
+        assertEquals(secondAttempts.items[0].total_attempt_number, 2);
+        const toonSecondAttempts = toon(
+          await successful(
+            harness.runOptctl([
+              "outbox",
+              "attempts",
+              ambiguousDelivery.id,
+              "--limit",
+              "1",
+              "--cursor",
+              attemptCursor,
+            ]),
+            outputs,
+          ),
+        ).data;
+        assertEquals(toonSecondAttempts, secondAttempts);
+        for (const asJson of [true, false]) {
+          const mismatchedAttemptCursor = await harness.runOptctl([
+            ...(asJson ? ["--json"] : []),
+            "outbox",
+            "attempts",
+            queuedDelivery.id,
+            "--cursor",
+            attemptCursor,
+          ]);
+          assertNotEquals(mismatchedAttemptCursor.code, 0);
+          assertEquals(
+            errorOutput(mismatchedAttemptCursor, asJson).error.code,
+            "invalid_cursor",
+          );
+          outputs.push(
+            mismatchedAttemptCursor.stdout,
+            mismatchedAttemptCursor.stderr,
+          );
+        }
         const attemptsAlias = await harness.runOptctl([
           "--json",
           "outbox",
@@ -620,23 +807,130 @@ for (const logLevel of ["info", "trace"] as const) {
           "1",
         ]);
         assertNotEquals(attemptsAlias.code, 0);
+        assertStringIncludes(attemptsAlias.stderr, "unknown option --after");
         outputs.push(attemptsAlias.stdout, attemptsAlias.stderr);
-        await successful(
-          harness.runOptctl([
-            "--json",
-            "outbox",
-            "drain",
-            "--limit",
-            "1",
-          ]),
-          outputs,
+
+        await installPauseTrigger(harness);
+        const toonCancelWork = await stageCommit(
+          harness,
+          pack,
+          projectId,
+          "normal",
+          "toon-cancel",
         );
-        const legacy = await harness.runOptctl(["--json", "outbox", "status"]);
-        assertNotEquals(legacy.code, 0);
-        outputs.push(legacy.stdout, legacy.stderr);
+        const toonCancelDelivery = await deliveryForStage(
+          harness,
+          toonCancelWork.stageId,
+        );
+        const toonCancelled = toon(
+          await successful(
+            harness.runOptctl([
+              "outbox",
+              "cancel",
+              toonCancelDelivery.id,
+              "--reason",
+              "TOON cancellation proof",
+            ]),
+            outputs,
+          ),
+        ).data;
+        assertEquals(toonCancelled.status, "cancelled");
+        assertEquals(toonCancelled.total_attempts, 0);
+
+        const toonRetryWork = await stageCommit(
+          harness,
+          pack,
+          projectId,
+          "normal",
+          "toon-retry",
+        );
+        const toonRetryDelivery = await deliveryForStage(
+          harness,
+          toonRetryWork.stageId,
+        );
+        provider.enqueue({ kind: "permanent_failure" });
+        await releasePaused(harness, toonRetryDelivery.id);
+        await waitStatus(harness, toonRetryDelivery.id, "dead_letter");
+        provider.enqueue({ kind: "success" });
+        const toonRetried = toon(
+          await successful(
+            harness.runOptctl([
+              "outbox",
+              "retry",
+              toonRetryDelivery.id,
+              "--reason",
+              "TOON retry proof",
+            ]),
+            outputs,
+          ),
+        ).data;
+        assertEquals(toonRetried.status, "pending");
+        assertEquals(toonRetried.retry_generation, 1);
+        await waitStatus(harness, toonRetryDelivery.id, "succeeded");
+        const toonRetryHistory = await attemptRows(
+          harness,
+          toonRetryDelivery.id,
+        );
+        assertEquals(toonRetryHistory.length, 2);
+        assertEquals(toonRetryHistory[1].retry_generation, 1);
+
+        const toonDrain = toon(
+          await successful(
+            harness.runOptctl(["outbox", "drain", "--limit", "1"]),
+            outputs,
+          ),
+        ).data;
+        assertEquals(typeof toonDrain.worker_id, "string");
+        assertEquals(typeof toonDrain.claimed, "number");
+        assertEquals(Array.isArray(toonDrain.executions), true);
+        const jsonDrain = json(
+          await successful(
+            harness.runOptctl([
+              "--json",
+              "outbox",
+              "drain",
+              "--limit",
+              "1",
+            ]),
+            outputs,
+          ),
+        ).data;
+        assertEquals(typeof jsonDrain.claimed, "number");
+        for (const asJson of [true, false]) {
+          const legacy = await harness.runOptctl([
+            ...(asJson ? ["--json"] : []),
+            "outbox",
+            "status",
+          ]);
+          assertNotEquals(legacy.code, 0);
+          if (asJson) {
+            assertEquals(errorOutput(legacy, true).error.code, "usage_error");
+          } else assertStringIncludes(legacy.stderr, "usage_error");
+          const unknown = await harness.runOptctl([
+            ...(asJson ? ["--json"] : []),
+            "outbox",
+            "list",
+            "--unknown",
+            "value",
+          ]);
+          assertNotEquals(unknown.code, 0);
+          if (asJson) {
+            assertEquals(errorOutput(unknown, true).error.code, "usage_error");
+          } else {
+            assertStringIncludes(unknown.stderr, "usage_error");
+            assertStringIncludes(unknown.stderr, "unknown option --unknown");
+          }
+          outputs.push(
+            legacy.stdout,
+            legacy.stderr,
+            unknown.stdout,
+            unknown.stderr,
+          );
+        }
         const legacyHttp = await fetch(`${harness.baseUrl}/outbox`);
         assertEquals([401, 404].includes(legacyHttp.status), true);
-        await legacyHttp.body?.cancel();
+        const legacyHttpText = await legacyHttp.text();
+        assertEquals(legacyHttpText.includes(secretV1), false);
 
         const ordinaryPassword = `ordinary-outbox-${crypto.randomUUID()}`;
         const ordinaryUsername = `ordinary-outbox-${
@@ -686,37 +980,116 @@ for (const logLevel of ["info", "trace"] as const) {
           ordinaryLogin.result.stderr,
         );
         const ordinary = ordinaryLogin.launcher;
-        await successful(
-          ordinary.runOptctl([
-            "--json",
-            "outbox",
-            "inspect",
-            normalDelivery.id,
-          ]),
-          outputs,
+        const ordinaryJsonInspect = json(
+          await successful(
+            ordinary.runOptctl([
+              "--json",
+              "outbox",
+              "inspect",
+              normalDelivery.id,
+            ]),
+            outputs,
+          ),
         );
-        await successful(
-          ordinary.runOptctl([
-            "--json",
-            "outbox",
-            "list",
-            "--status",
-            "succeeded",
-            "--hook",
-            "test/durableoutbox:deliver",
-            "--event",
-            normalDelivery.event_id,
-            "--from",
-            "2000-01-01T00:00:00Z",
-            "--to",
-            "2100-01-01T00:00:00Z",
-          ]),
-          outputs,
+        assertEquals(
+          toon(
+            await successful(
+              ordinary.runOptctl([
+                "outbox",
+                "inspect",
+                normalDelivery.id,
+              ]),
+              outputs,
+            ),
+          ).data,
+          ordinaryJsonInspect.data,
         );
-        await successful(
-          ordinary.runOptctl(["--json", "outbox", "drain", "--limit", "1"]),
-          outputs,
+        const ordinaryJsonAttempts = json(
+          await successful(
+            ordinary.runOptctl([
+              "--json",
+              "outbox",
+              "attempts",
+              ambiguousDelivery.id,
+            ]),
+            outputs,
+          ),
         );
+        assertEquals(
+          toon(
+            await successful(
+              ordinary.runOptctl([
+                "outbox",
+                "attempts",
+                ambiguousDelivery.id,
+              ]),
+              outputs,
+            ),
+          ).data,
+          ordinaryJsonAttempts.data,
+        );
+        const ordinaryJsonList = json(
+          await successful(
+            ordinary.runOptctl([
+              "--json",
+              "outbox",
+              "list",
+              "--status",
+              "succeeded",
+              "--hook",
+              "test/durableoutbox:deliver",
+              "--event",
+              normalDelivery.event_id,
+              "--from",
+              "2000-01-01T00:00:00Z",
+              "--to",
+              "2100-01-01T00:00:00Z",
+            ]),
+            outputs,
+          ),
+        );
+        assertEquals(
+          toon(
+            await successful(
+              ordinary.runOptctl([
+                "outbox",
+                "list",
+                "--status",
+                "succeeded",
+                "--hook",
+                "test/durableoutbox:deliver",
+                "--event",
+                normalDelivery.event_id,
+                "--from",
+                "2000-01-01T00:00:00Z",
+                "--to",
+                "2100-01-01T00:00:00Z",
+              ]),
+              outputs,
+            ),
+          ).data,
+          ordinaryJsonList.data,
+        );
+        const ordinaryJsonDrain = json(
+          await successful(
+            ordinary.runOptctl([
+              "--json",
+              "outbox",
+              "drain",
+              "--limit",
+              "1",
+            ]),
+            outputs,
+          ),
+        );
+        const ordinaryToonDrain = toon(
+          await successful(
+            ordinary.runOptctl(["outbox", "drain", "--limit", "1"]),
+            outputs,
+          ),
+        );
+        assertEquals(typeof ordinaryJsonDrain.data.claimed, "number");
+        assertEquals(typeof ordinaryToonDrain.data.claimed, "number");
         await installPauseTrigger(harness);
         const ordinaryMutation = await stageCommit(
           harness,
@@ -729,15 +1102,44 @@ for (const logLevel of ["info", "trace"] as const) {
           harness,
           ordinaryMutation.stageId,
         );
-        await successful(
-          ordinary.runOptctl([
-            "--json",
-            "outbox",
-            "cancel",
-            ordinaryDelivery.id,
-          ]),
-          outputs,
+        const ordinaryJsonCancelled = json(
+          await successful(
+            ordinary.runOptctl([
+              "--json",
+              "outbox",
+              "cancel",
+              ordinaryDelivery.id,
+              "--reason",
+              "ordinary JSON cancel",
+            ]),
+            outputs,
+          ),
+        ).data;
+        assertEquals(ordinaryJsonCancelled.status, "cancelled");
+        const ordinaryToonCancelWork = await stageCommit(
+          harness,
+          pack,
+          projectId,
+          "normal",
+          "ordinary-toon-cancel",
         );
+        const ordinaryToonCancelDelivery = await deliveryForStage(
+          harness,
+          ordinaryToonCancelWork.stageId,
+        );
+        const ordinaryToonCancelled = toon(
+          await successful(
+            ordinary.runOptctl([
+              "outbox",
+              "cancel",
+              ordinaryToonCancelDelivery.id,
+              "--reason",
+              "ordinary TOON cancel",
+            ]),
+            outputs,
+          ),
+        ).data;
+        assertEquals(ordinaryToonCancelled.status, "cancelled");
         const ordinaryRetryWork = await stageCommit(
           harness,
           pack,
@@ -749,37 +1151,125 @@ for (const logLevel of ["info", "trace"] as const) {
           harness,
           ordinaryRetryWork.stageId,
         );
-        provider.enqueue({ kind: "permanent_failure" });
-        await releasePaused(harness, ordinaryRetryDelivery.id);
-        await waitStatus(harness, ordinaryRetryDelivery.id, "dead_letter");
-        provider.enqueue({ kind: "success" });
-        await successful(
-          ordinary.runOptctl([
-            "--json",
-            "outbox",
-            "retry",
-            ordinaryRetryDelivery.id,
-          ]),
-          outputs,
+        const ordinaryToonRetryWork = await stageCommit(
+          harness,
+          pack,
+          projectId,
+          "normal",
+          "ordinary-toon-retry",
         );
+        const ordinaryToonRetryDelivery = await deliveryForStage(
+          harness,
+          ordinaryToonRetryWork.stageId,
+        );
+        provider.enqueue(
+          { kind: "permanent_failure" },
+          { kind: "permanent_failure" },
+        );
+        await releasePausedMany(harness, [
+          ordinaryRetryDelivery.id,
+          ordinaryToonRetryDelivery.id,
+        ]);
+        await waitStatus(harness, ordinaryRetryDelivery.id, "dead_letter");
+        await waitStatus(
+          harness,
+          ordinaryToonRetryDelivery.id,
+          "dead_letter",
+        );
+        provider.enqueue({ kind: "success" }, { kind: "success" });
+        const ordinaryJsonRetried = json(
+          await successful(
+            ordinary.runOptctl([
+              "--json",
+              "outbox",
+              "retry",
+              ordinaryRetryDelivery.id,
+              "--reason",
+              "ordinary JSON retry",
+            ]),
+            outputs,
+          ),
+        ).data;
+        assertEquals(ordinaryJsonRetried.retry_generation, 1);
+        const ordinaryToonRetried = toon(
+          await successful(
+            ordinary.runOptctl([
+              "outbox",
+              "retry",
+              ordinaryToonRetryDelivery.id,
+              "--reason",
+              "ordinary TOON retry",
+            ]),
+            outputs,
+          ),
+        ).data;
+        assertEquals(ordinaryToonRetried.retry_generation, 1);
         await waitStatus(harness, ordinaryRetryDelivery.id, "succeeded");
+        await waitStatus(
+          harness,
+          ordinaryToonRetryDelivery.id,
+          "succeeded",
+        );
         await query(
           harness.server.sql,
           "update role_assignments set active=false,disabled_at=now() where id=$1",
           [ordinaryAssignment],
         );
-        for (
-          const args of [
-            ["--json", "outbox", "inspect", normalDelivery.id],
-            ["--json", "outbox", "retry", ordinaryRetryDelivery.id],
-            ["--json", "outbox", "cancel", normalDelivery.id],
-            ["--json", "outbox", "drain", "--limit", "1"],
-          ]
-        ) {
-          const denied = await ordinary.runOptctl(args);
-          assertNotEquals(denied.code, 0);
-          assertStringIncludes(denied.stderr, "policy_denied");
-          outputs.push(denied.stdout, denied.stderr);
+        const nonexistentDelivery = uuidV7();
+        for (const asJson of [true, false]) {
+          for (
+            const [command, existing] of [
+              ["inspect", normalDelivery.id],
+              ["attempts", ambiguousDelivery.id],
+              ["retry", ordinaryRetryDelivery.id],
+              ["cancel", normalDelivery.id],
+            ]
+          ) {
+            const existingDenied = await ordinary.runOptctl([
+              ...(asJson ? ["--json"] : []),
+              "outbox",
+              command,
+              existing,
+            ]);
+            const missingDenied = await ordinary.runOptctl([
+              ...(asJson ? ["--json"] : []),
+              "outbox",
+              command,
+              nonexistentDelivery,
+            ]);
+            assertNotEquals(existingDenied.code, 0);
+            assertEquals(existingDenied.code, missingDenied.code);
+            const existingError = withoutRequestId(
+              errorOutput(existingDenied, asJson),
+            );
+            const missingError = withoutRequestId(
+              errorOutput(missingDenied, asJson),
+            );
+            assertEquals(existingError, missingError);
+            assertEquals(existingError.error.code, "policy_denied");
+            assertEquals(existingError.error.details.resource, "system:outbox");
+            outputs.push(
+              existingDenied.stdout,
+              existingDenied.stderr,
+              missingDenied.stdout,
+              missingDenied.stderr,
+            );
+          }
+          for (const command of ["list", "drain"]) {
+            const args = command === "drain"
+              ? ["outbox", "drain", "--limit", "1"]
+              : ["outbox", "list"];
+            const denied = await ordinary.runOptctl([
+              ...(asJson ? ["--json"] : []),
+              ...args,
+            ]);
+            assertNotEquals(denied.code, 0);
+            assertEquals(
+              errorOutput(denied, asJson).error.code,
+              "policy_denied",
+            );
+            outputs.push(denied.stdout, denied.stderr);
+          }
         }
         await ordinary.close();
 
@@ -916,6 +1406,31 @@ async function successful(
 function json(result: { stdout: string }) {
   return JSON.parse(result.stdout);
 }
+function toon(result: { stdout: string }) {
+  return decodeToon(result.stdout) as Record<string, any>;
+}
+function errorOutput(
+  result: { stderr: string },
+  asJson: boolean,
+): Record<string, any> {
+  return (asJson
+    ? JSON.parse(result.stderr)
+    : decodeToon(result.stderr)) as Record<string, any>;
+}
+function withoutRequestId(value: Record<string, any>): Record<string, any> {
+  return {
+    ...value,
+    error: {
+      ...value.error,
+      details: {
+        ...value.error?.details,
+        // Each public token authentication creates a fresh immutable context.
+        auth_context_id: "<request-auth-context>",
+      },
+    },
+    meta: { ...value.meta, request_id: "<removed>" },
+  };
+}
 type DeliveryRow = {
   id: string;
   event_id: string;
@@ -991,12 +1506,13 @@ async function deliveryAggregate(harness: LiveHarness, id: string) {
 async function attemptRows(harness: LiveHarness, id: string) {
   return (await query<ArrayRow>(
     harness.server.sql,
-    `select id,outcome,idempotency_key,grant_evidence_json from outbox_attempts where delivery_id=$1 order by total_attempt_number`,
+    `select id,retry_generation,outcome,idempotency_key,grant_evidence_json from outbox_attempts where delivery_id=$1 order by total_attempt_number`,
     [id],
   )).rows;
 }
 type ArrayRow = {
   id: string;
+  retry_generation: number;
   outcome: string;
   idempotency_key: string;
   grant_evidence_json: Array<Record<string, unknown>>;
