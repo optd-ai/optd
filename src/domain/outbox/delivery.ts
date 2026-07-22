@@ -13,6 +13,56 @@ export type DeliveryOutcome =
   | { outcome: "retry"; code: string; message: string; retry_after_ms?: number }
   | { outcome: "dead_letter"; code: string; message: string };
 
+const LEGAL_TRANSITIONS: Readonly<
+  Record<DeliveryStatus, readonly DeliveryStatus[]>
+> = {
+  pending: ["running", "cancelled"],
+  running: ["pending", "retry_wait", "succeeded", "dead_letter"],
+  retry_wait: ["running", "pending", "cancelled"],
+  succeeded: [],
+  dead_letter: ["pending"],
+  cancelled: [],
+};
+
+export function isLegalDeliveryTransition(
+  from: DeliveryStatus,
+  to: DeliveryStatus,
+): boolean {
+  return LEGAL_TRANSITIONS[from].includes(to);
+}
+
+export function assertDeliveryCounters(value: {
+  retry_generation: number;
+  attempts_in_generation: number;
+  total_attempts: number;
+  max_attempts: number;
+}): void {
+  if (
+    !Number.isSafeInteger(value.retry_generation) ||
+    value.retry_generation < 0 ||
+    !Number.isSafeInteger(value.attempts_in_generation) ||
+    value.attempts_in_generation < 0 ||
+    !Number.isSafeInteger(value.total_attempts) ||
+    value.total_attempts < value.attempts_in_generation ||
+    !Number.isSafeInteger(value.max_attempts) || value.max_attempts < 1
+  ) {
+    throw new RangeError("invalid delivery counters");
+  }
+}
+
+export function retryDisposition(
+  attemptNumber: number,
+  maxAttempts: number,
+): "retry_wait" | "dead_letter" {
+  if (
+    !Number.isSafeInteger(attemptNumber) || attemptNumber < 1 ||
+    !Number.isSafeInteger(maxAttempts) || maxAttempts < 1
+  ) {
+    throw new RangeError("invalid retry counters");
+  }
+  return attemptNumber >= maxAttempts ? "dead_letter" : "retry_wait";
+}
+
 const CODE = /^[a-z][a-z0-9_]{0,127}$/;
 const DURATION = /^(\d+(?:\.\d+)?)(ms|s|m|h)$/;
 const TEXT_LIMIT = 1_000;

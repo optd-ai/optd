@@ -1,3 +1,4 @@
+import type { AuthContext } from "../../../domain/auth/model.ts";
 import { uuidV7 } from "../../../domain/ids/uuid_v7.ts";
 import type { DeliveryOutcome } from "../../../domain/outbox/delivery.ts";
 import { boundedEvidence } from "../../../domain/outbox/delivery.ts";
@@ -37,7 +38,14 @@ export type ExecutionEvidence = {
 };
 
 export class PostgresOutboxRepository {
-  constructor(private readonly sql: Sql) {}
+  constructor(
+    private readonly sql: Sql,
+    private readonly authorizeMutation?: (
+      tx: Queryable,
+      auth: AuthContext,
+      action: "outbox.retry" | "outbox.cancel",
+    ) => Promise<boolean>,
+  ) {}
 
   async claim(
     workerId: string,
@@ -101,6 +109,7 @@ export class PostgresOutboxRepository {
             attemptNumber,
             totalAttemptNumber,
             workerId,
+            row.hook_revision_id,
             now,
             leaseExpires,
           ],
@@ -138,11 +147,14 @@ export class PostgresOutboxRepository {
         current.lease_attempt_id === claim.attempt_id &&
         current.lease_expires_at !== null &&
         new Date(current.lease_expires_at).getTime() > now.getTime();
+      const executionId = await recordExecution(tx, claim, evidence);
       if (!owns) {
         await query(
           tx,
           `update outbox_attempts set outcome=$2,completed_at=$3,
-          error_code=$4,error_message=$5 where id=$1 and outcome in ('running','lease_expired')`,
+          error_code=$4,error_message=$5,hook_execution_id=$6,
+          grant_evidence_json=$7::jsonb
+          where id=$1 and outcome in ('running','lease_expired')`,
           [
             claim.attempt_id,
             outcome.outcome === "succeeded" ? "late_succeeded" : "late_failed",
@@ -151,36 +163,12 @@ export class PostgresOutboxRepository {
             outcome.outcome === "succeeded"
               ? null
               : boundedEvidence(outcome.message),
+            executionId,
+            evidence.grants,
           ],
         );
         return "late" as const;
       }
-      const executionId = uuidV7();
-      await query(
-        tx,
-        `insert into outbox_hook_executions(id,delivery_id,attempt_id,
-        hook_revision_id,attachment_id,script_digest,security_digest,attachment_digest,
-        config_digest,duration_ms,exit_code,logs,logs_truncated,secrets_redacted,
-        grant_evidence_json) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,
-        $13,$14,$15::jsonb)`,
-        [
-          executionId,
-          claim.id,
-          claim.attempt_id,
-          claim.hook_revision_id,
-          claim.attachment_id,
-          claim.script_digest,
-          claim.security_digest,
-          claim.attachment_digest,
-          claim.config_digest,
-          Math.max(0, Math.floor(evidence.duration_ms)),
-          evidence.exit_code,
-          boundedEvidence(evidence.logs, 1_000_000),
-          evidence.logs_truncated,
-          evidence.secrets_redacted,
-          evidence.grants,
-        ],
-      );
       if (outcome.outcome === "succeeded") {
         await query(
           tx,
@@ -317,7 +305,7 @@ export class PostgresOutboxRepository {
 
   async retry(
     id: string,
-    audit?: { authContextId: string; reason?: string },
+    audit?: { authContextId: string; auth?: AuthContext; reason?: string },
     now = new Date(),
   ) {
     return await this.sql.begin(async (tx) => {
@@ -327,6 +315,10 @@ export class PostgresOutboxRepository {
         [id],
       )).rows[0];
       if (!row) return "delivery_not_found" as const;
+      if (
+        audit?.auth && this.authorizeMutation &&
+        !await this.authorizeMutation(tx, audit.auth, "outbox.retry")
+      ) return "authorization_changed" as const;
       if (row.status !== "dead_letter") {
         return "delivery_not_retryable" as const;
       }
@@ -345,7 +337,7 @@ export class PostgresOutboxRepository {
 
   async cancel(
     id: string,
-    audit?: { authContextId: string; reason?: string },
+    audit?: { authContextId: string; auth?: AuthContext; reason?: string },
     now = new Date(),
   ) {
     return await this.sql.begin(async (tx) => {
@@ -355,6 +347,10 @@ export class PostgresOutboxRepository {
         [id],
       )).rows[0];
       if (!row) return "delivery_not_found" as const;
+      if (
+        audit?.auth && this.authorizeMutation &&
+        !await this.authorizeMutation(tx, audit.auth, "outbox.cancel")
+      ) return "authorization_changed" as const;
       if (row.status === "running") return "delivery_in_progress" as const;
       if (["succeeded", "dead_letter", "cancelled"].includes(row.status)) {
         return row.status;
@@ -369,6 +365,47 @@ export class PostgresOutboxRepository {
       return "cancelled" as const;
     });
   }
+}
+
+async function recordExecution(
+  tx: Queryable,
+  claim: ClaimedDelivery,
+  evidence: ExecutionEvidence,
+): Promise<string> {
+  const executionId = uuidV7();
+  const inserted = await query<{ id: string }>(
+    tx,
+    `insert into outbox_hook_executions(id,delivery_id,attempt_id,
+      hook_revision_id,attachment_id,script_digest,security_digest,attachment_digest,
+      config_digest,duration_ms,exit_code,logs,logs_truncated,secrets_redacted,
+      grant_evidence_json) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,
+      $13,$14,$15::jsonb) on conflict(attempt_id) do nothing returning id`,
+    [
+      executionId,
+      claim.id,
+      claim.attempt_id,
+      claim.hook_revision_id,
+      claim.attachment_id,
+      claim.script_digest,
+      claim.security_digest,
+      claim.attachment_digest,
+      claim.config_digest,
+      Math.max(0, Math.floor(evidence.duration_ms)),
+      evidence.exit_code,
+      boundedEvidence(evidence.logs, 1_000_000),
+      evidence.logs_truncated,
+      evidence.secrets_redacted,
+      evidence.grants,
+    ],
+  );
+  if (inserted.rows[0]) return inserted.rows[0].id;
+  const existing = (await query<{ id: string }>(
+    tx,
+    "select id from outbox_hook_executions where attempt_id=$1",
+    [claim.attempt_id],
+  )).rows[0];
+  if (!existing) throw new Error("outbox execution evidence is unavailable");
+  return existing.id;
 }
 
 async function expireLeases(tx: Queryable, now: Date): Promise<void> {

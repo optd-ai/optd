@@ -12,10 +12,8 @@ import {
   parseDeliveryOutput,
   retryDelayMs,
 } from "../../domain/outbox/delivery.ts";
-import {
-  decodeOutboxCursor,
-  encodeOutboxCursor,
-} from "../../domain/outbox/cursor.ts";
+import { OutboxCursorSigner } from "../../domain/outbox/cursor.ts";
+import { attemptDto, deliveryDto } from "../../domain/outbox/dto.ts";
 import {
   DenoHookRunner,
   type DenoHookRunnerOptions,
@@ -94,6 +92,7 @@ export function makeProcessOutboxService(deps: {
   }
   const workerId = deps.workerId ?? uuidV7();
   const random = deps.random ?? Math.random;
+  let cursors: OutboxCursorSigner | undefined;
 
   async function processBatch(limit = config.batchSize) {
     const claims = await deps.repository.claim(
@@ -252,16 +251,19 @@ export function makeProcessOutboxService(deps: {
       ) {
         return err(validationError("bad_request", "status is invalid"));
       }
-      const cursor = typeof input.cursor === "string"
-        ? await decodeOutboxCursor(input.cursor, filters)
-        : undefined;
-      if (typeof input.cursor === "string" && !cursor) {
-        return err(
-          validationError(
-            "invalid_cursor",
-            "outbox cursor is invalid for these filters",
-          ),
-        );
+      let cursor: { created_at: string; id: string } | undefined;
+      if (typeof input.cursor === "string") {
+        try {
+          cursors ??= OutboxCursorSigner.fromEnvironment();
+          cursor = await cursors.decode(input.cursor, filters);
+        } catch {
+          return err(
+            validationError(
+              "invalid_cursor",
+              "outbox cursor is invalid for these filters",
+            ),
+          );
+        }
       }
       const rows = await deps.repository.list(
         filters,
@@ -269,12 +271,12 @@ export function makeProcessOutboxService(deps: {
         cursor ?? undefined,
       );
       const hasMore = rows.length > limit;
-      const items = rows.slice(0, limit);
+      const items = rows.slice(0, limit).map(deliveryDto);
       const last = items.at(-1) as
         | { created_at?: string; id?: string }
         | undefined;
       const nextCursor = hasMore && last?.created_at && last.id
-        ? await encodeOutboxCursor(
+        ? await (cursors ??= OutboxCursorSigner.fromEnvironment()).encode(
           { created_at: last.created_at, id: last.id },
           filters,
         )
@@ -285,7 +287,9 @@ export function makeProcessOutboxService(deps: {
       const allowed = await authorize(auth, "outbox.inspect");
       if (!allowed.ok) return allowed;
       const row = await deps.repository.inspect(id);
-      return row ? ok(row) : deliveryError("delivery_not_found", "not_found");
+      return row
+        ? ok(deliveryDto(row))
+        : deliveryError("delivery_not_found", "not_found");
     },
     async attempts(
       id: string,
@@ -306,7 +310,7 @@ export function makeProcessOutboxService(deps: {
       }
       const rows = await deps.repository.attempts(id, limit + 1, after);
       return ok({
-        items: rows.slice(0, limit),
+        items: rows.slice(0, limit).map(attemptDto),
         page: {
           limit,
           next_after: rows.length > limit
@@ -325,15 +329,23 @@ export function makeProcessOutboxService(deps: {
       if (!allowed.ok) return allowed;
       const status = await deps.repository.retry(id, {
         authContextId: auth.id,
+        auth,
         ...(_reason === undefined ? {} : { reason: _reason }),
       });
       if (status !== "pending") {
+        if (status === "authorization_changed") {
+          return err({
+            code: "authorization_changed",
+            message: "outbox authority changed before mutation",
+            severity: "authorization",
+          });
+        }
         return deliveryError(
           status,
           status === "delivery_not_found" ? "not_found" : "conflict",
         );
       }
-      return ok(await deps.repository.inspect(id));
+      return ok(deliveryDto(await deps.repository.inspect(id)));
     },
     async cancel(
       id: string,
@@ -344,8 +356,16 @@ export function makeProcessOutboxService(deps: {
       if (!allowed.ok) return allowed;
       const status = await deps.repository.cancel(id, {
         authContextId: auth.id,
+        auth,
         ...(_reason === undefined ? {} : { reason: _reason }),
       });
+      if (status === "authorization_changed") {
+        return err({
+          code: "authorization_changed",
+          message: "outbox authority changed before mutation",
+          severity: "authorization",
+        });
+      }
       if (
         status === "delivery_not_found" || status === "delivery_in_progress"
       ) {
@@ -354,7 +374,7 @@ export function makeProcessOutboxService(deps: {
           status === "delivery_not_found" ? "not_found" : "conflict",
         );
       }
-      return ok(await deps.repository.inspect(id));
+      return ok(deliveryDto(await deps.repository.inspect(id)));
     },
     async drain(
       limit: number | undefined,

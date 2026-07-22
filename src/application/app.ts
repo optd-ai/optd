@@ -141,7 +141,17 @@ export function makeApplication(
     expressions: makeExpressionService(sql as Queryable),
     outbox: makeProcessOutboxService({
       sql: sql as Queryable,
-      repository: new PostgresOutboxRepository(sql),
+      repository: new PostgresOutboxRepository(
+        sql,
+        async (lockedSql, auth, action) =>
+          (await new PostgresAuthorizationRepository(lockedSql as Sql)
+            .authorize({
+              auth,
+              boundary: { type: "system" },
+              action,
+              resource: "system:outbox",
+            })).ok,
+      ),
       authorization: authorizationRepository,
       secrets: hookSecretRepository,
       hookRunnerOptions: options.hookRunnerOptions,

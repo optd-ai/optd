@@ -22,12 +22,17 @@ export function startOutboxPollLoop(
     async stop(): Promise<void> {
       controller.abort();
       const settled = task.then(() => true, () => true);
-      await Promise.race([
-        settled,
-        new Promise<void>((resolve) =>
-          setTimeout(resolve, options.shutdownGraceMs)
-        ),
-      ]);
+      let graceTimer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          settled,
+          new Promise<void>((resolve) => {
+            graceTimer = setTimeout(resolve, options.shutdownGraceMs);
+          }),
+        ]);
+      } finally {
+        if (graceTimer !== undefined) clearTimeout(graceTimer);
+      }
       // SQL remains open until all claimed hooks have settled or their runner
       // timeout has killed them, even if the preferred grace period elapsed.
       await task;

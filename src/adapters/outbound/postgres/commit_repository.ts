@@ -1507,14 +1507,24 @@ async function enqueueAfterCommitDeliveries(
        on active.candidate_revision_id=attachment.candidate_revision_id
      join pack_component_revisions hook on hook.id=attachment.hook_revision_id
      where attachment.phase='event.after_commit'
-       and attachment.declaration_spec->>'event'=$1
+       and (attachment.declaration_spec->'event'='null'::jsonb or
+            attachment.declaration_spec->>'event'=$1)
        and (attachment.declaration_spec->'resource'='null'::jsonb or
             attachment.declaration_spec->>'resource'=$2)
+       and (attachment.declaration_spec->'action'='null'::jsonb or
+            attachment.declaration_spec->>'action'=$4)
        and (attachment.declaration_spec->'condition'='null'::jsonb or
             attachment.declaration_spec->>'condition'='true' or
             (attachment.declaration_spec->>'condition'='active()' and $3 <> 'object.archived'))
      order by attachment.ordinal,attachment.id`,
-    [event.type, event.resource, event.type],
+    [
+      event.type,
+      event.resource,
+      event.type,
+      typeof record(event.payload).action === "string"
+        ? record(event.payload).action
+        : null,
+    ],
   )).rows;
   if (attachments.length === 0) return;
   const authContextId = (await query<{ committed_auth_context_id: string }>(
