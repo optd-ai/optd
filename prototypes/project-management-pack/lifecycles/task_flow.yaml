@@ -38,4 +38,8 @@ spec:
       to: done
   axi:
     purpose: task flow guidance for the operant/projects pack.
+    whenToUse:
+      - Inspect lifecycle task_flow behavior and guidance before relying on it.
+    help:
+      - optctl metadata lifecycle operant/projects:task_flow
   initial: todo

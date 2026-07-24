@@ -22,6 +22,10 @@ spec:
         input: $action.input
   axi:
     purpose: convert lead guidance for the operant/crm pack.
+    whenToUse:
+      - Inspect hook convert_lead behavior and guidance before relying on it.
+    help:
+      - optctl metadata hook operant/crm:convert_lead
   secrets: []
   effects:
     operations:

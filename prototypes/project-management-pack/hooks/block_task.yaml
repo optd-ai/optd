@@ -20,6 +20,10 @@ spec:
       input: {}
   axi:
     purpose: block task guidance for the operant/projects pack.
+    whenToUse:
+      - Inspect hook block_task behavior and guidance before relying on it.
+    help:
+      - optctl metadata hook operant/projects:block_task
   secrets: []
   effects:
     operations:

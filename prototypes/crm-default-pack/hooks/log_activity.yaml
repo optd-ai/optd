@@ -19,6 +19,10 @@ spec:
       action: operant/crm:log_activity
   axi:
     purpose: log activity guidance for the operant/crm pack.
+    whenToUse:
+      - Inspect hook log_activity behavior and guidance before relying on it.
+    help:
+      - optctl metadata hook operant/crm:log_activity
   secrets: []
   effects:
     operations:

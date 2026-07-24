@@ -642,7 +642,7 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
       assertEquals((await invalid.json()).error.code, "bad_request");
     }
     const invalidMetadataQuery = await fetch(
-      `${harness.baseUrl}/metadata/packs/operant/crm/hooks/validate_lead?include_security=false`,
+      `${harness.baseUrl}/api/v1/metadata/packs/operant/crm/hooks/validate_lead?include_security=false`,
       { headers: { authorization: `Bearer ${fullToken}` } },
     );
     assertEquals(invalidMetadataQuery.status, 400);

@@ -21,3 +21,7 @@ spec:
       default_deadline_days: 2
   axi:
     purpose: activity types guidance for the operant/crm pack.
+    whenToUse:
+      - Inspect seed activity_types behavior and guidance before relying on it.
+    help:
+      - optctl metadata seed operant/crm:activity_types

@@ -1,8 +1,13 @@
 import { assert, assertEquals, assertRejects } from "jsr:@std/assert";
 import {
   loadPackFromFiles,
+  parseYamlJsonObject,
   type UploadedPackFile,
 } from "../../src/adapters/outbound/yaml/pack_loader.ts";
+import {
+  type PackKind,
+  validatePackDocument,
+} from "../../src/schemas/packs/pack_schemas.ts";
 
 const root = `kind: Pack
 apiVersion: operant.dev/v1
@@ -513,6 +518,40 @@ Deno.test("strict pack loader canonicalizes bounded YAML aliases", async () => {
   assert(pack.revision.startsWith("operant/test@0.1.0:sha256:"));
 });
 
+Deno.test("every AXI kind accepts only exact empty or complete guidance", async () => {
+  const documents = new Map<PackKind, Record<string, unknown>>();
+  async function collect(path: string) {
+    for await (const entry of Deno.readDir(path)) {
+      const child = `${path}/${entry.name}`;
+      if (entry.isDirectory) await collect(child);
+      else if (entry.name.endsWith(".yaml")) {
+        const document = parseYamlJsonObject(
+          await Deno.readTextFile(child),
+          child,
+        );
+        const kind = document.kind as PackKind;
+        if (!documents.has(kind)) documents.set(kind, document);
+      }
+    }
+  }
+  await collect("prototypes/crm-default-pack");
+  assertEquals(documents.size, 9);
+  for (const [kind, source] of documents) {
+    const empty = structuredClone(source);
+    (empty.spec as Record<string, unknown>).axi = {};
+    assertEquals(validatePackDocument(kind, empty), [], `${kind} empty AXI`);
+
+    const partial = structuredClone(source);
+    (partial.spec as Record<string, unknown>).axi = {
+      purpose: "Incomplete guidance must fail.",
+    };
+    assert(
+      validatePackDocument(kind, partial).length > 0,
+      `${kind} accepted partial AXI guidance`,
+    );
+  }
+});
+
 Deno.test("strict AXI readiness and safe placeholders fail pack preview", async () => {
   await assertRejects(
     () =>
@@ -541,7 +580,8 @@ Deno.test("strict AXI readiness and safe placeholders fail pack preview", async 
     Error,
     "unknown AXI placeholder 'missing'",
   );
-  const action = `kind: Action\napiVersion: operant.dev/v1\nmetadata: {name: run}\nspec:\n  input: {value: {type: string, required: true}}\n  axi:\n    purpose: Run the test action.\n    successHelp: ["optctl changeset inspect \${stage_id}"]\n`;
+  const action =
+    `kind: Action\napiVersion: operant.dev/v1\nmetadata: {name: run}\nspec:\n  input: {value: {type: string, required: true}}\n  axi:\n    purpose: Run the test action.\n    successHelp: ["optctl changeset inspect \${stage_id}"]\n`;
   await assertRejects(
     () =>
       loadPackFromFiles([

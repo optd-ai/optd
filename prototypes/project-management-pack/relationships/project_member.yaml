@@ -15,6 +15,10 @@ spec:
       type: string
   axi:
     purpose: project member guidance for the operant/projects pack.
+    whenToUse:
+      - Inspect relationship project_member behavior and guidance before relying on it.
+    help:
+      - optctl metadata relationship operant/projects:project_member
   unique:
     - from
     - to

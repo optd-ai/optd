@@ -22,6 +22,10 @@ spec:
         proposed: $proposed
   axi:
     purpose: validate lead guidance for the operant/crm pack.
+    whenToUse:
+      - Inspect hook validate_lead behavior and guidance before relying on it.
+    help:
+      - optctl metadata hook operant/crm:validate_lead
   secrets: []
   effects:
     operations: []

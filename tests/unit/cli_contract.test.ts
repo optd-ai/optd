@@ -34,7 +34,9 @@ async function withMockServer(
       entry.body = await req.json();
     }
     seen.push(entry);
-    if (url.pathname === "/metadata/packs/operant/crm/resources/missing") {
+    if (
+      url.pathname === "/api/v1/metadata/packs/operant/crm/resources/missing"
+    ) {
       return error(
         404,
         "resource_not_found",
@@ -47,6 +49,14 @@ async function withMockServer(
       typeof entry.body === "object"
     ) {
       return ok({ surface: "query", request: entry.body });
+    }
+    if (url.pathname.endsWith("/actions/operant/crm/convert_lead/stage")) {
+      return ok({ id: "019b7a2e-7c10-7000-8000-000000000011" });
+    }
+    if (url.pathname.endsWith("/packs/operant/crm/seeds/stage")) {
+      return ok({
+        stage: { id: "019b7a2e-7c10-7000-8000-000000000011" },
+      });
     }
     return ok({ surface: url.pathname, method: req.method });
   });
@@ -75,9 +85,26 @@ Deno.test("optctl maps current strict commands to canonical HTTP URLs", async ()
       ["changeset", "commit", stageId, "--timeout", "250ms"],
       ["changeset", "approvals", stageId],
       ["changeset", "cancel", stageId, "--reason", "obsolete"],
-      ["outbox", "status"],
+      ["outbox", "list"],
       ["outbox", "drain", "--limit", "1"],
       ["outbox", "retry", stageId],
+      [
+        "--project",
+        stageId,
+        "action",
+        "commit",
+        "operant/crm:convert_lead",
+        "--input",
+        "{}",
+      ],
+      [
+        "--project",
+        stageId,
+        "seed",
+        "commit",
+        "operant/crm",
+        "--all",
+      ],
     ];
     for (const command of commands) {
       const result = await runOptctl([
@@ -94,23 +121,27 @@ Deno.test("optctl maps current strict commands to canonical HTTP URLs", async ()
       assertEquals(JSON.parse(result.stdout).ok, true);
     }
     assertEquals(seen.map((request) => `${request.method} ${request.path}`), [
-      "GET /metadata/home",
-      "GET /metadata/packs",
-      "GET /metadata/packs",
-      "GET /metadata/packs/operant/crm",
-      "GET /metadata/packs/operant/crm/resources/lead",
-      "GET /metadata/packs/operant/crm/relationships/contact_company",
-      "GET /metadata/packs/operant/crm/actions/convert_lead",
-      "GET /metadata/packs/operant/crm/hooks/validate_lead",
-      "GET /metadata/packs/operant/crm/policies/crm_sales",
+      "GET /api/v1/metadata/home",
+      "GET /api/v1/metadata/packs",
+      "GET /api/v1/metadata/packs",
+      "GET /api/v1/metadata/packs/operant/crm",
+      "GET /api/v1/metadata/packs/operant/crm/resources/lead",
+      "GET /api/v1/metadata/packs/operant/crm/relationships/contact_company",
+      "GET /api/v1/metadata/packs/operant/crm/actions/convert_lead",
+      "GET /api/v1/metadata/packs/operant/crm/hooks/validate_lead",
+      "GET /api/v1/metadata/packs/operant/crm/policies/crm_sales",
       `GET /api/v1/changesets/${stageId}`,
       `POST /api/v1/changesets/${stageId}/commit`,
       `POST /api/v1/changesets/${stageId}/commit`,
       `GET /api/v1/changesets/${stageId}/approvals`,
       `POST /api/v1/changesets/${stageId}/cancel`,
-      "GET /outbox",
-      "POST /outbox/drain",
-      `/POST /outbox/${stageId}/retry`.slice(1),
+      "GET /api/v1/outbox",
+      "POST /api/v1/outbox/drain",
+      `POST /api/v1/outbox/${stageId}/retry`,
+      "POST /api/v1/actions/operant/crm/convert_lead/stage",
+      `POST /api/v1/changesets/${stageId}/commit`,
+      "POST /api/v1/packs/operant/crm/seeds/stage",
+      `POST /api/v1/changesets/${stageId}/commit`,
     ]);
     const commitBodies = seen.filter((request) =>
       request.path.endsWith("/commit")
@@ -118,6 +149,8 @@ Deno.test("optctl maps current strict commands to canonical HTTP URLs", async ()
     assertEquals(commitBodies.map((request) => request.body), [
       {},
       { lock_timeout: "250ms" },
+      {},
+      {},
     ]);
   });
 });
@@ -153,7 +186,7 @@ Deno.test("optctl emits TOON by default and stable JSON error envelopes", async 
     const toon = await runOptctl(["--server", baseUrl, "home"]);
     assertEquals(toon.code, 0, toon.stderr);
     assertStringIncludes(toon.stdout, "ok: true");
-    assertStringIncludes(toon.stdout, "/metadata/home");
+    assertStringIncludes(toon.stdout, "/api/v1/metadata/home");
 
     const missing = await runOptctl([
       "--server",
@@ -204,7 +237,7 @@ Deno.test("compiled optctl binary runs against HTTP server", async () => {
       }).output();
       assertEquals(run.code, 0, new TextDecoder().decode(run.stderr));
       const body = JSON.parse(new TextDecoder().decode(run.stdout));
-      assertEquals(body.data.surface, "/metadata/home");
+      assertEquals(body.data.surface, "/api/v1/metadata/home");
     } finally {
       await Deno.remove(dir, { recursive: true }).catch(() => {});
     }

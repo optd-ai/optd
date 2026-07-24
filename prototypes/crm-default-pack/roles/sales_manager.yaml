@@ -7,3 +7,7 @@ spec:
   description: sales_manager responsibility for the crm proof pack.
   axi:
     purpose: sales manager guidance for the operant/crm pack.
+    whenToUse:
+      - Inspect role sales_manager behavior and guidance before relying on it.
+    help:
+      - optctl metadata role operant/crm:sales_manager

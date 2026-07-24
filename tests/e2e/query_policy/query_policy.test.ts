@@ -46,7 +46,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
     ) as {
       spec: {
         fields: Record<string, unknown>;
-        axi: { list: { fields: string[] } };
+        axi: { list: { defaultFields: string[] } };
       };
     };
     Object.assign(lead.spec.fields, {
@@ -54,7 +54,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       due_date: { type: "date" },
       amount: { type: "decimal", precision: 12, scale: 2 },
     });
-    lead.spec.axi.list.fields = ["id", "name", "score", "amount"];
+    lead.spec.axi.list.defaultFields = ["id", "name", "score", "amount"];
     await Deno.writeTextFile(leadPath, JSON.stringify(lead, null, 2));
     await Deno.writeTextFile(
       join(pack, "relationships", "lead_viewer.yaml"),
@@ -83,6 +83,32 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       "--safe",
     ]);
     assertEquals(applied.code, 0, applied.stderr);
+    const packMetadata = await harness.runOptctl([
+      "--json",
+      "metadata",
+      "pack",
+      "operant/crm",
+    ]);
+    assertEquals(packMetadata.code, 0, packMetadata.stderr);
+    assertEquals(JSON.parse(packMetadata.stdout).data.axi_readiness, {
+      ready: false,
+      missing_guidance: ["relationship:operant/crm:lead_viewer"],
+    });
+    const relationshipMetadata = await harness.runOptctl([
+      "--json",
+      "metadata",
+      "relationship",
+      "operant/crm:lead_viewer",
+    ]);
+    assertEquals(relationshipMetadata.code, 0, relationshipMetadata.stderr);
+    assertEquals(JSON.parse(relationshipMetadata.stdout).data.axi_readiness, {
+      ready: false,
+      missing_guidance: [
+        "axi.purpose",
+        "axi.whenToUse",
+        "axi.help",
+      ],
+    });
     const expressionContexts = [
       "query",
       "policy",

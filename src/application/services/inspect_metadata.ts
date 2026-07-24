@@ -21,11 +21,13 @@ import { isUuidV7 } from "../../domain/ids/uuid_v7.ts";
 export type HomeDto = {
   version: string;
   generated_at: string;
-  system: { active_pack: string | null };
+  system: { active_packs: string[] };
   resources: string[];
   actions: string[];
   status: "ready";
   capabilities: string[];
+  capability_projection: Record<string, unknown>;
+  axi_readiness: AxiReadiness;
   help: string[];
 };
 export type MetadataOptions = Readonly<
@@ -103,6 +105,7 @@ export function makeInspectMetadataService(
       pack,
       name,
       capability_projection: boundary.value,
+      axi_readiness: axiReadiness(kind, spec.axi),
     };
     if (section === "resources") {
       Object.assign(base, {
@@ -159,22 +162,9 @@ export function makeInspectMetadataService(
       const rules = arrayRecords(spec.rules);
       Object.assign(base, {
         axi: spec.axi ?? {},
-        capabilities: rules.map((rule) =>
-          allow(rule, ["id", "action", "resource", "summary"])
-        ),
+        capabilities: rules.map(policyRuleSummary),
       });
-      if (options.includeSecurity) {
-        base.rules = rules.map((rule) =>
-          allow(rule, [
-            "id",
-            "action",
-            "resource",
-            "condition",
-            "predicate",
-            "summary",
-          ])
-        );
-      }
+      if (options.includeSecurity) base.rules = rules;
     } else if (section === "roles") {
       Object.assign(base, {
         display_name: spec.displayName ?? spec.display_name,
@@ -204,38 +194,94 @@ export function makeInspectMetadataService(
     return ok(base);
   };
   return {
-    async home(): Promise<Result<HomeDto>> {
-      const active = await getActivePack(deps.sql);
-      const manifest = jsonRecord(active?.manifest);
-      const normalized = jsonRecord(active?.normalized);
-      const spec = jsonRecord(manifest.spec);
-      const home = jsonRecord(jsonRecord(spec.axi).home);
-      const publisher = typeof active?.publisher === "string"
-        ? active.publisher
-        : null;
-      const pack = typeof active?.name === "string" ? active.name : null;
-      const qualify = (section: string) =>
-        publisher && pack
-          ? Object.keys(jsonRecord(normalized[section])).sort().map((name) =>
-            `${publisher}/${pack}:${name}`
-          )
-          : [];
+    async home(options: MetadataOptions): Promise<Result<HomeDto>> {
+      if (options.includeSecurity) {
+        return err(
+          badRequest("include_security is not supported for metadata home"),
+        );
+      }
+      const boundary = await projection(options);
+      if (!boundary.ok) return boundary;
+      const result = await query<Record<string, unknown>>(
+        deps.sql,
+        `select ar.publisher, ar.pack_name as name, cr.version, cr.manifest, cr.normalized
+           from pack_active_revisions ar
+           join pack_candidate_revisions cr on cr.id=ar.candidate_revision_id
+          order by ar.publisher, ar.pack_name`,
+      );
+      const activePacks: string[] = [];
+      const resources = new Set<string>();
+      const actions = new Set<string>();
+      const help = new Set<string>();
+      for (const row of result.rows) {
+        const publisher = String(row.publisher);
+        const pack = String(row.name);
+        activePacks.push(`${publisher}/${pack}@${String(row.version)}`);
+        const normalized = jsonRecord(row.normalized);
+        for (const name of Object.keys(jsonRecord(normalized.resources))) {
+          resources.add(`${publisher}/${pack}:${name}`);
+        }
+        for (const name of Object.keys(jsonRecord(normalized.actions))) {
+          actions.add(`${publisher}/${pack}:${name}`);
+        }
+        const manifest = jsonRecord(row.manifest);
+        const home = jsonRecord(
+          jsonRecord(jsonRecord(manifest.spec).axi).home,
+        );
+        for (const command of preferred(home.help, [])) {
+          help.add(
+            options.projectId
+              ? command.replaceAll("${project}", options.projectId)
+              : command,
+          );
+        }
+      }
+      const missingGuidance: string[] = [];
+      for (const row of result.rows) {
+        const publisher = String(row.publisher);
+        const pack = String(row.name);
+        const normalized = jsonRecord(row.normalized);
+        const manifestAxi = jsonRecord(
+          jsonRecord(jsonRecord(row.manifest).spec).axi,
+        );
+        if (!Object.keys(manifestAxi).length) {
+          missingGuidance.push(`${publisher}/${pack}`);
+        }
+        for (const [section, kind] of Object.entries(SECTION_KINDS)) {
+          for (
+            const [name, document] of Object.entries(
+              jsonRecord(normalized[section]),
+            )
+          ) {
+            const axi = jsonRecord(jsonRecord(jsonRecord(document).spec).axi);
+            if (!Object.keys(axi).length) {
+              missingGuidance.push(`${kind}:${publisher}/${pack}:${name}`);
+            }
+          }
+        }
+      }
       return ok({
         version: deps.version,
         generated_at: deps.clock.now().toISOString(),
-        system: {
-          active_pack: publisher && pack
-            ? `${publisher}/${pack}@${active?.version}`
-            : null,
-        },
-        resources: preferred(home.resources, qualify("resources")),
-        actions: preferred(home.actions, qualify("actions")),
+        system: { active_packs: activePacks },
+        resources: [...resources].sort(),
+        actions: [...actions].sort(),
         status: "ready",
-        capabilities: ["health", "metadata.home", "pack.preview"],
-        help: preferred(home.help, [
-          "optctl pack preview <pack-dir> --json",
-          "optctl metadata resource <publisher>/<pack>:<name>",
-        ]),
+        capabilities: [
+          "metadata.home",
+          "metadata.inspect",
+          "project.list",
+          "pack.preview",
+          "query",
+          "changeset.stage",
+          "action.stage",
+        ],
+        capability_projection: boundary.value,
+        axi_readiness: {
+          ready: missingGuidance.length === 0,
+          missing_guidance: missingGuidance.sort(),
+        },
+        help: [...help].sort(),
       });
     },
     async packs(options: MetadataOptions): Promise<Result<unknown>> {
@@ -268,6 +314,23 @@ export function makeInspectMetadataService(
       const normalized = jsonRecord(value.normalized);
       const names = (key: string) =>
         Object.keys(jsonRecord(normalized[key])).sort();
+      const missingGuidance: string[] = [];
+      const manifestAxi = jsonRecord(jsonRecord(value.manifest).spec).axi;
+      if (!Object.keys(jsonRecord(manifestAxi)).length) {
+        missingGuidance.push(`${publisher}/${pack}`);
+      }
+      for (const [section, kind] of Object.entries(SECTION_KINDS)) {
+        for (
+          const [name, document] of Object.entries(
+            jsonRecord(normalized[section]),
+          )
+        ) {
+          const axi = jsonRecord(jsonRecord(jsonRecord(document).spec).axi);
+          if (!Object.keys(axi).length) {
+            missingGuidance.push(`${kind}:${publisher}/${pack}:${name}`);
+          }
+        }
+      }
       return ok({
         publisher,
         name: pack,
@@ -282,6 +345,10 @@ export function makeInspectMetadataService(
         policies: names("policies"),
         seeds: names("seeds"),
         capability_projection: p.value,
+        axi_readiness: {
+          ready: missingGuidance.length === 0,
+          missing_guidance: missingGuidance.sort(),
+        },
         ...(options.includeSecurity
           ? { security: packSecurity(normalized) }
           : {}),
@@ -297,6 +364,35 @@ export function makeInspectMetadataService(
     seed: child("seeds", "seed"),
   };
 }
+type AxiReadiness = { ready: boolean; missing_guidance: string[] };
+const SECTION_KINDS: Record<string, string> = {
+  resources: "resource",
+  relationships: "relationship",
+  lifecycles: "lifecycle",
+  actions: "action",
+  hooks: "hook",
+  roles: "role",
+  policies: "policy",
+  seeds: "seed",
+};
+const AXI_REQUIRED: Record<string, string[]> = {
+  resource: ["purpose", "whenToUse", "identity", "list", "detail", "help"],
+  action: ["purpose", "examples", "successHelp"],
+  relationship: ["purpose", "whenToUse", "help"],
+  lifecycle: ["purpose", "whenToUse", "help"],
+  hook: ["purpose", "whenToUse", "help"],
+  role: ["purpose", "whenToUse", "help"],
+  policy: ["purpose", "whenToUse", "help"],
+  seed: ["purpose", "whenToUse", "help"],
+};
+function axiReadiness(kind: string, value: unknown): AxiReadiness {
+  const axi = jsonRecord(value);
+  const missing = Object.keys(axi).length === 0
+    ? (AXI_REQUIRED[kind] ?? []).map((field) => `axi.${field}`)
+    : [];
+  return { ready: missing.length === 0, missing_guidance: missing };
+}
+
 function packSecurity(normalized: Record<string, unknown>) {
   const scripts = jsonRecord(normalized.scripts);
   const hooks = Object.entries(jsonRecord(normalized.hooks)).sort(([a], [b]) =>
@@ -324,17 +420,7 @@ function packSecurity(normalized: Record<string, unknown>) {
     [b],
   ) => a.localeCompare(b)).map(([name, document]) => ({
     name,
-    rules: arrayRecords(jsonRecord(jsonRecord(document).spec).rules).map(
-      (rule) =>
-        allow(rule, [
-          "id",
-          "action",
-          "resource",
-          "condition",
-          "predicate",
-          "summary",
-        ]),
-    ),
+    rules: arrayRecords(jsonRecord(jsonRecord(document).spec).rules),
   }));
   return { hooks, policies };
 }
@@ -390,6 +476,23 @@ function allow(value: Record<string, unknown>, keys: string[]) {
 function summary(value: unknown) {
   const record = jsonRecord(value);
   return allow(record, ["schema", "operations", "events", "summary"]);
+}
+function policyRuleSummary(rule: Record<string, unknown>) {
+  return {
+    name: rule.name,
+    actions: Array.isArray(rule.actions) ? rule.actions : [],
+    resources: Array.isArray(rule.resources) ? rule.resources : [],
+    conditional: typeof rule.where === "string",
+    relation: rule.relation
+      ? allow(jsonRecord(rule.relation), [
+        "relationship",
+        "object_side",
+        "subject_side",
+        "subject",
+      ])
+      : null,
+    summary: jsonRecord(rule.axi).summary ?? null,
+  };
 }
 function byJson(a: unknown, b: unknown) {
   return JSON.stringify(a).localeCompare(JSON.stringify(b));

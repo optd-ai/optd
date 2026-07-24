@@ -7,3 +7,7 @@ spec:
   description: crm_admin responsibility for the crm proof pack.
   axi:
     purpose: crm admin guidance for the operant/crm pack.
+    whenToUse:
+      - Inspect role crm_admin behavior and guidance before relying on it.
+    help:
+      - optctl metadata role operant/crm:crm_admin

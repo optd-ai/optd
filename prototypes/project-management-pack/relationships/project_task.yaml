@@ -12,5 +12,9 @@ spec:
       type: string
   axi:
     purpose: project task guidance for the operant/projects pack.
+    whenToUse:
+      - Inspect relationship project_task behavior and guidance before relying on it.
+    help:
+      - optctl metadata relationship operant/projects:project_task
   unique:
     - to

@@ -21,6 +21,10 @@ spec:
         operation: $operation
   axi:
     purpose: normalize lead guidance for the operant/crm pack.
+    whenToUse:
+      - Inspect hook normalize_lead behavior and guidance before relying on it.
+    help:
+      - optctl metadata hook operant/crm:normalize_lead
   secrets: []
   effects:
     operations: []

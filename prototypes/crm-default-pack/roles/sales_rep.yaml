@@ -7,3 +7,7 @@ spec:
   description: sales_rep responsibility for the crm proof pack.
   axi:
     purpose: sales rep guidance for the operant/crm pack.
+    whenToUse:
+      - Inspect role sales_rep behavior and guidance before relying on it.
+    help:
+      - optctl metadata role operant/crm:sales_rep

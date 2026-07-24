@@ -19,6 +19,10 @@ spec:
       action: operant/crm:mark_lost
   axi:
     purpose: mark lost guidance for the operant/crm pack.
+    whenToUse:
+      - Inspect hook mark_lost behavior and guidance before relying on it.
+    help:
+      - optctl metadata hook operant/crm:mark_lost
   secrets: []
   effects:
     operations:

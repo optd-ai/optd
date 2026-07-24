@@ -19,6 +19,10 @@ spec:
       action: operant/crm:mark_won
   axi:
     purpose: mark won guidance for the operant/crm pack.
+    whenToUse:
+      - Inspect hook mark_won behavior and guidance before relying on it.
+    help:
+      - optctl metadata hook operant/crm:mark_won
   secrets: []
   effects:
     operations:

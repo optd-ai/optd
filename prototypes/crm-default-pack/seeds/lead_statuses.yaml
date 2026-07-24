@@ -29,3 +29,7 @@ spec:
       terminal: true
   axi:
     purpose: lead statuses guidance for the operant/crm pack.
+    whenToUse:
+      - Inspect seed lead_statuses behavior and guidance before relying on it.
+    help:
+      - optctl metadata seed operant/crm:lead_statuses

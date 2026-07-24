@@ -32,7 +32,7 @@ Deno.test({
       );
       const token = store.origins[harness.baseUrl].token;
       const requestToken = store.origins[harness.baseUrl].requestToken;
-      const denied = await fetch(`${harness.baseUrl}/metadata/home`, {
+      const denied = await fetch(`${harness.baseUrl}/api/v1/metadata/home`, {
         headers: { authorization: `Bearer ${requestToken}` },
       });
       assertEquals(denied.status, 403);

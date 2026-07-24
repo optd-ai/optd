@@ -49,6 +49,33 @@ Deno.test("compiled optctl completes safe, destructive, stale, timeout, risky, a
     ], secrets);
     assertEquals(repeated.data, initialApply.data.application);
 
+    const projectsApply = await runOk(
+      harness,
+      [
+        "pack",
+        "apply",
+        "prototypes/project-management-pack",
+        "--safe",
+      ],
+      secrets,
+    );
+    assert(projectsApply.data.application.id);
+    const projectsMetadata = await runOk(
+      harness,
+      ["metadata", "pack", "operant/projects"],
+      secrets,
+    );
+    assertEquals(projectsMetadata.data.axi_readiness, {
+      ready: true,
+      missing_guidance: [],
+    });
+    assertEquals(projectsMetadata.data.resources.includes("task"), true);
+    const aggregatedHome = await runOk(harness, ["home"], secrets);
+    assertEquals(aggregatedHome.data.system.active_packs, [
+      "operant/crm@0.1.0",
+      "operant/projects@0.1.0",
+    ]);
+
     for (const slug of ["alpha", "beta"]) {
       await runOk(
         harness,
@@ -66,7 +93,7 @@ Deno.test("compiled optctl completes safe, destructive, stale, timeout, risky, a
       leadPath,
     ) as Record<string, any>;
     delete lead.spec.fields.phone;
-    lead.spec.axi.list.fields = lead.spec.axi.list.fields.filter((
+    lead.spec.axi.list.defaultFields = lead.spec.axi.list.defaultFields.filter((
       field: string,
     ) => field !== "phone");
     await Deno.writeTextFile(leadPath, JSON.stringify(lead, null, 2));
@@ -447,7 +474,7 @@ Deno.test("compiled optctl completes safe, destructive, stale, timeout, risky, a
         harness.server.sql,
         "select count(*)::text count from pack_migration_applications",
       )).rows[0].count,
-      "5",
+      "6",
     );
     assertEquals(
       (await query<{ leaked: boolean }>(

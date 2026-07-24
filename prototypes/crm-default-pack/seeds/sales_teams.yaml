@@ -17,3 +17,7 @@ spec:
       monthly_target: "250000"
   axi:
     purpose: sales teams guidance for the operant/crm pack.
+    whenToUse:
+      - Inspect seed sales_teams behavior and guidance before relying on it.
+    help:
+      - optctl metadata seed operant/crm:sales_teams

@@ -12,5 +12,9 @@ spec:
       type: string
   axi:
     purpose: task milestone guidance for the operant/projects pack.
+    whenToUse:
+      - Inspect relationship task_milestone behavior and guidance before relying on it.
+    help:
+      - optctl metadata relationship operant/projects:task_milestone
   unique:
     - from

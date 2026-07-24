@@ -12,6 +12,10 @@ spec:
       type: string
   axi:
     purpose: task tag assignment guidance for the operant/projects pack.
+    whenToUse:
+      - Inspect relationship task_tag_assignment behavior and guidance before relying on it.
+    help:
+      - optctl metadata relationship operant/projects:task_tag_assignment
   unique:
     - from
     - to

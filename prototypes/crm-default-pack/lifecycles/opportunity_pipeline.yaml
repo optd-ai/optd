@@ -32,4 +32,8 @@ spec:
       to: lost
   axi:
     purpose: opportunity pipeline guidance for the operant/crm pack.
+    whenToUse:
+      - Inspect lifecycle opportunity_pipeline behavior and guidance before relying on it.
+    help:
+      - optctl metadata lifecycle operant/crm:opportunity_pipeline
   initial: new

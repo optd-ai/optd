@@ -20,6 +20,10 @@ spec:
       input: {}
   axi:
     purpose: start task guidance for the operant/projects pack.
+    whenToUse:
+      - Inspect hook start_task behavior and guidance before relying on it.
+    help:
+      - optctl metadata hook operant/projects:start_task
   secrets: []
   effects:
     operations:

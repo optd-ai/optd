@@ -127,3 +127,7 @@ spec:
       where: visibility == "internal"
   axi:
     purpose: project access guidance for the operant/projects pack.
+    whenToUse:
+      - Inspect policy project_access behavior and guidance before relying on it.
+    help:
+      - optctl metadata policy operant/projects:project_access

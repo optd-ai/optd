@@ -17,3 +17,7 @@ spec:
       color: purple
   axi:
     purpose: task tags guidance for the operant/projects pack.
+    whenToUse:
+      - Inspect seed task_tags behavior and guidance before relying on it.
+    help:
+      - optctl metadata seed operant/projects:task_tags

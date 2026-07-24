@@ -196,7 +196,11 @@ Deno.test("compiled optctl binds one nearest Linux process credential without fa
         "--yes",
       ],
     );
-    assertEquals(repaired.code, 0, repaired.stderr);
+    assertEquals(
+      repaired.code,
+      0,
+      `stdout=${repaired.stdout}\nstderr=${repaired.stderr}`,
+    );
     assertEquals((await Deno.stat(paths.token)).mode! & 0o777, 0o600);
 
     const binding = JSON.parse(

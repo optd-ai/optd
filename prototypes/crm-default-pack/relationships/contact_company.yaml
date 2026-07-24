@@ -14,6 +14,10 @@ spec:
       type: boolean
   axi:
     purpose: contact company guidance for the operant/crm pack.
+    whenToUse:
+      - Inspect relationship contact_company behavior and guidance before relying on it.
+    help:
+      - optctl metadata relationship operant/crm:contact_company
   unique:
     - from
     - to

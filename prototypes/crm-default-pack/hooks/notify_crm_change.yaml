@@ -21,6 +21,10 @@ spec:
         event: $event
   axi:
     purpose: notify crm change guidance for the operant/crm pack.
+    whenToUse:
+      - Inspect hook notify_crm_change behavior and guidance before relying on it.
+    help:
+      - optctl metadata hook operant/crm:notify_crm_change
   secrets: []
   effects:
     operations: []

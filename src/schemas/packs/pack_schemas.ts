@@ -38,10 +38,13 @@ const AxiList = Type.Object({
   aggregates: Type.Optional(NameArray),
 }, { additionalProperties: false });
 const AxiDetail = Type.Object({
-  sections: Type.Optional(Type.Array(Type.Object({
-    title: NonEmptyString,
-    fields: NameArray,
-  }, { additionalProperties: false }), { minItems: 1 })),
+  sections: Type.Optional(Type.Array(
+    Type.Object({
+      title: NonEmptyString,
+      fields: NameArray,
+    }, { additionalProperties: false }),
+    { minItems: 1 },
+  )),
   help: Help,
 }, { additionalProperties: false });
 const AxiSearch = Type.Object({
@@ -49,7 +52,11 @@ const AxiSearch = Type.Object({
   examples: Help,
   resultFields: Type.Optional(NameArray),
 }, { additionalProperties: false });
-const ResourceAxi = Type.Object({
+const ExactEmptyAxi = Type.Object({}, {
+  additionalProperties: false,
+  maxProperties: 0,
+});
+const ResourceAxiGuidance = Type.Object({
   purpose: NonEmptyString,
   whenToUse: Help,
   doNotUseFor: Type.Optional(Help),
@@ -62,10 +69,13 @@ const ResourceAxi = Type.Object({
       minItems: 1,
       uniqueItems: true,
     })),
-    byState: Type.Optional(Type.Record(Name, Type.Array(Identity, {
-      minItems: 1,
-      uniqueItems: true,
-    }))),
+    byState: Type.Optional(Type.Record(
+      Name,
+      Type.Array(Identity, {
+        minItems: 1,
+        uniqueItems: true,
+      }),
+    )),
   }, { additionalProperties: false })),
   help: Type.Object({
     list: Help,
@@ -78,14 +88,16 @@ const ResourceAxi = Type.Object({
     not_found: Type.Optional(Help),
   }, { additionalProperties: false }),
 }, { additionalProperties: false });
-const ActionAxi = Type.Object({
+const ResourceAxi = Type.Union([ExactEmptyAxi, ResourceAxiGuidance]);
+const ActionAxiGuidance = Type.Object({
   purpose: NonEmptyString,
   whenToUse: Type.Optional(Help),
   stageFirst: Type.Optional(Type.Boolean()),
   examples: Help,
   successHelp: Help,
 }, { additionalProperties: false });
-const PackAxi = Type.Object({
+const ActionAxi = Type.Union([ExactEmptyAxi, ActionAxiGuidance]);
+const PackAxiGuidance = Type.Object({
   purpose: NonEmptyString,
   home: Type.Object({
     resources: Type.Array(Identity, { minItems: 1, uniqueItems: true }),
@@ -96,11 +108,13 @@ const PackAxi = Type.Object({
     help: Help,
   }, { additionalProperties: false }),
 }, { additionalProperties: false });
-const DefinitionAxi = Type.Object({
-  purpose: Type.Optional(NonEmptyString),
-  whenToUse: Type.Optional(Help),
-  help: Type.Optional(Help),
+const PackAxi = Type.Union([ExactEmptyAxi, PackAxiGuidance]);
+const DefinitionAxiGuidance = Type.Object({
+  purpose: NonEmptyString,
+  whenToUse: Help,
+  help: Help,
 }, { additionalProperties: false });
+const DefinitionAxi = Type.Union([ExactEmptyAxi, DefinitionAxiGuidance]);
 const StringArray = Type.Array(Type.String({ minLength: 1 }), {
   uniqueItems: true,
 });

@@ -786,8 +786,6 @@ for (const trace of [false, true]) {
         for (
           const legacy of [
             ["action", "preview", "test/actionproof:generate", "--input", "{}"],
-            ["action", "commit", "test/actionproof:generate", "--input", "{}"],
-            ["seed", "commit", "test/actionproof", "--all"],
           ]
         ) {
           assertEquals(

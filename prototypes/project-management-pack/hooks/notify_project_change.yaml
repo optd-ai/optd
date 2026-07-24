@@ -21,6 +21,10 @@ spec:
         event: $event
   axi:
     purpose: notify project change guidance for the operant/projects pack.
+    whenToUse:
+      - Inspect hook notify_project_change behavior and guidance before relying on it.
+    help:
+      - optctl metadata hook operant/projects:notify_project_change
   secrets: []
   effects:
     operations: []

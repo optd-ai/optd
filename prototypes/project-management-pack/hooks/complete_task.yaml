@@ -20,6 +20,10 @@ spec:
       input: {}
   axi:
     purpose: complete task guidance for the operant/projects pack.
+    whenToUse:
+      - Inspect hook complete_task behavior and guidance before relying on it.
+    help:
+      - optctl metadata hook operant/projects:complete_task
   secrets: []
   effects:
     operations:

@@ -7,7 +7,13 @@ import { compileMigrationPreview } from "../../src/adapters/outbound/postgres/re
 const root = `kind: Pack
 apiVersion: operant.dev/v1
 metadata: { publisher: operant, name: test, version: 0.2.0 }
-spec: { purpose: Migration test., axi: {} }
+spec:
+  purpose: Migration test.
+  axi:
+    purpose: Validate migration planning.
+    home:
+      resources: [operant/test:lead]
+      help: [optctl metadata pack operant/test]
 `;
 const resource = `kind: Resource
 apiVersion: operant.dev/v1
@@ -15,7 +21,23 @@ metadata: { name: lead }
 spec:
   fields:
     name: { type: string, required: true }
-  axi: {}
+    email: { type: string }
+    status: { type: string }
+  axi:
+    purpose: Validate migration resources.
+    whenToUse: [Use operant/test:lead for migration tests.]
+    identity: { title: "\${name}" }
+    list:
+      defaultFields: [name, email, status]
+      empty:
+        message: No test resources found.
+        help: [optctl query operant/test:lead]
+    detail:
+      help: ['optctl view operant/test:lead \${id}']
+    help:
+      list: [optctl query operant/test:lead]
+      view: ['optctl view operant/test:lead \${id}']
+      created: ['optctl view operant/test:lead \${id}']
 `;
 
 Deno.test("migration plans use frozen durable shape for first install", async () => {

@@ -34,3 +34,7 @@ spec:
       terminal: true
   axi:
     purpose: opportunity stages guidance for the operant/crm pack.
+    whenToUse:
+      - Inspect seed opportunity_stages behavior and guidance before relying on it.
+    help:
+      - optctl metadata seed operant/crm:opportunity_stages

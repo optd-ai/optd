@@ -336,7 +336,7 @@ async function assertMalformedMultipart(
 ) {
   const form = new FormData();
   form.append("file", new File([strictRoot()], filename));
-  const response = await fetch(`${harness.baseUrl}/packs/preview`, {
+  const response = await fetch(`${harness.baseUrl}/api/v1/packs/preview`, {
     method: "POST",
     headers: { authorization: `Bearer ${await harnessToken(harness)}` },
     body: form,
@@ -349,7 +349,7 @@ async function assertMalformedMultipart(
 async function assertUnknownMultipartName(harness: LiveHarness) {
   const form = new FormData();
   form.append("manifest", new File([strictRoot()], "pack.yaml"));
-  const response = await fetch(`${harness.baseUrl}/packs/preview`, {
+  const response = await fetch(`${harness.baseUrl}/api/v1/packs/preview`, {
     method: "POST",
     headers: { authorization: `Bearer ${await harnessToken(harness)}` },
     body: form,

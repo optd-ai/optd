@@ -91,3 +91,7 @@ spec:
       where: owner_id == actor.id
   axi:
     purpose: sales access guidance for the operant/crm pack.
+    whenToUse:
+      - Inspect policy sales_access behavior and guidance before relying on it.
+    help:
+      - optctl metadata policy operant/crm:sales_access

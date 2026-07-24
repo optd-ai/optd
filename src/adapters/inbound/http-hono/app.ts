@@ -51,7 +51,7 @@ export type HttpDependencies = {
   projects: ProjectHttpService;
   authorization: AuthorizationHttpService;
   metadata: {
-    home(): Promise<Result<HomeDto>>;
+    home(options: MetadataOptions): Promise<Result<HomeDto>>;
     packs(options: MetadataOptions): Promise<Result<unknown>>;
     pack(
       publisher: string,
@@ -313,21 +313,12 @@ export function makeHttpApp(
   registerProjectRoutes(app, deps.projects);
   registerAuthorizationRoutes(app, deps.authorization);
 
-  app.get(
-    "/api/v1/metadata/home",
-    async (c) =>
-      Object.keys(c.req.queries()).length
-        ? resultJson(
-          c,
-          err(
-            validationError(
-              "bad_request",
-              "metadata home does not accept query parameters",
-            ),
-          ),
-        )
-        : resultJson(c, await deps.metadata.home()),
-  );
+  app.get("/api/v1/metadata/home", async (c) => {
+    const options = metadataOptions(c);
+    return options.ok
+      ? resultJson(c, await deps.metadata.home(options.value))
+      : resultJson(c, options);
+  });
   app.get("/api/v1/metadata/packs", async (c) => {
     const options = metadataOptions(c);
     return options.ok

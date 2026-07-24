@@ -14,6 +14,10 @@ spec:
       type: boolean
   axi:
     purpose: opportunity contact guidance for the operant/crm pack.
+    whenToUse:
+      - Inspect relationship opportunity_contact behavior and guidance before relying on it.
+    help:
+      - optctl metadata relationship operant/crm:opportunity_contact
   unique:
     - from
     - to

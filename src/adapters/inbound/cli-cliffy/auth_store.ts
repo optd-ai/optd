@@ -1,7 +1,25 @@
-import { FilesystemLocalAuthStore } from "../../outbound/local-auth-store/filesystem.ts";
+import {
+  authDataRoot,
+  FilesystemLocalAuthStore,
+  normalizeOrigin,
+} from "../../outbound/local-auth-store/filesystem.ts";
+import { dirname, join } from "jsr:@std/path";
 import { platformProcessInspector } from "../../outbound/process-inspection/linux.ts";
 import type { LocalCredential } from "../../../application/ports/local_auth.ts";
 import type { ProcessIdentity } from "../../../application/ports/process_inspection.ts";
+
+export type LocalContext = {
+  name: string;
+  origin: string;
+  projectId?: string;
+  projectSlug?: string;
+};
+type ContextFile = {
+  schema_version: 1;
+  record_type: "contexts";
+  active: string | null;
+  contexts: LocalContext[];
+};
 
 export type OriginState = {
   token?: string;
@@ -15,6 +33,140 @@ export type OriginState = {
   resetCapabilities?: Record<string, string>;
   authorizationNonces?: Record<string, string>;
 };
+
+const contextPath = () => join(authDataRoot(), "contexts.json");
+
+async function readContexts(): Promise<ContextFile> {
+  try {
+    const value = JSON.parse(await Deno.readTextFile(contextPath()));
+    if (
+      value?.schema_version !== 1 ||
+      value.record_type !== "contexts" ||
+      (value.active !== null && typeof value.active !== "string") ||
+      !Array.isArray(value.contexts)
+    ) throw new Error("invalid local context store");
+    return value as ContextFile;
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) {
+      return {
+        schema_version: 1,
+        record_type: "contexts",
+        active: null,
+        contexts: [],
+      };
+    }
+    throw error;
+  }
+}
+
+async function writeContexts(value: ContextFile): Promise<void> {
+  const path = contextPath();
+  await Deno.mkdir(dirname(path), { recursive: true, mode: 0o700 });
+  const temporary = `${path}.${crypto.randomUUID()}.tmp`;
+  await Deno.writeTextFile(temporary, JSON.stringify(value), {
+    createNew: true,
+    mode: 0o600,
+  });
+  await Deno.rename(temporary, path);
+  await Deno.chmod(path, 0o600);
+}
+
+function contextName(value: string): string {
+  if (!/^[a-z][a-z0-9_-]{0,62}$/.test(value)) {
+    throw new Error("context name must be lowercase letters, digits, _ or -");
+  }
+  return value;
+}
+
+export async function activeContextOrigin(): Promise<string | undefined> {
+  const value = await readContexts();
+  return value.contexts.find((item) => item.name === value.active)?.origin;
+}
+
+export async function listContexts(): Promise<{
+  active: string | null;
+  contexts: LocalContext[];
+}> {
+  const value = await readContexts();
+  return {
+    active: value.active,
+    contexts: value.contexts.toSorted((a, b) => a.name.localeCompare(b.name)),
+  };
+}
+
+export async function showContext(name?: string): Promise<LocalContext> {
+  const value = await readContexts();
+  const selected = name ?? value.active;
+  const context = value.contexts.find((item) => item.name === selected);
+  if (!context) throw new Error(`unknown context ${selected ?? "(none)"}`);
+  const state = await store().readState(context.origin) as OriginState;
+  return {
+    ...context,
+    ...(state.projectId ? { projectId: state.projectId } : {}),
+    ...(state.projectSlug ? { projectSlug: state.projectSlug } : {}),
+  };
+}
+
+export async function addContext(
+  nameValue: string,
+  originValue: string,
+  activate = false,
+): Promise<LocalContext> {
+  const name = contextName(nameValue);
+  const origin = normalizeOrigin(originValue);
+  const value = await readContexts();
+  if (value.contexts.some((item) => item.name === name)) {
+    throw new Error(`context ${name} already exists`);
+  }
+  const context = { name, origin };
+  value.contexts.push(context);
+  if (activate || value.active === null) value.active = name;
+  await writeContexts(value);
+  return context;
+}
+
+export async function ensureContext(originValue: string): Promise<void> {
+  const origin = normalizeOrigin(originValue);
+  const value = await readContexts();
+  const existing = value.contexts.find((item) => item.origin === origin);
+  if (existing) value.active = existing.name;
+  else {
+    let name = new URL(origin).hostname.replace(/[^a-z0-9_-]/g, "-");
+    if (!/^[a-z]/.test(name)) name = `server-${name}`;
+    let candidate = name;
+    for (
+      let suffix = 2;
+      value.contexts.some((item) => item.name === candidate);
+      suffix++
+    ) {
+      candidate = `${name}-${suffix}`;
+    }
+    value.contexts.push({ name: candidate, origin });
+    value.active = candidate;
+  }
+  await writeContexts(value);
+}
+
+export async function useContext(nameValue: string): Promise<LocalContext> {
+  const name = contextName(nameValue);
+  const value = await readContexts();
+  const context = value.contexts.find((item) => item.name === name);
+  if (!context) throw new Error(`unknown context ${name}`);
+  value.active = name;
+  await writeContexts(value);
+  return context;
+}
+
+export async function removeContext(nameValue: string): Promise<LocalContext> {
+  const name = contextName(nameValue);
+  const value = await readContexts();
+  const index = value.contexts.findIndex((item) => item.name === name);
+  if (index < 0) throw new Error(`unknown context ${name}`);
+  const [removed] = value.contexts.splice(index, 1);
+  if (value.active === name) value.active = value.contexts[0]?.name ?? null;
+  await writeContexts(value);
+  return removed;
+}
 
 function store(): FilesystemLocalAuthStore {
   return FilesystemLocalAuthStore.create(platformProcessInspector());

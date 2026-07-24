@@ -8,11 +8,18 @@ import {
   errorEnvelope,
 } from "../../../schemas/api/contracts.ts";
 import {
+  activeContextOrigin,
+  addContext,
   cleanupLocalAuth,
   doctorLocalAuth,
+  ensureContext,
+  listContexts,
   localAuthStatus,
   readOrigin,
+  removeContext,
   removeLocalAuthorization,
+  showContext,
+  useContext,
   writeOrigin,
 } from "./auth_store.ts";
 import { opaqueToken, tokenDigest } from "../../../domain/auth/token.ts";
@@ -447,15 +454,38 @@ function changesetId(value: string | undefined): string {
 
 function commitPayload(args: string[]): { lock_timeout?: string } {
   if (!args.length) return {};
-  const timeout = option(args, "--timeout");
-  const consumed = (args.length === 2 && args[0] === "--timeout") ||
-    (args.length === 1 && args[0].startsWith("--timeout="));
-  if (!consumed || !timeout || !/^[1-9][0-9]*(ms|s|m)$/.test(timeout)) {
+  const parsed = commitPayloadOptions(args);
+  if (parsed.remaining.length) {
     throw usageError(
       "changeset commit accepts only --timeout <positive-duration>",
     );
   }
-  return { lock_timeout: timeout };
+  return parsed.payload;
+}
+
+function commitPayloadOptions(args: string[]): {
+  payload: { lock_timeout?: string };
+  remaining: string[];
+} {
+  const remaining: string[] = [];
+  let timeout: string | undefined;
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index];
+    if (arg === "--timeout") {
+      if (timeout !== undefined) throw usageError("duplicate option --timeout");
+      timeout = args[++index];
+    } else if (arg.startsWith("--timeout=")) {
+      if (timeout !== undefined) throw usageError("duplicate option --timeout");
+      timeout = arg.slice("--timeout=".length);
+    } else remaining.push(arg);
+  }
+  if (timeout !== undefined && !/^[1-9][0-9]*(ms|s|m)$/.test(timeout)) {
+    throw usageError("--timeout requires a positive duration");
+  }
+  return {
+    payload: timeout === undefined ? {} : { lock_timeout: timeout },
+    remaining,
+  };
 }
 
 function cancelPayload(args: string[]): { reason?: string } {
@@ -552,7 +582,7 @@ async function resolveReadProject(parsed: Parsed): Promise<string> {
     selected.projectId ?? selected.projectSlug;
   if (!selector) {
     throw usageError(
-      "view and history require global --project <uuid-or-slug> or an active local Project selection",
+      "command requires global --project <uuid-or-slug> or an active local Project selection",
     );
   }
   const project = await resolveProject(parsed.server, selector);
@@ -815,20 +845,187 @@ async function runIsolatedCommand(
   }
 }
 
-function helpText(): string {
-  return new Command()
+const CLI_GROUPS: ReadonlyArray<readonly [string, string, readonly string[]]> =
+  [
+    ["status", "Inspect liveness, readiness, and bootstrap state.", [
+      "live",
+      "ready",
+      "bootstrap",
+    ]],
+    ["bootstrap", "Create the first authenticated human.", ["init"]],
+    ["auth", "Manage human and agent authentication.", [
+      "login",
+      "logout",
+      "status",
+      "whoami",
+      "sessions",
+      "roles",
+      "request",
+      "approve",
+      "deny",
+      "wait",
+      "authorizations",
+      "revoke",
+      "isolate",
+      "doctor",
+      "cleanup",
+      "user",
+      "password",
+      "password-policy",
+      "password-reset",
+      "recover",
+    ]],
+    ["context", "Manage local server and Project contexts.", [
+      "list",
+      "show",
+      "add",
+      "use",
+      "set-project",
+      "remove",
+    ]],
+    ["project", "Manage platform Projects.", [
+      "list",
+      "create",
+      "view",
+      "update",
+      "archive",
+      "select",
+    ]],
+    ["metadata", "Inspect active pack metadata and AXI guidance.", [
+      "packs",
+      "pack",
+      "resource",
+      "relationship",
+      "lifecycle",
+      "action",
+      "hook",
+      "role",
+      "policy",
+      "seed",
+    ]],
+    ["pack", "Preview, apply, and inspect packs.", [
+      "preview",
+      "apply",
+      "inspect",
+    ]],
+    ["migration", "Inspect, validate, and apply migration plans.", [
+      "inspect",
+      "validate",
+      "apply",
+    ]],
+    ["changeset", "Stage and manage immutable changesets.", [
+      "stage",
+      "inspect",
+      "commit",
+      "cancel",
+      "approvals",
+      "approve",
+      "reject",
+    ]],
+    ["action", "Stage or directly commit semantic actions.", [
+      "stage",
+      "commit",
+    ]],
+    ["seed", "Stage or directly commit seed reconciliation.", [
+      "stage",
+      "commit",
+    ]],
+    ["assignment", "Manage role assignments.", ["role"]],
+    ["policy", "Manage policy assignments.", ["assignment"]],
+    ["secret", "Manage encrypted secrets and Hook grants.", [
+      "list",
+      "create",
+      "rotate",
+      "disable",
+      "grants",
+      "grant",
+      "replace-grant",
+      "revoke-grant",
+    ]],
+    ["outbox", "Inspect and administer durable deliveries.", [
+      "list",
+      "inspect",
+      "attempts",
+      "retry",
+      "cancel",
+      "drain",
+    ]],
+    ["expression", "Inspect and validate expression syntax.", [
+      "help",
+      "validate",
+    ]],
+  ];
+
+function cliCommand() {
+  const root = new Command()
     .name("optctl")
-    .description("Operant control CLI")
-    .getHelp();
+    .description("Content-first Operant control client.")
+    .option("--server <origin:string>", "Operant server origin.")
+    .option(
+      "--project <project:string>",
+      "Explicit Project UUID or local selector.",
+    )
+    .option("--json", "Emit the canonical server JSON envelope.")
+    .option("--verbose", "Include request context without credentials.");
+  for (const [name, description, subcommands] of CLI_GROUPS) {
+    const group = new Command().name(name).description(description);
+    for (const subcommand of subcommands) {
+      group.command(
+        subcommand,
+        new Command().description(`${subcommand} ${name} operation.`),
+      );
+    }
+    root.command(name, group);
+  }
+  for (
+    const [name, description] of [
+      ["home", "Show live active-pack and Project guidance."],
+      ["resources", "List active resources and their AXI purposes."],
+      ["list", "List resource objects using metadata defaults."],
+      ["search", "Search resource objects using metadata guidance."],
+      ["create", "Stage or commit a resource create operation."],
+      ["update", "Stage or commit a resource update operation."],
+      ["transition", "Stage or commit a resource transition operation."],
+      ["query", "Query committed resource or relationship facts."],
+      ["view", "Read one committed object or relationship."],
+      ["history", "Read immutable object or relationship history."],
+    ] as const
+  ) root.command(name, new Command().description(description));
+  return root;
+}
+
+function helpText(args: string[]): string {
+  const words = args.filter((arg) => arg !== "--help" && arg !== "-h");
+  const group = CLI_GROUPS.find(([name]) => name === words[0]);
+  if (!group) return cliCommand().getHelp();
+  const [name, description, subcommands] = group;
+  return [
+    `Usage: optctl ${name} <command>`,
+    "",
+    description,
+    "",
+    "Commands:",
+    ...subcommands.map((subcommand) => `  ${subcommand}`),
+    "",
+  ].join("\n");
 }
 
 export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
   try {
     if (args.includes("--help") || args.includes("-h")) {
-      return { stdout: helpText(), stderr: "", code: 0 };
+      return { stdout: helpText(args), stderr: "", code: 0 };
     }
     const parsed = parse(args);
-    const [cmd, sub, value] = parsed.positional;
+    if (
+      !args.some((arg) => arg === "--server" || arg.startsWith("--server="))
+    ) {
+      parsed.server = (await activeContextOrigin()) ?? parsed.server;
+    }
+    let [cmd, sub, value] = parsed.positional;
+    if (!cmd) {
+      cmd = "home";
+      parsed.positional = ["home"];
+    }
     let result: unknown;
     if (cmd === "status" && sub === "live") {
       result = await getJson(`${parsed.server}/live`);
@@ -869,6 +1066,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
         ...issuedCredentialUpdate(credentials),
         username,
       });
+      await ensureContext(parsed.server);
       result = authenticatedOutput(envelopeData(result).user);
     } else if (cmd === "auth" && sub === "login") {
       const authArgs = parsed.positional.slice(2);
@@ -1386,6 +1584,40 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
         url.searchParams.set("include_security", "true");
       }
       result = await getJson(url.toString());
+    } else if (cmd === "context" && sub === "list") {
+      if (parsed.positional.length !== 2) {
+        throw usageError("context list accepts no arguments");
+      }
+      result = { ok: true, data: await listContexts() };
+    } else if (cmd === "context" && sub === "show") {
+      if (parsed.positional.length > 3) {
+        throw usageError("context show accepts at most one context name");
+      }
+      result = { ok: true, data: await showContext(value) };
+    } else if (cmd === "context" && sub === "add" && value) {
+      const contextArgs = parsed.positional.slice(3);
+      const origin = option(contextArgs, "--server");
+      const project = option(contextArgs, "--project");
+      if (!origin) throw usageError("context add requires --server <origin>");
+      const context = await addContext(value, origin);
+      if (project) {
+        const selected = await resolveProject(context.origin, project);
+        await writeOrigin(context.origin, {
+          projectId: String(selected.id),
+          projectSlug: String(selected.slug),
+        });
+      }
+      result = { ok: true, data: await showContext(value) };
+    } else if (cmd === "context" && sub === "use" && value) {
+      if (parsed.positional.length !== 3) {
+        throw usageError("context use accepts exactly one context name");
+      }
+      result = { ok: true, data: await useContext(value) };
+    } else if (cmd === "context" && sub === "remove" && value) {
+      if (parsed.positional.length !== 3) {
+        throw usageError("context remove accepts exactly one context name");
+      }
+      result = { ok: true, data: await removeContext(value) };
     } else if (cmd === "assignment" && sub === "role" && value === "list") {
       const userId = parsed.positional[3];
       if (!userId) throw usageError("assignment role list requires <user-id>");
@@ -1530,7 +1762,12 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
         data: { project_id: project.id, slug: project.slug },
       };
     } else if (cmd === "home") {
-      result = await getJson(`${parsed.server}/api/v1/metadata/home`);
+      result = await getJson(
+        `${parsed.server}/api/v1/metadata/home${await metadataQuery(
+          parsed,
+          [],
+        )}`,
+      );
     } else if (cmd === "pack" && sub === "preview" && value) {
       result = await postMultipart(
         `${parsed.server}/api/v1/packs/preview`,
@@ -1594,22 +1831,36 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
           },
         };
       }
-    } else if (cmd === "action" && sub === "stage" && value) {
-      if (!parsed.project) throw usageError("action stage requires --project");
-      const project = await resolveProject(parsed.server, parsed.project);
+    } else if (
+      cmd === "action" && (sub === "stage" || sub === "commit") && value
+    ) {
+      const project = { id: await resolveReadProject(parsed) };
       const [publisher, pack, name] = splitDefinitionIdentity(value);
-      result = await postJson(
+      const actionArgs = parsed.positional.slice(3);
+      const commit = sub === "commit" ? commitPayloadOptions(actionArgs) : null;
+      const staged = await postJson(
         `${parsed.server}/api/v1/actions/${publisher}/${pack}/${name}/stage`,
         {
           project_id: project.id,
-          input: await resolveActionInput(parsed.positional.slice(3)),
+          input: await resolveActionInput(commit?.remaining ?? actionArgs),
         },
       );
-    } else if (cmd === "seed" && sub === "stage" && value) {
-      if (!parsed.project) throw usageError("seed stage requires --project");
-      const project = await resolveProject(parsed.server, parsed.project);
+      if (sub === "stage") result = staged;
+      else {
+        const stage = envelopeData(staged);
+        result = stage.stage === null ? staged : await postJson(
+          `${parsed.server}/api/v1/changesets/${String(stage.id)}/commit`,
+          commit?.payload ?? {},
+        );
+      }
+    } else if (
+      cmd === "seed" && (sub === "stage" || sub === "commit") && value
+    ) {
+      const project = { id: await resolveReadProject(parsed) };
       const [publisher, pack] = splitPackIdentity(value);
-      const args = parsed.positional.slice(3);
+      const seedArgs = parsed.positional.slice(3);
+      const commit = sub === "commit" ? commitPayloadOptions(seedArgs) : null;
+      const args = commit?.remaining ?? seedArgs;
       const all = args.includes("--all");
       const names = options(args, "--seed");
       for (let index = 0; index < args.length; index++) {
@@ -1619,9 +1870,9 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
           index++;
           continue;
         }
-        throw usageError(`unknown seed stage option ${arg}`);
+        throw usageError(`unknown seed ${sub} option ${arg}`);
       }
-      result = await postJson(
+      const staged = await postJson(
         `${parsed.server}/api/v1/packs/${publisher}/${pack}/seeds/stage`,
         {
           project_id: project.id,
@@ -1629,6 +1880,16 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
           ...(names.length ? { seed_names: names } : {}),
         },
       );
+      if (sub === "stage") result = staged;
+      else {
+        const stage = envelopeData(staged).stage as
+          | Record<string, unknown>
+          | null;
+        result = stage === null ? staged : await postJson(
+          `${parsed.server}/api/v1/changesets/${String(stage.id)}/commit`,
+          commit?.payload ?? {},
+        );
+      }
     } else if (cmd === "secret" && sub === "list") {
       result = await getJson(`${parsed.server}/api/v1/secrets`);
     } else if (cmd === "secret" && sub === "create" && value) {
@@ -1789,11 +2050,14 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
           "migration apply requires exactly one of --safe, --reviewed, or --confirm-token <token>",
         );
       }
-      result = await postJson(`${parsed.server}/api/v1/migrations/${value}/apply`, {
-        acknowledgement,
-        confirmation_token: confirmationToken ?? null,
-        ...lockTimeout ? { lock_timeout: lockTimeout } : {},
-      });
+      result = await postJson(
+        `${parsed.server}/api/v1/migrations/${value}/apply`,
+        {
+          acknowledgement,
+          confirmation_token: confirmationToken ?? null,
+          ...lockTimeout ? { lock_timeout: lockTimeout } : {},
+        },
+      );
     } else if (cmd === "migration" && sub === "inspect" && value) {
       const projection = parsed.positional.includes("--sql")
         ? "sql"
@@ -1917,7 +2181,10 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       );
     } else if (cmd === "metadata" && !sub) {
       result = await getJson(
-        `${parsed.server}/api/v1/metadata/packs${await metadataQuery(parsed, [])}`,
+        `${parsed.server}/api/v1/metadata/packs${await metadataQuery(
+          parsed,
+          [],
+        )}`,
       );
     } else if (cmd === "metadata" && sub === "packs") {
       result = await getJson(
@@ -1955,7 +2222,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       );
     } else {
       throw usageError(
-        "usage: optctl status live/ready/bootstrap | bootstrap init | home | project list/create/view/update/archive/select | context set-project | pack preview <dir> | pack apply <dir> [--safe|--reviewed] [--timeout duration] | metadata [packs] | metadata pack <publisher/pack> | metadata resource/relationship/lifecycle/action/hook/role/policy/seed <publisher/pack:name> | secret list/create/rotate/disable/grants/grant/replace-grant/revoke-grant | action preview/commit <namespace.action> --input '{...}' | outbox list/inspect/attempts/retry/cancel/drain | migration inspect <id> [--sql|--violations] | migration validate <id> | migration apply <id> (--safe|--reviewed|--confirm-token <token>) [--timeout duration] | query <namespace.resource> [--where expr] [--fields a,b] [--sort field:desc] [--limit n] [--cursor c] | changeset stage <json-file> | changeset commit <stage-id> [--timeout duration] | changeset inspect <stage-id> | changeset cancel <stage-id> [--reason text] | --project <selector> view publisher/pack:name <uuid> | --project <selector> history publisher/pack:name <uuid> [--limit n] [--cursor c] | --project <selector> view relationship publisher/pack:name <uuid> | --project <selector> history relationship publisher/pack:name <uuid> [--limit n] [--cursor c]",
+        "unknown command; run optctl --help or optctl <group> --help",
       );
     }
     const output = parsed.verbose

@@ -35,7 +35,7 @@ export async function requireBearer(
     const multipart = contentType.toLowerCase().startsWith(
       "multipart/form-data",
     );
-    const multipartRoute = c.req.path === "/packs/preview";
+    const multipartRoute = c.req.path === "/api/v1/packs/preview";
     if (multipartRoute !== multipart) {
       return c.json(
         errorEnvelope({

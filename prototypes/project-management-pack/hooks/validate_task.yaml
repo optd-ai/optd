@@ -24,6 +24,10 @@ spec:
       input: {}
   axi:
     purpose: validate task guidance for the operant/projects pack.
+    whenToUse:
+      - Inspect hook validate_task behavior and guidance before relying on it.
+    help:
+      - optctl metadata hook operant/projects:validate_task
   secrets: []
   effects:
     operations: []

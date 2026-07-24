@@ -7,3 +7,7 @@ spec:
   description: project_member responsibility for the projects proof pack.
   axi:
     purpose: project member guidance for the operant/projects pack.
+    whenToUse:
+      - Inspect role project_member behavior and guidance before relying on it.
+    help:
+      - optctl metadata role operant/projects:project_member

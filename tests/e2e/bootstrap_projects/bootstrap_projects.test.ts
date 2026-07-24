@@ -52,7 +52,9 @@ Deno.test({
         JSON.parse(configuredStatus.stdout).data.state,
         "bootstrap_required",
       );
-      const unauthenticated = await fetch(`${harness.baseUrl}/metadata/home`);
+      const unauthenticated = await fetch(
+        `${harness.baseUrl}/api/v1/metadata/home`,
+      );
       assertEquals(unauthenticated.status, 401);
       assertEquals(
         (await unauthenticated.json()).error.code,
@@ -245,9 +247,14 @@ Deno.test({
       const home = await harness.runOptctl(["--json", "home"]);
       assertEquals(home.code, 0, home.stderr);
 
-      const requestOnly = await fetch(`${harness.baseUrl}/metadata/home`, {
-        headers: { authorization: `Bearer ${originCredentials.requestToken}` },
-      });
+      const requestOnly = await fetch(
+        `${harness.baseUrl}/api/v1/metadata/home`,
+        {
+          headers: {
+            authorization: `Bearer ${originCredentials.requestToken}`,
+          },
+        },
+      );
       assertEquals(requestOnly.status, 403);
       assertEquals(
         (await requestOnly.json()).error.code,

@@ -32,6 +32,7 @@ function testApp() {
     "/queries",
     async (c) => c.json({ input: await authenticatedJson(c) }),
   );
+  app.post("/api/v1/packs/preview", (c) => c.json({ ok: true }));
   return { app, context };
 }
 
@@ -103,6 +104,42 @@ Deno.test("protected JSON routes reject authority injection independent of conte
       body: "{}",
     })).status,
     422,
+  );
+});
+
+Deno.test("canonical pack preview accepts multipart and rejects wrong media types", async () => {
+  const { app } = testApp();
+  const form = new FormData();
+  form.append("file", new File(["pack"], "pack.yaml"));
+  assertEquals(
+    (await app.request("/api/v1/packs/preview", {
+      method: "POST",
+      headers: { authorization: "Bearer valid" },
+      body: form,
+    })).status,
+    200,
+  );
+  assertEquals(
+    (await app.request("/api/v1/packs/preview", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer valid",
+        "content-type": "application/json",
+      },
+      body: "{}",
+    })).status,
+    415,
+  );
+  assertEquals(
+    (await app.request("/queries", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer valid",
+        "content-type": "multipart/form-data; boundary=x",
+      },
+      body: "--x--",
+    })).status,
+    415,
   );
 });
 

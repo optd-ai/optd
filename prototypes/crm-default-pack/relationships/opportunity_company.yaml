@@ -12,6 +12,10 @@ spec:
       type: string
   axi:
     purpose: opportunity company guidance for the operant/crm pack.
+    whenToUse:
+      - Inspect relationship opportunity_company behavior and guidance before relying on it.
+    help:
+      - optctl metadata relationship operant/crm:opportunity_company
   unique:
     - from
     - to

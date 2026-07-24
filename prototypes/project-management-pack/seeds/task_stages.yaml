@@ -25,3 +25,7 @@ spec:
       folded: true
   axi:
     purpose: task stages guidance for the operant/projects pack.
+    whenToUse:
+      - Inspect seed task_stages behavior and guidance before relying on it.
+    help:
+      - optctl metadata seed operant/projects:task_stages

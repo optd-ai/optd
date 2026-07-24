@@ -7,3 +7,7 @@ spec:
   description: viewer responsibility for the projects proof pack.
   axi:
     purpose: viewer guidance for the operant/projects pack.
+    whenToUse:
+      - Inspect role viewer behavior and guidance before relying on it.
+    help:
+      - optctl metadata role operant/projects:viewer

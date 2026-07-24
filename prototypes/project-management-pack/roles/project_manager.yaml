@@ -7,3 +7,7 @@ spec:
   description: project_manager responsibility for the projects proof pack.
   axi:
     purpose: project manager guidance for the operant/projects pack.
+    whenToUse:
+      - Inspect role project_manager behavior and guidance before relying on it.
+    help:
+      - optctl metadata role operant/projects:project_manager

@@ -7,3 +7,7 @@ spec:
   description: projects_admin responsibility for the projects proof pack.
   axi:
     purpose: projects admin guidance for the operant/projects pack.
+    whenToUse:
+      - Inspect role projects_admin behavior and guidance before relying on it.
+    help:
+      - optctl metadata role operant/projects:projects_admin

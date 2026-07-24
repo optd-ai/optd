@@ -10,6 +10,10 @@ spec:
   fields: {}
   axi:
     purpose: activity contact guidance for the operant/crm pack.
+    whenToUse:
+      - Inspect relationship activity_contact behavior and guidance before relying on it.
+    help:
+      - optctl metadata relationship operant/crm:activity_contact
   unique:
     - from
     - to
