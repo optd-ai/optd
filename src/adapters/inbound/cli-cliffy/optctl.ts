@@ -39,6 +39,14 @@ class OptctlError extends Error {
   }
 }
 
+const REQUEST_DEADLINE_MS = 30_000;
+function boundedFetch(input: string | URL | Request, init: RequestInit = {}) {
+  return fetch(input, {
+    ...init,
+    signal: init.signal ?? AbortSignal.timeout(REQUEST_DEADLINE_MS),
+  });
+}
+
 async function decodeJsonResponse(response: Response): Promise<unknown> {
   const body = await response.json().catch(() => undefined);
   if (!response.ok) {
@@ -59,7 +67,7 @@ async function requestCredentialHeaders(
 }
 async function getJson(url: string): Promise<unknown> {
   return await decodeJsonResponse(
-    await fetch(url, {
+    await boundedFetch(url, {
       headers: await credentialHeaders(url),
       redirect: "error",
     }),
@@ -67,7 +75,7 @@ async function getJson(url: string): Promise<unknown> {
 }
 async function postJson(url: string, payload: unknown): Promise<unknown> {
   return await decodeJsonResponse(
-    await fetch(url, {
+    await boundedFetch(url, {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -115,7 +123,7 @@ async function postMultipart(url: string, packDir: string): Promise<unknown> {
     );
   }
   return await decodeJsonResponse(
-    await fetch(url, {
+    await boundedFetch(url, {
       method: "POST",
       body: form,
       headers: await credentialHeaders(url),
@@ -170,8 +178,9 @@ function parse(args: string[]): Parsed {
     }
     if (arg === "--json") parsed.json = true;
     else if (arg === "--verbose" || arg === "-v") parsed.verbose = true;
-    else if (arg === "--server") parsed.server = args[++i] ?? parsed.server;
-    else if (arg.startsWith("--server=")) {
+    else if (!commandSeen && arg === "--server") {
+      parsed.server = args[++i] ?? parsed.server;
+    } else if (!commandSeen && arg.startsWith("--server=")) {
       parsed.server = arg.slice("--server=".length);
     } else if (!commandSeen && arg === "--project") {
       parsed.project = args[++i];
@@ -302,6 +311,83 @@ function usageError(message: string): OptctlError {
       },
     }),
     2,
+  );
+}
+
+async function resourceMetadata(
+  server: string,
+  identity: string,
+): Promise<Record<string, unknown>> {
+  const [publisher, pack, name] = splitDefinitionIdentity(identity);
+  return envelopeData(
+    await getJson(
+      `${server}/api/v1/metadata/packs/${publisher}/${pack}/resources/${name}`,
+    ),
+  );
+}
+
+async function stageResourceCommand(
+  parsed: Parsed,
+  command: "create" | "update" | "transition",
+): Promise<unknown> {
+  const identity = parsed.positional[1];
+  if (!identity) throw usageError(`${command} requires publisher/pack:name`);
+  splitDefinitionIdentity(identity);
+  const projectId = await resolveReadProject(parsed);
+  const args = parsed.positional.slice(2);
+  const commit = commitPayloadOptions(args);
+  const remaining = commit.remaining;
+  const stageOnly = remaining.includes("--stage");
+  const filtered = remaining.filter((arg) => arg !== "--stage");
+  const inputAt = filtered.findIndex((arg) => arg === "--input");
+  if (inputAt < 0 || !filtered[inputAt + 1]) {
+    throw usageError(`${command} requires --input <JSON-or-file>`);
+  }
+  const fields = await resolveActionInput(filtered.slice(inputAt, inputAt + 2));
+  const before = filtered.slice(0, inputAt);
+  const after = filtered.slice(inputAt + 2);
+  const operation: Record<string, unknown> = {
+    op: command,
+    project_id: projectId,
+    resource: identity,
+  };
+  if (command === "create") operation.fields = fields;
+  else {
+    const objectId = before[0];
+    if (!objectId || !isUuidV7(objectId)) {
+      throw usageError(`${command} requires a lowercase UUIDv7 object id`);
+    }
+    operation.object_id = objectId;
+    const expected = option(after, "--version") ??
+      option(before.slice(1), "--version");
+    if (!expected || !/^[1-9][0-9]*$/.test(expected)) {
+      throw usageError(`${command} requires --version <positive-integer>`);
+    }
+    operation.expected_version = Number(expected);
+    if (command === "update") operation.set = fields;
+    else {
+      const to = option(after, "--to") ?? option(before.slice(1), "--to");
+      if (!to) throw usageError("transition requires --to <state>");
+      operation.to = to;
+      operation.set = fields;
+    }
+  }
+  const known = new Set(["--version", "--to"]);
+  for (let index = 0; index < after.length; index++) {
+    const arg = after[index];
+    if (known.has(arg)) index++;
+    else if (![...known].some((name) => arg.startsWith(`${name}=`))) {
+      throw usageError(`unknown ${command} option ${arg}`);
+    }
+  }
+  const staged = await postJson(`${parsed.server}/api/v1/changesets/stage`, {
+    operations: [operation],
+  });
+  if (stageOnly) return staged;
+  const stage = envelopeData(staged);
+  return await postJson(
+    `${parsed.server}/api/v1/changesets/${String(stage.id)}/commit`,
+    commit.payload,
   );
 }
 
@@ -646,7 +732,7 @@ async function waitForPasswordReset(
   while (true) {
     try {
       const ticketEnvelope = await decodeJsonResponse(
-        await fetch(
+        await boundedFetch(
           `${server}/api/v1/auth/password-reset/requests/${
             encodeURIComponent(requestId)
           }/watch-ticket`,
@@ -714,7 +800,7 @@ async function waitForAuthorization(
   while (true) {
     try {
       const ticketEnvelope = await decodeJsonResponse(
-        await fetch(
+        await boundedFetch(
           `${server}/api/v1/auth/requests/${
             encodeURIComponent(requestId)
           }/watch-ticket`,
@@ -999,6 +1085,17 @@ function helpText(args: string[]): string {
   const group = CLI_GROUPS.find(([name]) => name === words[0]);
   if (!group) return cliCommand().getHelp();
   const [name, description, subcommands] = group;
+  if (words[1] && subcommands.includes(words[1])) {
+    return [
+      `Usage: optctl ${name} ${words[1]} [options]`,
+      "",
+      `${words[1]} ${name} operation.`,
+      "",
+      "Options:",
+      "  -h, --help  Show this help.",
+      "",
+    ].join("\n");
+  }
   return [
     `Usage: optctl ${name} <command>`,
     "",
@@ -1045,7 +1142,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
         );
       }
       result = await decodeJsonResponse(
-        await fetch(`${parsed.server}/api/v1/auth/bootstrap`, {
+        await boundedFetch(`${parsed.server}/api/v1/auth/bootstrap`, {
           method: "POST",
           headers: {
             "content-type": "application/json",
@@ -1077,7 +1174,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       }
       const password = await readPassword(authArgs, false);
       result = await decodeJsonResponse(
-        await fetch(`${parsed.server}/api/v1/auth/login`, {
+        await boundedFetch(`${parsed.server}/api/v1/auth/login`, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
@@ -1206,7 +1303,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       const userId = parsed.positional[3];
       if (!userId) throw usageError(`auth user ${value} requires a user id`);
       result = await decodeJsonResponse(
-        await fetch(
+        await boundedFetch(
           `${parsed.server}/api/v1/auth/users/${encodeURIComponent(userId)}`,
           {
             method: "PATCH",
@@ -1273,7 +1370,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
           }));
         }
         const redeemed = await decodeJsonResponse(
-          await fetch(
+          await boundedFetch(
             `${parsed.server}/api/v1/auth/requests/${
               encodeURIComponent(value)
             }/redeem`,
@@ -1322,7 +1419,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
           );
         }
         const redeemed = await decodeJsonResponse(
-          await fetch(
+          await boundedFetch(
             `${parsed.server}/api/v1/auth/password-reset/requests/${
               encodeURIComponent(value)
             }/redeem`,
@@ -1336,7 +1433,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
         const capability = String(envelopeData(redeemed).capability);
         const password = await readPassword(waitArgs);
         result = await decodeJsonResponse(
-          await fetch(
+          await boundedFetch(
             `${parsed.server}/api/v1/auth/password-reset/requests/${
               encodeURIComponent(value)
             }/complete`,
@@ -1370,7 +1467,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       url.searchParams.set("boundary_type", boundaryType);
       if (projectId) url.searchParams.set("project_id", projectId);
       result = await decodeJsonResponse(
-        await fetch(url, {
+        await boundedFetch(url, {
           headers: await requestCredentialHeaders(parsed.server),
         }),
       );
@@ -1387,7 +1484,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       }
       const nonce = opaqueToken();
       result = await decodeJsonResponse(
-        await fetch(`${parsed.server}/api/v1/auth/requests`, {
+        await boundedFetch(`${parsed.server}/api/v1/auth/requests`, {
           method: "POST",
           headers: {
             "content-type": "application/json",
@@ -1451,17 +1548,20 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
         const nonce = opaqueToken();
         const idempotencyKey = opaqueToken();
         result = await decodeJsonResponse(
-          await fetch(`${parsed.server}/api/v1/auth/password-reset/requests`, {
-            method: "POST",
-            headers: {
-              "content-type": "application/json",
-              "idempotency-key": idempotencyKey,
+          await boundedFetch(
+            `${parsed.server}/api/v1/auth/password-reset/requests`,
+            {
+              method: "POST",
+              headers: {
+                "content-type": "application/json",
+                "idempotency-key": idempotencyKey,
+              },
+              body: JSON.stringify({
+                username,
+                redemption_nonce_hash: await tokenDigest(nonce),
+              }),
             },
-            body: JSON.stringify({
-              username,
-              redemption_nonce_hash: await tokenDigest(nonce),
-            }),
-          }),
+          ),
         );
         const id = String(envelopeData(result).request_id);
         const prior = await readOrigin(parsed.server);
@@ -1491,7 +1591,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
         }
         if (action === "cancel") {
           result = await decodeJsonResponse(
-            await fetch(
+            await boundedFetch(
               `${parsed.server}/api/v1/auth/password-reset/requests/${
                 encodeURIComponent(requestId)
               }/cancel`,
@@ -1504,7 +1604,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
           );
         } else {
           const redeemed = await decodeJsonResponse(
-            await fetch(
+            await boundedFetch(
               `${parsed.server}/api/v1/auth/password-reset/requests/${
                 encodeURIComponent(requestId)
               }/redeem`,
@@ -1518,7 +1618,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
           const capability = String(envelopeData(redeemed).capability);
           const password = await readPassword(resetArgs);
           result = await decodeJsonResponse(
-            await fetch(
+            await boundedFetch(
               `${parsed.server}/api/v1/auth/password-reset/requests/${
                 encodeURIComponent(requestId)
               }/complete`,
@@ -1554,7 +1654,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       }
       const password = await readPassword(recoveryArgs);
       result = await decodeJsonResponse(
-        await fetch(`${parsed.server}/api/v1/auth/recovery/complete`, {
+        await boundedFetch(`${parsed.server}/api/v1/auth/recovery/complete`, {
           method: "POST",
           headers: {
             "content-type": "application/json",
@@ -1761,13 +1861,54 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
         ok: true,
         data: { project_id: project.id, slug: project.slug },
       };
-    } else if (cmd === "home") {
+    } else if (cmd === "home" || cmd === "resources") {
       result = await getJson(
         `${parsed.server}/api/v1/metadata/home${await metadataQuery(
           parsed,
           [],
         )}`,
       );
+    } else if ((cmd === "list" || cmd === "search") && sub) {
+      const projectId = await resolveReadProject(parsed);
+      const args = parsed.positional.slice(2);
+      const metadata = await resourceMetadata(parsed.server, sub);
+      const axi = metadata.axi as Record<string, unknown> | undefined;
+      const list = axi?.list as Record<string, unknown> | undefined;
+      const queryArgs = [...args];
+      if (
+        !args.some((arg) => arg === "--fields" || arg.startsWith("--fields="))
+      ) {
+        const defaultFields = list?.defaultFields;
+        if (Array.isArray(defaultFields) && defaultFields.length) {
+          queryArgs.push("--fields", defaultFields.join(","));
+        }
+      }
+      if (cmd === "search") {
+        const text = option(queryArgs, "--text");
+        const textIndex = queryArgs.findIndex((arg) =>
+          arg === "--text" || arg.startsWith("--text=")
+        );
+        if (!text || textIndex < 0) {
+          throw usageError("search requires --text <value>");
+        }
+        queryArgs.splice(textIndex, queryArgs[textIndex] === "--text" ? 2 : 1);
+        const search = axi?.search as Record<string, unknown> | undefined;
+        const fields = search?.fields;
+        if (!Array.isArray(fields) || !fields.length) {
+          throw usageError(`${sub} does not declare AXI search fields`);
+        }
+        const literal = JSON.stringify(text);
+        queryArgs.push(
+          "--where",
+          fields.map((field) => `${String(field)} == ${literal}`).join(" || "),
+        );
+      }
+      result = await postJson(
+        `${parsed.server}/api/v1/queries`,
+        parseQueryPayload(projectId, "resource", sub, queryArgs),
+      );
+    } else if (cmd === "create" || cmd === "update" || cmd === "transition") {
+      result = await stageResourceCommand(parsed, cmd);
     } else if (cmd === "pack" && sub === "preview" && value) {
       result = await postMultipart(
         `${parsed.server}/api/v1/packs/preview`,
