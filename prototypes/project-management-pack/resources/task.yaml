@@ -27,6 +27,7 @@ spec:
         - done
     assignee_id:
       type: string
+      format: uuid
     priority:
       type: string
       enum:
@@ -40,8 +41,16 @@ spec:
       type: string
     estimated_hours:
       type: decimal
+      minimum: "0.00"
+      maximum: "999999.99"
+      precision: 8
+      scale: 2
     spent_hours:
       type: decimal
+      minimum: "0.00"
+      maximum: "999999.99"
+      precision: 8
+      scale: 2
   axi:
     purpose: task guidance for the operant/projects pack.
     whenToUse:

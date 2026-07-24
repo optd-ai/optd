@@ -1,0 +1,33 @@
+kind: Hook
+apiVersion: operant.dev/v1
+metadata:
+  name: approve_opportunity
+spec:
+  script: approve_opportunity.ts
+  timeout: 2s
+  permissions:
+    net: false
+    read: false
+    write: false
+    env: false
+    run: false
+  secrets: []
+  effects:
+    operations: []
+  output:
+    schema: validation.v1
+  attachments:
+    - phase: changeset.validate
+      resource: operant/crm:opportunity
+      order: 200
+      input:
+        operation: $operation
+        project_id: $project_id
+        current: $current
+        proposed: $proposed
+  axi:
+    purpose: Requires sales manager approval before an opportunity is marked won.
+    whenToUse:
+      - Inspect this hook when reviewing opportunity approval requirements.
+    help:
+      - optctl metadata hook operant/crm:approve_opportunity

@@ -15,7 +15,8 @@ spec:
     schema: changeset.operations.v1
   attachments:
     - phase: action.stage
-      input: {}
+      input:
+        action_input: $action.input
       action: operant/crm:log_activity
   axi:
     purpose: log activity guidance for the operant/crm pack.

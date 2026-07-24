@@ -17,11 +17,19 @@ spec:
     - phase: changeset.validate
       resource: operant/projects:task
       order: 100
-      input: {}
+      input:
+        operation: $operation
+        project_id: $project_id
+        current: $current
+        proposed: $proposed
     - phase: changeset.validate
       resource: operant/projects:timesheet_entry
       order: 100
-      input: {}
+      input:
+        operation: $operation
+        project_id: $project_id
+        current: $current
+        proposed: $proposed
   axi:
     purpose: validate task guidance for the operant/projects pack.
     whenToUse:

@@ -13,8 +13,35 @@ spec:
       required: true
       format: uuid
     spent_hours:
+      type: decimal
+      required: true
+      minimum: "0.01"
+      maximum: "24.00"
+      precision: 4
+      scale: 2
+    principal_id:
       type: string
       required: true
+      format: uuid
+    entry_date:
+      type: date
+      required: true
+  reads:
+    task:
+      resource: operant/projects:task
+      id_from: $action.input.task_id
+      fields:
+        - id
+        - version
+        - state
+        - work_project_id
+        - assignee_id
+      required: true
+  availability:
+    resource: operant/projects:task
+    states:
+      - in_progress
+      - blocked
   axi:
     purpose: complete task guidance for the operant/projects pack.
     whenToUse:

@@ -5,6 +5,21 @@ metadata:
 spec:
   default_assignment: all_projects
   rules:
+    - name: direct_opportunity_viewer
+      effect: allow
+      roles:
+        - operant/crm:sales_rep
+      actions:
+        - read
+      resources:
+        - operant/crm:opportunity
+      relation:
+        relationship: operant/crm:opportunity_viewer
+        object_side: from
+        subject_side: to
+        subject: actor.id
+      axi:
+        summary: A sales representative may read an opportunity linked directly to their principal.
     - name: crm_admin_access_1
       effect: allow
       roles:
@@ -31,6 +46,8 @@ spec:
         - operant/crm:opportunity
         - operant/crm:opportunity_stage
         - operant/crm:activity_type
+      axi:
+        summary: CRM administrators may manage every CRM resource.
     - name: sales_manager_access_2
       effect: allow
       roles:
@@ -60,6 +77,8 @@ spec:
         - operant/crm:opportunity_stage
         - operant/crm:activity_type
       where: "true"
+      axi:
+        summary: Sales managers may manage CRM resources and invoke CRM actions.
     - name: sales_rep_access_3
       effect: allow
       roles:
@@ -89,6 +108,8 @@ spec:
         - operant/crm:opportunity_stage
         - operant/crm:activity_type
       where: owner_id == actor.id
+      axi:
+        summary: Sales representatives may manage CRM records owned by their principal.
   axi:
     purpose: sales access guidance for the operant/crm pack.
     whenToUse:

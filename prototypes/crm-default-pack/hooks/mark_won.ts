@@ -1,7 +1,7 @@
 const envelope = JSON.parse(await new Response(Deno.stdin.readable).text());
-const input = envelope.input ?? {};
-const opportunityId = input.opportunity_id ?? input.id;
-const expected_version = input.expected_version ?? input.version;
+const input = envelope.input.action_input;
+const opportunityId = input.opportunity_id;
+const expected_version = input.expected_version;
 if (!opportunityId) {
   console.log(
     JSON.stringify({

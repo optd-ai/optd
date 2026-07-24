@@ -1,0 +1,18 @@
+kind: Relationship
+apiVersion: operant.dev/v1
+metadata:
+  name: opportunity_viewer
+spec:
+  from:
+    resource: operant/crm:opportunity
+  to:
+    resource: system:principal
+  unique:
+    - from
+    - to
+  axi:
+    purpose: Grants one principal direct read access to one opportunity.
+    whenToUse:
+      - Link an opportunity to a principal when direct viewer access is required.
+    help:
+      - optctl metadata relationship operant/crm:opportunity_viewer

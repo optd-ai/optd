@@ -17,7 +17,9 @@ spec:
     - phase: action.stage
       action: operant/projects:block_task
       order: 100
-      input: {}
+      input:
+        action_input: $action.input
+        task: $reads.task
   axi:
     purpose: block task guidance for the operant/projects pack.
     whenToUse:
@@ -29,4 +31,4 @@ spec:
     operations:
       - resource: operant/projects:task
         ops:
-          - update
+          - transition

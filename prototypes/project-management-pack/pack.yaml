@@ -11,6 +11,7 @@ spec:
     home:
       resources:
         - operant/projects:project
+        - operant/projects:project_member
         - operant/projects:project_milestone
         - operant/projects:task
         - operant/projects:task_stage
@@ -22,5 +23,5 @@ spec:
         - operant/projects:start_task
       help:
         - optctl resources
-        - optctl --project ${project} query operant/projects:project
+        - optctl --project ${project} list operant/projects:project
         - optctl metadata pack operant/projects

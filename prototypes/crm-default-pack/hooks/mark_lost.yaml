@@ -15,7 +15,8 @@ spec:
     schema: changeset.operations.v1
   attachments:
     - phase: action.stage
-      input: {}
+      input:
+        action_input: $action.input
       action: operant/crm:mark_lost
   axi:
     purpose: mark lost guidance for the operant/crm pack.

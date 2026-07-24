@@ -11,6 +11,10 @@ spec:
       type: string
       required: true
       format: uuid
+    principal_id:
+      type: string
+      required: true
+      format: uuid
     type:
       type: string
       required: true

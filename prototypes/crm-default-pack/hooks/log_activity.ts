@@ -1,5 +1,5 @@
 const envelope = JSON.parse(await new Response(Deno.stdin.readable).text());
-const input = envelope.input ?? {};
+const input = envelope.input.action_input;
 const resource = input.resource;
 const objectId = input.object_id;
 if (!resource || !objectId || !input.subject || !input.type) {
@@ -38,7 +38,7 @@ if (input.note) {
     fields: {
       body: input.note,
       [`${resource}_id`]: objectId,
-      author_id: input.actor_id,
+      author_id: input.principal_id,
     },
   });
 }

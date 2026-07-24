@@ -8,6 +8,10 @@ spec:
       type: string
       required: true
       format: uuid
+    expected_version:
+      type: integer
+      required: true
+      minimum: 1
   axi:
     purpose: mark won guidance for the operant/crm pack.
     whenToUse:

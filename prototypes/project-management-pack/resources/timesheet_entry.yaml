@@ -8,12 +8,16 @@ spec:
       type: string
       required: true
       ref: operant/projects:task
-    actor_id:
+    principal_id:
       type: string
       required: true
     hours:
       type: decimal
       required: true
+      minimum: "0.01"
+      maximum: "24.00"
+      precision: 4
+      scale: 2
     description:
       type: string
     entry_date:
@@ -31,7 +35,7 @@ spec:
       defaultFields:
         - id
         - task_id
-        - actor_id
+        - principal_id
         - hours
         - description
       empty:
@@ -44,7 +48,7 @@ spec:
         - title: timesheet entry
           fields:
             - task_id
-            - actor_id
+            - principal_id
             - hours
             - description
             - entry_date

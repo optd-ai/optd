@@ -12,6 +12,22 @@ spec:
       type: string
       required: true
       format: uuid
+  reads:
+    task:
+      resource: operant/projects:task
+      id_from: $action.input.task_id
+      fields:
+        - id
+        - version
+        - state
+        - work_project_id
+        - assignee_id
+      required: true
+  availability:
+    resource: operant/projects:task
+    states:
+      - todo
+      - blocked
   axi:
     purpose: start task guidance for the operant/projects pack.
     whenToUse:

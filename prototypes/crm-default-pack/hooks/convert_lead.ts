@@ -1,6 +1,5 @@
 const envelope = JSON.parse(await new Response(Deno.stdin.readable).text());
-const lead = envelope.input?.lead ?? envelope.input?.current ??
-  envelope.input ?? {};
+const lead = envelope.input.lead;
 if (!lead.id) {
   console.log(
     JSON.stringify({

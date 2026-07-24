@@ -1,6 +1,6 @@
 const envelope = JSON.parse(await new Response(Deno.stdin.readable).text());
-const input = envelope.input ?? {};
-const opportunityId = input.opportunity_id ?? input.id;
+const input = envelope.input.action_input;
+const opportunityId = input.opportunity_id;
 if (!opportunityId || !input.lost_reason_id) {
   console.log(
     JSON.stringify({
@@ -19,7 +19,7 @@ if (!opportunityId || !input.lost_reason_id) {
       resource: "opportunity",
       object_id: opportunityId,
       to: "lost",
-      expected_version: input.expected_version ?? input.version,
+      expected_version: input.expected_version,
       set: { probability: 0, lost_reason_id: input.lost_reason_id },
     },
   ];
@@ -30,7 +30,7 @@ if (!opportunityId || !input.lost_reason_id) {
       fields: {
         body: input.note,
         opportunity_id: opportunityId,
-        author_id: input.actor_id,
+        author_id: input.principal_id,
       },
     });
   }

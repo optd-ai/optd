@@ -412,6 +412,7 @@ export function buildHookEnvelope(
     ) ?? null;
   const context: Record<string, unknown> = {
     "$operation": operation,
+    "$project_id": operation?.project_id ?? null,
     "$current": declaration.operation_key === null
       ? null
       : input.base_states[declaration.operation_key],

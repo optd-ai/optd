@@ -15,6 +15,22 @@ spec:
     blocked_reason:
       type: string
       required: true
+  reads:
+    task:
+      resource: operant/projects:task
+      id_from: $action.input.task_id
+      fields:
+        - id
+        - version
+        - state
+        - work_project_id
+        - assignee_id
+      required: true
+  availability:
+    resource: operant/projects:task
+    states:
+      - todo
+      - in_progress
   axi:
     purpose: block task guidance for the operant/projects pack.
     whenToUse:
