@@ -28,9 +28,19 @@ spec:
         - operant/projects:task
         - operant/projects:task_stage
         - operant/projects:task_tag
-        - operant/projects:timesheet_entry
+        - operant/projects:timesheet
       axi:
         summary: Projects administrators may manage every Projects pack resource.
+    - name: project_manager_approval
+      effect: allow
+      roles:
+        - operant/projects:project_manager
+      actions:
+        - changeset.approval.decide
+      resources:
+        - system:changeset-approval
+      axi:
+        summary: Project managers may decide task-completion approvals.
     - name: project_manager
       effect: allow
       roles:
@@ -52,7 +62,7 @@ spec:
         - operant/projects:task
         - operant/projects:task_stage
         - operant/projects:task_tag
-        - operant/projects:timesheet_entry
+        - operant/projects:timesheet
       axi:
         summary: Project managers may manage resources within their assigned Project boundary.
     - name: project_member_read
@@ -95,7 +105,7 @@ spec:
         - create
         - update
       resources:
-        - operant/projects:timesheet_entry
+        - operant/projects:timesheet
       where: principal_id == actor.id
       axi:
         summary: Project members may manage only timesheets owned by their principal.
@@ -112,7 +122,7 @@ spec:
         - operant/projects:task
         - operant/projects:task_stage
         - operant/projects:task_tag
-        - operant/projects:timesheet_entry
+        - operant/projects:timesheet
       axi:
         summary: Viewers have read-only access within their assigned Project boundary.
   axi:

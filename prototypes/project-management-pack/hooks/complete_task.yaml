@@ -19,6 +19,7 @@ spec:
       order: 100
       input:
         action_input: $action.input
+        actor: $actor
         task: $reads.task
   axi:
     purpose: complete task guidance for the operant/projects pack.
@@ -32,6 +33,6 @@ spec:
       - resource: operant/projects:task
         ops:
           - transition
-      - resource: operant/projects:timesheet_entry
+      - resource: operant/projects:timesheet
         ops:
           - create

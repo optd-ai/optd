@@ -10,14 +10,8 @@ spec:
       ref: operant/projects:project
     principal_id:
       type: string
+      format: uuid
       required: true
-    member_role:
-      type: string
-      required: true
-      enum:
-        - manager
-        - member
-        - viewer
   constraints:
     - name: project_principal_membership
       kind: unique
@@ -30,21 +24,20 @@ spec:
         - principal_id
         - work_project_id
   axi:
-    purpose: Records a principal's explicit membership and role in a work project.
+    purpose: Records a principal's direct membership in a work project.
     whenToUse:
-      - Use project members to grant manager, member, or viewer access to a work project.
+      - Use project members to record direct principal membership; use role assignments for authority.
     identity:
       title: ${principal_id}
-      subtitle: ${member_role}
+      subtitle: ${work_project_id}
       labelFields:
         - principal_id
-        - member_role
+        - work_project_id
     list:
       defaultFields:
         - id
         - work_project_id
         - principal_id
-        - member_role
       empty:
         message: No project members found.
         help:
@@ -55,20 +48,17 @@ spec:
           fields:
             - work_project_id
             - principal_id
-            - member_role
       help:
         - optctl --project ${project} view operant/projects:project_member ${id}
     search:
       fields:
         - principal_id
-        - member_role
       examples:
-        - optctl --project ${project} search operant/projects:project_member --text manager
+        - optctl --project ${project} search operant/projects:project_member --text ${principal_id}
       resultFields:
         - id
         - work_project_id
         - principal_id
-        - member_role
     help:
       list:
         - optctl --project ${project} list operant/projects:project_member

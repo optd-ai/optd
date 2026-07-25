@@ -5,7 +5,7 @@ const after = envelope.input?.proposed ?? operation.fields ?? {};
 const resource = operation.resource ?? "";
 const errors = [];
 const warnings: unknown[] = [];
-if (resource.endsWith(".task") || resource === "task") {
+if (resource === "operant/projects:task") {
   if (!after.title || String(after.title).trim() === "") {
     errors.push({
       path: "/title",
@@ -52,7 +52,7 @@ if (resource.endsWith(".task") || resource === "task") {
     }
   }
 }
-if (resource.endsWith(".timesheet_entry") || resource === "timesheet_entry") {
+if (resource === "operant/projects:timesheet") {
   const hours = Number(after.hours);
   if (!Number.isFinite(hours) || hours <= 0 || hours > 24) {
     errors.push({
@@ -62,7 +62,7 @@ if (resource.endsWith(".timesheet_entry") || resource === "timesheet_entry") {
     });
   }
 }
-const requiredApprovals = resource.endsWith(".task") || resource === "task"
+const requiredApprovals = resource === "operant/projects:task"
   ? after.state === "done" && before?.state !== "done"
     ? [{
       key: "task_completion",

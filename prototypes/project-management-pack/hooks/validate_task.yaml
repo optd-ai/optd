@@ -23,7 +23,7 @@ spec:
         current: $current
         proposed: $proposed
     - phase: changeset.validate
-      resource: operant/projects:timesheet_entry
+      resource: operant/projects:timesheet
       order: 100
       input:
         operation: $operation

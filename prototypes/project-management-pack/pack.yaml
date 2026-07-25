@@ -16,7 +16,7 @@ spec:
         - operant/projects:task
         - operant/projects:task_stage
         - operant/projects:task_tag
-        - operant/projects:timesheet_entry
+        - operant/projects:timesheet
       actions:
         - operant/projects:block_task
         - operant/projects:complete_task

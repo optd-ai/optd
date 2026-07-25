@@ -17,7 +17,7 @@ spec:
       required: true
   reads:
     task:
-      resource: operant/projects:task
+      resource: task
       id_from: $action.input.task_id
       fields:
         - id

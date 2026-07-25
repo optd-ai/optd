@@ -1,7 +1,7 @@
 kind: Resource
 apiVersion: operant.dev/v1
 metadata:
-  name: timesheet_entry
+  name: timesheet
 spec:
   fields:
     task_id:
@@ -10,6 +10,7 @@ spec:
       ref: operant/projects:task
     principal_id:
       type: string
+      format: uuid
       required: true
     hours:
       type: decimal
@@ -24,9 +25,9 @@ spec:
       type: date
       required: true
   axi:
-    purpose: timesheet entry guidance for the operant/projects pack.
+    purpose: Time logged by a principal against a task.
     whenToUse:
-      - Use operant/projects:timesheet_entry when working with timesheet entry records.
+      - Use operant/projects:timesheet to record principal-owned task time.
     identity:
       title: ${task_id}
       labelFields:
@@ -39,13 +40,13 @@ spec:
         - hours
         - description
       empty:
-        message: No timesheet entry records found.
+        message: No timesheet records found.
         help:
-          - optctl --project ${project} create operant/projects:timesheet_entry --input object.json
+          - optctl --project ${project} create operant/projects:timesheet --input object.json
             --stage
     detail:
       sections:
-        - title: timesheet entry
+        - title: Timesheet
           fields:
             - task_id
             - principal_id
@@ -53,11 +54,11 @@ spec:
             - description
             - entry_date
       help:
-        - optctl --project ${project} query operant/projects:timesheet_entry --where 'id == "${id}"'
+        - optctl --project ${project} query operant/projects:timesheet --where 'id == "${id}"'
     help:
       list:
-        - optctl --project ${project} query operant/projects:timesheet_entry
+        - optctl --project ${project} query operant/projects:timesheet
       view:
-        - optctl --project ${project} view operant/projects:timesheet_entry ${id}
+        - optctl --project ${project} view operant/projects:timesheet ${id}
       created:
-        - optctl --project ${project} view operant/projects:timesheet_entry ${id}
+        - optctl --project ${project} view operant/projects:timesheet ${id}
