@@ -19,14 +19,7 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends tini=0.19.0-1+b3 \
   && rm -rf /var/lib/apt/lists/*
 
-FROM ${POSTGRES_IMAGE} AS runtime
-ARG OPERANT_VERSION=0.1.0-dev
-ARG OPERANT_REVISION=unknown
-ARG OPERANT_SOURCE=https://github.com/from-nibly/operant
-LABEL org.opencontainers.image.title="Operant" \
-  org.opencontainers.image.version="${OPERANT_VERSION}" \
-  org.opencontainers.image.revision="${OPERANT_REVISION}" \
-  org.opencontainers.image.source="${OPERANT_SOURCE}"
+FROM ${POSTGRES_IMAGE} AS rootfs
 
 USER root
 RUN groupadd --gid 1993 operant \
@@ -39,12 +32,25 @@ COPY --from=build /opt/operant/bin/operant-server /opt/operant/bin/optctl /usr/l
 COPY --from=tini /usr/bin/tini /usr/bin/tini
 COPY deno.json deno.lock /opt/operant/
 COPY src/adapters/outbound/postgres/auth_password_worker.ts /opt/operant/runtime/auth_password_worker.ts
-COPY prototypes /opt/operant/prototypes
+COPY prototypes/crm-default-pack /opt/operant/prototypes/crm-default-pack
+COPY prototypes/project-management-pack /opt/operant/prototypes/project-management-pack
 COPY scripts/container-entrypoint.sh /usr/local/bin/operant-entrypoint
 RUN chmod 0555 /usr/local/bin/operant-server /usr/local/bin/optctl \
     /usr/local/bin/deno /usr/local/bin/operant-entrypoint /usr/bin/tini \
   && chown -R 1993:1993 /opt/operant
 
+# The official postgres image declares /var/lib/postgresql as a volume and
+# port 5432 as exposed metadata. Docker cannot remove inherited metadata, so
+# copy the prepared filesystem into a metadata-clean final image.
+FROM scratch AS runtime
+ARG OPERANT_VERSION=0.1.0-dev
+ARG OPERANT_REVISION=unknown
+ARG OPERANT_SOURCE=https://github.com/from-nibly/operant
+COPY --from=rootfs / /
+LABEL org.opencontainers.image.title="Operant" \
+  org.opencontainers.image.version="${OPERANT_VERSION}" \
+  org.opencontainers.image.revision="${OPERANT_REVISION}" \
+  org.opencontainers.image.source="${OPERANT_SOURCE}"
 ENV OPERANT_HOST=0.0.0.0 \
   OPERANT_PORT=8789 \
   OPERANT_DATA_DIR=/data \

@@ -36,6 +36,7 @@ export type HttpProvider = {
 
 export function startHttpProvider(
   initial: ProviderBehavior[] = [],
+  options: { hostname?: string; advertisedHostname?: string } = {},
 ): HttpProvider {
   const controller = new AbortController();
   const queue = [...initial];
@@ -45,7 +46,7 @@ export function startHttpProvider(
   const waiters = new Set<() => void>();
   const holds = new Map<string, () => void>();
   const server = Deno.serve({
-    hostname: "127.0.0.1",
+    hostname: options.hostname ?? "127.0.0.1",
     port: 0,
     signal: controller.signal,
     onListen() {},
@@ -101,7 +102,9 @@ export function startHttpProvider(
   const address = server.addr as Deno.NetAddr;
 
   return {
-    url: `http://${address.hostname}:${address.port}`,
+    url: `http://${
+      options.advertisedHostname ?? address.hostname
+    }:${address.port}`,
     attempts,
     effects,
     enqueue(...behaviors) {
