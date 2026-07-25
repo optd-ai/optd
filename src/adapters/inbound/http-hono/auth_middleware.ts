@@ -13,13 +13,7 @@ export async function requireBearer(
 ) {
   const url = new URL(c.req.url);
   const authorityInput = [...url.searchParams.keys()].some(isAuthorityKey) ||
-    [
-      "x-operant-actor",
-      "x-operant-role",
-      "x-actor",
-      "x-role",
-      "x-roles",
-    ].some((name) => c.req.header(name) !== undefined);
+    [...c.req.raw.headers.keys()].some(isTrustHeader);
   if (authorityInput) {
     return c.json(
       errorEnvelope({
@@ -60,7 +54,7 @@ export async function requireBearer(
         );
       }
       const body = await c.req.raw.clone().json().catch(() => undefined);
-      if (containsAuthority(body, c.req.path === "/api/v1/auth/requests")) {
+      if (containsRequestAuthority(body, c.req.path)) {
         return c.json(
           errorEnvelope({
             code: "validation_failed",
@@ -138,20 +132,73 @@ export function isAuthorityKey(key: string): boolean {
   ].includes(key.toLowerCase().replaceAll("-", "_"));
 }
 
-export function containsAuthority(
-  value: unknown,
-  allowRequestedRoles = false,
-): boolean {
+export function containsAuthority(value: unknown): boolean {
   if (!value || typeof value !== "object") return false;
-  if (Array.isArray(value)) {
-    return value.some((child) => containsAuthority(child, allowRequestedRoles));
+  if (Array.isArray(value)) return value.some(containsAuthority);
+  return Object.entries(value as Record<string, unknown>).some(
+    ([key, child]) => isAuthorityKey(key) || containsAuthority(child),
+  );
+}
+
+function isTrustHeader(name: string): boolean {
+  const normalized = name.toLowerCase().replaceAll("-", "_");
+  if (!normalized.startsWith("x_")) return false;
+  const key = normalized.slice(2).replace(/^operant_/, "");
+  return isAuthorityKey(key);
+}
+
+function containsRequestAuthority(value: unknown, path: string): boolean {
+  if (path === "/api/v1/auth/requests") {
+    return containsAuthRequestAuthority(value);
   }
-  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+  if (path === "/api/v1/changesets/stage") {
+    return containsChangesetAuthority(value);
+  }
+  return containsAuthority(value);
+}
+
+function containsAuthRequestAuthority(value: unknown): boolean {
+  if (!isRecord(value)) return containsAuthority(value);
+  return Object.entries(value).some(([key, child]) => {
     const normalized = key.toLowerCase().replaceAll("-", "_");
-    if (
-      isAuthorityKey(key) && !(allowRequestedRoles && normalized === "roles")
-    ) return true;
-    if (containsAuthority(child, allowRequestedRoles)) return true;
+    if (normalized === "roles") return false;
+    return isAuthorityKey(key) || containsAuthority(child);
+  });
+}
+
+function containsChangesetAuthority(value: unknown): boolean {
+  if (!isRecord(value) || !Array.isArray(value.operations)) {
+    return containsAuthority(value);
+  }
+  for (const [key, child] of Object.entries(value)) {
+    if (isAuthorityKey(key)) return true;
+    if (key !== "operations" && containsAuthority(child)) return true;
+  }
+  return value.operations.some(containsOperationAuthority);
+}
+
+function containsOperationAuthority(value: unknown): boolean {
+  if (!isRecord(value) || typeof value.op !== "string") {
+    return containsAuthority(value);
+  }
+  const opaqueContainer = value.op === "create" || value.op === "link"
+    ? "fields"
+    : value.op === "update"
+    ? "set"
+    : undefined;
+  for (const [key, child] of Object.entries(value)) {
+    if (isAuthorityKey(key)) return true;
+    if (key === opaqueContainer) {
+      // Only schema-shaped business field maps are opaque. Malformed containers
+      // are walked normally so authority-looking data cannot hide in them.
+      if (!isRecord(child) && containsAuthority(child)) return true;
+      continue;
+    }
+    if (containsAuthority(child)) return true;
   }
   return false;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
 }

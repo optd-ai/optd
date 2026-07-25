@@ -32,6 +32,18 @@ function testApp() {
     "/queries",
     async (c) => c.json({ input: await authenticatedJson(c) }),
   );
+  app.post(
+    "/api/v1/changesets/stage",
+    async (c) => c.json({ downstream: await c.req.json() }),
+  );
+  app.post(
+    "/api/v1/actions/:publisher/:pack/:action/stage",
+    async (c) => c.json({ downstream: await c.req.json() }),
+  );
+  app.post(
+    "/api/v1/auth/requests",
+    async (c) => c.json({ downstream: await c.req.json() }),
+  );
   app.post("/api/v1/packs/preview", (c) => c.json({ ok: true }));
   return { app, context };
 }
@@ -102,6 +114,144 @@ Deno.test("protected JSON routes reject authority injection independent of conte
         "x-roles": "super_admin",
       },
       body: "{}",
+    })).status,
+    422,
+  );
+  assertEquals(
+    (await app.request("/queries?principal_id=spoofed", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer valid",
+        "content-type": "application/json",
+      },
+      body: "{}",
+    })).status,
+    422,
+  );
+  assertEquals(
+    (await app.request("/queries", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer valid",
+        "content-type": "application/json",
+        "x-operant-principal-id": "spoofed",
+      },
+      body: "{}",
+    })).status,
+    422,
+  );
+});
+
+Deno.test("changeset business fields allow principal references without granting authority", async () => {
+  const { app } = testApp();
+  const request = (body: unknown, authorization = "Bearer valid") =>
+    app.request("/api/v1/changesets/stage", {
+      method: "POST",
+      headers: {
+        authorization,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+  const legitimate = {
+    project_id: uuidV7(),
+    operations: [{
+      op: "create",
+      resource: "operant/projects:project_member",
+      fields: { principal_id: uuidV7(), role: "contributor" },
+    }, {
+      op: "create",
+      resource: "operant/projects:timesheet",
+      fields: { principal_id: uuidV7(), comments: "roles are not authority" },
+    }, {
+      op: "link",
+      relationship: "operant/projects:project_member",
+      from: uuidV7(),
+      to: uuidV7(),
+      fields: { principal_id: uuidV7(), nested: { roles: ["domain-value"] } },
+    }, {
+      op: "update",
+      resource: "operant/projects:timesheet",
+      object_id: uuidV7(),
+      set: { principal_id: uuidV7() },
+    }],
+  };
+  const accepted = await request(legitimate);
+  assertEquals(accepted.status, 200);
+  assertEquals((await accepted.json()).downstream, legitimate);
+  assertEquals((await request(legitimate, "")).status, 401);
+
+  for (
+    const spoof of [
+      { ...legitimate, actor: { id: "spoofed" } },
+      {
+        ...legitimate,
+        control: { envelope: { principal_id: "spoofed" } },
+      },
+      {
+        operations: [{
+          op: "create",
+          resource: "operant/projects:timesheet",
+          fields: {},
+          principal_id: "spoofed",
+        }],
+      },
+      {
+        operations: [{
+          op: "transition",
+          resource: "operant/projects:timesheet",
+          object_id: uuidV7(),
+          to: "submitted",
+          set: { principal_id: "spoofed" },
+        }],
+      },
+      {
+        operations: [{
+          op: "create",
+          resource: "operant/projects:timesheet",
+          fields: [{ principal_id: "spoofed" }],
+        }],
+      },
+    ]
+  ) {
+    assertEquals((await request(spoof)).status, 422);
+  }
+});
+
+Deno.test("action inputs remain recursively protected and auth roles are exact", async () => {
+  const { app } = testApp();
+  const post = (path: string, body: unknown) =>
+    app.request(path, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer valid",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+  for (
+    const input of [
+      { input: { actor: ["spoofed"] } },
+      { input: { nested: { roles: ["super_admin"] } } },
+      { input: { deep: [{ principal: { id: "spoofed" } }] } },
+    ]
+  ) {
+    assertEquals(
+      (await post("/api/v1/actions/operant/projects/start_task/stage", input))
+        .status,
+      422,
+    );
+  }
+  assertEquals(
+    (await post("/api/v1/auth/requests", {
+      roles: ["project:contributor"],
+      boundary: { type: "project", project_id: uuidV7() },
+    })).status,
+    200,
+  );
+  assertEquals(
+    (await post("/api/v1/auth/requests", {
+      boundary: { roles: ["system:super_admin"] },
     })).status,
     422,
   );
