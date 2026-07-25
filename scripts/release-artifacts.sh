@@ -3,6 +3,8 @@ set -euo pipefail
 
 image="${1:?usage: release-artifacts.sh IMAGE [OUTPUT_DIR]}"
 out="${2:-dist}"
+source_dirty=false
+if [[ -n "$(git status --short)" ]]; then source_dirty=true; fi
 mkdir -p "$out"
 
 deno task compile:optctl
@@ -12,8 +14,6 @@ fi
 sha256sum "$out/optctl" >"$out/SHA256SUMS"
 
 revision="$(git rev-parse HEAD)"
-source_dirty=false
-if [[ -n "$(git status --short)" ]]; then source_dirty=true; fi
 
 image_id="$(docker image inspect "$image" --format '{{.Id}}')"
 image_digest="$(docker image inspect "$image" --format '{{join .RepoDigests ","}}')"
