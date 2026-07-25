@@ -73,6 +73,7 @@ const DOMAIN_POLICY_ACTIONS = new Set([
   "link",
   "unlink",
   "comment",
+  "changeset.approval.decide",
 ]);
 const dirKind: Record<string, PackKind> = {
   resources: "Resource",
@@ -422,15 +423,31 @@ function qualifyDocument(
     for (const rule of asArray(spec.rules, "spec.rules")) {
       const r = asRecord(rule, "rule");
       r.roles = asArray(r.roles, "roles").map(qualify) as JsonValue[];
-      r.resources = asArray(r.resources, "resources").map(
-        qualify,
+      const resources = asArray(r.resources, "resources");
+      const actions = asArray(r.actions, "actions");
+      const approvalResource = "system:changeset-approval";
+      const approvalAction = "changeset.approval.decide";
+      if (
+        resources.includes(approvalResource) || actions.includes(approvalAction)
+      ) {
+        if (
+          resources.length !== 1 || resources[0] !== approvalResource ||
+          actions.length !== 1 || actions[0] !== approvalAction
+        ) {
+          throw new Error(
+            `changeset approval policy rules must pair only '${approvalAction}' with '${approvalResource}'`,
+          );
+        }
+      }
+      r.resources = resources.map((resource) =>
+        resource === approvalResource ? resource : qualify(resource)
       ) as JsonValue[];
       if (r.relation) {
         asRecord(r.relation, "relation").relationship = qualify(
           asRecord(r.relation, "relation").relationship,
         ) as string;
       }
-      r.actions = asArray(r.actions, "actions").map((action) =>
+      r.actions = actions.map((action) =>
         typeof action === "string" && /^(?:action|seed):[^/]+$/.test(action)
           ? `${action.split(":")[0]}:${publisher}/${pack}:${
             action.split(":")[1]
@@ -835,7 +852,9 @@ function validateReferences(pack: LoadedPack) {
         local(role, pack.roles, `${def.path}.roles`);
       }
       for (const resource of asArray(r.resources, "resources")) {
-        local(resource, pack.resources, `${def.path}.resources`);
+        if (resource !== "system:changeset-approval") {
+          local(resource, pack.resources, `${def.path}.resources`);
+        }
       }
       for (const action of asArray(r.actions, "actions")) {
         if (typeof action !== "string" || action === "*") {

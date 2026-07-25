@@ -391,12 +391,16 @@ export const HookSchema = Type.Object({
   }, { additionalProperties: false }),
 }, { additionalProperties: false });
 
+const PolicyResource = Type.Union([
+  Identity,
+  Type.Literal("system:changeset-approval"),
+]);
 const PolicyRule = Type.Object({
   name: Name,
   effect: Type.Literal("allow"),
   roles: Type.Array(Identity, { minItems: 1, uniqueItems: true }),
   actions: StringArray,
-  resources: Type.Array(Identity, { minItems: 1, uniqueItems: true }),
+  resources: Type.Array(PolicyResource, { minItems: 1, uniqueItems: true }),
   where: Type.Optional(Type.String({ minLength: 1 })),
   relation: Type.Optional(Type.Object({
     relationship: Identity,

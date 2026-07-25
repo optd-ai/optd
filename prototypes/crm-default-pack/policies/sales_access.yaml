@@ -48,6 +48,16 @@ spec:
         - operant/crm:activity_type
       axi:
         summary: CRM administrators may manage every CRM resource.
+    - name: sales_manager_approval
+      effect: allow
+      roles:
+        - operant/crm:sales_manager
+      actions:
+        - changeset.approval.decide
+      resources:
+        - system:changeset-approval
+      axi:
+        summary: Sales managers may decide changeset approval requirements.
     - name: sales_manager_access_2
       effect: allow
       roles:

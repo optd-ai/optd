@@ -279,6 +279,101 @@ Deno.test("strict pack loader broadly rejects superseded schema and unsafe sourc
   }
 });
 
+Deno.test("approval policy vocabulary is exact, paired, and canonically preserved", async () => {
+  const role = `kind: Role
+apiVersion: operant.dev/v1
+metadata: {name: manager}
+spec:
+  display_name: Manager
+  description: Approves reviewed changesets.
+  axi: {}
+`;
+  const policy = (action: string, policyResource: string) =>
+    `kind: Policy
+apiVersion: operant.dev/v1
+metadata: {name: approval}
+spec:
+  default_assignment: all_projects
+  rules:
+    - name: decide
+      effect: allow
+      roles: [manager]
+      actions: [${action}]
+      resources: [${policyResource}]
+  axi: {}
+`;
+  const files = (
+    action: string,
+    policyResource: string,
+  ): UploadedPackFile[] => [
+    { path: "pack.yaml", text: root },
+    { path: "resources/lead.yaml", text: resource },
+    { path: "roles/manager.yaml", text: role },
+    {
+      path: "policies/approval.yaml",
+      text: policy(action, policyResource),
+    },
+  ];
+
+  const loaded = await loadPackFromFiles(
+    files("changeset.approval.decide", "system:changeset-approval"),
+  );
+  const rule = (loaded.policies.approval.spec.rules as Array<{
+    roles: string[];
+    actions: string[];
+    resources: string[];
+  }>)[0];
+  assertEquals(rule.roles, ["operant/test:manager"]);
+  assertEquals(rule.actions, ["changeset.approval.decide"]);
+  assertEquals(rule.resources, ["system:changeset-approval"]);
+  assertEquals(
+    ((loaded.normalized.policies as Record<string, Record<string, unknown>>)
+      .approval.spec as { rules: Array<{ resources: string[] }> }).rules[0]
+      .resources,
+    ["system:changeset-approval"],
+  );
+
+  for (
+    const [action, policyResource] of [
+      ["changeset.approval.decide", "lead"],
+      ["read", "system:changeset-approval"],
+      ["changeset.approval.deside", "system:changeset-approval"],
+      ["changeset.approval.decide", "system:changeset-approvals"],
+      ["changeset.approval.decide", "system:anything"],
+    ]
+  ) {
+    await assertRejects(
+      () => loadPackFromFiles(files(action, policyResource)),
+      Error,
+      undefined,
+      `${action} / ${policyResource}`,
+    );
+  }
+
+  const invalidIdentityDocuments: Array<[PackKind, unknown]> = [
+    [
+      "Resource",
+      parseYamlJsonObject(
+        resource.replace(
+          "type: string, required: true",
+          "type: string, required: true, ref: system:changeset-approval",
+        ),
+        "resource",
+      ),
+    ],
+    [
+      "Relationship",
+      parseYamlJsonObject(
+        `kind: Relationship\napiVersion: operant.dev/v1\nmetadata: {name: bad}\nspec: {from: {resource: system:changeset-approval}, to: {resource: lead}, axi: {}}\n`,
+        "relationship",
+      ),
+    ],
+  ];
+  for (const [kind, document] of invalidIdentityDocuments) {
+    assert(validatePackDocument(kind, document).length > 0, kind);
+  }
+});
+
 Deno.test("lifecycle cross-invariants reject every invalid graph and mutation", async () => {
   const lifecycleResource =
     `kind: Resource\napiVersion: operant.dev/v1\nmetadata: {name: ticket}\nspec:\n  fields:\n    state: {type: string, required: true, enum: [open, closed]}\n    title: {type: string, required: true, maxLength: 8}\n    count: {type: integer, minimum: 0, maximum: 10}\n    amount: {type: decimal, precision: 4, scale: 2}\n    note: {type: string}\n  axi:\n    purpose: Test tickets.\n    whenToUse: [Use test tickets.]\n    identity: {title: "\${title}", labelFields: [title]}\n    list:\n      defaultFields: [id, state, title]\n      empty: {message: No tickets found., help: ["optctl --project \${project} create operant/test:ticket --input object.json --stage"]}\n    detail: {help: ["optctl --project \${project} view operant/test:ticket \${id}"]}\n    help:\n      list: ["optctl --project \${project} query operant/test:ticket"]\n      view: ["optctl --project \${project} view operant/test:ticket \${id}"]\n      created: ["optctl --project \${project} view operant/test:ticket \${id}"]\n`;

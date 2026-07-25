@@ -101,6 +101,24 @@ Deno.test({
         human.runOptctl(["--json", "pack", "apply", PACK, "--safe"]),
         output,
       );
+      const persistedApprovalPolicy = await query<{
+        role_id: string;
+        capability: string;
+        resource: string;
+      }>(
+        harness.server.sql,
+        `select pr.role_id,pr.capability,pr.resource
+           from policy_rules pr
+           join policy_definition_versions pdv
+             on pdv.id=pr.policy_definition_version_id
+          where pdv.policy_id=$1 and pr.rule_name='sales_manager_approval'`,
+        [`${CRM}:sales_access`],
+      );
+      assertEquals(persistedApprovalPolicy.rows, [{
+        role_id: `${CRM}:sales_manager`,
+        capability: "changeset.approval.decide",
+        resource: "system:changeset-approval",
+      }]);
 
       const metadataCases = [
         ["home"],
