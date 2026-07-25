@@ -11,6 +11,7 @@ spec:
         - operant/projects:projects_admin
       actions:
         - read
+        - history.read
         - create
         - update
         - archive
@@ -47,6 +48,7 @@ spec:
         - operant/projects:project_manager
       actions:
         - read
+        - history.read
         - create
         - update
         - archive
@@ -71,6 +73,7 @@ spec:
         - operant/projects:project_member
       actions:
         - read
+        - history.read
         - create
       resources:
         - operant/projects:project
@@ -115,6 +118,7 @@ spec:
         - operant/projects:viewer
       actions:
         - read
+        - history.read
       resources:
         - operant/projects:project
         - operant/projects:project_member

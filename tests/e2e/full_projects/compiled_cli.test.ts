@@ -296,7 +296,7 @@ for (const logLevel of logLevels) {
                   state: "todo",
                   assignee_id: principalId,
                   priority: "high",
-                  estimated_hours: "4.50",
+                  estimated_hours: "4.5",
                 },
               }],
             }, agent),
@@ -388,7 +388,7 @@ for (const logLevel of logLevels) {
           JSON.stringify({
             task_id: taskId,
             stage_id: todoId,
-            spent_hours: "25.00",
+            spent_hours: "25",
             entry_date: "2026-07-24",
           }),
         ]);
@@ -408,7 +408,7 @@ for (const logLevel of logLevels) {
               JSON.stringify({
                 task_id: taskId,
                 stage_id: todoId,
-                spent_hours: "4.50",
+                spent_hours: "4.5",
                 entry_date: "2026-07-24",
               }),
             ]),
@@ -447,7 +447,7 @@ for (const logLevel of logLevels) {
             output,
           ),
         );
-        assertEquals(timesheets.data.items[0].data.hours, "4.50");
+        assertEquals(timesheets.data.items[0].data.hours, "4.5");
 
         const badProject = await agent.runOptctl([
           "--json",
