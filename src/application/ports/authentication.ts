@@ -5,6 +5,7 @@ import type {
   AuthorizationBoundary,
   BootstrapInput,
   BootstrapResult,
+  CurrentIdentity,
   HumanSession,
   HumanUser,
   LoginResult,
@@ -29,6 +30,7 @@ export interface AuthRepository extends BootstrapRepository {
     password: string,
     existingRequestSessionId?: string,
   ): Promise<Result<LoginResult>>;
+  currentIdentity(auth: AuthContext): Promise<Result<CurrentIdentity>>;
   current(auth: AuthContext): Promise<Result<HumanUser>>;
   sessions(auth: AuthContext): Promise<Result<HumanSession[]>>;
   logout(auth: AuthContext): Promise<Result<{ revoked: true }>>;

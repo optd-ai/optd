@@ -13,6 +13,7 @@ import type {
   BootstrapInput,
   BootstrapResult,
   CredentialKind,
+  CurrentIdentity,
   HumanSession,
   HumanUser,
   LoginResult,
@@ -454,19 +455,167 @@ export class PostgresAuthRepository implements AuthRepository {
     }
   }
 
-  async current(auth: AuthContext): Promise<Result<HumanUser>> {
-    const row = (await query<UserRow>(
+  async currentIdentity(auth: AuthContext): Promise<Result<CurrentIdentity>> {
+    const base = (await query<
+      UserRow & {
+        session_active: boolean;
+        context_active: boolean;
+        principal_active: boolean;
+      }
+    >(
       this.sql,
-      `select id,principal_id,username,display_name,status from human_users where id=$1`,
-      [auth.humanUserId],
+      `select u.id,u.principal_id,u.username,u.display_name,u.status,
+              (s.revoked_at is null) session_active,
+              (c.id is not null) context_active,
+              p.active principal_active
+         from human_users u
+         join principals p on p.id=$2
+         join auth_sessions s on s.id=$3 and s.principal_id=$2
+           and s.human_user_id=u.id and s.credential_kind=$4
+           and s.authorization_id is not distinct from $5
+         left join auth_contexts c on c.id=$6 and c.session_id=s.id
+           and c.principal_id=$2 and c.credential_kind=$4
+           and c.authorization_id is not distinct from $5
+        where u.id=$1`,
+      [
+        auth.humanUserId,
+        auth.principalId,
+        auth.sessionId,
+        auth.credentialKind,
+        auth.authorizationId ?? null,
+        auth.id,
+      ],
     )).rows[0];
-    return row ? ok(humanUser(row)) : err(
-      authError(
-        "credential_invalid",
-        "credential is invalid",
-        "authentication",
-      ),
-    );
+    if (
+      !base || !base.session_active || !base.context_active ||
+      !base.principal_active || base.status !== "active"
+    ) return credentialInvalid();
+
+    let agent: CurrentIdentity["agent"];
+    let roleAssignments: RoleAssignment[];
+    if (auth.credentialKind === "agent_authorization") {
+      if (!auth.authorizationId || auth.principalType !== "agent_user") {
+        return credentialInvalid();
+      }
+      const lineage = (await query<{
+        id: string;
+        agent_user_id: string;
+        agent_principal_id: string;
+        agent_name: string | null;
+        parent_authorization_id: string | null;
+        root_authorization_id: string;
+        depth: number;
+        revoked_at: Date | null;
+        superseded_at: Date | null;
+      }>(
+        this.sql,
+        `with recursive lineage as (
+           select a.id,a.agent_user_id,a.parent_authorization_id,
+                  a.root_authorization_id,a.revoked_at,a.superseded_at,0 depth
+             from agent_authorizations a where a.id=$1
+           union
+           select parent.id,parent.agent_user_id,parent.parent_authorization_id,
+                  parent.root_authorization_id,parent.revoked_at,
+                  parent.superseded_at,child.depth+1
+             from agent_authorizations parent
+             join lineage child on child.parent_authorization_id=parent.id
+         )
+         select l.*,au.principal_id agent_principal_id,au.name agent_name
+           from lineage l join agent_users au on au.id=l.agent_user_id
+          order by l.depth`,
+        [auth.authorizationId],
+      )).rows;
+      const leaf = lineage[0];
+      if (
+        !leaf || leaf.agent_principal_id !== auth.principalId ||
+        lineage.some((entry) => entry.revoked_at !== null) ||
+        leaf.superseded_at !== null ||
+        lineage.at(-1)?.id !== leaf.root_authorization_id
+      ) return credentialInvalid();
+      agent = {
+        id: leaf.agent_user_id,
+        principalId: leaf.agent_principal_id,
+        name: leaf.agent_name ?? "",
+        authorizationId: leaf.id,
+        ...(leaf.parent_authorization_id
+          ? { parentAuthorizationId: leaf.parent_authorization_id }
+          : {}),
+        rootAuthorizationId: leaf.root_authorization_id,
+        authorizationAncestryIds: lineage.map((entry) => entry.id),
+      };
+      const rows = (await query<{
+        role_id: string;
+        boundary_type: "project" | "all_projects" | "system";
+        project_id: string | null;
+      }>(
+        this.sql,
+        `with recursive lineage(id,parent_authorization_id) as (
+           select id,parent_authorization_id from agent_authorizations where id=$1
+           union
+           select parent.id,parent.parent_authorization_id
+             from agent_authorizations parent
+             join lineage child on child.parent_authorization_id=parent.id
+         )
+         select ar.role_id,ar.boundary_type,ar.project_id
+           from agent_authorization_roles ar
+          where ar.authorization_id=$1
+            and not exists (
+              select 1 from lineage ancestor
+              join agent_authorizations original on original.id=ancestor.id
+              where ancestor.id<>$1 and not exists (
+                select 1 from agent_authorizations current
+                join agent_authorization_roles upstream
+                  on upstream.authorization_id=current.id
+                where current.agent_user_id=original.agent_user_id
+                  and current.revoked_at is null
+                  and current.superseded_at is null
+                  and upstream.role_id=ar.role_id
+                  and upstream.boundary_type=ar.boundary_type
+                  and upstream.project_id is not distinct from ar.project_id
+              )
+            )
+          order by ar.role_id,ar.boundary_type,ar.project_id`,
+        [auth.authorizationId],
+      )).rows;
+      roleAssignments = rows.map((row) => ({
+        role: row.role_id,
+        boundary: boundaryFromRow(row),
+      }));
+    } else {
+      const rows = auth.credentialKind === "human_full"
+        ? (await query<{
+          role_id: string;
+          boundary_type: "project" | "all_projects" | "system";
+          project_id: string | null;
+        }>(
+          this.sql,
+          `select role_id,boundary_type,project_id from role_assignments
+            where principal_id=$1 and active
+            order by role_id,boundary_type,project_id`,
+          [auth.principalId],
+        )).rows
+        : [];
+      roleAssignments = rows.map((row) => ({
+        role: row.role_id,
+        boundary: boundaryFromRow(row),
+      }));
+    }
+    return ok({
+      credentialKind: auth.credentialKind,
+      principalType: auth.principalType,
+      principalId: auth.principalId,
+      humanUser: humanUser(base),
+      ...(agent ? { agent } : {}),
+      roleAssignments,
+      sessionId: auth.sessionId,
+      authContextId: auth.id,
+      active: true,
+    });
+  }
+
+  async current(auth: AuthContext): Promise<Result<HumanUser>> {
+    const identity = await this.currentIdentity(auth);
+    return identity.ok ? ok(identity.value.humanUser) : identity;
   }
 
   async sessions(auth: AuthContext): Promise<Result<HumanSession[]>> {
@@ -2934,6 +3083,15 @@ async function audit(
       sessionId ?? null,
       JSON.stringify(details),
     ],
+  );
+}
+function credentialInvalid() {
+  return err(
+    authError(
+      "credential_invalid",
+      "credential is invalid",
+      "authentication",
+    ),
   );
 }
 function authError(

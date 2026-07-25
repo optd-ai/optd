@@ -80,7 +80,7 @@ export function makeHumanAuthService(
         existingRequestSessionId,
       );
     },
-    current: (auth: AuthContext) => repository.current(auth),
+    current: (auth: AuthContext) => repository.currentIdentity(auth),
     sessions: (auth: AuthContext) => repository.sessions(auth),
     logout: (auth: AuthContext) => repository.logout(auth),
     logoutAll: async (auth: AuthContext, supplied: unknown) => {

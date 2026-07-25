@@ -7,6 +7,7 @@ import type {
   AuthContext,
   AuthorizationBoundary,
   BootstrapResult,
+  CurrentIdentity,
   HumanSession,
   HumanUser,
   LoginResult,
@@ -42,7 +43,7 @@ export type HumanAuthHttpService = {
       existingRequestSessionId?: unknown;
     },
   ): Promise<Result<LoginResult>>;
-  current(auth: AuthContext): Promise<Result<HumanUser>>;
+  current(auth: AuthContext): Promise<Result<CurrentIdentity>>;
   sessions(auth: AuthContext): Promise<Result<HumanSession[]>>;
   logout(auth: AuthContext): Promise<Result<{ revoked: true }>>;
   logoutAll(
@@ -294,7 +295,7 @@ export function registerAuthRoutes(
   app.get(
     "/api/v1/auth/me",
     async (c) =>
-      send(c, mapResult(await human.current(c.get("auth")), userDto)),
+      send(c, mapResult(await human.current(c.get("auth")), identityDto)),
   );
   app.get(
     "/api/v1/auth/sessions",
@@ -727,6 +728,38 @@ function authorizationDto(authorization: AgentAuthorization) {
     })),
     active: authorization.active,
     created_at: authorization.createdAt,
+  };
+}
+function identityDto(identity: CurrentIdentity) {
+  return {
+    credential_kind: identity.credentialKind,
+    principal_type: identity.principalType,
+    principal_id: identity.principalId,
+    human_user: userDto(identity.humanUser),
+    ...(identity.agent
+      ? {
+        agent: {
+          id: identity.agent.id,
+          principal_id: identity.agent.principalId,
+          name: identity.agent.name,
+          authorization_id: identity.agent.authorizationId,
+          ...(identity.agent.parentAuthorizationId
+            ? {
+              parent_authorization_id: identity.agent.parentAuthorizationId,
+            }
+            : {}),
+          root_authorization_id: identity.agent.rootAuthorizationId,
+          authorization_ancestry_ids: identity.agent.authorizationAncestryIds,
+        },
+      }
+      : {}),
+    role_assignments: identity.roleAssignments.map((assignment) => ({
+      role: assignment.role,
+      boundary: boundaryDto(assignment.boundary),
+    })),
+    session_id: identity.sessionId,
+    auth_context_id: identity.authContextId,
+    active: identity.active,
   };
 }
 function userDto(user: HumanUser) {

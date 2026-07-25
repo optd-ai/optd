@@ -55,6 +55,26 @@ export type HumanSession = {
   current: boolean;
 };
 
+export type CurrentIdentity = {
+  credentialKind: CredentialKind;
+  principalType: "human_user" | "agent_user";
+  principalId: string;
+  humanUser: HumanUser;
+  agent?: {
+    id: string;
+    principalId: string;
+    name: string;
+    authorizationId: string;
+    parentAuthorizationId?: string;
+    rootAuthorizationId: string;
+    authorizationAncestryIds: string[];
+  };
+  roleAssignments: RoleAssignment[];
+  sessionId: string;
+  authContextId: string;
+  active: boolean;
+};
+
 export type LoginResult = {
   user: HumanUser;
   credentials: IssuedCredentials;
