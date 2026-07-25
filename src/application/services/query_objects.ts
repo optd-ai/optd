@@ -450,6 +450,89 @@ export async function evaluateObjectPolicy(
   }
 }
 
+export async function targetedActionAuthorityFactsDigest(
+  sql: Queryable,
+  projectId: string,
+  targets: readonly TargetedActionPolicyTarget[],
+  auth: AuthContext,
+): Promise<string> {
+  const assignmentTable = auth.authorizationId
+    ? "agent_authorization_roles"
+    : "role_assignments";
+  const assignmentColumn = auth.authorizationId
+    ? "authorization_id"
+    : "principal_id";
+  const assignments = (await query<Record<string, unknown>>(
+    sql,
+    `select to_jsonb(a) fact from ${qi(assignmentTable)} a where ${
+      qi(assignmentColumn)
+    }=$1 and (boundary_type in ('system','all_projects') or project_id=$2) order by id`,
+    [auth.authorizationId ?? auth.principalId, projectId],
+  )).rows.map((row) => row.fact);
+  const policies = (await query<Record<string, unknown>>(
+    sql,
+    `select to_jsonb(pa) fact from policy_assignments pa where boundary_type in ('system','all_projects') or project_id=$1 order by id`,
+    [projectId],
+  )).rows.map((row) => row.fact);
+  const relationships: unknown[] = [];
+  const packs = [
+    ...new Set(
+      targets.map((target) =>
+        `${target.definition.publisher}/${target.definition.pack}`
+      ),
+    ),
+  ].sort();
+  for (const identity of packs) {
+    const [publisher, pack] = identity.split("/");
+    const tables = (await query<{ table_name: string }>(
+      sql,
+      `select table_name from pack_runtime_tables where publisher=$1 and pack_name=$2 and definition_kind='relationship' order by table_name`,
+      [publisher, pack],
+    )).rows;
+    for (const row of tables) {
+      const facts = (await query<Record<string, unknown>>(
+        sql,
+        `select to_jsonb(r) fact from ${
+          qi(row.table_name)
+        } r where project_id=$1 order by id`,
+        [projectId],
+      )).rows.map((fact) => fact.fact);
+      relationships.push({ table: row.table_name, facts });
+    }
+  }
+  return await digest({ assignments, policies, relationships });
+}
+
+export async function lockTargetedActionAuthority(
+  sql: Queryable,
+  targets: readonly TargetedActionPolicyTarget[],
+): Promise<void> {
+  await query(
+    sql,
+    `lock table role_assignments,agent_authorization_roles,policy_assignments,
+      system_roles,role_definition_versions,policy_definition_versions,policy_rules
+      in share mode`,
+  );
+  const packs = [
+    ...new Set(
+      targets.map((target) =>
+        `${target.definition.publisher}/${target.definition.pack}`
+      ),
+    ),
+  ].sort();
+  for (const identity of packs) {
+    const [publisher, pack] = identity.split("/");
+    const tables = (await query<{ table_name: string }>(
+      sql,
+      `select table_name from pack_runtime_tables where publisher=$1 and pack_name=$2 and definition_kind='relationship' order by table_name`,
+      [publisher, pack],
+    )).rows;
+    for (const row of tables) {
+      await query(sql, `lock table ${qi(row.table_name)} in share mode`);
+    }
+  }
+}
+
 /**
  * Evaluates one semantic action against its reviewed, concrete targets. Object
  * targets use the same SQL ABAC/ReBAC lowering as canonical object reads;

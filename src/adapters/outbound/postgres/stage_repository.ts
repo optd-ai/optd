@@ -27,6 +27,12 @@ import {
   type FieldSpec,
   lowerCelToSql,
 } from "../../../domain/queries/expression_lowerer.ts";
+import {
+  evaluateTargetedActionPolicy,
+  lockTargetedActionAuthority,
+  targetedActionAuthorityFactsDigest,
+  type TargetedActionPolicyTarget,
+} from "../../../application/services/query_objects.ts";
 
 type Revision = {
   id: string;
@@ -813,6 +819,124 @@ export class PostgresStageRepository implements StageRepository {
   }
 }
 
+async function revalidateTargetedAuthority(
+  sql: Queryable,
+  auth: AuthContext,
+  projectId: string,
+  evidence: NonNullable<NonNullable<StageSource["authority"]>["targeted"]>,
+  authorizationRootId: string | undefined,
+  dependencies: Record<string, unknown>[],
+): Promise<void> {
+  const { facts_digest: _factsDigest, ...evidenceIdentity } = evidence.cutoff;
+  const currentIdentity = {
+    auth_context_id: auth.id,
+    principal_id: auth.principalId,
+    human_user_id: auth.humanUserId,
+    session_id: auth.sessionId,
+    authorization_id: auth.authorizationId ?? null,
+    authorization_root_id: authorizationRootId,
+  };
+  if (canonicalJson(currentIdentity) !== canonicalJson(evidenceIdentity)) {
+    throw domain(
+      "project_conflict",
+      "Targeted action authority cutoff changed before persistence",
+      "conflict",
+    );
+  }
+  const targets: TargetedActionPolicyTarget[] = [];
+  for (const target of evidence.targets) {
+    const definition = parseIdentity(target.resource);
+    if (target.object_id) {
+      if (!target.object_version_id || target.absent_effect) {
+        throw domain(
+          "validation_failed",
+          "Targeted action evidence is invalid",
+          "validation",
+        );
+      }
+      const table = (await query<{ table_name: string }>(
+        sql,
+        `select table_name from pack_runtime_tables where publisher=$1 and pack_name=$2 and definition_kind='resource' and definition_name=$3`,
+        [definition.publisher, definition.pack, definition.name],
+      )).rows[0]?.table_name;
+      const current = table
+        ? (await query<{ current_object_version_id: string }>(
+          sql,
+          `select current_object_version_id from ${
+            quoteIdentifier(table)
+          } where project_id=$1 and id=$2 and archived_at is null for share`,
+          [projectId, target.object_id],
+        )).rows[0]
+        : undefined;
+      if (
+        !current ||
+        current.current_object_version_id !== target.object_version_id
+      ) {
+        throw domain(
+          "project_conflict",
+          "Targeted action object changed before persistence",
+          "conflict",
+        );
+      }
+      targets.push({
+        definition: { kind: "resource", ...definition },
+        objectId: target.object_id,
+      });
+    } else {
+      if (target.absent_effect !== true || target.object_version_id) {
+        throw domain(
+          "validation_failed",
+          "Targeted action evidence is invalid",
+          "validation",
+        );
+      }
+      targets.push({ definition: { kind: "resource", ...definition } });
+    }
+  }
+  await lockTargetedActionAuthority(sql, targets);
+  const factsDigest = await targetedActionAuthorityFactsDigest(
+    sql,
+    projectId,
+    targets,
+    auth,
+  );
+  if (factsDigest !== evidence.cutoff.facts_digest) {
+    throw domain(
+      "project_conflict",
+      "Targeted action authority facts changed before persistence",
+      "conflict",
+    );
+  }
+  const current = await evaluateTargetedActionPolicy(
+    sql,
+    { projectId, action: evidence.action, targets },
+    auth,
+  );
+  if (!current.allowed) {
+    throw domain(
+      "policy_denied",
+      "Current authority denies the action on its exact targets",
+      "authorization",
+    );
+  }
+  if (current.policyDigest !== evidence.policy_digest) {
+    throw domain(
+      "project_conflict",
+      "Targeted action authority changed before persistence",
+      "conflict",
+    );
+  }
+  dependencies.push({
+    kind: "policy",
+    targeted_action_authority: true,
+    project_id: projectId,
+    action: evidence.action,
+    targets: evidence.targets,
+    policy_digest: evidence.policy_digest,
+    cutoff: evidence.cutoff,
+  });
+}
+
 async function prepare(
   sql: Queryable,
   operations: CanonicalOperation[],
@@ -825,8 +949,10 @@ async function prepare(
   ].sort();
   const projects: Record<string, unknown>[] = [];
   const dependencies: Record<string, unknown>[] = [];
+  const authorityRoots = new Map<string, string>();
   for (const projectId of projectIds) {
     const anchor = await lockReadAuthority(sql, auth, projectId);
+    authorityRoots.set(projectId, anchor.authorizationRootId);
     const project =
       (await query<{ id: string; version: string; status: string }>(
         sql,
@@ -1066,7 +1192,19 @@ async function prepare(
     }
   }
   const decisions: Record<string, unknown>[] = [];
-  if (source?.authority) {
+  const targetedAuthority = source?.authority?.targeted;
+  if (targetedAuthority) {
+    await revalidateTargetedAuthority(
+      sql,
+      auth,
+      source!.authority!.project_id,
+      targetedAuthority,
+      authorityRoots.get(source!.authority!.project_id),
+      dependencies,
+    );
+  } else if (source?.authority) {
+    // Seeds retain their existing semantic authority path. Action sources always
+    // carry exact targeted evidence and never authorize a synthetic resource.
     for (const semanticAction of source.authority.actions) {
       const semanticAuthority = await new PostgresAuthorizationRepository(
         sql as Sql,
@@ -1214,80 +1352,96 @@ async function prepare(
     const authorizationResource = source?.authority
       ? effectiveAuthorizationAction
       : identity;
-    const authorization = await new PostgresAuthorizationRepository(sql as Sql)
-      .authorize({
-        auth,
-        boundary: { type: "project", projectId: operation.project_id },
+    if (targetedAuthority) {
+      decisions.push({
+        project_id: operation.project_id,
         action: effectiveAuthorizationAction,
-        resource: authorizationResource,
-      });
-    if (!authorization.ok) {
-      throw domain(
-        authorization.error.code,
-        authorization.error.message,
-        authorization.error.severity,
-      );
-    }
-    const matchingCapabilities = authorization.value.capabilities.filter((
-      capability,
-    ) =>
-      capability.action === effectiveAuthorizationAction &&
-      (capability.resource === "*" ||
-        capability.resource === authorizationResource)
-    );
-    const policyEvaluation = authorization.value.superAdmin
-      ? {
-        allowed: true,
-        matched_rule_ids: ["system:super_admin"],
-        rule_evidence: [],
-      }
-      : source?.authority
-      ? {
-        allowed: matchingCapabilities.length > 0,
+        resource_identity: identity,
+        decision: "allow",
+        authority_digest: targetedAuthority.policy_digest,
+        superadmin_bypass: false,
+        operation_key: operation.key,
         matched_rule_ids: [],
         rule_evidence: [],
+      });
+    } else {
+      const authorization = await new PostgresAuthorizationRepository(
+        sql as Sql,
+      )
+        .authorize({
+          auth,
+          boundary: { type: "project", projectId: operation.project_id },
+          action: effectiveAuthorizationAction,
+          resource: authorizationResource,
+        });
+      if (!authorization.ok) {
+        throw domain(
+          authorization.error.code,
+          authorization.error.message,
+          authorization.error.severity,
+        );
       }
-      : await evaluateStagePolicy(
-        sql,
-        auth,
-        operation,
-        parsed,
-        revision,
-        definition,
-        matchingCapabilities,
+      const matchingCapabilities = authorization.value.capabilities.filter((
+        capability,
+      ) =>
+        capability.action === effectiveAuthorizationAction &&
+        (capability.resource === "*" ||
+          capability.resource === authorizationResource)
       );
-    if (!policyEvaluation.allowed) {
-      throw domain(
-        "policy_denied",
-        "Current stage policy denied the operation",
-        "authorization",
-      );
+      const policyEvaluation = authorization.value.superAdmin
+        ? {
+          allowed: true,
+          matched_rule_ids: ["system:super_admin"],
+          rule_evidence: [],
+        }
+        : source?.authority
+        ? {
+          allowed: matchingCapabilities.length > 0,
+          matched_rule_ids: [],
+          rule_evidence: [],
+        }
+        : await evaluateStagePolicy(
+          sql,
+          auth,
+          operation,
+          parsed,
+          revision,
+          definition,
+          matchingCapabilities,
+        );
+      if (!policyEvaluation.allowed) {
+        throw domain(
+          "policy_denied",
+          "Current stage policy denied the operation",
+          "authorization",
+        );
+      }
+      decisions.push({
+        project_id: operation.project_id,
+        action: effectiveAuthorizationAction,
+        resource_identity: authorizationResource,
+        decision: "allow",
+        authority_digest: authorization.value.digest,
+        superadmin_bypass: authorization.value.superAdmin,
+        operation_key: operation.key,
+        matched_rule_ids: policyEvaluation.matched_rule_ids,
+        rule_evidence: policyEvaluation.rule_evidence,
+      });
+      dependencies.push({
+        kind: "policy",
+        project_id: operation.project_id,
+        authority_digest: authorization.value.digest,
+        action: effectiveAuthorizationAction,
+        resource_identity: authorizationResource,
+        capabilities: matchingCapabilities,
+      });
+      dependencies.push({
+        kind: "assignment",
+        project_id: operation.project_id,
+        effective_roles: [...authorization.value.effectiveRoles].sort(),
+        superadmin: authorization.value.superAdmin,
+      });
     }
-    decisions.push({
-      project_id: operation.project_id,
-      action: effectiveAuthorizationAction,
-      resource_identity: authorizationResource,
-      decision: "allow",
-      authority_digest: authorization.value.digest,
-      superadmin_bypass: authorization.value.superAdmin,
-      operation_key: operation.key,
-      matched_rule_ids: policyEvaluation.matched_rule_ids,
-      rule_evidence: policyEvaluation.rule_evidence,
-    });
-    dependencies.push({
-      kind: "policy",
-      project_id: operation.project_id,
-      authority_digest: authorization.value.digest,
-      action: effectiveAuthorizationAction,
-      resource_identity: authorizationResource,
-      capabilities: matchingCapabilities,
-    });
-    dependencies.push({
-      kind: "assignment",
-      project_id: operation.project_id,
-      effective_roles: [...authorization.value.effectiveRoles].sort(),
-      superadmin: authorization.value.superAdmin,
-    });
     dependencies.push({
       kind: "resource",
       project_id: operation.project_id,

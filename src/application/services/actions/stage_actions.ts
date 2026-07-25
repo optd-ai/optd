@@ -14,12 +14,15 @@ import {
 import { validateFieldMap } from "../../../schemas/changesets/field_values.ts";
 import {
   evaluateTargetedActionPolicy,
+  lockTargetedActionAuthority,
+  targetedActionAuthorityFactsDigest,
   type TargetedActionPolicyTarget,
 } from "../query_objects.ts";
 import {
   type FieldSpec,
   lowerCelToSql,
 } from "../../../domain/queries/expression_lowerer.ts";
+import { lockReadAuthority } from "../../../adapters/outbound/postgres/object_read_boundary.ts";
 
 export function makeStageActionService(
   sql: Sql,
@@ -237,8 +240,14 @@ export function makeStageActionService(
         if (!resolvedPolicyTargets) {
           return invalid("action effects have no exact authorization target");
         }
-        const authority = await sql.begin((tx) =>
-          evaluateTargetedActionPolicy(
+        const authority = await sql.begin(async (tx) => {
+          const anchor = await lockReadAuthority(
+            tx,
+            auth,
+            String(raw.project_id),
+          );
+          await lockTargetedActionAuthority(tx, resolvedPolicyTargets);
+          const evaluation = await evaluateTargetedActionPolicy(
             tx,
             {
               projectId: String(raw.project_id),
@@ -246,8 +255,21 @@ export function makeStageActionService(
               targets: resolvedPolicyTargets,
             },
             auth,
-          )
-        ) as Awaited<ReturnType<typeof evaluateTargetedActionPolicy>>;
+          );
+          return {
+            ...evaluation,
+            authorizationRootId: anchor.authorizationRootId,
+            factsDigest: await targetedActionAuthorityFactsDigest(
+              tx,
+              String(raw.project_id),
+              resolvedPolicyTargets,
+              auth,
+            ),
+          };
+        }) as Awaited<ReturnType<typeof evaluateTargetedActionPolicy>> & {
+          authorizationRootId: string;
+          factsDigest: string;
+        };
         if (!authority.allowed) {
           return policyDenied(semantic, raw.project_id, auth);
         }
@@ -276,11 +298,46 @@ export function makeStageActionService(
             stage: null,
           });
         }
+        const targetedEvidence = {
+          action: semantic,
+          targets: resolvedPolicyTargets.map((target) => {
+            const resource =
+              `${target.definition.publisher}/${target.definition.pack}:${target.definition.name}`;
+            if (!target.objectId) {
+              return { resource, absent_effect: true as const };
+            }
+            const dependency = readDependencies.find((candidate) =>
+              candidate.resource_identity === resource &&
+              candidate.object_id === target.objectId
+            );
+            if (!dependency) {
+              throw new Error(
+                "targeted action object lacks immutable version evidence",
+              );
+            }
+            return {
+              resource,
+              object_id: target.objectId,
+              object_version_id: dependency.object_version_id,
+            };
+          }),
+          policy_digest: authority.policyDigest,
+          cutoff: {
+            auth_context_id: auth.id,
+            principal_id: auth.principalId,
+            human_user_id: auth.humanUserId,
+            session_id: auth.sessionId,
+            authorization_id: auth.authorizationId ?? null,
+            authorization_root_id: authority.authorizationRootId,
+            facts_digest: authority.factsDigest,
+          },
+        };
         const source: StageSource = {
           kind: "action",
           identity: {
             action: `${publisher}/${pack}:${name}`,
             revision_id: revision.id,
+            authority_evidence: targetedEvidence,
           },
           authority: {
             project_id: raw.project_id,
@@ -295,6 +352,7 @@ export function makeStageActionService(
                 operation,
               ) => [operation.key, semantic]),
             ),
+            targeted: targetedEvidence,
           },
           dependencies: readDependencies.map((dependency) => ({
             kind: "object_version",
@@ -316,7 +374,10 @@ export function makeStageActionService(
             logs_truncated: execution.logs_truncated,
             secrets_redacted: execution.secrets_redacted,
             duration_ms: execution.duration_ms,
-            authority_snapshot: execution.authority_snapshot,
+            authority_snapshot: {
+              ...record(execution.authority_snapshot),
+              targeted_action: targetedEvidence,
+            },
             grant_snapshot: execution.grant_snapshot,
           })),
         };

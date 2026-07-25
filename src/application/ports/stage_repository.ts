@@ -18,6 +18,25 @@ export type StageSource = Readonly<{
       { resource: string; ops: readonly string[]; authority_action?: string }
     >[];
     operation_authority: Readonly<Record<string, string>>;
+    targeted?: Readonly<{
+      action: string;
+      targets: readonly Readonly<{
+        resource: string;
+        object_id?: string;
+        object_version_id?: string;
+        absent_effect?: true;
+      }>[];
+      policy_digest: string;
+      cutoff: Readonly<{
+        auth_context_id: string;
+        principal_id: string;
+        human_user_id: string;
+        session_id: string;
+        authorization_id: string | null;
+        authorization_root_id: string;
+        facts_digest: string;
+      }>;
+    }>;
   }>;
   dependencies?: readonly Readonly<Record<string, unknown>>[];
   hook_executions?: readonly Readonly<Record<string, unknown>>[];
