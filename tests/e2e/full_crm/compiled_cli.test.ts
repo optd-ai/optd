@@ -147,8 +147,10 @@ Deno.test({
       );
       assertEquals(humanWhoami.data.credential_kind, "human_full");
       assertEquals(humanWhoami.data.principal_type, "human_user");
-      assertEquals(humanWhoami.data.human_user.id, humanUserId);
-      assertEquals(humanWhoami.data.active, true);
+      assertEquals(humanWhoami.data.id, humanUserId);
+      assertEquals(humanWhoami.data.status, "active");
+      assertEquals("human_user" in humanWhoami.data, false);
+      assertEquals("agent" in humanWhoami.data, false);
       assertEquals("token" in humanWhoami.data, false);
 
       const firstSeed = json(

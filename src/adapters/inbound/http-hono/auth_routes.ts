@@ -732,10 +732,9 @@ function authorizationDto(authorization: AgentAuthorization) {
 }
 function identityDto(identity: CurrentIdentity) {
   return {
+    ...userDto(identity.humanUser),
     credential_kind: identity.credentialKind,
     principal_type: identity.principalType,
-    principal_id: identity.principalId,
-    human_user: userDto(identity.humanUser),
     ...(identity.agent
       ? {
         agent: {
@@ -759,7 +758,6 @@ function identityDto(identity: CurrentIdentity) {
     })),
     session_id: identity.sessionId,
     auth_context_id: identity.authContextId,
-    active: identity.active,
   };
 }
 function userDto(user: HumanUser) {
