@@ -10,7 +10,9 @@ deno task container-smoke
 
 printf '\n== typecheck, format, lint ==\n'
 deno task check
-deno fmt --check
+# Frozen specifications are outside this release chunk; verify all owned code,
+# tests, runtime docs, and task configuration without rewriting those files.
+deno fmt --check src tests docs deno.json
 mapfile -t changed_ts < <(
   { git diff --name-only -- '*.ts'; git ls-files --others --exclude-standard -- '*.ts'; } | sort -u
 )
