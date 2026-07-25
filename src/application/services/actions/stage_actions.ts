@@ -11,8 +11,11 @@ import {
   type ActionStageHookDeclaration,
   TrustedStageHookCoordinator,
 } from "../hooks/stage_hook_coordinator.ts";
-import { PostgresAuthorizationRepository } from "../../../adapters/outbound/postgres/authorization_repository.ts";
 import { validateFieldMap } from "../../../schemas/changesets/field_values.ts";
+import {
+  evaluateTargetedActionPolicy,
+  type TargetedActionPolicyTarget,
+} from "../query_objects.ts";
 import {
   type FieldSpec,
   lowerCelToSql,
@@ -69,16 +72,6 @@ export function makeStageActionService(
           return invalid(inputIssue);
         }
         const semantic = `action:${publisher}/${pack}:${name}`;
-        const authority = await new PostgresAuthorizationRepository(sql)
-          .authorize({
-            auth,
-            boundary: { type: "project", projectId: raw.project_id },
-            action: semantic,
-            resource: semantic,
-          });
-        if (!authority.ok) {
-          return authority;
-        }
         const reads: Record<string, unknown> = {};
         const readFacts: Record<
           string,
@@ -93,6 +86,7 @@ export function makeStageActionService(
             object_version_id: string;
           }
         > = [];
+        const policyTargets: TargetedActionPolicyTarget[] = [];
         for (const readName of Object.keys(record(spec.reads)).sort()) {
           const declaration = record(record(spec.reads)[readName]);
           const source = String(declaration.id_from);
@@ -112,11 +106,16 @@ export function makeStageActionService(
           const qualified = resourceIdentity.includes(":")
             ? resourceIdentity
             : `${publisher}/${pack}:${resourceIdentity}`;
-          const resourceName = qualified.split(":")[1];
+          const target = parseResourceIdentity(qualified);
+          if (!target) {
+            return invalid("declared action read resource is unavailable");
+          }
           const table = (await query<{ table_name: string }>(
             sql,
-            `select table_name from pack_runtime_tables where publisher=$1 and pack_name=$2 and definition_kind='resource' and definition_name=$3`,
-            [publisher, pack, resourceName],
+            `select rt.table_name from pack_runtime_tables rt
+             join pack_active_revisions ar on ar.publisher=rt.publisher and ar.pack_name=rt.pack_name
+             where rt.publisher=$1 and rt.pack_name=$2 and rt.definition_kind='resource' and rt.definition_name=$3`,
+            [target.publisher, target.pack, target.name],
           )).rows[0]?.table_name;
           if (!table) {
             return invalid(
@@ -151,6 +150,7 @@ export function makeStageActionService(
             fields.map((field) => [field, row[field]]),
           );
           readFacts[readName] = { row, resource: qualified, table };
+          policyTargets.push({ definition: target, objectId });
           readDependencies.push({
             name: readName,
             project_id: raw.project_id,
@@ -222,6 +222,36 @@ export function makeStageActionService(
             declaration_digest: String(row.declaration_digest),
           };
         });
+        const effects = declarations.flatMap((declaration) =>
+          declaration.effects
+        ).filter((value): value is Record<string, unknown> =>
+          isRecord(value)
+        ).map((effect) => ({
+          resource: String(effect.resource),
+          ops: array(effect.ops).map(String),
+        }));
+        const resolvedPolicyTargets = resolveActionPolicyTargets(
+          policyTargets,
+          effects,
+        );
+        if (!resolvedPolicyTargets) {
+          return invalid("action effects have no exact authorization target");
+        }
+        const authority = await sql.begin((tx) =>
+          evaluateTargetedActionPolicy(
+            tx,
+            {
+              projectId: String(raw.project_id),
+              action: semantic,
+              targets: resolvedPolicyTargets,
+            },
+            auth,
+          )
+        ) as Awaited<ReturnType<typeof evaluateTargetedActionPolicy>>;
+        if (!authority.allowed) {
+          return policyDenied(semantic, raw.project_id, auth);
+        }
+
         const result = await coordinator.runActionStage({
           action: `${publisher}/${pack}:${name}`,
           project_id: raw.project_id,
@@ -236,8 +266,8 @@ export function makeStageActionService(
           authority_snapshot: {
             principal_id: auth.principalId,
             auth_context_id: auth.id,
-            assignment_digest: authority.value.digest,
-            policy_digest: authority.value.digest,
+            assignment_digest: authority.policyDigest,
+            policy_digest: authority.policyDigest,
           },
         });
         if (!result.added_operations.length) {
@@ -246,14 +276,6 @@ export function makeStageActionService(
             stage: null,
           });
         }
-        const effects = declarations.flatMap((declaration) =>
-          declaration.effects
-        ).filter((value): value is Record<string, unknown> =>
-          isRecord(value)
-        ).map((effect) => ({
-          resource: String(effect.resource),
-          ops: array(effect.ops).map(String),
-        }));
         const source: StageSource = {
           kind: "action",
           identity: {
@@ -407,6 +429,53 @@ export function validateActionInput(
   fields: Record<string, unknown>,
 ): string | null {
   return validateFieldMap(input, fields, true);
+}
+export function resolveActionPolicyTargets(
+  reads: TargetedActionPolicyTarget[],
+  effects: Array<{ resource: string }>,
+): TargetedActionPolicyTarget[] | null {
+  if (reads.length) return reads;
+  const targets: TargetedActionPolicyTarget[] = [];
+  for (
+    const resource of [...new Set(effects.map((effect) => effect.resource))]
+  ) {
+    const definition = parseResourceIdentity(resource);
+    if (!definition) return null;
+    targets.push({ definition });
+  }
+  return targets.length ? targets : null;
+}
+
+function parseResourceIdentity(value: string): {
+  kind: "resource";
+  publisher: string;
+  pack: string;
+  name: string;
+} | null {
+  const match =
+    /^([a-z][a-z0-9-]{0,62})\/([a-z][a-z0-9_]{0,62}):([a-z][a-z0-9_]{0,62})$/
+      .exec(value);
+  return match
+    ? { kind: "resource", publisher: match[1], pack: match[2], name: match[3] }
+    : null;
+}
+function policyDenied(
+  action: string,
+  projectId: string,
+  auth: AuthContext,
+): Result<never> {
+  return err({
+    code: "policy_denied",
+    message:
+      `current authority does not allow ${action} on its declared targets`,
+    severity: "authorization",
+    details: {
+      auth_context_id: auth.id,
+      principal_id: auth.principalId,
+      boundary: { type: "project", project_id: projectId },
+      action,
+    },
+  });
 }
 function invalid(message: string): Result<never> {
   return err({

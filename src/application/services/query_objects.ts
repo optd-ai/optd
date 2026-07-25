@@ -11,6 +11,7 @@ import {
   lowerExpression,
 } from "../../domain/expressions/cel.ts";
 import { canonicalJson } from "../../domain/ids/canonical_json.ts";
+import { uuidV7 } from "../../domain/ids/uuid_v7.ts";
 import { QueryCursorSigner } from "../../domain/queries/cursor.ts";
 import {
   type QueryRequest,
@@ -65,6 +66,11 @@ type PolicyAuthorization = {
 export type ObjectPolicyEvaluation = Readonly<{
   allowed: boolean;
   policyDigest: string;
+}>;
+
+export type TargetedActionPolicyTarget = Readonly<{
+  definition: DefinitionIdentity;
+  objectId?: string;
 }>;
 
 class QueryFailure extends Error {
@@ -444,6 +450,137 @@ export async function evaluateObjectPolicy(
   }
 }
 
+/**
+ * Evaluates one semantic action against its reviewed, concrete targets. Object
+ * targets use the same SQL ABAC/ReBAC lowering as canonical object reads;
+ * targets without an object only accept an unconditional exact-resource rule.
+ */
+export async function evaluateTargetedActionPolicy(
+  sql: Queryable,
+  input: {
+    projectId: string;
+    action: string;
+    targets: TargetedActionPolicyTarget[];
+  },
+  auth: AuthContext,
+): Promise<ObjectPolicyEvaluation> {
+  if (!input.targets.length) {
+    return { allowed: false, policyDigest: await digest(null) };
+  }
+  try {
+    const evaluations: Array<{ target: string; digest: string }> = [];
+    for (const target of input.targets) {
+      const request = {
+        project_id: input.projectId,
+        definition: target.definition,
+      } as QueryRequest;
+      const definition = await resolveDefinition(sql, request);
+      if (!definition) {
+        await auditTargetedActionDecision(
+          sql,
+          auth,
+          input.projectId,
+          input.action,
+          target,
+          "policy.denied",
+          [],
+        );
+        return { allowed: false, policyDigest: await digest(null) };
+      }
+      const params: unknown[] = target.objectId
+        ? [input.projectId, target.objectId]
+        : [input.projectId];
+      const policy = await resolvePolicyAuthorization(
+        sql,
+        input.projectId,
+        definition,
+        auth,
+        [input.action],
+        params,
+        true,
+      );
+      let allowed = policy.superAdmin;
+      if (!allowed && target.objectId) {
+        const result = await query<{ allowed: boolean }>(
+          sql,
+          `select exists(select 1 from ${qi(definition.table)} q
+            where q.project_id=$1 and q.id=$2 and q.archived_at is null
+            and (${policy.predicates[input.action]})) allowed`,
+          params,
+        );
+        allowed = result.rows[0]?.allowed === true;
+      } else if (!allowed) {
+        allowed = policy.rules[input.action].some((rule) =>
+          !rule.predicate && !rule.relation_relationship
+        );
+      }
+      await auditTargetedActionDecision(
+        sql,
+        auth,
+        input.projectId,
+        input.action,
+        target,
+        policy.superAdmin
+          ? "policy.bypassed"
+          : allowed
+          ? "policy.allowed"
+          : "policy.denied",
+        policy.rules[input.action].map((rule) => rule.policy_id),
+      );
+      if (!allowed) return { allowed: false, policyDigest: policy.digest };
+      evaluations.push({ target: targetKey(target), digest: policy.digest });
+    }
+    return {
+      allowed: true,
+      policyDigest: await digest({
+        action: input.action,
+        targets: evaluations.sort((a, b) => a.target.localeCompare(b.target)),
+      }),
+    };
+  } catch (error) {
+    if (error instanceof QueryFailure || error instanceof ExpressionError) {
+      return { allowed: false, policyDigest: await digest(null) };
+    }
+    throw error;
+  }
+}
+
+async function auditTargetedActionDecision(
+  sql: Queryable,
+  auth: AuthContext,
+  projectId: string,
+  action: string,
+  target: TargetedActionPolicyTarget,
+  eventType: "policy.allowed" | "policy.denied" | "policy.bypassed",
+  policies: string[],
+): Promise<void> {
+  await query(
+    sql,
+    "insert into authorization_audit_events(id,auth_context_id,event_type,details) values($1,$2,$3,$4::jsonb)",
+    [
+      uuidV7(),
+      auth.id,
+      eventType,
+      JSON.stringify({
+        principal_id: auth.principalId,
+        boundary: { type: "project", project_id: projectId },
+        action,
+        resource:
+          `${target.definition.publisher}/${target.definition.pack}:${target.definition.name}`,
+        object_id: target.objectId ?? null,
+        checked_policies: [...new Set(policies)].sort(),
+      }),
+    ],
+  );
+}
+
+function targetKey(target: TargetedActionPolicyTarget): string {
+  const definition = target.definition;
+  return `${definition.kind}:${definition.publisher}/${definition.pack}:${definition.name}:${
+    target.objectId ?? "unconditional"
+  }`;
+}
+
 async function resolvePolicyAuthorization(
   sql: Queryable,
   project: string,
@@ -451,6 +588,7 @@ async function resolvePolicyAuthorization(
   auth: AuthContext,
   actions: string[],
   params: unknown[],
+  exactResource = false,
 ): Promise<PolicyAuthorization> {
   const roles = await effectiveRoles(sql, auth, project);
   const superAdmin = roles.some((role) =>
@@ -465,6 +603,7 @@ async function resolvePolicyAuthorization(
       project,
       definition.identity,
       action,
+      exactResource,
     );
     predicates[action] = superAdmin ? "true" : await compilePolicy(
       sql,
@@ -527,6 +666,7 @@ async function policyRows(
   project: string,
   resource: string,
   action: string,
+  exactResource = false,
 ) {
   if (!roles.length) return [];
   return (await query<PolicyRow>(
@@ -536,9 +676,11 @@ async function policyRows(
  from policy_rules pr join policy_definition_versions pd on pd.id=pr.policy_definition_version_id and pd.active
  join policy_assignments pa on pa.policy_definition_version_id=pd.id and pa.active
  left join pack_active_revisions ar on ar.candidate_revision_id=pd.candidate_revision_id
- where pr.role_id=any($1::text[]) and pr.capability=$2 and (pr.resource=$3 or pr.resource='*') and (pa.boundary_type='all_projects' or pa.project_id=$4)
+ where pr.role_id=any($1::text[]) and pr.capability=$2
+ and (pr.resource=$3 or (not $5::boolean and pr.resource='*'))
+ and (pa.boundary_type='all_projects' or pa.project_id=$4)
  and (pd.candidate_revision_id is null or ar.candidate_revision_id is not null) order by pd.policy_id,pr.rule_name,pr.id`,
-    [roles, action, resource, project],
+    [roles, action, resource, project, exactResource],
   )).rows;
 }
 
