@@ -13,8 +13,6 @@ spec:
       resource: lead
       id_from: $action.input.lead_id
       fields:
-        - id
-        - version
         - name
         - company_name
         - email

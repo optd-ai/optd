@@ -390,6 +390,204 @@ Deno.test({
       );
       assertEquals(secondSeed.data.stage, null);
       assertEquals(await persistenceCounts(harness), beforeSecondSeed);
+
+      const setupStage = json(
+        await ok(
+          harness.runJson(
+            ["--json", "changeset", "stage"],
+            {
+              project_id: projectId,
+              operations: [{
+                op: "create",
+                key: "company",
+                project_id: projectId,
+                resource: `${CRM}:company`,
+                fields: { name: "Acme", industry: "Software" },
+              }, {
+                op: "create",
+                key: "primary_contact",
+                project_id: projectId,
+                resource: `${CRM}:contact`,
+                fields: { name: "Ada", email: "ada@example.test" },
+              }, {
+                op: "create",
+                key: "old_contact",
+                project_id: projectId,
+                resource: `${CRM}:contact`,
+                fields: { name: "Grace", email: "grace@example.test" },
+              }, {
+                op: "create",
+                key: "opportunity",
+                project_id: projectId,
+                resource: `${CRM}:opportunity`,
+                fields: {
+                  name: "Enterprise",
+                  stage: "new",
+                  expected_revenue: "12345678901234567890.12",
+                  probability: 10,
+                },
+              }, {
+                op: "link",
+                key: "old_link",
+                project_id: projectId,
+                relationship: `${CRM}:contact_company`,
+                from: { $ref: "old_contact.object_id" },
+                to: { $ref: "company.object_id" },
+                fields: { primary: false },
+              }],
+            },
+            replacementHuman.launcher,
+          ),
+          output,
+        ),
+      ).data;
+      await ok(
+        replacementHuman.launcher.runOptctl([
+          "--json",
+          "changeset",
+          "commit",
+          setupStage.id,
+        ]),
+        output,
+      );
+      const setupOperation = (key: string) =>
+        setupStage.operations.find((value: any) => value.key === key);
+      const companyId = String(setupOperation("company").object_id);
+      const primaryContactId = String(
+        setupOperation("primary_contact").object_id,
+      );
+      const oldContactId = String(setupOperation("old_contact").object_id);
+      const opportunityId = String(setupOperation("opportunity").object_id);
+      const oldLinkId = String(setupOperation("old_link").relationship_id);
+      for (
+        const value of [
+          companyId,
+          primaryContactId,
+          oldContactId,
+          opportunityId,
+          oldLinkId,
+        ]
+      ) assert(isUuidV7(value));
+
+      const allSeven = json(
+        await ok(
+          harness.runJson(
+            ["--json", "changeset", "stage"],
+            {
+              project_id: projectId,
+              operations: [{
+                op: "create",
+                key: "lead",
+                project_id: projectId,
+                resource: `${CRM}:lead`,
+                fields: {
+                  name: "Public Lead",
+                  email: "lead@example.test",
+                  status: "new",
+                  score: 7,
+                  next_activity_at: "2026-07-24T10:11:12Z",
+                },
+              }, {
+                op: "update",
+                project_id: projectId,
+                resource: `${CRM}:company`,
+                object_id: companyId,
+                expected_version: 1,
+                set: { industry: "Enterprise software" },
+              }, {
+                op: "transition",
+                project_id: projectId,
+                resource: `${CRM}:opportunity`,
+                object_id: opportunityId,
+                expected_version: 1,
+                to: "qualified",
+              }, {
+                op: "archive",
+                project_id: projectId,
+                resource: `${CRM}:contact`,
+                object_id: oldContactId,
+                expected_version: 1,
+              }, {
+                op: "link",
+                key: "new_link",
+                project_id: projectId,
+                relationship: `${CRM}:contact_company`,
+                from: primaryContactId,
+                to: companyId,
+                fields: { primary: true },
+              }, {
+                op: "unlink",
+                project_id: projectId,
+                relationship: `${CRM}:contact_company`,
+                relationship_id: oldLinkId,
+                expected_version: 1,
+              }, {
+                op: "comment",
+                key: "company_comment",
+                project_id: projectId,
+                resource: `${CRM}:company`,
+                object_id: companyId,
+                body: "Updated through the public CRM acceptance graph",
+              }],
+            },
+            replacementHuman.launcher,
+          ),
+          output,
+        ),
+      ).data;
+      assertEquals(allSeven.operations.map((value: any) => value.op), [
+        "create",
+        "update",
+        "transition",
+        "archive",
+        "link",
+        "unlink",
+        "comment",
+      ]);
+      const allSevenInspect = json(
+        await ok(
+          replacementHuman.launcher.runOptctl([
+            "--json",
+            "changeset",
+            "inspect",
+            allSeven.id,
+          ]),
+          output,
+        ),
+      );
+      assertEquals(allSevenInspect.data, allSeven);
+      await ok(
+        replacementHuman.launcher.runOptctl([
+          "--json",
+          "changeset",
+          "commit",
+          allSeven.id,
+        ]),
+        output,
+      );
+      const leadId = String(
+        allSeven.operations.find((value: any) => value.key === "lead")
+          .object_id,
+      );
+      assert(isUuidV7(leadId));
+      const convertLeadResult = await replacementHuman.launcher.runOptctl([
+        "--json",
+        "--project",
+        projectId,
+        "action",
+        "stage",
+        `${CRM}:convert_lead`,
+        "--input",
+        JSON.stringify({ lead_id: leadId }),
+      ]);
+      output.push(convertLeadResult.stdout, convertLeadResult.stderr);
+      assertEquals(
+        convertLeadResult.code,
+        0,
+        JSON.stringify(await harness.diagnostics()),
+      );
+      const convertLead = json(convertLeadResult);
+      assertEquals(convertLead.data.source.kind, "action");
     } finally {
       await assertNoLeaks(harness, output).catch(() => undefined);
       for (const value of launchers.reverse()) {
