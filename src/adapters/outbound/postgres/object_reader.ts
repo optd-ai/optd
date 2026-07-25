@@ -41,7 +41,7 @@ export class PostgresObjectReader implements ObjectReader {
       this.sql,
       `select ${columns} from ${
         quoteIdentifier(definition.table)
-      } where project_id=$1 and id=$2`,
+      } where project_id=$1 and id=$2 for share`,
       [address.projectId, address.objectId],
     );
     const row = result.rows[0];

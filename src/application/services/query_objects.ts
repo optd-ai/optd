@@ -26,6 +26,7 @@ import {
 } from "../../adapters/outbound/postgres/client.ts";
 import { lockReadAuthority } from "../../adapters/outbound/postgres/object_read_boundary.ts";
 import { ObjectReadAuthorityInvalidError } from "../ports/object_reader.ts";
+import type { DefinitionIdentity } from "../../domain/objects/read.ts";
 
 export type QueryObjectsRequest = QueryRequest;
 export type QueryObjectsDto = QueryResponse;
@@ -54,6 +55,18 @@ type PolicyRow = {
   assignment_id: string;
   assignment_version: number;
 };
+type PolicyAuthorization = {
+  predicates: Record<string, string>;
+  rules: Record<string, PolicyRow[]>;
+  superAdmin: boolean;
+  digest: string;
+};
+
+export type ObjectPolicyEvaluation = Readonly<{
+  allowed: boolean;
+  policyDigest: string;
+}>;
+
 class QueryFailure extends Error {
   constructor(
     readonly code: string,
@@ -149,30 +162,6 @@ async function execute(
   if (!definition) throw hidden();
   const fields = resolveFields(request.fields, definition);
   const sort = resolveSort(request.sort, definition);
-  const roles = await effectiveRoles(sql, auth, request.project_id);
-  const superAdmin = roles.some((role) =>
-    role.role_id === "system:super_admin" && role.boundary_type === "system"
-  );
-  const readRules = superAdmin ? [] : await policyRows(
-    sql,
-    roles.map((r) => r.role_id),
-    request.project_id,
-    definition.identity,
-    "read",
-  );
-  if (!superAdmin && !readRules.length && !request.cursor) throw hidden();
-  let archivedRules: PolicyRow[] = [];
-  if (request.include_archived && !superAdmin) {
-    archivedRules = await policyRows(
-      sql,
-      roles.map((r) => r.role_id),
-      request.project_id,
-      definition.identity,
-      "read_archived",
-    );
-    if (!archivedRules.length && !request.cursor) throw hidden();
-  }
-
   const params: unknown[] = [request.project_id];
   const user = lowerExpression(request.where ?? "true", {
     fields: definition.fields,
@@ -180,47 +169,29 @@ async function execute(
     parameterOffset: params.length,
   });
   params.push(...user.params);
-  const readPredicate = superAdmin ? "true" : await compilePolicy(
+  const actions = request.include_archived
+    ? ["read", "read_archived"]
+    : ["read"];
+  const policy = await resolvePolicyAuthorization(
     sql,
-    readRules,
+    request.project_id,
     definition,
     auth,
-    request.project_id,
+    actions,
     params,
   );
+  if (!policy.superAdmin && !policy.rules.read.length && !request.cursor) {
+    throw hidden();
+  }
+  if (
+    request.include_archived && !policy.superAdmin &&
+    !policy.rules.read_archived.length && !request.cursor
+  ) throw hidden();
+  const readPredicate = policy.predicates.read;
   const archivePredicate = request.include_archived
-    ? (superAdmin ? "true" : await compilePolicy(
-      sql,
-      archivedRules,
-      definition,
-      auth,
-      request.project_id,
-      params,
-    ))
+    ? policy.predicates.read_archived
     : `q."archived_at" is null`;
-  const policyContext = {
-    principal: auth.principalId,
-    leaf: auth.authorizationId ?? null,
-    root: (await lockReadAuthority(sql, auth, request.project_id))
-      .authorizationRootId,
-    roles: roles.map((r) => [
-      r.role_id,
-      r.version_id,
-      r.version,
-      r.boundary_type,
-    ]),
-    assignments: [...readRules, ...archivedRules].map((
-      r,
-    ) => [
-      r.assignment_id,
-      r.assignment_version,
-      r.policy_version_id,
-      r.policy_version,
-      r.id,
-    ]).sort(),
-    super_admin: superAdmin,
-  };
-  const policyDigest = await digest(policyContext);
+  const policyDigest = policy.digest;
   const shapeDigest = await digest({
     project_id: request.project_id,
     definition: request.definition,
@@ -424,6 +395,114 @@ function resolveSort(
   }
   return out;
 }
+export async function evaluateObjectPolicy(
+  sql: Queryable,
+  input: {
+    projectId: string;
+    objectId: string;
+    definition: DefinitionIdentity;
+    actions: string[];
+  },
+  auth: AuthContext,
+): Promise<ObjectPolicyEvaluation> {
+  const request = {
+    project_id: input.projectId,
+    definition: input.definition,
+  } as QueryRequest;
+  const definition = await resolveDefinition(sql, request);
+  if (!definition) return { allowed: false, policyDigest: await digest(null) };
+  try {
+    const params: unknown[] = [input.projectId, input.objectId];
+    const policy = await resolvePolicyAuthorization(
+      sql,
+      input.projectId,
+      definition,
+      auth,
+      input.actions,
+      params,
+    );
+    const predicates = input.actions.map((action) =>
+      `(${policy.predicates[action] ?? "false"})`
+    );
+    const result = await query<{ allowed: boolean }>(
+      sql,
+      `select exists(select 1 from ${qi(definition.table)} q
+        where q.project_id=$1 and q.id=$2 and ${
+        predicates.join(" and ")
+      }) allowed`,
+      params,
+    );
+    return {
+      allowed: result.rows[0]?.allowed === true,
+      policyDigest: policy.digest,
+    };
+  } catch (error) {
+    if (error instanceof QueryFailure || error instanceof ExpressionError) {
+      return { allowed: false, policyDigest: await digest(null) };
+    }
+    throw error;
+  }
+}
+
+async function resolvePolicyAuthorization(
+  sql: Queryable,
+  project: string,
+  definition: Definition,
+  auth: AuthContext,
+  actions: string[],
+  params: unknown[],
+): Promise<PolicyAuthorization> {
+  const roles = await effectiveRoles(sql, auth, project);
+  const superAdmin = roles.some((role) =>
+    role.role_id === "system:super_admin" && role.boundary_type === "system"
+  );
+  const rules: Record<string, PolicyRow[]> = {};
+  const predicates: Record<string, string> = {};
+  for (const action of [...new Set(actions)]) {
+    rules[action] = superAdmin ? [] : await policyRows(
+      sql,
+      roles.map((role) => role.role_id),
+      project,
+      definition.identity,
+      action,
+    );
+    predicates[action] = superAdmin ? "true" : await compilePolicy(
+      sql,
+      rules[action],
+      definition,
+      auth,
+      project,
+      params,
+    );
+  }
+  const anchor = await lockReadAuthority(sql, auth, project);
+  return {
+    predicates,
+    rules,
+    superAdmin,
+    digest: await digest({
+      principal: auth.principalId,
+      leaf: auth.authorizationId ?? null,
+      root: anchor.authorizationRootId,
+      roles: roles.map((role) => [
+        role.role_id,
+        role.version_id,
+        role.version,
+        role.boundary_type,
+      ]),
+      assignments: Object.values(rules).flat().map((rule) => [
+        rule.assignment_id,
+        rule.assignment_version,
+        rule.policy_version_id,
+        rule.policy_version,
+        rule.id,
+      ]).sort(),
+      actions: [...new Set(actions)].sort(),
+      super_admin: superAdmin,
+    }),
+  };
+}
+
 async function effectiveRoles(
   sql: Queryable,
   auth: AuthContext,
@@ -457,7 +536,7 @@ async function policyRows(
  from policy_rules pr join policy_definition_versions pd on pd.id=pr.policy_definition_version_id and pd.active
  join policy_assignments pa on pa.policy_definition_version_id=pd.id and pa.active
  left join pack_active_revisions ar on ar.candidate_revision_id=pd.candidate_revision_id
- where pr.role_id=any($1::text[]) and pr.capability=$2 and pr.resource=$3 and (pa.boundary_type='all_projects' or pa.project_id=$4)
+ where pr.role_id=any($1::text[]) and pr.capability=$2 and (pr.resource=$3 or pr.resource='*') and (pa.boundary_type='all_projects' or pa.project_id=$4)
  and (pd.candidate_revision_id is null or ar.candidate_revision_id is not null) order by pd.policy_id,pr.rule_name,pr.id`,
     [roles, action, resource, project],
   )).rows;

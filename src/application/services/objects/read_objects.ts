@@ -4,11 +4,7 @@ import {
   type ReadAddress,
 } from "../../ports/object_reader.ts";
 import type { AuthContext } from "../../../domain/auth/model.ts";
-import type { BoundaryAuthority } from "../../../domain/authorization/model.ts";
-import {
-  assertReadAddress,
-  qualifiedIdentity,
-} from "../../../domain/objects/read.ts";
+import { assertReadAddress } from "../../../domain/objects/read.ts";
 import { HistoryCursorSigner } from "../../../domain/history/cursor.ts";
 import {
   err,
@@ -16,6 +12,7 @@ import {
   type Result,
   validationError,
 } from "../../../domain/errors/result.ts";
+import { evaluateObjectPolicy } from "../query_objects.ts";
 
 export function makeObjectReadService(deps: {
   boundary: ObjectReadBoundary;
@@ -35,30 +32,24 @@ export function makeObjectReadService(deps: {
         return await deps.boundary.execute(
           auth,
           address,
-          async (reader, authorization) => {
-            const resource = qualifiedIdentity(address.definition);
-            const authority = await authorization.authority(auth, {
-              type: "project",
-              projectId: address.projectId,
-            });
-            if (
-              !authority.ok || !allowed(authority.value, "read", resource)
-            ) return err(notFound());
+          async (reader, _authorization, _anchor, sql) => {
             const value = await reader.read(address);
-            if (
-              !value ||
-              (value.archived_at !== null &&
-                !allowed(authority.value, "read_archived", resource))
-            ) return err(notFound());
-            const current = await authorization.authority(auth, {
-              type: "project",
+            if (!value) return err(notFound());
+            const actions = value.archived_at === null
+              ? ["read"]
+              : ["read", "read_archived"];
+            const policyInput = {
               projectId: address.projectId,
-            });
-            if (
-              !current.ok || !allowed(current.value, "read", resource) ||
-              (value.archived_at !== null &&
-                !allowed(current.value, "read_archived", resource))
-            ) return err(notFound());
+              objectId: address.objectId,
+              definition: address.definition,
+              actions,
+            };
+            if (!(await evaluateObjectPolicy(sql, policyInput, auth)).allowed) {
+              return err(notFound());
+            }
+            if (!(await evaluateObjectPolicy(sql, policyInput, auth)).allowed) {
+              return err(notFound());
+            }
             return ok(value);
           },
         );
@@ -92,15 +83,24 @@ export function makeObjectReadService(deps: {
         return await deps.boundary.execute(
           auth,
           address,
-          async (reader, authorization, anchor) => {
-            const resource = qualifiedIdentity(address.definition);
-            const authority = await authorization.authority(auth, {
-              type: "project",
+          async (reader, _authorization, anchor, sql) => {
+            const currentObject = await reader.read(address);
+            if (!currentObject) return err(notFound());
+            const actions = currentObject.archived_at === null
+              ? ["read", "history.read"]
+              : ["read", "history.read", "read_archived"];
+            const policyInput = {
               projectId: address.projectId,
-            });
-            if (
-              !authority.ok || !historyAllowed(authority.value, resource)
-            ) return err(notFound());
+              objectId: address.objectId,
+              definition: address.definition,
+              actions,
+            };
+            const authority = await evaluateObjectPolicy(
+              sql,
+              policyInput,
+              auth,
+            );
+            if (!authority.allowed) return err(notFound());
             let before: { createdAt: string; id: string } | undefined;
             if (input.cursor) {
               try {
@@ -109,7 +109,7 @@ export function makeObjectReadService(deps: {
                   binding(
                     address,
                     auth,
-                    authority.value,
+                    authority.policyDigest,
                     anchor.authorizationRootId,
                     limit,
                   ),
@@ -123,29 +123,16 @@ export function makeObjectReadService(deps: {
                 );
               }
             }
-            const currentObject = await reader.read(address);
-            if (
-              !currentObject ||
-              (currentObject.archived_at !== null &&
-                !allowed(authority.value, "read_archived", resource))
-            ) return err(notFound());
             const page = await reader.history(address, limit, before);
             if (!page) return err(notFound());
-            const current = await authorization.authority(auth, {
-              type: "project",
-              projectId: address.projectId,
-            });
-            if (
-              !current.ok || !historyAllowed(current.value, resource) ||
-              (currentObject.archived_at !== null &&
-                !allowed(current.value, "read_archived", resource))
-            ) return err(notFound());
+            const current = await evaluateObjectPolicy(sql, policyInput, auth);
+            if (!current.allowed) return err(notFound());
             const next = page.nextPosition
               ? await deps.cursors().encode(
                 binding(
                   address,
                   auth,
-                  current.value,
+                  current.policyDigest,
                   anchor.authorizationRootId,
                   limit,
                 ),
@@ -174,22 +161,6 @@ function assertAddress(address: ReadAddress) {
     ...address.definition,
   });
 }
-function allowed(
-  authority: BoundaryAuthority,
-  action: string,
-  resource: string,
-): boolean {
-  return authority.superAdmin ||
-    authority.capabilities.some((capability) =>
-      capability.condition === "unconditional" &&
-      capability.action === action &&
-      (capability.resource === "*" || capability.resource === resource)
-    );
-}
-function historyAllowed(authority: BoundaryAuthority, resource: string) {
-  return allowed(authority, "read", resource) &&
-    allowed(authority, "history.read", resource);
-}
 function notFound() {
   return {
     code: "not_found",
@@ -204,7 +175,7 @@ function message(error: unknown) {
 function binding(
   address: ReadAddress,
   auth: AuthContext,
-  authority: BoundaryAuthority,
+  policyDigest: string,
   authorizationRootId: string,
   limit: number,
 ) {
@@ -216,7 +187,7 @@ function binding(
     principal_id: auth.principalId,
     authorization_id: auth.authorizationId ?? null,
     authorization_root_id: authorizationRootId,
-    policy_digest: authority.digest,
+    policy_digest: policyDigest,
     limit,
   };
 }

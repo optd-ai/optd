@@ -29,6 +29,7 @@ export class PostgresObjectReadBoundary implements ObjectReadBoundary {
       reader: PostgresObjectReader,
       authorization: PostgresAuthorizationRepository,
       anchor: ReadAuthorityAnchor,
+      sql: Queryable,
     ) => Promise<T>,
   ): Promise<T> {
     return await this.sql.begin(async (tx) => {
@@ -37,6 +38,7 @@ export class PostgresObjectReadBoundary implements ObjectReadBoundary {
         new PostgresObjectReader(tx),
         new PostgresAuthorizationRepository(tx as unknown as Sql),
         anchor,
+        tx,
       );
     }) as T;
   }

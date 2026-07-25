@@ -422,7 +422,7 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
       harness,
       "history-conditional",
     );
-    await installCapability(
+    const abacRule = await installCapability(
       harness,
       conditionalPrincipal,
       projectOne,
@@ -431,15 +431,6 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
       "read",
       "abac",
     );
-    await installCapability(
-      harness,
-      conditionalPrincipal,
-      projectOne,
-      auth,
-      "history_conditional_rebac",
-      "read",
-      "rebac",
-    );
     assertEquals(
       (await harness.login({
         username: "history-conditional",
@@ -447,14 +438,32 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
       })).code,
       0,
     );
-    await expectCode(harness, [
+    assertEquals(
+      (await harness.runOptctl([
+        "--json",
+        "--project",
+        projectOne,
+        "view",
+        "operant/crm:lead",
+        ids.object,
+      ])).code,
+      0,
+      "ABAC true predicate must authorize an individual read",
+    );
+    await query(
+      harness.server.sql,
+      "update policy_rules set predicate='false' where id=$1",
+      [abacRule],
+    );
+    const conditionalLeadView = [
       "--json",
       "--project",
       projectOne,
       "view",
       "operant/crm:lead",
       ids.object,
-    ], "not_found");
+    ];
+    await expectCode(harness, conditionalLeadView, "not_found");
 
     await harness.login({
       username: "history-admin",
@@ -716,6 +725,7 @@ async function installCapability(
   const role = `test:${suffix}`;
   const roleVersion = uuidV7();
   const policyVersion = uuidV7();
+  const ruleId = uuidV7();
   await harness.server.sql.begin(async (tx) => {
     await query(
       tx,
@@ -736,7 +746,7 @@ async function installCapability(
       tx,
       "insert into policy_rules(id,policy_definition_version_id,role_id,capability,resource,condition_kind,predicate) values($1,$2,$3,$4,'*',$5,$6)",
       [
-        uuidV7(),
+        ruleId,
         policyVersion,
         role,
         action,
@@ -760,6 +770,7 @@ async function installCapability(
       [uuidV7(), principalId, role, projectId, authContextId],
     );
   });
+  return ruleId;
 }
 async function expectCode(harness: LiveHarness, args: string[], code: string) {
   const result = await harness.runOptctl(args);

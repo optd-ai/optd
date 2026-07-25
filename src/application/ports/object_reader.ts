@@ -1,6 +1,7 @@
 import type { DefinitionIdentity } from "../../domain/objects/read.ts";
 import type { AuthContext } from "../../domain/auth/model.ts";
 import type { AuthorizationRepository } from "./authorization.ts";
+import type { Queryable } from "../../adapters/outbound/postgres/client.ts";
 import type {
   HistoryEntry,
   ObjectDto,
@@ -36,6 +37,7 @@ export interface ObjectReadBoundary {
       reader: ObjectReader,
       authorization: AuthorizationRepository,
       anchor: ReadAuthorityAnchor,
+      sql: Queryable,
     ) => Promise<T>,
   ): Promise<T>;
 }
