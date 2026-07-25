@@ -104,7 +104,11 @@ Deno.test("trusted action-stage seam enforces declared operation effects", async
     operation_key: null,
     output_schema: "changeset.operations.v1",
     effects: [{ resource: "operant/test:item", ops: ["create"] }],
-    input_mapping: { request: "$action.input", record: "$reads.item" },
+    input_mapping: {
+      request: "$action.input",
+      actor: "$actor",
+      record: "$reads.item",
+    },
   } as ActionStageHookDeclaration;
   const second = {
     ...action,
@@ -112,13 +116,17 @@ Deno.test("trusted action-stage seam enforces declared operation effects", async
     hook_revision_id: "0198c4ba-42b8-7000-8000-000000000032",
     order: 2,
     script_content:
-      `const input=JSON.parse(await new Response(Deno.stdin.readable).text()); if (input.input.request.name !== "generated" || input.input.record.id !== "0198c4ba-42b8-7000-8000-000000000020" || input.input.authority_snapshot !== undefined) throw new Error("uncurated input"); console.log(JSON.stringify({operations:[{op:"update",project_id:"0198c4ba-42b8-7000-8000-000000000010",resource:"operant/test:item",object_id:{$ref:"op_000001.object_id"},set:{status:"ready"}}]}));`,
+      `const envelope=JSON.parse(await new Response(Deno.stdin.readable).text()); const input=envelope.input; if (input.request.name !== "generated" || input.request.actor.id !== "spoofed" || input.record.id !== "0198c4ba-42b8-7000-8000-000000000020" || JSON.stringify(input.actor) !== '{"id":"0198c4ba-42b8-7000-8000-000000000011","principal_type":"human_user"}' || Object.keys(input.actor).sort().join(",") !== "id,principal_type" || input.authority_snapshot !== undefined || envelope.authority_snapshot !== undefined || envelope.grant_snapshot !== undefined) throw new Error("uncurated input"); console.log(JSON.stringify({operations:[{op:"update",project_id:"0198c4ba-42b8-7000-8000-000000000010",resource:"operant/test:item",object_id:{$ref:"op_000001.object_id"},set:{status:"ready"}}]}));`,
     effects: [{ resource: "operant/test:item", ops: ["update"] }],
   } as ActionStageHookDeclaration;
   const result = await coordinator.runActionStage({
     action: "operant/test:generate",
+    actor: {
+      id: "0198c4ba-42b8-7000-8000-000000000011",
+      principal_type: "human_user",
+    },
     project_id: "0198c4ba-42b8-7000-8000-000000000010",
-    input: { name: "generated" },
+    input: { name: "generated", actor: { id: "spoofed", roles: ["admin"] } },
     reads: { item: { id: "0198c4ba-42b8-7000-8000-000000000020" } },
     read_dependencies: [{
       name: "item",
@@ -170,6 +178,10 @@ Deno.test("trusted action-stage seam enforces declared operation effects", async
   try {
     await coordinator.runActionStage({
       action: "operant/test:generate",
+      actor: {
+        id: "0198c4ba-42b8-7000-8000-000000000011",
+        principal_type: "human_user",
+      },
       input: {},
       reads: { item: {} },
       read_dependencies: [{
@@ -193,6 +205,10 @@ Deno.test("trusted action-stage seam enforces declared operation effects", async
   try {
     await coordinator.runActionStage({
       action: "operant/test:generate",
+      actor: {
+        id: "0198c4ba-42b8-7000-8000-000000000011",
+        principal_type: "human_user",
+      },
       input: {},
       reads: { item: {} },
       read_dependencies: [{
@@ -222,6 +238,10 @@ Deno.test("trusted action-stage seam enforces declared operation effects", async
   try {
     await coordinator.runActionStage({
       action: "operant/test:generate",
+      actor: {
+        id: "0198c4ba-42b8-7000-8000-000000000011",
+        principal_type: "human_user",
+      },
       input: {},
       reads: {},
       declarations: [{
@@ -241,6 +261,10 @@ Deno.test("trusted action-stage seam enforces declared operation effects", async
   try {
     await coordinator.runActionStage({
       action: "operant/test:generate",
+      actor: {
+        id: "0198c4ba-42b8-7000-8000-000000000011",
+        principal_type: "human_user",
+      },
       project_id: "0198c4ba-42b8-7000-8000-000000000010",
       input: {},
       reads: { item: {} },

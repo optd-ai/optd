@@ -1,5 +1,5 @@
 // deno-lint-ignore-file no-import-prefix
-import { assertEquals } from "jsr:@std/assert@1";
+import { assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
 import { query } from "../../src/adapters/outbound/postgres/client.ts";
 import { EnvelopeCrypto } from "../../src/adapters/outbound/crypto/envelope.ts";
 import { PostgresHookSecretRepository } from "../../src/adapters/outbound/postgres/hook_secret_repository.ts";
@@ -78,8 +78,19 @@ Deno.test({
       };
       const result = await coordinator.runActionStage({
         action: "test/actionproof:generate",
+        actor: {
+          id: "0198c4ba-42b8-7000-8000-000000000011",
+          principal_type: "human_user",
+        },
         project_id: projectId,
-        input: { source_id: read.id },
+        input: {
+          source_id: read.id,
+          actor: {
+            id: "spoofed",
+            principal_type: "human_user",
+            roles: ["admin"],
+          },
+        },
         reads: {
           source: { name: read.name, status: read.status },
         },
@@ -120,6 +131,10 @@ Deno.test({
 
       const explicitProject = await coordinator.runActionStage({
         action: "test/actionproof:generate",
+        actor: {
+          id: "0198c4ba-42b8-7000-8000-000000000011",
+          principal_type: "human_user",
+        },
         project_id: projectId,
         input: { source_id: read.id },
         reads: { source: { name: read.name, status: read.status } },
@@ -138,6 +153,10 @@ Deno.test({
         () =>
           coordinator.runActionStage({
             action: "test/actionproof:generate",
+            actor: {
+              id: "0198c4ba-42b8-7000-8000-000000000011",
+              principal_type: "human_user",
+            },
             project_id: projectId,
             input: { source_id: read.id },
             reads: { source: { name: read.name, status: read.status } },
@@ -163,6 +182,23 @@ Deno.test({
         JSON.stringify({ source_id: read.id }),
       ]);
       assertEquals(publicStage.code, 0, publicStage.stderr);
+      for (const field of ["principal_id", "actor", "roles"]) {
+        const spoofed = await harness.runOptctl([
+          "--json",
+          "--project",
+          "action-stage-project",
+          "action",
+          "stage",
+          "test/actionproof:generate",
+          "--input",
+          JSON.stringify({ source_id: read.id, [field]: "spoofed" }),
+        ]);
+        assertEquals(spoofed.code, 1, `${field}: ${spoofed.stderr}`);
+        assertStringIncludes(
+          spoofed.stderr,
+          "caller-supplied actor or role authority is not accepted",
+        );
+      }
       const staged = JSON.parse(publicStage.stdout).data;
       assertEquals(staged.source.kind, "action");
       assertEquals(staged.source.identity.action, "test/actionproof:generate");
@@ -224,6 +260,10 @@ Deno.test({
         () =>
           coordinator.runActionStage({
             action: "test/actionproof:generate",
+            actor: {
+              id: "0198c4ba-42b8-7000-8000-000000000011",
+              principal_type: "human_user",
+            },
             project_id: projectId,
             input: { source_id: read.id },
             reads: {},
@@ -239,6 +279,10 @@ Deno.test({
         () =>
           coordinator.runActionStage({
             action: "test/actionproof:generate",
+            actor: {
+              id: "0198c4ba-42b8-7000-8000-000000000011",
+              principal_type: "human_user",
+            },
             project_id: projectId,
             input: { source_id: read.id },
             reads: {
@@ -259,6 +303,10 @@ Deno.test({
         () =>
           coordinator.runActionStage({
             action: "test/actionproof:generate",
+            actor: {
+              id: "0198c4ba-42b8-7000-8000-000000000011",
+              principal_type: "human_user",
+            },
             project_id: projectId,
             input: { source_id: read.id },
             reads: {
@@ -473,11 +521,11 @@ export async function writePack(
   );
   await Deno.writeTextFile(
     `${root}/hooks/generate.yaml`,
-    `kind: Hook\napiVersion: operant.dev/v1\nmetadata: { name: generate }\nspec:\n  script: generate.ts\n  timeout: 5s\n  permissions: { net: [${endpoint}], env: false, read: false, write: false, run: false }\n  secrets: []\n  effects:\n    operations:\n      - { resource: test/actionproof:target, ops: [create, update] }\n  output: { schema: changeset.operations.v1 }\n  attachments:\n    - phase: action.stage\n      action: test/actionproof:generate\n      order: 10\n      input: { read: '$reads.source', request: '$action.input' }\n  axi: {}\n`,
+    `kind: Hook\napiVersion: operant.dev/v1\nmetadata: { name: generate }\nspec:\n  script: generate.ts\n  timeout: 5s\n  permissions: { net: [${endpoint}], env: false, read: false, write: false, run: false }\n  secrets: []\n  effects:\n    operations:\n      - { resource: test/actionproof:target, ops: [create, update] }\n  output: { schema: changeset.operations.v1 }\n  attachments:\n    - phase: action.stage\n      action: test/actionproof:generate\n      order: 10\n      input: { actor: '$actor', read: '$reads.source', request: '$action.input' }\n  axi: {}\n`,
   );
   await Deno.writeTextFile(
     `${root}/hooks/generate.ts`,
-    `const envelope=JSON.parse(await new Response(Deno.stdin.readable).text()); const read=envelope.input.read; if (Object.keys(read).sort().join(',')!=="name,status" || read.status!=="ready" || "project_id" in envelope.input.request) throw new Error("uncurated read"); await fetch(${
+    `const envelope=JSON.parse(await new Response(Deno.stdin.readable).text()); const read=envelope.input.read; const actor=envelope.input.actor; if (Object.keys(read).sort().join(',')!=="name,status" || read.status!=="ready" || "project_id" in envelope.input.request || JSON.stringify(Object.keys(actor).sort())!==JSON.stringify(["id","principal_type"]) || !/^[0-9a-f-]{36}$/.test(actor.id) || !["human_user","agent_user"].includes(actor.principal_type) || actor.id===envelope.input.request.actor?.id || envelope.authority_snapshot!==undefined || envelope.grant_snapshot!==undefined) throw new Error("uncurated input"); await fetch(${
       JSON.stringify(providerUrl)
     }); console.log(JSON.stringify({operations:[{op:"create",key:"made",resource:"test/actionproof:target",fields:{name:read.name}},{op:"update",resource:"test/actionproof:target",object_id:{$ref:"made.object_id"},set:{status:"converted"}}]}));`,
   );

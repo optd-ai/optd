@@ -17,6 +17,7 @@ spec:
     - phase: action.stage
       input:
         action_input: $action.input
+        actor: $actor
       action: operant/crm:log_activity
   axi:
     purpose: log activity guidance for the operant/crm pack.

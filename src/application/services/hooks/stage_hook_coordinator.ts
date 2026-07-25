@@ -59,9 +59,14 @@ export type ActionStageReadDependency = Readonly<{
   object_id: string;
   object_version_id: string;
 }>;
+export type ActionStageActor = Readonly<{
+  id: string;
+  principal_type: "human_user" | "agent_user";
+}>;
 export type ActionStageHookInput = Readonly<{
   action: string;
   project_id: string;
+  actor: ActionStageActor;
   input: Readonly<Record<string, unknown>>;
   reads: Readonly<Record<string, unknown>>;
   read_dependencies?: readonly ActionStageReadDependency[];
@@ -203,6 +208,7 @@ export class TrustedStageHookCoordinator implements StageHookCoordinator {
         phase: "action.stage",
         input: mapValue(declaration.input_mapping, {
           "$action.input": input.input,
+          "$actor": input.actor,
           ...Object.fromEntries(
             Object.entries(input.reads).map(([name, value]) => [
               `$reads.${name}`,

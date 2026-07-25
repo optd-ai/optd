@@ -621,6 +621,81 @@ Deno.test({
       );
       const convertLead = json(convertLeadResult);
       assertEquals(convertLead.data.source.kind, "action");
+
+      for (const field of ["principal_id", "actor", "roles"]) {
+        const spoofed = await replacementHuman.launcher.runOptctl([
+          "--json",
+          "--project",
+          projectId,
+          "action",
+          "stage",
+          `${CRM}:log_activity`,
+          "--input",
+          JSON.stringify({
+            resource: "lead",
+            object_id: leadId,
+            type: "call",
+            subject: "Public acceptance call",
+            note: "Caller authority is ignored in favor of the frozen actor.",
+            [field]: "spoofed",
+          }),
+        ]);
+        output.push(spoofed.stdout, spoofed.stderr);
+        assertEquals(spoofed.code, 1, `${field}: ${spoofed.stderr}`);
+        assertStringIncludes(
+          spoofed.stderr,
+          "caller-supplied actor or role authority is not accepted",
+        );
+      }
+      const logged = json(
+        await ok(
+          replacementHuman.launcher.runOptctl([
+            "--json",
+            "--project",
+            projectId,
+            "action",
+            "stage",
+            `${CRM}:log_activity`,
+            "--input",
+            JSON.stringify({
+              resource: "lead",
+              object_id: leadId,
+              type: "call",
+              subject: "Public acceptance call",
+              note: "Logged by the server-authenticated actor.",
+            }),
+          ]),
+          output,
+        ),
+      ).data;
+      const authenticatedPrincipal = (await query<{ principal_id: string }>(
+        harness.server.sql,
+        "select principal_id from auth_contexts where id=$1",
+        [logged.hook_executions[0].authority_snapshot.auth_context_id],
+      )).rows[0].principal_id;
+      const note = logged.operations.find((value: any) =>
+        value.resource === `${CRM}:note`
+      );
+      assertEquals(note.fields.author_id, authenticatedPrincipal);
+      const actionExecution = logged.hook_executions.find((value: any) =>
+        value.phase === "action.stage"
+      );
+      assertEquals(Object.keys(actionExecution.output), ["operations"]);
+      assertEquals(
+        actionExecution.output.operations.find((value: any) =>
+          value.resource === `${CRM}:note`
+        ).fields.author_id,
+        authenticatedPrincipal,
+      );
+      await ok(
+        replacementHuman.launcher.runOptctl([
+          "--json",
+          "changeset",
+          "commit",
+          logged.id,
+        ]),
+        output,
+      );
     } finally {
       await assertNoLeaks(harness, output).catch(() => undefined);
       for (const value of launchers.reverse()) {
