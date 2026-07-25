@@ -147,7 +147,7 @@ export function makeStageActionService(
             return invalid(`required action read ${readName} was not found`);
           }
           reads[readName] = Object.fromEntries(
-            fields.map((field) => [field, row[field]]),
+            fields.map((field) => [field, curatedReadValue(field, row[field])]),
           );
           readFacts[readName] = { row, resource: qualified, table };
           policyTargets.push({ definition: target, objectId });
@@ -422,6 +422,18 @@ async function checkAvailability(
     }
   }
   return null;
+}
+
+function curatedReadValue(field: string, value: unknown): unknown {
+  if (field === "id") return String(value);
+  if (field === "version") {
+    const version = Number(value);
+    if (!Number.isSafeInteger(version) || version < 1) {
+      throw new Error("declared action read has an invalid object version");
+    }
+    return version;
+  }
+  return value instanceof Date ? value.toISOString() : value;
 }
 
 export function validateActionInput(
