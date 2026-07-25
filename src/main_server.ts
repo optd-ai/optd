@@ -5,6 +5,7 @@ import {
   closePostgresClient,
   createPostgresClient,
   pingPostgres,
+  query,
   type Sql,
 } from "./adapters/outbound/postgres/client.ts";
 import {
@@ -16,6 +17,7 @@ import {
 import { assertSecretSubsystemReady } from "./application/services/secrets/manage_secrets.ts";
 import { resolveHookDenoBinary } from "./adapters/outbound/deno-hooks/hook_runner.ts";
 import {
+  assertSupportedPostgresVersionNumber,
   type PostgresRuntime,
   startPostgresRuntime,
 } from "./adapters/outbound/postgres-process/lifecycle.ts";
@@ -31,10 +33,26 @@ export async function createFetchHandler(
   options: { hookServerPort?: number; hookServerHosts?: string[] } = {},
 ) {
   const postgresRuntime = await startPostgresRuntime();
+  console.log(JSON.stringify({
+    event: "runtime_started",
+    mode: postgresRuntime.mode,
+  }));
   const sql = createPostgresClient(postgresRuntime.databaseUrl);
   let migrationResult: MigrationApplyResult;
   let denoBin: string;
   try {
+    const version = await query<{ server_version_num: string }>(
+      sql,
+      "select current_setting('server_version_num') as server_version_num",
+    );
+    const postgresMajor = assertSupportedPostgresVersionNumber(
+      version.rows[0]?.server_version_num ?? "",
+    );
+    console.log(JSON.stringify({
+      event: "database_validated",
+      mode: postgresRuntime.mode,
+      postgresMajor,
+    }));
     migrationResult = await sql.begin(async (tx) =>
       await applyPlatformMigrations(tx)
     );
@@ -92,10 +110,18 @@ export async function createFetchHandler(
     fetch: app.fetch,
     sql,
     async shutdown() {
+      console.log(JSON.stringify({
+        event: "runtime_stopping",
+        mode: postgresRuntime.mode,
+      }));
       await outboxLoop.stop();
       await application.authentication.close();
       await closePostgresClient(sql);
       await postgresRuntime.stop();
+      console.log(JSON.stringify({
+        event: "runtime_stopped",
+        mode: postgresRuntime.mode,
+      }));
     },
   };
 }
@@ -259,29 +285,107 @@ async function runRecoveryHostCommand(args: string[]): Promise<void> {
   }
 }
 
-if (
-  import.meta.main && Deno.args[0] === "auth" && Deno.args[1] === "recovery"
-) {
-  await runRecoveryHostCommand(Deno.args);
-} else if (import.meta.main) {
+async function runMain(): Promise<void> {
+  // Deno.execPath() is the compiled executable inside the release image. The
+  // password worker intentionally uses Deno.execPath(), so relay that one
+  // internal `deno run` invocation to the locked runtime Deno binary.
+  if (
+    Deno.args[0] === "run" &&
+    Deno.args.at(-1)?.endsWith("/auth_password_worker.ts")
+  ) {
+    const denoBin = Deno.env.get("OPERANT_DENO_BIN");
+    const worker = Deno.env.get("OPERANT_AUTH_PASSWORD_WORKER");
+    if (!denoBin || !worker) {
+      throw new Error("compiled password worker runtime is not configured");
+    }
+    const args = [...Deno.args];
+    args[args.length - 1] = worker;
+    const status = await new (Deno.Command)(denoBin, {
+      args,
+      stdin: "inherit",
+      stdout: "inherit",
+      stderr: "inherit",
+    }).spawn().status;
+    Deno.exit(status.code);
+  }
+
+  if (Deno.args[0] === "auth" && Deno.args[1] === "recovery") {
+    await runRecoveryHostCommand(Deno.args);
+    return;
+  }
+
   const config = loadRuntimeConfig();
   const server = await startServer({
     hostname: config.host,
     port: config.port,
     onListen: (url) => {
       console.log(
-        JSON.stringify({ ok: true, listening: url, version: OPERANT_VERSION }),
+        JSON.stringify({
+          ok: true,
+          event: "server_listening",
+          listening: url,
+          version: OPERANT_VERSION,
+        }),
       );
     },
   });
   let stopping = false;
-  const stop = async () => {
+  const stop = async (signal: "SIGTERM" | "SIGINT") => {
     if (stopping) return;
     stopping = true;
-    Deno.removeSignalListener("SIGTERM", stop);
-    Deno.removeSignalListener("SIGINT", stop);
-    await server.shutdown();
+    console.log(JSON.stringify({ event: "shutdown_requested", signal }));
+    Deno.removeSignalListener("SIGTERM", onTerm);
+    Deno.removeSignalListener("SIGINT", onInt);
+    try {
+      // The listener is aborted before the poll loop, auth listener, SQL pool,
+      // and (only in app-managed mode) Postgres are closed by startServer.
+      await server.shutdown();
+      console.log(JSON.stringify({ event: "shutdown_complete", signal }));
+    } catch (error) {
+      console.error(JSON.stringify({
+        event: "shutdown_failed",
+        error: redactedError(error),
+      }));
+      Deno.exitCode = 1;
+    }
   };
-  Deno.addSignalListener("SIGTERM", stop);
-  Deno.addSignalListener("SIGINT", stop);
+  const onTerm = () => void stop("SIGTERM");
+  const onInt = () => void stop("SIGINT");
+  Deno.addSignalListener("SIGTERM", onTerm);
+  Deno.addSignalListener("SIGINT", onInt);
+}
+
+function redactedError(
+  error: unknown,
+): { name: string; code?: string; message: string } {
+  const value = error instanceof Error ? error : new Error(String(error));
+  let message = value.message.slice(0, 1000).replace(
+    /postgres(?:ql)?:\/\/[^\s"']+/gi,
+    "[redacted-database-url]",
+  );
+  for (
+    const secret of [
+      Deno.env.get("OPERANT_DATABASE_URL"),
+      Deno.env.get("OPERANT_BOOTSTRAP_TOKEN"),
+      Deno.env.get("OPERANT_SECRET_MASTER_KEY"),
+    ]
+  ) {
+    if (secret) message = message.replaceAll(secret, "[redacted]");
+  }
+  const code = "code" in value && typeof value.code === "string"
+    ? value.code
+    : undefined;
+  return { name: value.name, ...code ? { code } : {}, message };
+}
+
+if (import.meta.main) {
+  try {
+    await runMain();
+  } catch (error) {
+    console.error(JSON.stringify({
+      event: "startup_failed",
+      error: redactedError(error),
+    }));
+    Deno.exit(1);
+  }
 }

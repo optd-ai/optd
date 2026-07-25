@@ -6,7 +6,11 @@
     "server": "deno run --allow-read --allow-write --allow-env --allow-net --allow-run src/main_server.ts",
     "optctl": "deno run --allow-read --allow-write --allow-env --allow-net --allow-run --allow-sys=uid src/main_optctl.ts",
     "compile:optctl": "deno compile --no-prompt --allow-read --allow-write --allow-env --allow-net --allow-run --allow-sys=uid --output dist/optctl src/main_optctl.ts",
-    "scenario:bootstrap": "deno test --allow-read --allow-write --allow-env --allow-net --allow-run tests/scenarios/00_bootstrap.ts"
+    "scenario:bootstrap": "deno test --allow-read --allow-write --allow-env --allow-net --allow-run tests/scenarios/00_bootstrap.ts",
+    "test:runtime-focused": "deno test --allow-read --allow-write --allow-env --allow-net --allow-run --allow-sys=uid tests/unit/runtime_artifacts.test.ts tests/integration/postgres_lifecycle.test.ts",
+    "container-smoke": "OPERANT_CONTAINER_RELEASE=1 deno test --allow-read --allow-write --allow-env --allow-net --allow-run --allow-sys=uid tests/e2e/container_release",
+    "release-gate": "bash scripts/release-gate.sh",
+    "release:artifacts": "bash scripts/release-artifacts.sh"
   },
   "fmt": {
     "include": ["src/", "tests/", "spec/", "docs/", "deno.json"]

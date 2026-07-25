@@ -1,0 +1,16 @@
+.git
+.ai
+.env
+.env.*
+.operant-data
+coverage
+dist
+result
+*.log
+Dockerfile*
+docker-compose*.yml
+compose*.yml
+k8s
+docs
+spec
+tests

@@ -1,10 +1,7 @@
-apiVersion: v1
-kind: Secret
-metadata:
-  name: operant-secrets
-stringData:
-  OPERANT_SECRET_MASTER_KEY: change-me-32-bytes-minimum
----
+# Create the required Secret out of band; do not commit either value:
+# kubectl create secret generic operant-runtime \
+#   --from-literal=OPERANT_BOOTSTRAP_TOKEN="$(openssl rand -base64 32)" \
+#   --from-literal=OPERANT_SECRET_MASTER_KEY="$(openssl rand -base64 32)"
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -21,6 +18,8 @@ metadata:
   name: operant
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: operant
@@ -29,10 +28,22 @@ spec:
       labels:
         app: operant
     spec:
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1993
+        runAsGroup: 1993
+        fsGroup: 1993
+        fsGroupChangePolicy: OnRootMismatch
       containers:
         - name: operant
-          image: operant:dev
+          image: registry.example/operant:0.1.0
           imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           ports:
             - name: http
               containerPort: 8789
@@ -43,30 +54,45 @@ spec:
               value: "8789"
             - name: OPERANT_DATA_DIR
               value: /data
-            - name: OPERANT_PG_BIN_DIR
-              value: /usr/lib/postgresql/17/bin
-          envFrom:
-            - secretRef:
-                name: operant-secrets
+            - name: OPERANT_BOOTSTRAP_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: operant-runtime
+                  key: OPERANT_BOOTSTRAP_TOKEN
+            - name: OPERANT_SECRET_MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: operant-runtime
+                  key: OPERANT_SECRET_MASTER_KEY
           volumeMounts:
             - name: data
               mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+          startupProbe:
+            httpGet:
+              path: /ready
+              port: http
+            periodSeconds: 2
+            failureThreshold: 60
           readinessProbe:
             httpGet:
               path: /ready
               port: http
-            initialDelaySeconds: 10
-            periodSeconds: 10
+            periodSeconds: 5
+            failureThreshold: 2
           livenessProbe:
             httpGet:
-              path: /health
+              path: /live
               port: http
-            initialDelaySeconds: 20
-            periodSeconds: 20
+            periodSeconds: 10
+            failureThreshold: 3
       volumes:
         - name: data
           persistentVolumeClaim:
             claimName: operant-data
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service

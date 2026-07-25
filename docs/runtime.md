@@ -1,102 +1,144 @@
 # Operant runtime and deployment
 
-Operant production deployment is container-only. The runtime is Postgres-only:
-use an external Postgres service by setting `OPERANT_DATABASE_URL`, or omit it
-and let the container start an app-managed Postgres process under
-`OPERANT_DATA_DIR`.
+Operant production deployment is container-only and supports exactly two modes.
+PostgreSQL 17 or newer is required (the release image and external Compose
+example pin PostgreSQL 18.4). PGlite and SQLite are prototype-only/non-MVP
+runtimes.
+
+## Mode 1: one container with app-managed PostgreSQL
+
+Leave `OPERANT_DATABASE_URL` unset. The Operant server starts and owns one
+PostgreSQL process beneath `OPERANT_DATA_DIR`, runs migrations, and runs exactly
+one in-process outbox poll loop. There is no database or worker sidecar.
+
+`docker-compose.yml` mounts exactly one persistent volume at `/data`. It stores
+the PostgreSQL cluster and server-owned durable state. The local `optctl` auth
+store belongs to the client: its default is under the invoking user's `HOME`/XDG
+directories. When executing `optctl` inside this container its home is `/data`,
+so that context is in the same protected volume. For a workstation CLI, back up
+and permission its XDG state separately.
+
+Use one app-managed replica. Its persistent volume must be writable by UID/GID
+1993; the Kubernetes example sets `runAsNonRoot`, `runAsUser`, `runAsGroup`, and
+`fsGroup` accordingly. A bind mount must likewise be owned by 1993:1993. Operant
+fails closed rather than changing ownership as root.
+
+## Mode 2: external PostgreSQL
+
+Set `OPERANT_DATABASE_URL` to a `postgres://` or `postgresql://` URL for
+PostgreSQL 17 or newer. Operant validates the server version before readiness or
+migrations. It never runs `initdb`, starts or stops PostgreSQL, or falls back to
+a local database when the URL is unreachable, malformed, unauthorized, or too
+old. Stopping/recreating Operant leaves the external server, data, and outbox
+rows intact. `compose.external-postgres.yml` demonstrates this mode with a
+separately pinned PostgreSQL 18.4 service.
+
+Both modes keep the outbox poll loop in the server process. Do not add a worker
+container or sidecar.
+
+## Required secrets
+
+Every fresh deployment requires `OPERANT_BOOTSTRAP_TOKEN`. The first
+`optctl bootstrap init` presents it through the process environment; remove or
+rotate the token after bootstrap. It is not readiness state: `/ready` can be
+healthy while bootstrap status is `bootstrap_required`.
+
+Set `OPERANT_SECRET_MASTER_KEY` to canonical base64 for exactly 32 random bytes
+before creating encrypted rows. Generate values without committing or baking
+them into an image:
+
+```bash
+export OPERANT_BOOTSTRAP_TOKEN="$(openssl rand -base64 32)"
+export OPERANT_SECRET_MASTER_KEY="$(openssl rand -base64 32)"
+```
+
+Keep the master key in a secret manager, not the data volume, CLI auth store,
+Compose file, image build args, logs, or backups. Preserve it alongside database
+backups. Once encrypted rows exist, a missing, malformed, or different key makes
+startup fail closed before readiness. Losing the key is data loss; database
+restore alone cannot decrypt secrets. Kubernetes uses `secretKeyRef` for both
+values (and for the external database URL).
+
+For external Compose also generate a URL-safe database password, for example
+`openssl rand -hex 32`, and export it as `OPERANT_POSTGRES_PASSWORD`.
+
+## Commands
+
+App-managed:
+
+```bash
+docker compose up --build -d
+docker compose exec operant optctl --server http://127.0.0.1:8789 status ready --json
+docker compose exec operant optctl --server http://127.0.0.1:8789 bootstrap init --username admin --password-stdin
+docker compose down                 # retain operant-data
+docker compose down --volumes       # destructive: remove all durable data
+```
+
+External:
+
+```bash
+docker compose -f compose.external-postgres.yml up --build -d
+docker compose -f compose.external-postgres.yml exec operant \
+  optctl --server http://127.0.0.1:8789 status ready --json
+docker compose -f compose.external-postgres.yml stop operant
+```
+
+Release verification and metadata:
+
+```bash
+deno task container-smoke
+deno task release-gate
+./scripts/release-artifacts.sh operant:0.1.0-dev dist
+```
+
+## Liveness, readiness, and startup
+
+- `GET /live` reports that the HTTP process can answer. Use it for liveness.
+- `GET /ready` returns 200 only while PostgreSQL is reachable and all platform
+  migrations are healthy; otherwise it returns 503. Use it for readiness and
+  startup probes.
+- `GET /api/v1/auth/bootstrap/status` independently reports `bootstrap_required`
+  or `active`.
+
+The image health check uses `/ready`. Kubernetes uses `/live` for liveness and
+`/ready` for startup/readiness. During graceful termination Operant first aborts
+the HTTP listener (so new readiness/work is rejected), stops the one outbox poll
+loop within its grace bound, closes authentication listeners and the SQL pool,
+and finally stops app-managed PostgreSQL. External PostgreSQL is never signaled.
+The server runs under `tini` as PID 1 so SIGTERM/SIGINT are forwarded and zombie
+children are reaped. Allow at least 30 seconds termination grace.
 
 ## Runtime environment
 
-| Variable                    | Required                                       | Description                                                                                                                                                                                                                                                 |
-| --------------------------- | ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `OPERANT_DATA_DIR`          | app-managed mode                               | Persistent runtime directory. Defaults to `/data` in the container. App-managed Postgres stores its cluster under `$OPERANT_DATA_DIR/postgres/data` and runtime socket/PID files under `$OPERANT_DATA_DIR/postgres/run`. Mount this as a persistent volume. |
-| `OPERANT_DATABASE_URL`      | external mode                                  | `postgres://` or `postgresql://` URL for external Postgres. When set, Operant never starts or stops a managed Postgres process. Non-Postgres URLs are rejected at startup.                                                                                  |
-| `OPERANT_PG_BIN_DIR`        | app-managed mode unless binaries are on `PATH` | Directory containing `initdb`, `postgres`, and `psql`. The production image installs Postgres and defaults this to `/usr/lib/postgresql/17/bin`; the entrypoint auto-detects a packaged version if the path changes.                                        |
-| `OPERANT_SECRET_MASTER_KEY` | before secret create/read/decrypt paths        | Master key material for application-level encrypted secrets and hook secret injection. Mount through a secret manager; do not bake it into images.                                                                                                          |
-| `OPERANT_HOST`              | optional                                       | Bind host, default `127.0.0.1` locally and `0.0.0.0` in the container image.                                                                                                                                                                                |
-| `OPERANT_PORT`              | optional                                       | HTTP port, default `8789`.                                                                                                                                                                                                                                  |
-| `OPERANT_PG_PORT`           | optional                                       | Managed Postgres port. Defaults to `0`/auto-select in app-managed runtime; set only when a fixed local port is needed.                                                                                                                                      |
+| Variable                    | Mode        | Meaning                                                                                                               |
+| --------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------- |
+| `OPERANT_DATA_DIR`          | app-managed | Persistent directory; defaults to `/data`. PostgreSQL data is under `postgres/data` and sockets under `postgres/run`. |
+| `OPERANT_DATABASE_URL`      | external    | External PostgreSQL URL. Its presence irrevocably selects external mode for that start.                               |
+| `OPERANT_PG_BIN_DIR`        | app-managed | Directory containing `initdb`, `postgres`, and `psql`; release default is `/usr/lib/postgresql/18/bin`.               |
+| `OPERANT_BOOTSTRAP_TOKEN`   | both        | Required injected bootstrap credential; never put it in image layers.                                                 |
+| `OPERANT_SECRET_MASTER_KEY` | both        | Canonical base64 encoding of exactly 32 random bytes, held outside database/data volume.                              |
+| `OPERANT_HOST`              | both        | Bind address; image default `0.0.0.0`.                                                                                |
+| `OPERANT_PORT`              | both        | HTTP port; default `8789`.                                                                                            |
+| `OPERANT_PG_PORT`           | app-managed | Optional managed PostgreSQL port; default `0` selects a free local port.                                              |
 
-## Container modes
+## Persistence, restart, and recovery
 
-### App-managed Postgres, one container
+Startup initializes an empty app-managed cluster, or reuses the existing
+`PG_VERSION`, then validates PostgreSQL and applies migrations idempotently.
+Never point two app-managed containers at one volume. Restart with the same
+volume and master key; migrations, facts, encrypted secrets, auth state, and
+queued/retry outbox work persist. Outbox leases recover according to their
+durable expiry contract after an unclean stop.
 
-```bash
-docker compose up --build
-```
+A normal SIGTERM cleanly removes PostgreSQL's `postmaster.pid`. After SIGKILL,
+PostgreSQL performs its own crash recovery on restart; Operant does not delete
+or forge lock/PID files. Permission, key, database authentication, migration,
+and version errors remain startup failures with bounded redacted diagnostics.
 
-This starts one Operant container, initializes Postgres if
-`$OPERANT_DATA_DIR/postgres/data` is empty, runs platform migrations
-idempotently, starts the HTTP API, and exposes health/readiness on port `8789`.
+## Backup and restore
 
-Smoke check:
-
-```bash
-docker compose exec operant optctl --server http://127.0.0.1:8789 home --json
-```
-
-### External Postgres with Compose
-
-```bash
-docker compose -f compose.external-postgres.yml up --build
-```
-
-The `operant` service receives `OPERANT_DATABASE_URL` pointing at the `postgres`
-service. In this mode the server connects to external Postgres only; it does not
-run `initdb` or start a managed Postgres process.
-
-### Kubernetes examples
-
-- `k8s/operant-app-managed.example.yaml`: single replica with app-managed
-  Postgres on a persistent volume.
-- `k8s/operant-external-postgres.example.yaml`: app deployment using an
-  external/shared Postgres URL from a Kubernetes Secret.
-
-Use one app-managed replica only. For horizontal scaling, use external Postgres
-and multiple stateless API/worker replicas after migration/outbox locking is
-validated for that deployment.
-
-## Health and readiness
-
-- `GET /health` returns process health details and is suitable for liveness.
-- `GET /ready` returns HTTP 200 only when Postgres is reachable and platform
-  migrations are marked healthy; otherwise it returns HTTP 503.
-
-Container and Kubernetes health checks use `/ready` for startup/readiness and
-`/health` for liveness.
-
-## Data directory behavior
-
-When `OPERANT_DATABASE_URL` is absent, Operant:
-
-1. Ensures `OPERANT_DATA_DIR` exists.
-2. Initializes a Postgres cluster under `$OPERANT_DATA_DIR/postgres/data` when
-   `PG_VERSION` is missing.
-3. Starts `postgres` from `OPERANT_PG_BIN_DIR`.
-4. Waits for readiness with `psql`.
-5. Runs platform migrations idempotently.
-6. Stops the managed Postgres process during server shutdown.
-
-Keep `OPERANT_DATA_DIR` on persistent storage. Removing it removes the local
-Postgres cluster.
-
-## Backup and restore (MVP guidance)
-
-MVP does not add a first-class backup command yet. Use standard Postgres tools:
-
-- app-managed mode: run `pg_dump`/`pg_restore` from the container using the
-  managed Postgres port shown in server health/debug logs or use a maintenance
-  shell with the same data volume mounted;
-- external mode: use your managed Postgres provider's backup tooling or
-  `pg_dump`/`pg_restore` against `OPERANT_DATABASE_URL`.
-
-Do not copy a live `$OPERANT_DATA_DIR/postgres/data` directory as the primary
-backup mechanism unless Postgres is stopped or the backup method is
-Postgres-aware.
-
-## Runtime guardrails
-
-PGlite and SQLite are prototype-only/non-MVP runtimes. Production startup
-accepts only real Postgres via `postgres://`/`postgresql://` URLs or app-managed
-Postgres binaries. `OPERANT_DATABASE_URL=file:...`, `sqlite:...`, `pglite:...`,
-or other non-Postgres URLs fail fast.
+MVP has no first-class backup command. Use `pg_dump`/`pg_restore`, or the
+external provider's PostgreSQL-aware backup tooling. Do not copy a live data
+directory as the primary backup. Restore the matching master key from its
+separate custody system, keep file ownership at 1993:1993 for app-managed mode,
+and restart Operant so migrations and outbox recovery run normally.

@@ -1,21 +1,9 @@
-apiVersion: v1
-kind: Secret
-metadata:
-  name: operant-runtime
-stringData:
-  OPERANT_DATABASE_URL: postgres://operant:change-me@postgres.example.svc:5432/operant
-  OPERANT_SECRET_MASTER_KEY: change-me-32-bytes-minimum
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: operant-data
-spec:
-  accessModes: ["ReadWriteOnce"]
-  resources:
-    requests:
-      storage: 10Gi
----
+# PostgreSQL 17 or newer is required. Create this Secret out of band; the URL
+# password must be URL-encoded and none of these values belong in source control:
+# kubectl create secret generic operant-runtime \
+#   --from-literal=OPERANT_DATABASE_URL='postgres://operant:...@postgres.example.svc:5432/operant' \
+#   --from-literal=OPERANT_BOOTSTRAP_TOKEN="$(openssl rand -base64 32)" \
+#   --from-literal=OPERANT_SECRET_MASTER_KEY="$(openssl rand -base64 32)"
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -30,10 +18,21 @@ spec:
       labels:
         app: operant
     spec:
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1993
+        runAsGroup: 1993
+        fsGroup: 1993
       containers:
         - name: operant
-          image: operant:dev
+          image: registry.example/operant:0.1.0
           imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           ports:
             - name: http
               containerPort: 8789
@@ -43,29 +42,46 @@ spec:
             - name: OPERANT_PORT
               value: "8789"
             - name: OPERANT_DATA_DIR
-              value: /data
-          envFrom:
-            - secretRef:
-                name: operant-runtime
+              value: /tmp/operant
+            - name: OPERANT_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: operant-runtime
+                  key: OPERANT_DATABASE_URL
+            - name: OPERANT_BOOTSTRAP_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: operant-runtime
+                  key: OPERANT_BOOTSTRAP_TOKEN
+            - name: OPERANT_SECRET_MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: operant-runtime
+                  key: OPERANT_SECRET_MASTER_KEY
           volumeMounts:
-            - name: data
-              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+          startupProbe:
+            httpGet:
+              path: /ready
+              port: http
+            periodSeconds: 2
+            failureThreshold: 60
           readinessProbe:
             httpGet:
               path: /ready
               port: http
-            initialDelaySeconds: 5
-            periodSeconds: 10
+            periodSeconds: 5
+            failureThreshold: 2
           livenessProbe:
             httpGet:
-              path: /health
+              path: /live
               port: http
-            initialDelaySeconds: 20
-            periodSeconds: 20
+            periodSeconds: 10
+            failureThreshold: 3
       volumes:
-        - name: data
-          persistentVolumeClaim:
-            claimName: operant-data
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service

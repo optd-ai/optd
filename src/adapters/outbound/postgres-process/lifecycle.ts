@@ -1,3 +1,5 @@
+export const MIN_POSTGRES_MAJOR = 17;
+
 export type PostgresRuntimeMode = "external" | "app_managed";
 
 export type PostgresRuntimePlan = {
@@ -178,6 +180,23 @@ export async function stopManagedPostgres(pg: ManagedPostgres): Promise<void> {
   await pg.process.status.catch(() => undefined);
 }
 
+export function assertSupportedPostgresVersionNumber(
+  serverVersionNum: string | number,
+): number {
+  const numeric = typeof serverVersionNum === "number"
+    ? serverVersionNum
+    : Number(serverVersionNum);
+  const major = Math.floor(numeric / 10_000);
+  if (
+    !Number.isSafeInteger(numeric) || numeric <= 0 || major < MIN_POSTGRES_MAJOR
+  ) {
+    throw new Error(
+      `unsupported PostgreSQL server version: Operant requires PostgreSQL ${MIN_POSTGRES_MAJOR} or newer`,
+    );
+  }
+  return major;
+}
+
 export function assertSupportedPostgresUrl(databaseUrl: string): void {
   let protocol: string;
   try {
@@ -232,7 +251,7 @@ async function runChecked(command: string, args: string[]): Promise<void> {
   if (!out.success) throw new Error(new TextDecoder().decode(out.stderr));
 }
 
-async function freePort(): Promise<number> {
+function freePort(): number {
   const listener = Deno.listen({ hostname: "127.0.0.1", port: 0 });
   const port = (listener.addr as Deno.NetAddr).port;
   listener.close();
