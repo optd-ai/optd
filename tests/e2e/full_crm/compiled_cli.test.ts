@@ -122,6 +122,38 @@ for (const logLevel of ["info", "trace"] as const) {
           capability: "changeset.approval.decide",
           resource: "system:changeset-approval",
         }]);
+        const persistedRelationshipPolicy = await query<{
+          capability: string;
+          resource: string;
+        }>(
+          harness.server.sql,
+          `select pr.capability,pr.resource
+           from policy_rules pr
+           join policy_definition_versions pdv
+             on pdv.id=pr.policy_definition_version_id
+          where pdv.policy_id=$1 and pr.rule_name='crm_admin_relationship_links'
+          order by pr.resource,pr.capability`,
+          [`${CRM}:sales_access`],
+        );
+        assertEquals(
+          persistedRelationshipPolicy.rows,
+          [
+            "activity_contact",
+            "activity_lead",
+            "activity_opportunity",
+            "contact_company",
+            "note_lead",
+            "opportunity_company",
+            "opportunity_contact",
+            "opportunity_viewer",
+            "task_opportunity",
+          ].flatMap((name) =>
+            ["link", "unlink"].map((capability) => ({
+              capability,
+              resource: `${CRM}:${name}`,
+            }))
+          ),
+        );
 
         const metadataCases = [
           ["home"],
@@ -836,6 +868,34 @@ for (const logLevel of ["info", "trace"] as const) {
           viewerLaunchers.push(login.launcher);
           await ok(Promise.resolve(login.result), output);
         }
+        const relationshipAuthor = json(
+          await ok(
+            replacementHuman.launcher.runOptctl(["--json", "auth", "whoami"]),
+            output,
+          ),
+        );
+        assertEquals(relationshipAuthor.data.id, humanUserId);
+        const relationshipAuthority = await query<{ count: number }>(
+          harness.server.sql,
+          `select count(*)::int count
+             from role_assignments ra
+             join policy_rules pr on pr.role_id=ra.role_id
+             join policy_definition_versions pdv
+               on pdv.id=pr.policy_definition_version_id and pdv.active
+             join policy_assignments pa
+               on pa.policy_definition_version_id=pdv.id and pa.active
+            where ra.principal_id=$1 and ra.active
+              and ra.role_id=$2 and ra.project_id=$3
+              and pr.capability='link' and pr.resource=$4
+              and pa.boundary_type='all_projects'`,
+          [
+            humanUserId,
+            `${CRM}:crm_admin`,
+            projectId,
+            `${CRM}:opportunity_viewer`,
+          ],
+        );
+        assertEquals(relationshipAuthority.rows[0].count, 1);
         const viewerLink = json(
           await ok(
             harness.runJson(

@@ -279,6 +279,127 @@ Deno.test("strict pack loader broadly rejects superseded schema and unsafe sourc
   }
 });
 
+Deno.test("relationship policy targets resolve canonically with strict vocabulary", async () => {
+  const role = `kind: Role
+apiVersion: operant.dev/v1
+metadata: {name: manager}
+spec:
+  display_name: Manager
+  description: Manages lead relationships.
+  axi: {}
+`;
+  const relationship = `kind: Relationship
+apiVersion: operant.dev/v1
+metadata: {name: lead_link}
+spec:
+  from: {resource: lead}
+  to: {resource: lead}
+  axi: {}
+`;
+  const policy = (
+    target: string,
+    actions = "link, unlink",
+    clause = "",
+  ) =>
+    `kind: Policy
+apiVersion: operant.dev/v1
+metadata: {name: access}
+spec:
+  default_assignment: all_projects
+  rules:
+    - name: manage_links
+      effect: allow
+      roles: [manager]
+      actions: [${actions}]
+      resources: [${target}]
+${clause}
+  axi: {}
+`;
+  const files = (
+    target: string,
+    actions?: string,
+    clause?: string,
+  ): UploadedPackFile[] => [
+    { path: "pack.yaml", text: root },
+    { path: "resources/lead.yaml", text: resource },
+    { path: "relationships/lead_link.yaml", text: relationship },
+    { path: "roles/manager.yaml", text: role },
+    { path: "policies/access.yaml", text: policy(target, actions, clause) },
+  ];
+
+  for (const target of ["lead_link", "operant/test:lead_link"]) {
+    const loaded = await loadPackFromFiles(files(target));
+    const rule = (loaded.policies.access.spec.rules as Array<{
+      actions: string[];
+      resources: string[];
+    }>)[0];
+    assertEquals(rule.actions, ["link", "unlink"]);
+    assertEquals(rule.resources, ["operant/test:lead_link"]);
+    assertEquals(
+      ((loaded.normalized.policies as Record<string, Record<string, unknown>>)
+        .access.spec as { rules: Array<{ resources: string[] }> }).rules[0]
+        .resources,
+      ["operant/test:lead_link"],
+    );
+  }
+
+  for (
+    const target of [
+      "missing_link",
+      "operant/test:missing_link",
+      "other/pack:lead_link",
+    ]
+  ) {
+    await assertRejects(
+      () => loadPackFromFiles(files(target)),
+      Error,
+      "policy target",
+      target,
+    );
+  }
+
+  for (
+    const action of [
+      "read",
+      "read_archived",
+      "history.read",
+      "create",
+      "update",
+      "archive",
+      "transition",
+      "comment",
+    ]
+  ) {
+    await assertRejects(
+      () => loadPackFromFiles(files("lead_link", action)),
+      Error,
+      "relationship policy targets support only link and unlink",
+      action,
+    );
+  }
+  await assertRejects(
+    () =>
+      loadPackFromFiles(files("lead_link", "link", "      where: name == 'x'")),
+    Error,
+    "do not support where or relation clauses",
+  );
+  await assertRejects(
+    () =>
+      loadPackFromFiles(
+        files(
+          "lead_link",
+          "unlink",
+          "      relation: {relationship: lead_link, object_side: from, subject_side: to, subject: actor.id}",
+        ),
+      ),
+    Error,
+    "do not support where or relation clauses",
+  );
+
+  const canonical = parseYamlJsonObject(policy("lead_link"), "policy");
+  assertEquals(validatePackDocument("Policy", canonical), []);
+});
+
 Deno.test("approval policy vocabulary is exact, paired, and canonically preserved", async () => {
   const role = `kind: Role
 apiVersion: operant.dev/v1

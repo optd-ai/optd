@@ -48,6 +48,25 @@ spec:
         - operant/crm:activity_type
       axi:
         summary: CRM administrators may manage every CRM resource.
+    - name: crm_admin_relationship_links
+      effect: allow
+      roles:
+        - operant/crm:crm_admin
+      actions:
+        - link
+        - unlink
+      resources:
+        - operant/crm:activity_contact
+        - operant/crm:activity_lead
+        - operant/crm:activity_opportunity
+        - operant/crm:contact_company
+        - operant/crm:note_lead
+        - operant/crm:opportunity_company
+        - operant/crm:opportunity_contact
+        - operant/crm:opportunity_viewer
+        - operant/crm:task_opportunity
+      axi:
+        summary: CRM administrators may create and remove every CRM relationship.
     - name: sales_manager_approval
       effect: allow
       roles:

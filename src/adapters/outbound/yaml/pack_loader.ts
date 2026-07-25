@@ -851,12 +851,29 @@ function validateReferences(pack: LoadedPack) {
       for (const role of asArray(r.roles, "roles")) {
         local(role, pack.roles, `${def.path}.roles`);
       }
-      for (const resource of asArray(r.resources, "resources")) {
-        if (resource !== "system:changeset-approval") {
-          local(resource, pack.resources, `${def.path}.resources`);
+      const policyTargets = asArray(r.resources, "resources");
+      let targetsRelationship = false;
+      for (const resource of policyTargets) {
+        if (resource === "system:changeset-approval") continue;
+        if (typeof resource !== "string") continue;
+        const prefix = `${pack.publisher}/${pack.name}:`;
+        if (!resource.startsWith(prefix)) {
+          throw new Error(
+            `${def.path}.resources: policy target is not an active pack definition ${resource}`,
+          );
         }
+        const name = resource.slice(prefix.length);
+        const isResource = name in pack.resources;
+        const isRelationship = name in pack.relationships;
+        if (isResource === isRelationship) {
+          throw new Error(
+            `${def.path}.resources: policy target must resolve exactly one active resource or relationship ${resource}`,
+          );
+        }
+        targetsRelationship ||= isRelationship;
       }
-      for (const action of asArray(r.actions, "actions")) {
+      const policyActions = asArray(r.actions, "actions");
+      for (const action of policyActions) {
         if (typeof action !== "string" || action === "*") {
           throw new Error(
             `${def.path}: wildcard or non-string policy action is not allowed`,
@@ -876,6 +893,20 @@ function validateReferences(pack: LoadedPack) {
           );
         } else if (!DOMAIN_POLICY_ACTIONS.has(action)) {
           throw new Error(`${def.path}: unknown policy action ${action}`);
+        }
+      }
+      if (targetsRelationship) {
+        for (const action of policyActions) {
+          if (action !== "link" && action !== "unlink") {
+            throw new Error(
+              `${def.path}: relationship policy targets support only link and unlink actions`,
+            );
+          }
+        }
+        if (r.where !== undefined || r.relation !== undefined) {
+          throw new Error(
+            `${def.path}: relationship policy targets do not support where or relation clauses`,
+          );
         }
       }
     }
