@@ -25,6 +25,8 @@ spec:
       - Inspect hook notify_crm_change behavior and guidance before relying on it.
     help:
       - optctl metadata hook operant/crm:notify_crm_change
-  secrets: []
+  secrets:
+    - slot: crm_webhook_token
+      env: CRM_WEBHOOK_TOKEN
   effects:
     operations: []
