@@ -6,7 +6,12 @@ deno test --allow-read --allow-write --allow-env --allow-net --allow-run --allow
   tests/unit/runtime_artifacts.test.ts tests/integration/postgres_lifecycle.test.ts
 
 printf '\n== real container modes ==\n'
-release_image="operant:release-gate-$(git rev-parse --short HEAD)"
+release_revision="$(git rev-parse HEAD)"
+release_image="operant:release-gate-${release_revision:0:7}"
+docker build --pull=false --no-cache \
+  --build-arg "OPERANT_REVISION=$release_revision" \
+  --build-arg "OPERANT_VERSION=release-gate" \
+  --tag "$release_image" .
 export OPERANT_CONTAINER_IMAGE="$release_image"
 deno task container-smoke
 
