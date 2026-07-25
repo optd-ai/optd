@@ -84,3 +84,73 @@ Deno.test("seed reconcile preserves UUID extras and changes only declared differ
   assertEquals(Object.hasOwn(update, "unset"), false);
   assertEquals(Object.hasOwn(update, "archive"), false);
 });
+
+Deno.test("seed reconcile normalizes PostgreSQL scalar representations by frozen descriptors", () => {
+  const descriptors = {
+    count: { type: "integer" },
+    amount: { type: "decimal" },
+    due: { type: "date" },
+    occurs_at: { type: "timestamp" },
+    enabled: { type: "boolean" },
+    label: { type: "string" },
+    owner_id: { type: "string", ref: "test/demo:user" },
+    note: { type: "string", nullable: true },
+  };
+  const desired = {
+    count: 42,
+    amount: "1.23",
+    due: "2026-07-24",
+    occurs_at: "2026-07-24T10:11:12Z",
+    enabled: true,
+    label: "Exact",
+    owner_id: object,
+    note: null,
+  };
+  const current = {
+    id: object,
+    version: 3,
+    count: "42",
+    amount: "001.2300",
+    due: new Date("2026-07-24T00:00:00.000Z"),
+    occurs_at: new Date("2026-07-24T10:11:12.000Z"),
+    enabled: true,
+    label: "Exact",
+    owner_id: object,
+    note: null,
+  };
+  assertEquals(
+    reconcileSeedRow(desired, current, context, descriptors),
+    null,
+  );
+});
+
+Deno.test("seed reconcile does not coerce unsafe integers or boolean, string, ref, and null values", () => {
+  const desired = {
+    unsafe: Number.MAX_SAFE_INTEGER + 1,
+    enabled: true,
+    label: "1",
+    owner_id: object,
+    note: null,
+  };
+  const update = reconcileSeedRow(
+    desired,
+    {
+      id: object,
+      version: 4,
+      unsafe: "9007199254740992",
+      enabled: "true",
+      label: 1,
+      owner_id: object.toUpperCase(),
+      note: "null",
+    },
+    context,
+    {
+      unsafe: { type: "integer" },
+      enabled: { type: "boolean" },
+      label: { type: "string" },
+      owner_id: { type: "string", ref: "test/demo:user" },
+      note: { type: "string", nullable: true },
+    },
+  )!;
+  assertEquals(update.set, desired);
+});

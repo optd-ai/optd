@@ -59,7 +59,9 @@ export function makeStageSeedsService(
           [publisher, pack],
         )).rows[0];
         if (!revision) return invalid("active pack revision was not found");
-        const seeds = record(record(revision.normalized).seeds);
+        const normalized = record(revision.normalized);
+        const seeds = record(normalized.seeds);
+        const resources = record(normalized.resources);
         const selected = (raw.all ? Object.keys(seeds) : names).sort();
         if (
           !selected.length || selected.some((name) => !record(seeds[name]))
@@ -89,11 +91,15 @@ export function makeStageSeedsService(
           const identity = resource.includes(":")
             ? resource
             : `${publisher}/${pack}:${resource}`;
+          const resourceName = resource.split(":").at(-1) ?? resource;
           const table = (await query<{ table_name: string }>(
             sql,
             `select table_name from pack_runtime_tables where publisher=$1 and pack_name=$2 and definition_kind='resource' and definition_name=$3`,
-            [publisher, pack, resource.split(":").at(-1)],
+            [publisher, pack, resourceName],
           )).rows[0]?.table_name;
+          const fieldDescriptors = record(
+            record(record(resources[resourceName]).spec).fields,
+          );
           if (!table || !Array.isArray(spec.rows)) {
             return invalid(
               "seed resource is unavailable",
@@ -143,7 +149,7 @@ export function makeStageSeedsService(
               operationKey: `${name}_${operations.length}`,
               projectId: raw.project_id,
               resource: identity,
-            });
+            }, fieldDescriptors);
             if (reconciled) {
               operations.push(reconciled);
               operationAuthority[String(reconciled.key)] =
@@ -221,6 +227,7 @@ export function reconcileSeedRow(
   desired: Record<string, unknown>,
   current: Record<string, unknown> | undefined,
   context: { operationKey: string; projectId: string; resource: string },
+  fieldDescriptors: Record<string, unknown> = {},
 ): Record<string, unknown> | null {
   if (!current) {
     return {
@@ -233,7 +240,11 @@ export function reconcileSeedRow(
   }
   const changed = Object.fromEntries(
     Object.entries(desired).filter(([field, value]) =>
-      canonicalJson(current[field]) !== canonicalJson(value)
+      !seedFieldValuesEqual(
+        current[field],
+        value,
+        record(fieldDescriptors[field]),
+      )
     ),
   );
   if (!Object.keys(changed).length) return null;
@@ -246,6 +257,73 @@ export function reconcileSeedRow(
     expected_version: Number(current.version),
     set: changed,
   };
+}
+
+function seedFieldValuesEqual(
+  current: unknown,
+  desired: unknown,
+  descriptor: Record<string, unknown>,
+): boolean {
+  if (current === null || desired === null) return current === desired;
+  switch (descriptor.type) {
+    case "integer":
+      return integerValue(current) !== null &&
+        integerValue(current) === integerValue(desired);
+    case "decimal":
+      return decimalValue(current) !== null &&
+        decimalValue(current) === decimalValue(desired);
+    case "date":
+      return dateValue(current) !== null &&
+        dateValue(current) === dateValue(desired);
+    case "timestamp":
+      return timestampValue(current) !== null &&
+        timestampValue(current) === timestampValue(desired);
+    default:
+      return canonicalJson(current) === canonicalJson(desired);
+  }
+}
+
+function integerValue(value: unknown): string | null {
+  if (typeof value === "number") {
+    return Number.isSafeInteger(value) ? String(value) : null;
+  }
+  if (typeof value !== "string" || !/^-?(?:0|[1-9]\d*)$/.test(value)) {
+    return null;
+  }
+  try {
+    return BigInt(value).toString();
+  } catch {
+    return null;
+  }
+}
+
+function decimalValue(value: unknown): string | null {
+  if (typeof value !== "string" || !/^-?\d+(?:\.\d+)?$/.test(value)) {
+    return null;
+  }
+  const negative = value.startsWith("-");
+  const unsigned = negative ? value.slice(1) : value;
+  const [rawInteger, rawFraction = ""] = unsigned.split(".");
+  const integer = rawInteger.replace(/^0+(?=\d)/, "");
+  const fraction = rawFraction.replace(/0+$/, "");
+  const magnitude = fraction ? `${integer}.${fraction}` : integer;
+  return `${negative && magnitude !== "0" ? "-" : ""}${magnitude}`;
+}
+
+function dateValue(value: unknown): string | null {
+  if (value instanceof Date && !Number.isNaN(value.valueOf())) {
+    return value.toISOString().slice(0, 10);
+  }
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)
+    ? value
+    : null;
+}
+
+function timestampValue(value: unknown): string | null {
+  if (!(value instanceof Date) && typeof value !== "string") return null;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.valueOf())) return null;
+  return date.toISOString().replace(/\.000Z$/, "Z");
 }
 
 function invalid(message: string): Result<never> {

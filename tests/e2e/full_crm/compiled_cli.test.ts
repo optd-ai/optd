@@ -9,6 +9,7 @@ import {
 import { decode as decodeToon } from "npm:@toon-format/toon";
 import { join } from "jsr:@std/path";
 import { isUuidV7 } from "../../../src/domain/ids/uuid_v7.ts";
+import { query } from "../../../src/adapters/outbound/postgres/client.ts";
 import {
   type CliLauncher,
   type CliResult,
@@ -372,6 +373,7 @@ Deno.test({
 
       // Frozen idempotency contract: a second complete seed reconciliation is a
       // successful no-op rather than a failed changeset.
+      const beforeSecondSeed = await persistenceCounts(harness);
       const secondSeed = json(
         await ok(
           replacementHuman.launcher.runOptctl([
@@ -387,6 +389,7 @@ Deno.test({
         ),
       );
       assertEquals(secondSeed.data.stage, null);
+      assertEquals(await persistenceCounts(harness), beforeSecondSeed);
     } finally {
       await assertNoLeaks(harness, output).catch(() => undefined);
       for (const value of launchers.reverse()) {
@@ -456,6 +459,15 @@ function assertSubstantiveParity(actual: any, expected: any) {
     return value;
   };
   assertEquals(normalize(actual), normalize(expected));
+}
+async function persistenceCounts(harness: LiveHarness) {
+  const counts = await query<{ stages: string; versions: string }>(
+    harness.server.sql,
+    `select
+       (select count(*)::text from staged_changesets) stages,
+       (select count(*)::text from object_versions) versions`,
+  );
+  return counts.rows[0];
 }
 async function assertNoLeaks(harness: LiveHarness, output: string[]) {
   const diagnostics = await harness.diagnostics();
