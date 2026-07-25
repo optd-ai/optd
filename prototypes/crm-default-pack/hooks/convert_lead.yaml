@@ -40,7 +40,7 @@ spec:
           - link
       - resource: operant/crm:lead
         ops:
-          - transition
+          - update
       - resource: operant/crm:opportunity
         ops:
           - create

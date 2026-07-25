@@ -3,6 +3,10 @@ const lead = envelope.input.lead;
 const leadId = envelope.input.input.lead_id;
 const companyName = lead.company_name ?? `${lead.name ?? "New"} Company`;
 const contactName = lead.name ?? "New Contact";
+const present = (fields: Record<string, unknown>) =>
+  Object.fromEntries(
+    Object.entries(fields).filter(([, value]) => value !== null),
+  );
 console.error(`convert_lead generating operations for ${leadId}`);
 console.log(JSON.stringify({
   operations: [
@@ -10,39 +14,38 @@ console.log(JSON.stringify({
       op: "create",
       resource: "operant/crm:company",
       key: "company",
-      fields: {
+      fields: present({
         name: companyName,
         email: lead.email,
         phone: lead.phone,
         owner_id: lead.owner_id,
-      },
+      }),
     },
     {
       op: "create",
       resource: "operant/crm:contact",
       key: "contact",
-      fields: {
+      fields: present({
         name: contactName,
         email: lead.email,
         phone: lead.phone,
         owner_id: lead.owner_id,
-      },
+      }),
     },
     {
       op: "create",
       resource: "operant/crm:opportunity",
       key: "opportunity",
-      fields: {
+      fields: present({
         name: `${companyName} opportunity`,
         company_id: { $ref: "company.object_id" },
         contact_id: { $ref: "contact.object_id" },
         lead_id: leadId,
-        stage: "qualified",
         expected_revenue: "0",
         probability: 30,
         owner_id: lead.owner_id,
         sales_team_id: lead.sales_team_id,
-      },
+      }),
     },
     {
       op: "link",
@@ -66,10 +69,10 @@ console.log(JSON.stringify({
       fields: { role: "decision_maker", primary: true },
     },
     {
-      op: "transition",
+      op: "update",
       resource: "operant/crm:lead",
       object_id: leadId,
-      to: "converted",
+      set: { status: "converted" },
     },
   ],
 }));

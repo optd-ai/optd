@@ -61,6 +61,7 @@ export type ActionStageReadDependency = Readonly<{
 }>;
 export type ActionStageHookInput = Readonly<{
   action: string;
+  project_id: string;
   input: Readonly<Record<string, unknown>>;
   reads: Readonly<Record<string, unknown>>;
   read_dependencies?: readonly ActionStageReadDependency[];
@@ -230,18 +231,36 @@ export class TrustedStageHookCoordinator implements StageHookCoordinator {
       }
       const authored: AuthoredOperation[] = [];
       for (let index = 0; index < emitted.length; index++) {
-        if (!authoredOperationContract.check(emitted[index])) {
+        const rawOperation = emitted[index];
+        if (
+          isRecord(rawOperation) && Object.hasOwn(rawOperation, "project_id") &&
+          rawOperation.project_id !== input.project_id
+        ) {
+          throw new StageHookError(
+            "hook_invalid_output",
+            "action hook operation project conflicts with request project",
+            {
+              hook: declaration.hook,
+              operation_index: index,
+            },
+          );
+        }
+        const boundOperation = isRecord(rawOperation) &&
+            !Object.hasOwn(rawOperation, "project_id")
+          ? { ...rawOperation, project_id: input.project_id }
+          : rawOperation;
+        if (!authoredOperationContract.check(boundOperation)) {
           throw new StageHookError(
             "hook_invalid_output",
             "action hook operation does not satisfy changeset.operations.v1",
             {
               hook: declaration.hook,
               operation_index: index,
-              issues: authoredOperationContract.issues(emitted[index]),
+              issues: authoredOperationContract.issues(boundOperation),
             },
           );
         }
-        authored.push(emitted[index]);
+        authored.push(boundOperation);
       }
       enforceEffects(declaration, authored);
       const priorLength = operations.length;

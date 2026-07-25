@@ -295,6 +295,17 @@ Deno.test({
       const revokedBody = await revoked.text();
       assertEquals(revokedBody.includes("Bearer "), false);
       assertEquals(revokedBody.includes(String(redeemed.data.token)), false);
+      const revokedSameProcess = await agent.runOptctl([
+        "--json",
+        "auth",
+        "whoami",
+      ]);
+      output.push(revokedSameProcess.stdout, revokedSameProcess.stderr);
+      assertEquals(revokedSameProcess.code, 1);
+      assertEquals(
+        revokedSameProcess.stdout.includes(String(redeemed.data.token)),
+        false,
+      );
 
       const adminLoginResponse = await fetch(
         `${harness.baseUrl}/api/v1/auth/login`,
@@ -584,7 +595,9 @@ Deno.test({
       assertEquals(
         convertLeadResult.code,
         0,
-        JSON.stringify(await harness.diagnostics()),
+        `${convertLeadResult.stderr}\n${convertLeadResult.stdout}\n${
+          JSON.stringify(await harness.diagnostics())
+        }`,
       );
       const convertLead = json(convertLeadResult);
       assertEquals(convertLead.data.source.kind, "action");

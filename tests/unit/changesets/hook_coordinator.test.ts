@@ -98,7 +98,7 @@ Deno.test("trusted action-stage seam enforces declared operation effects", async
   const action = {
     ...declaration(
       1,
-      `console.log(JSON.stringify({operations:[{op:"create",project_id:"0198c4ba-42b8-7000-8000-000000000010",resource:"operant/test:item",fields:{name:"generated"}}]}));`,
+      `console.log(JSON.stringify({operations:[{op:"create",resource:"operant/test:item",fields:{name:"generated"}}]}));`,
     ),
     phase: "action.stage",
     operation_key: null,
@@ -117,6 +117,7 @@ Deno.test("trusted action-stage seam enforces declared operation effects", async
   } as ActionStageHookDeclaration;
   const result = await coordinator.runActionStage({
     action: "operant/test:generate",
+    project_id: "0198c4ba-42b8-7000-8000-000000000010",
     input: { name: "generated" },
     reads: { item: { id: "0198c4ba-42b8-7000-8000-000000000020" } },
     read_dependencies: [{
@@ -145,6 +146,20 @@ Deno.test("trusted action-stage seam enforces declared operation effects", async
     status: "ready",
   });
   equals(result.hook_executions[0].output_schema, "changeset.operations.v1");
+  equals(
+    Object.hasOwn(
+      (result.hook_executions[0].output.operations as Record<
+        string,
+        unknown
+      >[])[0],
+      "project_id",
+    ),
+    false,
+  );
+  equals(
+    result.hook_executions[0].added_operations[0].project_id,
+    "0198c4ba-42b8-7000-8000-000000000010",
+  );
   equals(result.hook_executions[0].added_operations.length, 1);
   equals(
     result.read_dependencies[0].object_version_id,
@@ -165,6 +180,7 @@ Deno.test("trusted action-stage seam enforces declared operation effects", async
         object_version_id: "0198c4ba-42b8-7000-8000-000000000021",
       }],
       declarations: [{ ...action, effects: [] }],
+      project_id: "0198c4ba-42b8-7000-8000-000000000010",
       authority_snapshot: result.hook_executions[0].authority_snapshot,
     });
   } catch (error) {
@@ -187,6 +203,7 @@ Deno.test("trusted action-stage seam enforces declared operation effects", async
         object_version_id: "0198c4ba-42b8-7000-8000-000000000021",
       }],
       declarations: [action],
+      project_id: "0198c4ba-42b8-7000-8000-000000000010",
       authority_snapshot: result.hook_executions[0].authority_snapshot,
       limits: {
         maxOperations: 0,
@@ -211,6 +228,7 @@ Deno.test("trusted action-stage seam enforces declared operation effects", async
         ...action,
         input_mapping: { missing: "$reads.missing" },
       }],
+      project_id: "0198c4ba-42b8-7000-8000-000000000010",
       authority_snapshot: result.hook_executions[0].authority_snapshot,
     });
   } catch (error) {
@@ -218,6 +236,33 @@ Deno.test("trusted action-stage seam enforces declared operation effects", async
       error.code === "hook_input_invalid";
   }
   equals(undeclaredRead, true);
+
+  let crossProject = false;
+  try {
+    await coordinator.runActionStage({
+      action: "operant/test:generate",
+      project_id: "0198c4ba-42b8-7000-8000-000000000010",
+      input: {},
+      reads: { item: {} },
+      read_dependencies: [{
+        name: "item",
+        project_id: "0198c4ba-42b8-7000-8000-000000000010",
+        resource_identity: "operant/test:item",
+        object_id: "0198c4ba-42b8-7000-8000-000000000020",
+        object_version_id: "0198c4ba-42b8-7000-8000-000000000021",
+      }],
+      declarations: [{
+        ...action,
+        script_content:
+          `console.log(JSON.stringify({operations:[{op:"create",project_id:"0198c4ba-42b8-7000-8000-000000000099",resource:"operant/test:item",fields:{name:"wrong project"}}]}));`,
+      }],
+      authority_snapshot: result.hook_executions[0].authority_snapshot,
+    });
+  } catch (error) {
+    crossProject = error instanceof Error && "code" in error &&
+      error.code === "hook_invalid_output";
+  }
+  equals(crossProject, true);
 });
 
 function equals(actual: unknown, expected: unknown): void {

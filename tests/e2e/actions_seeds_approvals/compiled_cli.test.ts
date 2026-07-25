@@ -84,7 +84,7 @@ for (const trace of [false, true]) {
           "stage",
           "test/actionproof:generate",
           "--input",
-          JSON.stringify({ project_id: projectId, source_id: read.id }),
+          JSON.stringify({ source_id: read.id }),
         ]);
         assertEquals(action.code, 0, action.stderr);
         const actionData = JSON.parse(action.stdout).data;
@@ -138,7 +138,7 @@ for (const trace of [false, true]) {
           "stage",
           "test/actionproof:generate",
           "--input",
-          JSON.stringify({ project_id: projectId, source_id: uuidV7() }),
+          JSON.stringify({ source_id: uuidV7() }),
         ]);
         assertEquals(missingRead.code, 1);
         const beforeSeed = await stageCount(harness.server.sql);

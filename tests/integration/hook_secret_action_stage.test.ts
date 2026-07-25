@@ -78,7 +78,8 @@ Deno.test({
       };
       const result = await coordinator.runActionStage({
         action: "test/actionproof:generate",
-        input: { project_id: projectId, source_id: read.id },
+        project_id: projectId,
+        input: { source_id: read.id },
         reads: {
           source: { name: read.name, status: read.status },
         },
@@ -107,6 +108,49 @@ Deno.test({
         true,
       );
       assertEquals(result.operation_graph_digest.startsWith("sha256:"), true);
+      assertEquals(
+        "project_id" in
+          (result.hook_executions[0].output.operations as Record<
+            string,
+            unknown
+          >[])[0],
+        false,
+      );
+      assertEquals(result.added_operations[0].project_id, projectId);
+
+      const explicitProject = await coordinator.runActionStage({
+        action: "test/actionproof:generate",
+        project_id: projectId,
+        input: { source_id: read.id },
+        reads: { source: { name: read.name, status: read.status } },
+        read_dependencies: [dependency],
+        declarations: [{
+          ...declaration,
+          script_content:
+            `console.log(JSON.stringify({operations:[{op:"create",project_id:"${projectId}",resource:"test/actionproof:target",fields:{name:"same project",status:"ready"}}]}));`,
+        }],
+        authority_snapshot: authority,
+      });
+      assertEquals(explicitProject.added_operations[0].project_id, projectId);
+
+      const otherProjectId = uuidV7();
+      await assertStageError(
+        () =>
+          coordinator.runActionStage({
+            action: "test/actionproof:generate",
+            project_id: projectId,
+            input: { source_id: read.id },
+            reads: { source: { name: read.name, status: read.status } },
+            read_dependencies: [dependency],
+            declarations: [{
+              ...declaration,
+              script_content:
+                `console.log(JSON.stringify({operations:[{op:"create",project_id:"${otherProjectId}",resource:"test/actionproof:target",fields:{name:"cross project",status:"ready"}}]}));`,
+            }],
+            authority_snapshot: authority,
+          }),
+        "hook_invalid_output",
+      );
 
       const publicStage = await harness.runOptctl([
         "--json",
@@ -116,7 +160,7 @@ Deno.test({
         "stage",
         "test/actionproof:generate",
         "--input",
-        JSON.stringify({ project_id: projectId, source_id: read.id }),
+        JSON.stringify({ source_id: read.id }),
       ]);
       assertEquals(publicStage.code, 0, publicStage.stderr);
       const staged = JSON.parse(publicStage.stdout).data;
@@ -149,7 +193,7 @@ Deno.test({
         "stage",
         "test/actionproof:generate",
         "--input",
-        JSON.stringify({ project_id: projectId, source_id: read.id }),
+        JSON.stringify({ source_id: read.id }),
       ]);
       assertEquals(unavailable.code, 1);
       assertEquals(provider.attempts.length, 2);
@@ -180,7 +224,8 @@ Deno.test({
         () =>
           coordinator.runActionStage({
             action: "test/actionproof:generate",
-            input: { project_id: projectId, source_id: read.id },
+            project_id: projectId,
+            input: { source_id: read.id },
             reads: {},
             read_dependencies: [dependency],
             declarations: [declaration],
@@ -194,7 +239,8 @@ Deno.test({
         () =>
           coordinator.runActionStage({
             action: "test/actionproof:generate",
-            input: { project_id: projectId, source_id: read.id },
+            project_id: projectId,
+            input: { source_id: read.id },
             reads: {
               source: {
                 name: read.name,
@@ -213,7 +259,8 @@ Deno.test({
         () =>
           coordinator.runActionStage({
             action: "test/actionproof:generate",
-            input: { project_id: projectId, source_id: read.id },
+            project_id: projectId,
+            input: { source_id: read.id },
             reads: {
               source: {
                 name: read.name,
@@ -422,7 +469,7 @@ export async function writePack(
   );
   await Deno.writeTextFile(
     `${root}/actions/generate.yaml`,
-    `kind: Action\napiVersion: operant.dev/v1\nmetadata: { name: generate }\nspec:\n  input:\n    project_id: { type: string, required: true, format: uuid }\n    source_id: { type: string, required: true, format: uuid }\n  reads:\n    source:\n      resource: source\n      id_from: '$action.input.source_id'\n      fields: [name, status]\n      required: true\n  availability:\n    resource: source\n    states: [ready]\n    condition: 'status == "ready"'\n  axi: {}\n`,
+    `kind: Action\napiVersion: operant.dev/v1\nmetadata: { name: generate }\nspec:\n  input:\n    source_id: { type: string, required: true, format: uuid }\n  reads:\n    source:\n      resource: source\n      id_from: '$action.input.source_id'\n      fields: [name, status]\n      required: true\n  availability:\n    resource: source\n    states: [ready]\n    condition: 'status == "ready"'\n  axi: {}\n`,
   );
   await Deno.writeTextFile(
     `${root}/hooks/generate.yaml`,
@@ -430,8 +477,8 @@ export async function writePack(
   );
   await Deno.writeTextFile(
     `${root}/hooks/generate.ts`,
-    `const envelope=JSON.parse(await new Response(Deno.stdin.readable).text()); const read=envelope.input.read; const request=envelope.input.request; if (Object.keys(read).sort().join(',')!=="name,status" || read.status!=="ready") throw new Error("uncurated read"); await fetch(${
+    `const envelope=JSON.parse(await new Response(Deno.stdin.readable).text()); const read=envelope.input.read; if (Object.keys(read).sort().join(',')!=="name,status" || read.status!=="ready" || "project_id" in envelope.input.request) throw new Error("uncurated read"); await fetch(${
       JSON.stringify(providerUrl)
-    }); console.log(JSON.stringify({operations:[{op:"create",key:"made",project_id:request.project_id,resource:"test/actionproof:target",fields:{name:read.name}},{op:"update",project_id:request.project_id,resource:"test/actionproof:target",object_id:{$ref:"made.object_id"},set:{status:"converted"}}]}));`,
+    }); console.log(JSON.stringify({operations:[{op:"create",key:"made",resource:"test/actionproof:target",fields:{name:read.name}},{op:"update",resource:"test/actionproof:target",object_id:{$ref:"made.object_id"},set:{status:"converted"}}]}));`,
   );
 }

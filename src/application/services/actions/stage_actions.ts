@@ -224,6 +224,7 @@ export function makeStageActionService(
         });
         const result = await coordinator.runActionStage({
           action: `${publisher}/${pack}:${name}`,
+          project_id: raw.project_id,
           input: raw.input,
           reads,
           read_dependencies: readDependencies,
