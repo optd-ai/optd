@@ -3,6 +3,7 @@ import {
   assert,
   assertEquals,
   assertExists,
+  assertMatch,
   assertNotEquals,
   assertStringIncludes,
 } from "jsr:@std/assert";
@@ -819,6 +820,7 @@ for (const logLevel of ["info", "trace"] as const) {
           username: string;
           password: string;
           id: string;
+          principalId: string;
         }> = [];
         for (const username of ["crm-viewer", "crm-unrelated"]) {
           const password = `${username}-${crypto.randomUUID()}`;
@@ -839,7 +841,12 @@ for (const logLevel of ["info", "trace"] as const) {
             ),
           );
           const id = String(created.data.id);
-          viewerCredentials.push({ username, password, id });
+          viewerCredentials.push({
+            username,
+            password,
+            id,
+            principalId: String(created.data.principal_id),
+          });
           await ok(
             replacementHuman.launcher.runOptctl([
               "--json",
@@ -889,7 +896,7 @@ for (const logLevel of ["info", "trace"] as const) {
               and pr.capability='link' and pr.resource=$4
               and pa.boundary_type='all_projects'`,
           [
-            humanUserId,
+            relationshipAuthor.data.principal_id,
             `${CRM}:crm_admin`,
             projectId,
             `${CRM}:opportunity_viewer`,
@@ -907,7 +914,7 @@ for (const logLevel of ["info", "trace"] as const) {
                   project_id: projectId,
                   relationship: `${CRM}:opportunity_viewer`,
                   from: opportunityId,
-                  to: viewerCredentials[0].id,
+                  to: viewerCredentials[0].principalId,
                 }],
               },
               replacementHuman.launcher,
@@ -923,6 +930,38 @@ for (const logLevel of ["info", "trace"] as const) {
             viewerLink.id,
           ]),
           output,
+        );
+        const exactViewerIdentity = json(
+          await ok(
+            viewerLaunchers[0].runOptctl(["--json", "auth", "whoami"]),
+            output,
+          ),
+        );
+        assertEquals(
+          exactViewerIdentity.data.principal_id,
+          viewerCredentials[0].principalId,
+        );
+        const viewerTable = (await query<{ table_name: string }>(
+          harness.server.sql,
+          `select table_name from pack_runtime_tables
+            where publisher='operant' and pack_name='crm'
+              and definition_kind='relationship'
+              and definition_name='opportunity_viewer'`,
+        )).rows[0].table_name;
+        assertMatch(viewerTable, /^[a-z0-9_]+$/);
+        const viewerTuple = await query<{
+          from_object_id: string;
+          to_object_id: string;
+        }>(
+          harness.server.sql,
+          `select from_object_id,to_object_id
+             from ${viewerTable}
+            where project_id=$1 and from_object_id=$2 and archived_at is null`,
+          [projectId, opportunityId],
+        );
+        assertEquals(
+          viewerTuple.rows[0]?.to_object_id,
+          viewerCredentials[0].principalId,
         );
         const exactViewerRead = await viewerLaunchers[0].runOptctl([
           "--json",
