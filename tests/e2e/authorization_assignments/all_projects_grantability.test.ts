@@ -19,7 +19,6 @@ Deno.test("compiled optctl grantability inherits all-project authority only into
       })).code,
       0,
     );
-    const root = await stored(harness);
     const first = await createProject(harness, "inherit-first");
     const second = await createProject(harness, "inherit-second");
     assertEquals(
@@ -129,7 +128,6 @@ Deno.test("compiled optctl grantability inherits all-project authority only into
       "must not cross into system",
     ]);
     assertEquals(systemRequest.code, 1);
-    await select(harness, admin);
 
     const exactRole = "operant/test:project_reviewer";
     await query(
@@ -142,7 +140,11 @@ Deno.test("compiled optctl grantability inherits all-project authority only into
       "insert into role_definition_versions(id,role_id,version,active) values($1,$2,1,true)",
       [uuidV7(), exactRole],
     );
-    await select(harness, root);
+    await login(
+      harness,
+      "inherit-root",
+      "all projects inheritance root password",
+    );
     const exact = await harness.runOptctl([
       "--json",
       "assignment",
@@ -172,7 +174,6 @@ Deno.test("compiled optctl grantability inherits all-project authority only into
       "must not cross Projects",
     ]);
     assertEquals(wrongProject.code, 1);
-    await select(harness, admin);
     const missingRole = await createRequest(harness, admin, [
       "--role",
       exactRole,
@@ -181,7 +182,11 @@ Deno.test("compiled optctl grantability inherits all-project authority only into
       "--reason",
       "missing role at decision time",
     ]);
-    await select(harness, root);
+    await login(
+      harness,
+      "inherit-root",
+      "all projects inheritance root password",
+    );
     const removeExactRole = await harness.runOptctl([
       "--json",
       "assignment",
@@ -194,18 +199,8 @@ Deno.test("compiled optctl grantability inherits all-project authority only into
       String(exactAssignment.version),
     ]);
     assertEquals(removeExactRole.code, 0, removeExactRole.stderr);
-    await select(harness, admin);
-    const missingApproval = await harness.runOptctl([
-      "--json",
-      "auth",
-      "approve",
-      missingRole,
-    ]);
-    assertEquals(missingApproval.code, 1);
-    assertEquals(
-      JSON.parse(missingApproval.stderr).error.code,
-      "authorization_insufficient",
-    );
+    const missingApproval = await decide(harness, admin.token, missingRole);
+    assertEquals(missingApproval.error.code, "authorization_insufficient");
 
     const pendingPolicyDisable = await createRequest(harness, admin, [
       "--role",
@@ -224,24 +219,18 @@ Deno.test("compiled optctl grantability inherits all-project authority only into
       "update policy_assignments set active=false where id=$1",
       [platformPolicy.id],
     );
-    const disabledPolicyDecision = await harness.runOptctl([
-      "--json",
-      "auth",
-      "approve",
+    const disabledPolicyDecision = await decide(
+      harness,
+      admin.token,
       pendingPolicyDisable,
-    ]);
-    assertEquals(disabledPolicyDecision.code, 1);
-    const authorityWithoutPolicy = await harness.runOptctl([
-      "--json",
-      "auth",
-      "authority",
-      "--project",
-      first,
-    ]);
-    assertEquals(
-      JSON.parse(authorityWithoutPolicy.stdout).data.capabilities,
-      [],
     );
+    assertEquals(disabledPolicyDecision.ok, false);
+    const authorityWithoutPolicy = await fetchAuthority(
+      harness,
+      admin.token,
+      first,
+    );
+    assertEquals(authorityWithoutPolicy.data.capabilities, []);
     await query(
       harness.server.sql,
       "update policy_assignments set active=true where id=$1",
@@ -256,7 +245,11 @@ Deno.test("compiled optctl grantability inherits all-project authority only into
       "--reason",
       "role current-state cutoff",
     ]);
-    await select(harness, root);
+    await login(
+      harness,
+      "inherit-root",
+      "all projects inheritance root password",
+    );
     const disabledRole = await harness.runOptctl([
       "--json",
       "assignment",
@@ -269,27 +262,20 @@ Deno.test("compiled optctl grantability inherits all-project authority only into
       String(assignmentBody.version),
     ]);
     assertEquals(disabledRole.code, 0, disabledRole.stderr);
-    await select(harness, admin);
-    const disabledRoleDecision = await harness.runOptctl([
-      "--json",
-      "auth",
-      "approve",
+    const disabledRoleDecision = await decide(
+      harness,
+      admin.token,
       pendingRoleDisable,
-    ]);
-    assertEquals(disabledRoleDecision.code, 1);
-    const authorityWithoutRole = await harness.runOptctl([
-      "--json",
-      "auth",
-      "authority",
-      "--project",
-      first,
-    ]);
-    assertEquals(
-      JSON.parse(authorityWithoutRole.stdout).data.effective_roles,
-      [],
     );
+    assertEquals(disabledRoleDecision.ok, false);
+    const authorityWithoutRole = await fetchAuthority(
+      harness,
+      admin.token,
+      first,
+    );
+    assertEquals(authorityWithoutRole.data.effective_roles, []);
     assertEquals(
-      JSON.parse(authorityWithoutRole.stdout).data.capabilities.some(
+      authorityWithoutRole.data.capabilities.some(
         (item: Record<string, unknown>) =>
           item.action === "auth.request.decide",
       ),
@@ -339,6 +325,45 @@ async function stored(harness: LiveHarness): Promise<Stored> {
   );
   return value.origins[new URL(harness.baseUrl).origin];
 }
+async function decide(harness: LiveHarness, token: string, id: string) {
+  const response = await fetch(
+    `${harness.baseUrl}/api/v1/auth/requests/${id}/decision`,
+    {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ decision: "approved" }),
+    },
+  );
+  return await response.json();
+}
+
+async function fetchAuthority(
+  harness: LiveHarness,
+  token: string,
+  project: string,
+) {
+  const url = new URL(`${harness.baseUrl}/api/v1/authorization/authority`);
+  url.searchParams.set("boundary_type", "project");
+  url.searchParams.set("project_id", project);
+  const response = await fetch(url, {
+    headers: { authorization: `Bearer ${token}` },
+  });
+  assertEquals(response.status, 200);
+  return await response.json();
+}
+
+async function login(
+  harness: LiveHarness,
+  username: string,
+  password: string,
+) {
+  const result = await harness.login({ username, password });
+  assertEquals(result.code, 0, result.stderr);
+}
+
 async function select(harness: LiveHarness, selected: Partial<Stored>) {
   const path = join(harness.rootDir, "xdg-config", "operant", "auth.json");
   const value = JSON.parse(await Deno.readTextFile(path));

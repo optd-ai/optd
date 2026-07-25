@@ -15,8 +15,23 @@ spec:
     schema: delivery.v1
   attachments:
     - phase: event.after_commit
-      event: object.changed
+      event: object.created
       order: 100
+      input:
+        event: $event
+    - phase: event.after_commit
+      event: object.updated
+      order: 101
+      input:
+        event: $event
+    - phase: event.after_commit
+      event: object.transitioned
+      order: 102
+      input:
+        event: $event
+    - phase: event.after_commit
+      event: object.archived
+      order: 103
       input:
         event: $event
   axi:

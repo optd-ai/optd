@@ -16,7 +16,6 @@ Deno.test("compiled optctl resolves current explicit assignment boundaries and s
       })).code,
       0,
     );
-    const root = await selectedCredentials(harness);
     const createdUser = await harness.runOptctl([
       "--json",
       "auth",
@@ -66,11 +65,11 @@ Deno.test("compiled optctl resolves current explicit assignment boundaries and s
     assertEquals(assigned.code, 0, assigned.stderr);
     const assignment = JSON.parse(assigned.stdout).data;
 
-    const login = await harness.login({
+    const initialLogin = await harness.login({
       username: "bounded-admin",
       password: "bounded admin password",
     });
-    assertEquals(login.code, 0, login.stderr);
+    assertEquals(initialLogin.code, 0, initialLogin.stderr);
     const bounded = await selectedCredentials(harness);
     const allowed = await harness.runOptctl([
       "--json",
@@ -143,7 +142,7 @@ Deno.test("compiled optctl resolves current explicit assignment boundaries and s
     assertEquals(injected.status, 422);
     await injected.body?.cancel();
 
-    await selectCredentials(harness, root);
+    await login(harness, "root", "authorization root password");
     const disabled = await harness.runOptctl([
       "--json",
       "assignment",
@@ -156,7 +155,7 @@ Deno.test("compiled optctl resolves current explicit assignment boundaries and s
       String(assignment.version),
     ]);
     assertEquals(disabled.code, 0, disabled.stderr);
-    await selectCredentials(harness, bounded);
+    await login(harness, "bounded-admin", "bounded admin password");
     const revoked = await harness.runOptctl([
       "--json",
       "auth",
@@ -167,7 +166,7 @@ Deno.test("compiled optctl resolves current explicit assignment boundaries and s
     assertEquals(revoked.code, 0, revoked.stderr);
     assertEquals(JSON.parse(revoked.stdout).data.effective_roles, []);
 
-    await selectCredentials(harness, root);
+    await login(harness, "root", "authorization root password");
     const allProjects = await harness.runOptctl([
       "--json",
       "assignment",
@@ -192,7 +191,7 @@ Deno.test("compiled optctl resolves current explicit assignment boundaries and s
     ]);
     assertEquals(allProjects.code, 0, allProjects.stderr);
     assertEquals(system.code, 0, system.stderr);
-    await selectCredentials(harness, bounded);
+    await login(harness, "bounded-admin", "bounded admin password");
     const inheritedAllProjects = await harness.runOptctl([
       "--json",
       "auth",
@@ -215,7 +214,7 @@ Deno.test("compiled optctl resolves current explicit assignment boundaries and s
       "system:admin",
     ]);
 
-    await selectCredentials(harness, root);
+    await login(harness, "root", "authorization root password");
     const rootUser = (await query<{ id: string }>(
       harness.server.sql,
       "select id from human_users where username='root'",
@@ -240,7 +239,7 @@ Deno.test("compiled optctl resolves current explicit assignment boundaries and s
        where u.id=$1 and ra.role_id='system:super_admin' and ra.active`,
       [rootUser.id],
     )).rows[0];
-    await selectCredentials(harness, bounded);
+    await login(harness, "bounded-admin", "bounded admin password");
     const removeOriginal = await harness.runOptctl([
       "--json",
       "assignment",
@@ -294,15 +293,11 @@ async function selectedCredentials(
   );
   return store.origins[new URL(harness.baseUrl).origin];
 }
-async function selectCredentials(
+async function login(
   harness: LiveHarness,
-  credentials: { token: string },
+  username: string,
+  password: string,
 ) {
-  const path = join(harness.rootDir, "xdg-config", "operant", "auth.json");
-  const store = JSON.parse(await Deno.readTextFile(path));
-  store.origins[new URL(harness.baseUrl).origin] = {
-    ...store.origins[new URL(harness.baseUrl).origin],
-    ...credentials,
-  };
-  await Deno.writeTextFile(path, JSON.stringify(store));
+  const result = await harness.login({ username, password });
+  assertEquals(result.code, 0, result.stderr);
 }

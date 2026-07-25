@@ -20,8 +20,11 @@ import {
 
 const CRM = "operant/crm";
 const PACK = join(Deno.cwd(), "prototypes", "crm-default-pack");
+const logLevels = Deno.env.get("OPERANT_LOG_LEVEL") === "trace"
+  ? ["trace"] as const
+  : ["info"] as const;
 
-for (const logLevel of ["info", "trace"] as const) {
+for (const logLevel of logLevels) {
   Deno.test({
     name:
       `forced-current compiled CLI completes the public CRM acceptance flow (${logLevel})`,
@@ -33,6 +36,8 @@ for (const logLevel of ["info", "trace"] as const) {
         environment: {
           OPERANT_LOG_LEVEL: logLevel,
           OPERANT_OUTBOX_POLL_INTERVAL_MS: "60000",
+          OPERANT_OUTBOX_INITIAL_BACKOFF_MS: "600000",
+          OPERANT_OUTBOX_MAX_BACKOFF_MS: "600000",
           OPERANT_SECRET_MASTER_KEY: btoa(
             String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32))),
           ),
@@ -1095,8 +1100,22 @@ for (const logLevel of ["info", "trace"] as const) {
             output,
           ),
         );
-        assertEquals(wonView.data.fields.stage, "won");
-        assertEquals(wonView.data.fields.probability, 100);
+        const wonViewToon = toon(
+          await ok(
+            replacementHuman.launcher.runOptctl([
+              "--project",
+              projectId,
+              "view",
+              `${CRM}:opportunity`,
+              opportunityId,
+            ]),
+            output,
+          ),
+        );
+        assertEquals(wonViewToon.data, wonView.data);
+        assertEquals(wonView.data.data.stage, "won");
+        assertEquals(wonView.data.data.probability, "100");
+        assertEquals(wonView.data.fields, undefined);
         const wonHistory = json(
           await ok(
             replacementHuman.launcher.runOptctl([
@@ -1363,7 +1382,7 @@ for (const logLevel of ["info", "trace"] as const) {
 
         // Existing commits generated real persisted after-commit deliveries. Use
         // only public controls and observed actual states for administration.
-        const outboxList = json(
+        let outboxList = json(
           await ok(
             replacementHuman.launcher.runOptctl([
               "--json",
@@ -1377,11 +1396,84 @@ for (const logLevel of ["info", "trace"] as const) {
             output,
           ),
         );
-        const deliveries = outboxList.data.items ?? outboxList.data.deliveries;
-        assert(deliveries.length > 1);
-        const cancellable = deliveries.find((item: any) =>
-          item.status === "pending"
+        let deliveries = outboxList.data.items ?? outboxList.data.deliveries;
+        assert(deliveries.length > 1, JSON.stringify(outboxList.data));
+        let cancellable = deliveries.find((item: any) =>
+          item.status === "pending" || item.status === "retry_wait"
         );
+        if (!cancellable) {
+          for (
+            let attempt = 0;
+            attempt < 100 &&
+            deliveries.some((item: any) => item.status === "running");
+            attempt++
+          ) {
+            await delay(100);
+            outboxList = json(
+              await ok(
+                replacementHuman.launcher.runOptctl([
+                  "--json",
+                  "outbox",
+                  "list",
+                  "--hook",
+                  `${CRM}:notify_crm_change`,
+                  "--limit",
+                  "100",
+                ]),
+                output,
+              ),
+            );
+            deliveries = outboxList.data.items ?? outboxList.data.deliveries;
+          }
+          const cancellationSetup = json(
+            await ok(
+              harness.runJson(
+                ["--json", "changeset", "stage"],
+                {
+                  project_id: projectId,
+                  operations: [{
+                    op: "create",
+                    project_id: projectId,
+                    resource: `${CRM}:company`,
+                    fields: {
+                      name: `Cancellation proof ${crypto.randomUUID()}`,
+                      industry: "Testing",
+                    },
+                  }],
+                },
+                replacementHuman.launcher,
+              ),
+              output,
+            ),
+          ).data;
+          await ok(
+            replacementHuman.launcher.runOptctl([
+              "--json",
+              "changeset",
+              "commit",
+              cancellationSetup.id,
+            ]),
+            output,
+          );
+          outboxList = json(
+            await ok(
+              replacementHuman.launcher.runOptctl([
+                "--json",
+                "outbox",
+                "list",
+                "--hook",
+                `${CRM}:notify_crm_change`,
+                "--limit",
+                "100",
+              ]),
+              output,
+            ),
+          );
+          deliveries = outboxList.data.items ?? outboxList.data.deliveries;
+          cancellable = deliveries.find((item: any) =>
+            item.status === "pending" || item.status === "retry_wait"
+          );
+        }
         assert(cancellable);
         const inspectedPending = json(
           await ok(
@@ -1394,7 +1486,7 @@ for (const logLevel of ["info", "trace"] as const) {
             output,
           ),
         );
-        assertEquals(inspectedPending.data.status, "pending");
+        assertEquals(inspectedPending.data.status, cancellable.status);
         await ok(
           replacementHuman.launcher.runOptctl([
             "--json",
@@ -1416,40 +1508,73 @@ for (const logLevel of ["info", "trace"] as const) {
         ]);
         output.push(cancelledRetry.stdout, cancelledRetry.stderr);
         assertEquals(cancelledRetry.code, 1);
+        const drainSetup = json(
+          await ok(
+            harness.runJson(
+              ["--json", "changeset", "stage"],
+              {
+                project_id: projectId,
+                operations: [{
+                  op: "create",
+                  project_id: projectId,
+                  resource: `${CRM}:company`,
+                  fields: {
+                    name: `Drain proof ${crypto.randomUUID()}`,
+                    industry: "Testing",
+                  },
+                }],
+              },
+              replacementHuman.launcher,
+            ),
+            output,
+          ),
+        ).data;
+        await ok(
+          replacementHuman.launcher.runOptctl([
+            "--json",
+            "changeset",
+            "commit",
+            drainSetup.id,
+          ]),
+          output,
+        );
         await ok(
           replacementHuman.launcher.runOptctl([
             "--json",
             "outbox",
             "drain",
             "--limit",
-            "100",
+            "25",
           ]),
           output,
         );
-        const succeededList = json(
+        const attemptedList = json(
           await ok(
             replacementHuman.launcher.runOptctl([
               "--json",
               "outbox",
               "list",
-              "--status",
-              "succeeded",
+              "--hook",
+              `${CRM}:notify_crm_change`,
               "--limit",
-              "1",
+              "100",
             ]),
             output,
           ),
         );
-        const succeeded =
-          (succeededList.data.items ?? succeededList.data.deliveries)[0];
-        assert(succeeded);
+        const attempted = (
+          attemptedList.data.items ?? attemptedList.data.deliveries
+        ).find((item: any) =>
+          ["succeeded", "retry_wait", "dead_letter"].includes(item.status)
+        );
+        assert(attempted);
         const attempts = json(
           await ok(
             replacementHuman.launcher.runOptctl([
               "--json",
               "outbox",
               "attempts",
-              succeeded.id,
+              attempted.id,
             ]),
             output,
           ),

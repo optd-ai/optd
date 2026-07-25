@@ -172,19 +172,16 @@ Deno.test("assignment disable ordering preserves immutable contexts and cuts off
       )
     );
 
-    await selectCredentials(harness, root);
-    const replacementRole = await harness.runOptctl([
-      "--json",
-      "assignment",
-      "role",
-      "create",
-      user.id,
-      "--role",
-      "operant/test:operator",
-      "--boundary",
-      "all_projects",
-    ]);
-    assertEquals(replacementRole.code, 0, replacementRole.stderr);
+    const replacementRole = await post(
+      harness,
+      root,
+      `/api/v1/auth/users/${user.id}/role-assignments`,
+      {
+        role: "operant/test:operator",
+        boundary: { type: "all_projects" },
+      },
+    );
+    assertEquals(replacementRole.status, 201);
     const grantBeforePolicy = await grantability.current({
       auth: actorContext,
       roles: ["operant/test:operator"],
@@ -483,13 +480,4 @@ async function credentials(harness: LiveHarness): Promise<Credentials> {
     ),
   );
   return store.origins[new URL(harness.baseUrl).origin];
-}
-async function selectCredentials(harness: LiveHarness, selected: Credentials) {
-  const path = join(harness.rootDir, "xdg-config", "operant", "auth.json");
-  const store = JSON.parse(await Deno.readTextFile(path));
-  store.origins[new URL(harness.baseUrl).origin] = {
-    ...store.origins[new URL(harness.baseUrl).origin],
-    ...selected,
-  };
-  await Deno.writeTextFile(path, JSON.stringify(store));
 }

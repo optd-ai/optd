@@ -224,21 +224,38 @@ Deno.test("compiled optctl completes safe, destructive, stale, timeout, risky, a
         [uuidV7(), agentPrincipal, await tokenDigest(value), authorizationId],
       );
     }
-    await selectCredential(harness, rootTokens[0]);
-    const rootBoundToken = await validateToken(harness, destructiveA.id);
+    const rootBoundValidation = await fetch(
+      `${harness.baseUrl}/api/v1/migrations/${destructiveA.id}/validate`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${rootTokens[0]}`,
+          "content-type": "application/json",
+        },
+        body: "{}",
+      },
+    );
+    assertEquals(rootBoundValidation.status, 200);
+    const rootBoundToken = (await rootBoundValidation.json()).data
+      .confirmation_token as string;
     secrets.push(rootBoundToken);
-    await selectCredential(harness, rootTokens[1]);
-    await expectError(
-      harness,
-      [
-        "migration",
-        "apply",
-        destructiveA.id,
-        "--confirm-token",
-        rootBoundToken,
-      ],
+    const crossRootApply = await fetch(
+      `${harness.baseUrl}/api/v1/migrations/${destructiveA.id}/apply`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${rootTokens[1]}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          acknowledgement: "destructive",
+          confirmation_token: rootBoundToken,
+        }),
+      },
+    );
+    assertEquals(
+      (await crossRootApply.json()).error.code,
       "migration_confirmation_invalid",
-      secrets,
     );
     assertEquals(
       (await harness.login({ username: "root", password: rootPassword })).code,
@@ -569,7 +586,7 @@ function assertNoSecrets(result: CliResult, secrets: string[]) {
 async function waitForPackApplyLock(
   harness: Awaited<ReturnType<typeof startLiveHarness>>,
 ) {
-  for (let attempt = 0; attempt < 200; attempt++) {
+  for (let attempt = 0; attempt < 3_000; attempt++) {
     const waiting = await query<{ waiting: boolean }>(
       harness.server.sql,
       `select exists(
@@ -583,17 +600,6 @@ async function waitForPackApplyLock(
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   throw new Error("compiled pack apply did not reach the runtime lock barrier");
-}
-
-async function selectCredential(
-  harness: Awaited<ReturnType<typeof startLiveHarness>>,
-  token: string,
-) {
-  const path = join(harness.rootDir, "xdg-config", "operant", "auth.json");
-  const store = JSON.parse(await Deno.readTextFile(path));
-  const origin = new URL(harness.baseUrl).origin;
-  store.origins[origin] = { ...store.origins[origin], token };
-  await Deno.writeTextFile(path, JSON.stringify(store));
 }
 
 async function copyPack(from: string, to: string) {

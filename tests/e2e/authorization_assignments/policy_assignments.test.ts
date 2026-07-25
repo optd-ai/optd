@@ -17,7 +17,6 @@ Deno.test("compiled optctl administers and redacts explicit policy assignments",
       })).code,
       0,
     );
-    const root = await selectedCredentials(harness);
     const projectOne = await createProject(harness, "policy-one");
     const projectTwo = await createProject(harness, "policy-two");
 
@@ -247,7 +246,11 @@ Deno.test("compiled optctl administers and redacts explicit policy assignments",
     assertEquals(missingBoundary.status, 422);
     await missingBoundary.body?.cancel();
 
-    await selectCredentials(harness, root);
+    const rootLogin = await harness.login({
+      username: "policy-root",
+      password: "policy assignment root password",
+    });
+    assertEquals(rootLogin.code, 0, rootLogin.stderr);
     const privileged = await harness.runOptctl([
       "--json",
       "auth",
@@ -339,16 +342,4 @@ async function selectedCredentials(
     ),
   );
   return store.origins[new URL(harness.baseUrl).origin];
-}
-async function selectCredentials(
-  harness: LiveHarness,
-  credentials: { token: string },
-) {
-  const path = join(harness.rootDir, "xdg-config", "operant", "auth.json");
-  const store = JSON.parse(await Deno.readTextFile(path));
-  store.origins[new URL(harness.baseUrl).origin] = {
-    ...store.origins[new URL(harness.baseUrl).origin],
-    ...credentials,
-  };
-  await Deno.writeTextFile(path, JSON.stringify(store));
 }
