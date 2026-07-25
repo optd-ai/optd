@@ -880,13 +880,25 @@ function testAuthStoreBridge(
         const origin = new URL(serverUrl()).origin;
         const legacy = JSON.parse(text).origins?.[origin];
         if (!legacy) return;
-        await store.updateState(origin, {
+        const selected = await store.select(origin, pid);
+        const update = {
           ...legacy,
-          token: typeof legacy.token === "string" ? legacy.token : undefined,
           requestToken: typeof legacy.requestToken === "string"
             ? legacy.requestToken
             : undefined,
-        }, await inspector.inspect(pid));
+        };
+        if (!selected) {
+          Object.assign(update, {
+            token: typeof legacy.token === "string" ? legacy.token : undefined,
+          });
+        } else {
+          delete update.token;
+        }
+        await store.updateState(
+          origin,
+          update,
+          selected ? undefined : await inspector.inspect(pid),
+        );
       }),
     after: (pid: number) =>
       serialized(async () => {

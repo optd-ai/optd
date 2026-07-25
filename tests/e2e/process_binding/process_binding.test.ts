@@ -268,6 +268,79 @@ Deno.test("compiled optctl binds one nearest Linux process credential without fa
   }
 });
 
+Deno.test("compiled sibling human trees retain exact independent credentials", async () => {
+  const harness = await startLiveHarness();
+  const firstHuman = await harness.bootstrapProcess({
+    username: "first-process-human",
+    password: "first process password",
+  });
+  try {
+    assertEquals(firstHuman.result.code, 0, firstHuman.result.stderr);
+    const firstBefore = JSON.parse(
+      (await firstHuman.launcher.runOptctl([
+        "--json",
+        "auth",
+        "whoami",
+      ])).stdout,
+    ).data;
+    const secondPassword = `sibling-${crypto.randomUUID()}`;
+    const created = await firstHuman.launcher.runOptctl([
+      "--json",
+      "auth",
+      "user",
+      "create",
+      "--username",
+      "second-process-human",
+      "--password-stdin",
+    ], `${secondPassword}\n`);
+    assertEquals(created.code, 0, created.stderr);
+    const secondHuman = await harness.loginProcess({
+      username: "second-process-human",
+      password: secondPassword,
+    });
+    try {
+      assertEquals(secondHuman.result.code, 0, secondHuman.result.stderr);
+      const second = JSON.parse(
+        (await secondHuman.launcher.runOptctl([
+          "--json",
+          "auth",
+          "whoami",
+        ])).stdout,
+      ).data;
+      assertEquals(second.username, "second-process-human");
+      assert(second.binding.anchor_pid !== firstBefore.binding.anchor_pid);
+
+      // The compatibility projection is shared test state, not a credential
+      // selector. Touching it must not replace an existing tree binding.
+      const projectionPath = join(
+        harness.rootDir,
+        "xdg-config",
+        "operant",
+        "auth.json",
+      );
+      const projection = await Deno.readTextFile(projectionPath);
+      await Deno.writeTextFile(projectionPath, projection);
+      const firstAfter = JSON.parse(
+        (await firstHuman.launcher.runOptctl([
+          "--json",
+          "auth",
+          "whoami",
+        ])).stdout,
+      ).data;
+      assertEquals(firstAfter.id, firstBefore.id);
+      assertEquals(
+        firstAfter.binding.anchor_start_ticks,
+        firstBefore.binding.anchor_start_ticks,
+      );
+    } finally {
+      await secondHuman.launcher.close();
+    }
+  } finally {
+    await firstHuman.launcher.close();
+    await harness.close();
+  }
+});
+
 async function proveSignalForwarding(harness: LiveHarness): Promise<void> {
   if (Deno.build.os !== "linux") return;
   const pidPath = join(harness.rootDir, "isolate-signal-child.pid");
