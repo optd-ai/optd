@@ -858,6 +858,14 @@ function testAuthStoreBridge(
   let lastProjection: string | undefined;
   let lastProjectionMtime = 0;
   let queue = Promise.resolve();
+  const anchoredTrees = new Set<string>();
+  const processKey = (identity: {
+    pid: number;
+    startTicks: string;
+    uid: number;
+    bootId: string;
+  }) =>
+    `${identity.pid}:${identity.startTicks}:${identity.uid}:${identity.bootId}`;
 
   const serialized = <T>(operation: () => Promise<T>): Promise<T> => {
     const result = queue.then(operation, operation);
@@ -880,14 +888,16 @@ function testAuthStoreBridge(
         const origin = new URL(serverUrl()).origin;
         const legacy = JSON.parse(text).origins?.[origin];
         if (!legacy) return;
+        const identity = await inspector.inspect(pid);
         const selected = await store.select(origin, pid);
+        const alreadyAnchored = anchoredTrees.has(processKey(identity));
         const update = {
           ...legacy,
           requestToken: typeof legacy.requestToken === "string"
             ? legacy.requestToken
             : undefined,
         };
-        if (!selected) {
+        if (!selected && !alreadyAnchored) {
           Object.assign(update, {
             token: typeof legacy.token === "string" ? legacy.token : undefined,
           });
@@ -897,7 +907,7 @@ function testAuthStoreBridge(
         await store.updateState(
           origin,
           update,
-          selected ? undefined : await inspector.inspect(pid),
+          selected || alreadyAnchored ? undefined : identity,
         );
       }),
     after: (pid: number) =>
@@ -905,6 +915,7 @@ function testAuthStoreBridge(
         const origin = new URL(serverUrl()).origin;
         const state = await store.readState(origin);
         const selected = await store.select(origin, pid);
+        if (selected?.anchor) anchoredTrees.add(processKey(selected.anchor));
         const request = await store.requestCredential(origin);
         const prior = lastProjection
           ? JSON.parse(lastProjection).origins?.[origin]
