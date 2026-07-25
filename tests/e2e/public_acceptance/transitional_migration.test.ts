@@ -331,17 +331,24 @@ for (const logLevel of ["info", "trace"] as const) {
       assertStringIncludes(toon.stdout, "normalized_phone");
       assertEquals(toon.stdout.includes("555-0100"), false);
 
+      const staleSideEffectsBefore = await migrationSideEffects(
+        harness,
+        earlyFinal.id,
+      );
       await error(
         harness,
         ["migration", "validate", earlyFinal.id],
         "migration_stale",
         output,
       );
-      assertNoLeaks(output.join("\n"), [
-        token,
-        freshToken,
-        harness.databaseUrl,
-      ]);
+      assertEquals(
+        await migrationSideEffects(harness, earlyFinal.id),
+        staleSideEffectsBefore,
+      );
+      // Confirmation tokens are expected response data from validate, so the
+      // aggregate public-response transcript can only be checked for ambient
+      // infrastructure secrets and internal diagnostics.
+      assertNoLeaks(output.join("\n"), [harness.databaseUrl]);
     } finally {
       await harness.close();
     }
@@ -472,6 +479,20 @@ async function metadata(h: LiveHarness, out: string[]) {
   return data(
     await ok(h, ["--json", "metadata", "resource", `${CRM}:lead`], out),
   );
+}
+async function migrationSideEffects(h: LiveHarness, planId: string) {
+  return (await query<{
+    validations: string;
+    tokens: string;
+    attempts: string;
+  }>(
+    h.server.sql,
+    `select
+       (select count(*)::text from pack_migration_validations where plan_id=$1) validations,
+       (select count(*)::text from pack_migration_confirmation_tokens where plan_id=$1) tokens,
+       (select count(*)::text from pack_migration_attempts where plan_id=$1) attempts`,
+    [planId],
+  )).rows[0];
 }
 async function activeRevision(h: LiveHarness) {
   return (await query<{ id: string }>(

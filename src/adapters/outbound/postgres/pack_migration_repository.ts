@@ -205,16 +205,10 @@ export async function validateMigrationPlan(
   const plan = typeof stored === "string"
     ? JSON.parse(stored) as MigrationPlan
     : stored;
+  const candidate = await lockAndVerifyMigrationState(sql, plan);
   const blockers: MigrationPlan["blockers"] = [];
   const facts: Record<string, number> = {};
-  const candidateRow = await query<
-    { normalized: Record<string, unknown> | string }
-  >(
-    sql,
-    "select normalized from pack_candidate_revisions where id=$1",
-    [plan.to_pack_revision_id],
-  );
-  const normalizedValue = candidateRow.rows[0]?.normalized;
+  const normalizedValue = candidate.normalized;
   const normalized = typeof normalizedValue === "string"
     ? JSON.parse(normalizedValue) as Record<string, unknown>
     : normalizedValue ?? {};
@@ -242,6 +236,7 @@ export async function validateMigrationPlan(
   for (const table of tables) {
     await query(sql, `lock table ${quote(table)} in share mode`);
   }
+  await verifyActiveMigrationRevision(sql, plan);
   for (const change of plan.changes) {
     const qualified = change.target.resource ?? change.target.relationship;
     const definitionName = qualified?.split(":").pop();
@@ -414,6 +409,64 @@ export class MigrationApplyError extends Error {
   }
 }
 
+async function lockAndVerifyMigrationState(
+  sql: Queryable,
+  plan: MigrationPlan,
+): Promise<{ normalized: Record<string, unknown> | string }> {
+  // The pack-scoped lock also covers first installs, for which no active row
+  // exists yet to lock. Every migration validate/apply path takes these locks
+  // in this order before consulting runtime metadata or live data.
+  await query(
+    sql,
+    "select pg_advisory_xact_lock(hashtext('operant.pack.migration'),hashtext($1))",
+    [`${plan.publisher}/${plan.pack}`],
+  );
+  await verifyActiveMigrationRevision(sql, plan);
+  const candidate = await query<{
+    publisher: string;
+    pack_name: string;
+    source_digest: string;
+    normalized: Record<string, unknown> | string;
+  }>(
+    sql,
+    `select publisher,pack_name,source_digest,normalized
+       from pack_candidate_revisions where id=$1 for share`,
+    [plan.to_pack_revision_id],
+  );
+  const row = candidate.rows[0];
+  if (
+    !row || row.publisher !== plan.publisher || row.pack_name !== plan.pack ||
+    row.source_digest !== plan.candidate_source_digest
+  ) {
+    throw new MigrationApplyError(
+      "migration_plan_invalid",
+      "persisted candidate does not match plan",
+    );
+  }
+  return row;
+}
+
+async function verifyActiveMigrationRevision(
+  sql: Queryable,
+  plan: MigrationPlan,
+): Promise<void> {
+  const active = await query<{ candidate_revision_id: string }>(
+    sql,
+    `select candidate_revision_id from pack_active_revisions
+     where publisher=$1 and pack_name=$2`,
+    [plan.publisher, plan.pack],
+  );
+  if (
+    (active.rows[0]?.candidate_revision_id ?? null) !==
+      plan.from_pack_revision_id
+  ) {
+    throw new MigrationApplyError(
+      "migration_stale",
+      "active pack revision changed",
+    );
+  }
+}
+
 export async function applyMigrationPlan(
   sql: Queryable,
   id: string,
@@ -465,6 +518,7 @@ export async function applyMigrationPlan(
   if (existing) return existing;
   const timeout = parseLockTimeout(request.lock_timeout ?? "10s");
   await query(sql, "select set_config('lock_timeout',$1,true)", [timeout]);
+  await lockAndVerifyMigrationState(sql, plan);
   const tables = await query<{ table_name: string }>(
     sql,
     `select table_name from pack_runtime_tables where publisher=$1 and pack_name=$2
@@ -478,21 +532,8 @@ export async function applyMigrationPlan(
       `lock table ${quote(table.table_name)} in share row exclusive mode`,
     );
   }
+  await verifyActiveMigrationRevision(sql, plan);
   await authorizeLocked?.(sql);
-  const active = await query<{ candidate_revision_id: string }>(
-    sql,
-    "select candidate_revision_id from pack_active_revisions where publisher=$1 and pack_name=$2",
-    [plan.publisher, plan.pack],
-  );
-  if (
-    (active.rows[0]?.candidate_revision_id ?? null) !==
-      plan.from_pack_revision_id
-  ) {
-    throw new MigrationApplyError(
-      "migration_stale",
-      "active pack revision changed",
-    );
-  }
   verifyStepCoverage(plan, statements);
   const { plan_digest: _digest, ...digestablePlan } = plan;
   const digest = await migrationDigest({
@@ -503,20 +544,6 @@ export async function applyMigrationPlan(
     throw new MigrationApplyError(
       "migration_plan_invalid",
       "persisted plan digest does not match persisted SQL",
-    );
-  }
-  const candidate = await query<{ source_digest: string }>(
-    sql,
-    "select source_digest from pack_candidate_revisions where id=$1",
-    [plan.to_pack_revision_id],
-  );
-  if (
-    !candidate.rows[0] ||
-    candidate.rows[0].source_digest !== plan.candidate_source_digest
-  ) {
-    throw new MigrationApplyError(
-      "migration_plan_invalid",
-      "persisted candidate does not match plan",
     );
   }
   await query(sql, "savepoint operant_apply_revalidation");

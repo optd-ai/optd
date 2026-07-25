@@ -1,4 +1,6 @@
+// deno-lint-ignore-file no-import-prefix no-unversioned-import no-explicit-any require-await
 import { assertEquals } from "jsr:@std/assert";
+import { MigrationApplyError } from "../../src/adapters/outbound/postgres/pack_migration_repository.ts";
 import { makeMigrationServices } from "../../src/application/services/migration_services.ts";
 import type { AuthContext } from "../../src/domain/auth/model.ts";
 
@@ -11,6 +13,45 @@ const auth: AuthContext = Object.freeze({
   credentialKind: "human_full",
   roles: Object.freeze(["system:super_admin"]),
   createdAt: new Date(0).toISOString(),
+});
+
+Deno.test("migration validate maps stale typed failures without apply-attempt mutation", async () => {
+  let transactions = 0;
+  let queries = 0;
+  const services = makeMigrationServices({
+    sql: {
+      unsafe: async () => {
+        queries++;
+        return [];
+      },
+    },
+    authorization: {
+      authorize: async () => ({ ok: true, value: {} }),
+    } as any,
+    authorizeApplyInTransaction: async () => ({ ok: true, value: {} }),
+    tx: {
+      transaction: async () => {
+        transactions++;
+        throw new MigrationApplyError(
+          "migration_stale",
+          "database-specific detail must not escape",
+        );
+      },
+    },
+  } as any);
+
+  const result = await services.validate("migration", auth);
+  assertEquals(result, {
+    ok: false,
+    error: {
+      code: "migration_stale",
+      message: "migration plan no longer matches the active pack revision",
+      severity: "conflict",
+      details: { reason: "active_pack_revision_changed" },
+    },
+  });
+  assertEquals(transactions, 1);
+  assertEquals(queries, 0);
 });
 
 Deno.test("migration apply retries only 40P01 and 40001 with fresh transactions", async () => {

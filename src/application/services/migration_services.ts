@@ -82,10 +82,29 @@ export function makeMigrationServices(
         resource: "system:migration",
       });
       if (!authorized.ok) return err(authorized.error);
-      const validation = await deps.tx.transaction((sql) =>
-        validateMigrationPlan(sql, id, auth.id)
-      );
-      return validation ? ok(validation) : missing(id);
+      try {
+        const validation = await deps.tx.transaction((sql) =>
+          validateMigrationPlan(sql, id, auth.id)
+        );
+        return validation ? ok(validation) : missing(id);
+      } catch (error) {
+        if (error instanceof MigrationApplyError) {
+          const stale = error.code === "migration_stale";
+          return err({
+            code: error.code,
+            message: stale
+              ? "migration plan no longer matches the active pack revision"
+              : "migration plan validation failed",
+            severity: stale ? "conflict" : "validation",
+            details: {
+              reason: stale
+                ? "active_pack_revision_changed"
+                : "persisted_migration_invalid",
+            },
+          });
+        }
+        throw error;
+      }
     },
     async apply(
       id: string,
