@@ -548,7 +548,8 @@ async function relationSql(
     ? null
     : auth.humanUserId;
   if (!actor) return "false";
-  params.push(project, actor);
+  const projectParam = params.push(project);
+  const subjectParam = params.push(actor);
   const objectCol = rule.relation_object_side === "from"
       ? "from_object_id"
       : "to_object_id",
@@ -557,11 +558,11 @@ async function relationSql(
       : "to_object_id";
   return `exists(select 1 from ${
     qi(found.table_name)
-  } rel where rel.project_id=$${params.length - 1} and rel.${
+  } rel where rel.project_id=$${projectParam}::uuid and rel.${
     qi(objectCol)
   }=q.id and rel.${
     qi(subjectCol)
-  }=$${params.length}::uuid and rel.archived_at is null)`;
+  }=$${subjectParam}::uuid and rel.archived_at is null)`;
 }
 function keysetSql(
   sort: ResolvedSort[],
