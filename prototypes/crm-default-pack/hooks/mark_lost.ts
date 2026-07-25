@@ -1,5 +1,6 @@
 const envelope = JSON.parse(await new Response(Deno.stdin.readable).text());
 const input = envelope.input.action_input;
+const actor = envelope.input.actor;
 const opportunityId = input.opportunity_id;
 if (!opportunityId || !input.lost_reason_id) {
   console.log(
@@ -30,7 +31,7 @@ if (!opportunityId || !input.lost_reason_id) {
       fields: {
         body: input.note,
         opportunity_id: opportunityId,
-        author_id: input.principal_id,
+        author_id: actor.id,
       },
     });
   }

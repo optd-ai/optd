@@ -12,10 +12,6 @@ spec:
       type: integer
       required: true
       minimum: 1
-    principal_id:
-      type: string
-      required: true
-      format: uuid
     lost_reason_id:
       type: string
       required: true
