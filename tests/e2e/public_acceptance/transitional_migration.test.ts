@@ -112,7 +112,15 @@ for (const logLevel of ["info", "trace"] as const) {
       const unauthorized = await fetch(
         `${harness.baseUrl}/api/v1/migrations/${preview.plan.id}`,
       );
-      assertEquals(unauthorized.status, 401);
+      try {
+        assertEquals(unauthorized.status, 401);
+        assertEquals(
+          (await unauthorized.json()).error.code,
+          "authentication_required",
+        );
+      } finally {
+        if (!unauthorized.bodyUsed) await unauthorized.body?.cancel();
+      }
       const transitionalValidation = data(
         await ok(
           harness,
