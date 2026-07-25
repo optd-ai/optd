@@ -214,7 +214,6 @@ for (const logLevel of logLevels) {
           "wait",
           String(request.data.id),
         ]);
-        await delay(50);
         await ok(
           human.runOptctl([
             "--json",
@@ -556,9 +555,6 @@ function toon(result: CliResult): any {
   const value = decodeToon(result.stdout) as any;
   assertEquals(value.ok, true);
   return value;
-}
-function delay(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 function assertParity(actual: any, expected: any) {
   const normalize = (value: any): any =>

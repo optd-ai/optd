@@ -77,7 +77,10 @@ export interface AuthRepository extends BootstrapRepository {
       { requestId: string; version: number; status: PasswordReset["status"] }
     >
   >;
-  subscribePasswordReset(id: string, listener: () => void): () => void;
+  subscribePasswordReset(
+    id: string,
+    listener: () => void,
+  ): Promise<() => void>;
   inspectPasswordReset(
     auth: AuthContext,
     id: string,
@@ -150,7 +153,10 @@ export interface AuthRepository extends BootstrapRepository {
   authorizationRequestStatus(
     id: string,
   ): Promise<Result<AgentAuthorizationRequest>>;
-  subscribeAuthorizationRequest(id: string, listener: () => void): () => void;
+  subscribeAuthorizationRequest(
+    id: string,
+    listener: () => void,
+  ): Promise<() => void>;
   redeemAuthorizationRequest(
     auth: AuthContext,
     id: string,

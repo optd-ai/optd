@@ -1055,7 +1055,10 @@ export class PostgresAuthRepository implements AuthRepository {
     return await readPasswordResetStatus(this.sql, id);
   }
 
-  subscribePasswordReset(id: string, listener: () => void): () => void {
+  async subscribePasswordReset(
+    id: string,
+    listener: () => void,
+  ): Promise<() => void> {
     if (!this.resetListener) {
       this.resetListener = this.sql.listen(
         "operant_password_reset",
@@ -1065,9 +1068,12 @@ export class PostgresAuthRepository implements AuthRepository {
           ) notify();
         },
       );
-      void this.resetListener.catch(() => {
-        this.resetListener = undefined;
-      });
+    }
+    try {
+      await this.resetListener;
+    } catch (error) {
+      this.resetListener = undefined;
+      throw error;
     }
     let listeners = passwordResetListeners.get(id);
     if (!listeners) {
@@ -2133,10 +2139,10 @@ export class PostgresAuthRepository implements AuthRepository {
     );
   }
 
-  subscribeAuthorizationRequest(id: string, listener: () => void): () => void {
-    let listeners = agentRequestListeners.get(id);
-    if (!listeners) agentRequestListeners.set(id, listeners = new Set());
-    listeners.add(listener);
+  async subscribeAuthorizationRequest(
+    id: string,
+    listener: () => void,
+  ): Promise<() => void> {
     if (!this.agentRequestListener) {
       this.agentRequestListener = this.sql.listen(
         "operant_agent_authorization",
@@ -2146,10 +2152,16 @@ export class PostgresAuthRepository implements AuthRepository {
           ) notify();
         },
       );
-      void this.agentRequestListener.catch(() => {
-        this.agentRequestListener = undefined;
-      });
     }
+    try {
+      await this.agentRequestListener;
+    } catch (error) {
+      this.agentRequestListener = undefined;
+      throw error;
+    }
+    let listeners = agentRequestListeners.get(id);
+    if (!listeners) agentRequestListeners.set(id, listeners = new Set());
+    listeners.add(listener);
     return () => {
       listeners!.delete(listener);
       if (!listeners!.size) agentRequestListeners.delete(id);

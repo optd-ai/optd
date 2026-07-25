@@ -87,7 +87,7 @@ export type HumanAuthHttpService = {
       { requestId: string; version: number; status: PasswordReset["status"] }
     >
   >;
-  subscribeReset(id: string, listener: () => void): () => void;
+  subscribeReset(id: string, listener: () => void): Promise<() => void>;
   inspectReset(auth: AuthContext, id: string): Promise<Result<PasswordReset>>;
   decideReset(
     auth: AuthContext,
@@ -141,7 +141,7 @@ export type AgentAuthHttpService = {
     ticket: string,
   ): Promise<Result<AgentAuthorizationRequest>>;
   status(id: string): Promise<Result<AgentAuthorizationRequest>>;
-  subscribe(id: string, listener: () => void): () => void;
+  subscribe(id: string, listener: () => void): Promise<() => void>;
   redeem(
     auth: AuthContext,
     id: string,
@@ -449,7 +449,10 @@ export function registerAuthRoutes(
             ws.close(1008, consumed.error.code);
             return;
           }
-          unsubscribe = human.subscribeReset(id, () => void sendState(ws));
+          unsubscribe = await human.subscribeReset(
+            id,
+            () => void sendState(ws),
+          );
           await sendState(ws);
         },
         onClose() {
@@ -622,7 +625,10 @@ export function registerAuthRoutes(
         async onOpen(_event, ws) {
           const consumed = await agent.consumeWatchTicket(id, ticket);
           if (!consumed.ok) return ws.close(1008, consumed.error.code);
-          unsubscribe = agent.subscribe(id, () => void sendState(ws));
+          unsubscribe = await agent.subscribe(
+            id,
+            () => void sendState(ws),
+          );
           await sendState(ws);
         },
         onClose() {
