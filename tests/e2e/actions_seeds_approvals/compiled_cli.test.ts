@@ -88,13 +88,19 @@ for (const trace of [false, true]) {
         ]);
         assertEquals(action.code, 0, action.stderr);
         const actionData = JSON.parse(action.stdout).data;
-        assertEquals(actionData.source, {
-          kind: "action",
-          identity: {
-            action: "test/actionproof:generate",
-            revision_id: actionData.source.identity.revision_id,
-          },
-        });
+        assertEquals(actionData.source.kind, "action");
+        assertEquals(
+          actionData.source.identity.action,
+          "test/actionproof:generate",
+        );
+        assertEquals(
+          actionData.source.identity.authority_evidence.targets,
+          [{
+            resource: "test/actionproof:source",
+            object_id: read.id,
+            object_version_id: read.object_version_id,
+          }],
+        );
         assertEquals(
           actionData.hook_executions.filter((item: { phase: string }) =>
             item.phase === "action.stage"
@@ -862,7 +868,8 @@ async function provisionOrdinary(
   const capabilities = boundary === "system"
     ? [["changeset.approval.decide", "system:changeset-approval"]]
     : [
-      ["action:test/actionproof:generate", "action:test/actionproof:generate"],
+      ["action:test/actionproof:generate", "test/actionproof:source"],
+      ["action:test/actionproof:generate", "test/actionproof:target"],
       ...seedNames.map((
         name,
       ) => [`seed:test/actionproof:${name}`, `seed:test/actionproof:${name}`]),

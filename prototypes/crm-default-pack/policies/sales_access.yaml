@@ -128,7 +128,6 @@ spec:
         - operant/crm:sales_team
         - operant/crm:task
         - operant/crm:activity
-        - operant/crm:note
         - operant/crm:lead_status
         - operant/crm:contact
         - operant/crm:lost_reason
@@ -139,6 +138,22 @@ spec:
       where: owner_id == actor.id
       axi:
         summary: Sales representatives may manage CRM records owned by their principal.
+    - name: sales_rep_notes
+      effect: allow
+      roles:
+        - operant/crm:sales_rep
+      actions:
+        - read
+        - create
+        - update
+        - archive
+        - comment
+        - action:operant/crm:log_activity
+      resources:
+        - operant/crm:note
+      where: author_id == actor.id
+      axi:
+        summary: Sales representatives may manage CRM notes authored by their principal.
   axi:
     purpose: sales access guidance for the operant/crm pack.
     whenToUse:

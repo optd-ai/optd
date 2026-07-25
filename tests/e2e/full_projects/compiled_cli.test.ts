@@ -228,14 +228,22 @@ for (const logLevel of logLevels) {
           output,
         );
         const redeemed = json(await ok(waiting, output));
-        const agentId = String(
+        const redeemedAgentUserId = String(
           redeemed.data.authorization.agent_user_id ?? redeemed.data.agent?.id,
         );
         const whoami = json(
           await ok(agent.runOptctl(["--json", "auth", "whoami"]), output),
         );
-        const principalId = String(whoami.data.id ?? agentId);
+        const anchoringHumanPrincipalId = String(whoami.data.principal_id);
+        const nestedAgentId = String(whoami.data.agent?.id);
+        const principalId = String(whoami.data.agent?.principal_id);
         assert(isUuidV7(principalId));
+        assertEquals(String(whoami.data.id), humanId);
+        assertEquals(redeemedAgentUserId, nestedAgentId);
+        assert(principalId !== humanId);
+        assert(principalId !== anchoringHumanPrincipalId);
+        assert(principalId !== nestedAgentId);
+        assert(humanId !== nestedAgentId);
         assertEquals(whoami.data.role_assignments, [{
           role: `${PROJECTS}:project_manager`,
           boundary: { type: "project", project_id: projectId },
@@ -447,7 +455,16 @@ for (const logLevel of logLevels) {
             output,
           ),
         );
+        assertEquals(timesheets.data.items.length, 1);
+        assertEquals(timesheets.data.items[0].data.principal_id, principalId);
         assertEquals(timesheets.data.items[0].data.hours, "4.5");
+        assertEquals(
+          timesheets.data.items.some((item: any) =>
+            item.data.principal_id === humanId ||
+            item.data.principal_id === nestedAgentId
+          ),
+          false,
+        );
 
         const badProject = await agent.runOptctl([
           "--json",

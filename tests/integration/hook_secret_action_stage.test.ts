@@ -333,6 +333,307 @@ Deno.test({
   },
 });
 
+Deno.test({
+  name:
+    "targeted action hook persistence deterministically rejects stale authority and read races",
+  sanitizeOps: false,
+  sanitizeResources: false,
+  async fn() {
+    const provider = startHttpProvider();
+    const harness = await startAuthenticatedHarness();
+    const pack = await Deno.makeTempDir({ prefix: "operant-action-races-" });
+    try {
+      await writePack(pack, provider.url);
+      const apply = await harness.runOptctl([
+        "--json",
+        "pack",
+        "apply",
+        pack,
+        "--safe",
+      ]);
+      assertEquals(apply.code, 0, apply.stderr);
+      const project = await harness.runOptctl([
+        "--json",
+        "project",
+        "create",
+        "action-races",
+        "--display-name",
+        "Action Races",
+      ]);
+      assertEquals(project.code, 0, project.stderr);
+      const projectId = JSON.parse(project.stdout).data.id as string;
+      const unrelatedProject = await harness.runOptctl([
+        "--json",
+        "project",
+        "create",
+        "action-races-unrelated",
+        "--display-name",
+        "Unrelated Action Races",
+      ]);
+      assertEquals(unrelatedProject.code, 0, unrelatedProject.stderr);
+      const unrelatedProjectId = JSON.parse(unrelatedProject.stdout).data
+        .id as string;
+      const read = await seedRead(harness, projectId);
+      const auth = (await query<{ id: string; principal_id: string }>(
+        harness.server.sql,
+        "select id,principal_id from auth_contexts order by created_at desc limit 1",
+      )).rows[0];
+      const roleAssignment = (await query<{ id: string }>(
+        harness.server.sql,
+        "select id from role_assignments where principal_id=$1 and role_id='system:super_admin' and active",
+        [auth.principal_id],
+      )).rows[0].id;
+      const policy =
+        (await query<{ assignment_id: string; version_id: string }>(
+          harness.server.sql,
+          `select pa.id assignment_id,pdv.id version_id
+           from policy_assignments pa join policy_definition_versions pdv
+             on pdv.id=pa.policy_definition_version_id
+          where pdv.policy_id='test/actionproof:action_access' and pa.active`,
+        )).rows[0];
+      const relationshipTable = (await query<{ table_name: string }>(
+        harness.server.sql,
+        `select table_name from pack_runtime_tables where publisher='test'
+          and pack_name='actionproof' and definition_kind='relationship'
+          and definition_name='source_actor'`,
+      )).rows[0].table_name;
+      const linked = await harness.runJson(["--json", "changeset", "stage"], {
+        project_id: projectId,
+        operations: [{
+          op: "link",
+          key: "actor-link",
+          project_id: projectId,
+          relationship: "test/actionproof:source_actor",
+          from: read.id,
+          to: auth.principal_id,
+          fields: {},
+        }],
+      });
+      assertEquals(linked.code, 0, linked.stderr);
+      const relationshipStage = JSON.parse(linked.stdout).data;
+      const relationshipId = relationshipStage.operations[0].relationship_id;
+      const relationshipCommit = await harness.runOptctl([
+        "--json",
+        "changeset",
+        "commit",
+        relationshipStage.id,
+      ]);
+      assertEquals(relationshipCommit.code, 0, relationshipCommit.stderr);
+      await query(
+        harness.server.sql,
+        "update role_assignments set role_id='test/actionproof:operator',boundary_type='all_projects' where id=$1",
+        [roleAssignment],
+      );
+
+      let expectedAttempts = 0;
+      const race = async (
+        name: string,
+        mutate: () => Promise<void>,
+        restore: () => Promise<void>,
+        expectedCode: "project_conflict" | "policy_denied",
+      ) => {
+        const token = `race-${name}`;
+        provider.enqueue({ kind: "hold", token });
+        const beforeStages = await evidenceCounts(harness.server.sql);
+        const pending = harness.runOptctl([
+          "--json",
+          "--project",
+          projectId,
+          "action",
+          "stage",
+          "test/actionproof:generate",
+          "--input",
+          JSON.stringify({ source_id: read.id }),
+        ]);
+        expectedAttempts++;
+        await provider.waitForAttempts(expectedAttempts);
+        await mutate();
+        provider.release(token);
+        const result = await pending;
+        try {
+          assertEquals(result.code, 1, `${name}: ${result.stderr}`);
+          assertEquals(
+            JSON.parse(result.stderr).error.code,
+            expectedCode,
+            name,
+          );
+          assertEquals(
+            await evidenceCounts(harness.server.sql),
+            beforeStages,
+            `${name} persisted partial evidence`,
+          );
+          assertEquals(provider.attempts.length, expectedAttempts);
+        } finally {
+          await restore();
+        }
+      };
+
+      await race(
+        "role-disable",
+        () =>
+          query(
+            harness.server.sql,
+            "update role_assignments set active=false where id=$1",
+            [roleAssignment],
+          ).then(() => undefined),
+        () =>
+          query(
+            harness.server.sql,
+            "update role_assignments set active=true where id=$1",
+            [roleAssignment],
+          ).then(() => undefined),
+        "project_conflict",
+      );
+      await race(
+        "policy-assignment-disable",
+        () =>
+          query(
+            harness.server.sql,
+            "update policy_assignments set active=false where id=$1",
+            [policy.assignment_id],
+          ).then(() => undefined),
+        () =>
+          query(
+            harness.server.sql,
+            "update policy_assignments set active=true where id=$1",
+            [policy.assignment_id],
+          ).then(() => undefined),
+        "project_conflict",
+      );
+      await race(
+        "policy-version-disable",
+        () =>
+          query(
+            harness.server.sql,
+            "update policy_definition_versions set active=false where id=$1",
+            [policy.version_id],
+          ).then(() => undefined),
+        () =>
+          query(
+            harness.server.sql,
+            "update policy_definition_versions set active=true where id=$1",
+            [policy.version_id],
+          ).then(() => undefined),
+        "policy_denied",
+      );
+      await race(
+        "rebac-archive",
+        () =>
+          query(
+            harness.server.sql,
+            `update "${relationshipTable}" set archived_at=now() where id=$1`,
+            [relationshipId],
+          ).then(() => undefined),
+        () =>
+          query(
+            harness.server.sql,
+            `update "${relationshipTable}" set archived_at=null where id=$1`,
+            [relationshipId],
+          ).then(() => undefined),
+        "project_conflict",
+      );
+
+      const originalVersion = read.object_version_id;
+      const replacementVersion = uuidV7();
+      await query(
+        harness.server.sql,
+        `insert into object_versions(id,project_id,definition_kind,resource_identity,
+          object_id,version,previous_version_id,changeset_commit_id,operation,
+          resource_revision,snapshot_json,changed_fields,auth_context_id)
+         select $1,project_id,definition_kind,resource_identity,object_id,version+1,id,
+          changeset_commit_id,'update',resource_revision,snapshot_json,'{}'::text[],auth_context_id
+         from object_versions where id=$2`,
+        [replacementVersion, originalVersion],
+      );
+      const sourceTable = (await query<{ table_name: string }>(
+        harness.server.sql,
+        `select table_name from pack_runtime_tables where publisher='test'
+          and pack_name='actionproof' and definition_kind='resource'
+          and definition_name='source'`,
+      )).rows[0].table_name;
+      await race(
+        "required-read-version",
+        () =>
+          query(
+            harness.server.sql,
+            `update "${sourceTable}" set version=version+1,current_object_version_id=$1 where id=$2`,
+            [replacementVersion, read.id],
+          ).then(() => undefined),
+        () =>
+          query(
+            harness.server.sql,
+            `update "${sourceTable}" set version=1,current_object_version_id=$1 where id=$2`,
+            [originalVersion, read.id],
+          ).then(() => undefined),
+        "project_conflict",
+      );
+
+      const control = async (unrelated = false) => {
+        const token = unrelated ? "unrelated" : "unchanged";
+        provider.enqueue({ kind: "hold", token });
+        const pending = harness.runOptctl([
+          "--json",
+          "--project",
+          projectId,
+          "action",
+          "stage",
+          "test/actionproof:generate",
+          "--input",
+          JSON.stringify({ source_id: read.id }),
+        ]);
+        expectedAttempts++;
+        await provider.waitForAttempts(expectedAttempts);
+        if (unrelated) {
+          await query(
+            harness.server.sql,
+            "insert into role_assignments(id,principal_id,role_id,boundary_type,project_id,active) values($1,$2,'test/actionproof:operator','project',$3,true)",
+            [uuidV7(), auth.principal_id, unrelatedProjectId],
+          );
+        }
+        provider.release(token);
+        const result = await pending;
+        assertEquals(result.code, 0, `${token}: ${result.stderr}`);
+        assertEquals(provider.attempts.length, expectedAttempts);
+        return JSON.parse(result.stdout).data;
+      };
+      const unchanged = await control();
+      const evidence = unchanged.source.identity.authority_evidence;
+      assertEquals(evidence.action, "action:test/actionproof:generate");
+      assertEquals(evidence.targets, [{
+        resource: "test/actionproof:source",
+        object_id: read.id,
+        object_version_id: originalVersion,
+      }]);
+      assertEquals(/^sha256:[0-9a-f]{64}$/.test(evidence.policy_digest), true);
+      assertEquals(
+        /^sha256:[0-9a-f]{64}$/.test(evidence.cutoff.facts_digest),
+        true,
+      );
+      const unrelated = await control(true);
+      assertEquals(
+        unrelated.source.identity.authority_evidence.policy_digest,
+        evidence.policy_digest,
+      );
+      assertEquals(
+        unrelated.source.identity.authority_evidence.cutoff.facts_digest,
+        evidence.cutoff.facts_digest,
+      );
+    } finally {
+      await harness.close();
+      await provider.close();
+      await Deno.remove(pack, { recursive: true }).catch(() => undefined);
+    }
+  },
+});
+
+async function evidenceCounts(sql: Parameters<typeof query>[0]) {
+  return (await query<{ stages: string; hooks: string }>(
+    sql,
+    `select (select count(*)::text from staged_changesets) stages,
+            (select count(*)::text from staged_hook_executions) hooks`,
+  )).rows[0];
+}
+
 async function stageCount(sql: Parameters<typeof query>[0]) {
   return Number(
     (await query<{ count: string }>(
@@ -489,6 +790,9 @@ export async function writePack(
 ): Promise<void> {
   const endpoint = new URL(providerUrl).host;
   await Deno.mkdir(`${root}/resources`);
+  await Deno.mkdir(`${root}/relationships`);
+  await Deno.mkdir(`${root}/roles`);
+  await Deno.mkdir(`${root}/policies`);
   await Deno.mkdir(`${root}/actions`);
   await Deno.mkdir(`${root}/hooks`);
   await Deno.mkdir(`${root}/seeds`);
@@ -503,6 +807,18 @@ export async function writePack(
       `kind: Resource\napiVersion: operant.dev/v1\nmetadata: { name: ${name} }\nspec:\n  fields:\n    name: { type: string, required: true, unique: true }\n    status: { type: string, required: true }\n    note: { type: string }\n  axi: {}\n`,
     );
   }
+  await Deno.writeTextFile(
+    `${root}/relationships/source_actor.yaml`,
+    `kind: Relationship\napiVersion: operant.dev/v1\nmetadata: { name: source_actor }\nspec:\n  from: { resource: source }\n  to: { resource: system:principal }\n  fields: {}\n  unique: [from, to]\n  axi: {}\n`,
+  );
+  await Deno.writeTextFile(
+    `${root}/roles/operator.yaml`,
+    `kind: Role\napiVersion: operant.dev/v1\nmetadata: { name: operator }\nspec:\n  display_name: Action Operator\n  description: Exercises exact targeted action authority.\n  axi: {}\n`,
+  );
+  await Deno.writeTextFile(
+    `${root}/policies/action_access.yaml`,
+    `kind: Policy\napiVersion: operant.dev/v1\nmetadata: { name: action_access }\nspec:\n  default_assignment: all_projects\n  rules:\n    - name: action_operator\n      effect: allow\n      roles: [test/actionproof:operator]\n      actions: [read, create, update, action:test/actionproof:generate]\n      resources: [test/actionproof:source, test/actionproof:target]\n      axi: { summary: Action operators may exercise the targeted action fixture. }\n    - name: relationship_operator\n      effect: allow\n      roles: [test/actionproof:operator]\n      actions: [link, unlink]\n      resources: [test/actionproof:source_actor]\n      axi: { summary: Action operators may manage fixture relationships. }\n  axi: {}\n`,
+  );
   await Deno.writeTextFile(
     `${root}/lifecycles/source_status.yaml`,
     `kind: Lifecycle\napiVersion: operant.dev/v1\nmetadata: { name: source_status }\nspec:\n  resource: source\n  field: status\n  initial: ready\n  states:\n    - { name: ready, terminal: false }\n    - { name: blocked, terminal: true }\n  transitions:\n    - { name: block, from: [ready], to: blocked }\n  axi: {}\n`,
