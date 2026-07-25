@@ -258,7 +258,6 @@ async function createDockerProcessTreeLauncher(
       container,
       "deno",
       "eval",
-      "--allow-all",
       worker,
       root,
     ],

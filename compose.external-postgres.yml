@@ -39,7 +39,7 @@ services:
       POSTGRES_USER: operant
       POSTGRES_PASSWORD: ${OPERANT_POSTGRES_PASSWORD:?set a generated database password}
     volumes:
-      - operant-postgres:/var/lib/postgresql/data
+      - operant-postgres:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U operant -d operant"]
       interval: 5s

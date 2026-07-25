@@ -62,7 +62,7 @@ Deno.test({
         harness.container,
         "sh",
         "-c",
-        "ps -eo pid=,ppid=,comm=,args=",
+        'for p in /proc/[0-9]*; do pid=${p##*/}; ppid=$(sed -n \'s/^PPid:[[:space:]]*//p\' "$p/status"); comm=$(cat "$p/comm"); args=$(tr \'\\000\' \' \' < "$p/cmdline"); printf \'%s %s %s %s\\n\' "$pid" "$ppid" "$comm" "$args"; done',
       ]);
       const lines = processes.stdout.trim().split("\n");
       assertEquals(
@@ -219,7 +219,12 @@ Deno.test({
         const run = async (args: string[], stdin?: string) => {
           const result = await human.runOptctl(args, stdin);
           output.push(result.stdout, result.stderr);
-          assertEquals(result.code, 0, result.stderr);
+          assertEquals(
+            result.code,
+            0,
+            `${result.argv.join(" ")}\n${result.stderr}\n${await harness
+              .logs()}`,
+          );
           return JSON.parse(result.stdout);
         };
         const bootstrap = await run([
@@ -270,7 +275,9 @@ Deno.test({
             identity,
           ]);
           assertEquals(toon.code, 0, toon.stderr);
-          assertStringIncludes(toon.stdout, identity);
+          const [publisher, name] = identity.split("/");
+          assertStringIncludes(toon.stdout, `publisher: ${publisher}`);
+          assertStringIncludes(toon.stdout, `name: ${name}`);
           const firstSeed = await run([
             "--json",
             "--project",
@@ -310,16 +317,6 @@ Deno.test({
             projectId,
           ]);
         }
-        const stages = await run([
-          "--json",
-          "--project",
-          projectId,
-          "query",
-          "operant/projects:task_stage",
-          "--limit",
-          "10",
-        ]);
-        const stageId = String(stages.data.items[0].id);
         const staged = await stageChangeset(harness, human, projectId, [{
           op: "create",
           key: "company",
@@ -348,13 +345,24 @@ Deno.test({
           },
         }, {
           op: "create",
+          key: "stage",
+          project_id: projectId,
+          resource: "operant/projects:task_stage",
+          fields: {
+            name: "Container Todo",
+            state: "todo",
+            sequence: 100,
+            folded: false,
+          },
+        }, {
+          op: "create",
           key: "task",
           project_id: projectId,
           resource: "operant/projects:task",
           fields: {
             title: "Validate release",
             work_project_id: { $ref: "work_project.object_id" },
-            stage_id: stageId,
+            stage_id: { $ref: "stage.object_id" },
             state: "todo",
             assignee_id: principalId,
           },
@@ -375,17 +383,23 @@ Deno.test({
         const companyId = String(staged.data.operations[0].object_id);
         for (
           const command of [
-            [
-              "query",
-              "operant/crm:company",
-              "--where",
-              'name == "Container CRM"',
-            ],
             ["view", "operant/crm:company", companyId],
             ["history", "operant/crm:company", companyId],
-            ["query", "operant/projects:project_member"],
-            ["query", "operant/projects:task"],
-            ["query", "operant/projects:timesheet"],
+            [
+              "view",
+              "operant/projects:project_member",
+              String(staged.data.operations[2].object_id),
+            ],
+            [
+              "view",
+              "operant/projects:task",
+              String(staged.data.operations[4].object_id),
+            ],
+            [
+              "view",
+              "operant/projects:timesheet",
+              String(staged.data.operations[5].object_id),
+            ],
           ]
         ) {
           const result = await run([
@@ -400,8 +414,9 @@ Deno.test({
           "--json",
           "--project",
           crypto.randomUUID(),
-          "query",
+          "view",
           "operant/crm:company",
+          companyId,
         ]);
         assertEquals(stableFailure.code, 1);
         assertEquals(JSON.parse(stableFailure.stderr).ok, false);
@@ -506,7 +521,21 @@ Deno.test({
         String(running.id),
       ]);
       assertEquals(runningEvidence.status, "running");
-      assert(runningEvidence.attempts?.length >= 1);
+      const runningAttempts = await ok([
+        "--json",
+        "outbox",
+        "attempts",
+        String(running.id),
+      ]);
+      const runningAttempt = runningAttempts.items.find((attempt: {
+        state: string;
+      }) => attempt.state === "running");
+      assert(runningAttempt?.lease_expires_at);
+      assert(
+        provider.attempts.some((attempt) =>
+          attempt.idempotencyKey === running.id
+        ),
+      );
       await harness.docker(["kill", harness.container]);
       await launcher.close().catch(() => undefined);
       launcher = undefined;
@@ -529,9 +558,14 @@ Deno.test({
         "OPERANT_OUTBOX_MAX_BACKOFF_MS=100",
       ]);
       await harness.waitReady();
-      await new Promise((resolve) => setTimeout(resolve, 750));
-      assertEquals(provider.attempts.length, attemptsAtRestart);
       await provider.waitForAttempts(attemptsAtRestart + 2, 15_000);
+      const recoveredRunningAttempt = provider.attempts.slice(attemptsAtRestart)
+        .find((attempt) => attempt.idempotencyKey === running.id);
+      assert(recoveredRunningAttempt);
+      assert(
+        recoveredRunningAttempt.receivedAt >=
+          new Date(String(runningAttempt.lease_expires_at)).getTime(),
+      );
       launcher = await harness.createProcessTreeLauncher();
       const login = await launcher.runOptctl([
         "--json",
@@ -570,7 +604,7 @@ Deno.test({
         harness.container,
         "sh",
         "-c",
-        "ps -eo comm=,args=",
+        'for p in /proc/[0-9]*; do comm=$(cat "$p/comm"); args=$(tr \'\\000\' \' \' < "$p/cmdline"); printf \'%s %s\\n\' "$comm" "$args"; done',
       ]);
       assertEquals(topology.stdout.match(/outbox.*worker/gi) ?? [], []);
     } finally {
