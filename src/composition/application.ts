@@ -12,7 +12,11 @@ import { makePostgresQueryObjectRepository } from "../adapters/outbound/postgres
 import { makePostgresMigrationPersistence } from "../adapters/outbound/postgres/repositories/migration_application_repository.ts";
 import {
   loadOutboxConfig,
-  makePostgresOutboxProcessingRepository,
+  makeDenoDeliveryHookExecutor,
+  makeOutboxCursorPort,
+  makePostgresDeliverySecretResolver,
+  makePostgresOutboxLifecyclePort,
+  makePostgresPinnedDeliveryHookCatalog,
 } from "../adapters/outbound/postgres/repositories/outbox_processing_repository.ts";
 import { PostgresOutboxRepository } from "../adapters/outbound/postgres/outbox_repository.ts";
 import type { DenoHookRunnerOptions } from "../adapters/outbound/deno-hooks/hook_runner.ts";
@@ -39,6 +43,7 @@ import { PostgresObjectReadBoundary } from "../adapters/outbound/postgres/object
 import { HistoryCursorSigner } from "../domain/history/cursor.ts";
 import { makePostgresExpressionDefinitionPort } from "../adapters/outbound/postgres/repositories/expression_repository.ts";
 import { err } from "../domain/errors/result.ts";
+import { uuidV7 } from "../domain/ids/uuid_v7.ts";
 import type { StageHookCoordinator } from "../domain/changesets/stage.ts";
 import { makePostgresActionStageRepository } from "../adapters/outbound/postgres/repositories/action_stage_repository.ts";
 import { makePostgresSeedStageRepository } from "../adapters/outbound/postgres/repositories/seed_stage_repository.ts";
@@ -173,26 +178,30 @@ export function makeApplication(
     expressions: makeExpressionService(
       makePostgresExpressionDefinitionPort(sql as Queryable),
     ),
-    outbox: makeProcessOutboxService(makePostgresOutboxProcessingRepository({
-      sql: sql as Queryable,
-      repository: new PostgresOutboxRepository(
-        sql,
-        async (lockedSql, auth, action) =>
-          (await new PostgresAuthorizationRepository(lockedSql as Sql)
-            .authorize({
-              auth,
-              boundary: { type: "system" },
-              action,
-              resource: "system:outbox",
-            })).ok,
+    outbox: makeProcessOutboxService({
+      repository: makePostgresOutboxLifecyclePort(
+        new PostgresOutboxRepository(
+          sql,
+          async (lockedSql, auth, action) =>
+            (await new PostgresAuthorizationRepository(lockedSql as Sql)
+              .authorize({
+                auth,
+                boundary: { type: "system" },
+                action,
+                resource: "system:outbox",
+              })).ok,
+        ),
       ),
       authorization: authorizationRepository,
-      secrets: hookSecretRepository,
-      hookRunnerOptions: options.hookRunnerOptions,
+      catalog: makePostgresPinnedDeliveryHookCatalog(sql as Queryable),
+      secrets: makePostgresDeliverySecretResolver(hookSecretRepository),
+      hooks: makeDenoDeliveryHookExecutor(options.hookRunnerOptions),
+      cursors: makeOutboxCursorPort(),
       config: loadOutboxConfig(Deno.env.toObject()),
       random: Math.random,
       now: () => new Date(),
-    })),
+      workerId: uuidV7(),
+    }),
     secrets,
     actions: stageHookCoordinator instanceof TrustedStageHookCoordinator
       ? makeStageActionService(

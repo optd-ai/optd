@@ -548,6 +548,37 @@ Deno.test("action staging orchestration stays inward over granular capabilities"
   assertEquals(adapter.includes("StageSource ="), false);
 });
 
+Deno.test("outbox orchestration stays inward over lifecycle capabilities", async () => {
+  const application = await Deno.readTextFile(
+    "src/application/services/process_outbox.ts",
+  );
+  const adapter = await Deno.readTextFile(
+    "src/adapters/outbound/postgres/repositories/outbox_processing_repository.ts",
+  );
+  const composition = await Deno.readTextFile(
+    "src/composition/application.ts",
+  );
+
+  assertMatch(application, /OutboxLifecyclePort/);
+  assertMatch(application, /PinnedDeliveryHookCatalog/);
+  assertMatch(application, /DeliverySecretResolver/);
+  assertMatch(application, /DeliveryHookExecutor/);
+  assertMatch(application, /processOne/);
+  assertMatch(application, /retryDelayMs/);
+  assertMatch(application, /parseDeliveryOutput/);
+  assertMatch(application, /sanitizeOutboxAuthorizationResult/);
+  assertEquals(application.includes("makeProcessOutboxService<T"), false);
+  assertEquals(adapter.includes("processBatch"), false);
+  assertEquals(adapter.includes("processOne"), false);
+  assertEquals(adapter.includes("retryDelayMs"), false);
+  assertEquals(adapter.includes("parseDeliveryOutput"), false);
+  assertEquals(adapter.includes("makeProcessOutboxService"), false);
+  assertMatch(composition, /makePostgresOutboxLifecyclePort/);
+  assertMatch(composition, /makePostgresPinnedDeliveryHookCatalog/);
+  assertMatch(composition, /makePostgresDeliverySecretResolver/);
+  assertMatch(composition, /makeDenoDeliveryHookExecutor/);
+});
+
 Deno.test("high-surface concrete imports map to complete semantic ports", () => {
   const replacements = (importer: string, target: string) =>
     EXPECTED_APPLICATION_ADAPTER_EDGES.find((edge) =>

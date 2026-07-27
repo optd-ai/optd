@@ -19,7 +19,11 @@ import {
   PostgresHookSecretRepository,
 } from "../../src/adapters/outbound/postgres/hook_secret_repository.ts";
 import { PostgresOutboxRepository } from "../../src/adapters/outbound/postgres/outbox_repository.ts";
-import { makePostgresOutboxProcessingRepository } from "../../src/adapters/outbound/postgres/repositories/outbox_processing_repository.ts";
+import {
+  makePostgresOutboxLifecyclePort,
+  makePostgresPinnedDeliveryHookCatalog,
+} from "../../src/adapters/outbound/postgres/repositories/outbox_processing_repository.ts";
+import { makeProcessOutboxService } from "../../src/application/services/process_outbox.ts";
 import { canonicalSha256 } from "../../src/domain/ids/canonical_json.ts";
 import { uuidV7 } from "../../src/domain/ids/uuid_v7.ts";
 
@@ -329,15 +333,21 @@ Deno.test("production service dead-letters pinned permanent failures before prov
       | "retry"
       | "retry_after";
     let runnerMode: RunnerMode = "success";
-    const service = makePostgresOutboxProcessingRepository({
-      sql,
-      repository,
+    const service = makeProcessOutboxService({
+      repository: makePostgresOutboxLifecyclePort(repository),
       authorization: {
         authorize: () => Promise.resolve({ ok: true, value: {} as never }),
-      } as never,
+      },
+      catalog: makePostgresPinnedDeliveryHookCatalog(sql),
       secrets: {
         resolve: () => Promise.resolve({ values: {}, evidence: [] }),
-      } as unknown as PostgresHookSecretRepository,
+      },
+      cursors: {
+        decode: () => Promise.reject(new Error("unused")),
+        encode: () => Promise.reject(new Error("unused")),
+        decodeAttempt: () => Promise.reject(new Error("unused")),
+        encodeAttempt: () => Promise.reject(new Error("unused")),
+      },
       now: () => now,
       random: () => 0.5,
       workerId: uuidV7(),
@@ -350,19 +360,17 @@ Deno.test("production service dead-letters pinned permanent failures before prov
         maximumRetryAfterMs: 500,
         shutdownGraceMs: 1_000,
       },
-      runnerFactory: () => ({
-        run: async (hook) => {
+      hooks: {
+        run: async () => {
           await Promise.resolve();
           runnerCalls++;
           if (runnerMode === "capability") {
             return {
               ok: false,
-              hook: hook.name,
-              outputSchema: "delivery.v1",
+              output: null,
               logs: "",
               durationMs: 0,
               exitCode: null,
-              scriptDigest: hook.scriptDigest,
               error: {
                 code: "hook_capability_denied",
                 message: "deployment ceiling denied capability",
@@ -372,8 +380,6 @@ Deno.test("production service dead-letters pinned permanent failures before prov
           }
           return {
             ok: true,
-            hook: hook.name,
-            outputSchema: "delivery.v1",
             output: runnerMode === "invalid"
               ? { outcome: "success" }
               : runnerMode === "retry"
@@ -389,10 +395,9 @@ Deno.test("production service dead-letters pinned permanent failures before prov
             logs: "",
             durationMs: 1,
             exitCode: 0,
-            scriptDigest: hook.scriptDigest,
           };
         },
-      }),
+      },
     });
 
     await service.processBatch(1);
