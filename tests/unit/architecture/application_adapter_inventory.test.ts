@@ -222,7 +222,13 @@ export const EXPECTED_APPLICATION_ADAPTER_EDGES:
     edge(
       "src/application/services/run_action.ts",
       "src/adapters/outbound/postgres/client.ts",
-      "src/application/ports/repair/repositories.ts#ActionCatalog",
+      [
+        "src/application/ports/repair/repositories.ts#ActionCatalog",
+        "src/application/ports/repair/repositories.ts#PinnedActionHookCatalog",
+        "src/application/ports/repair/repositories.ts#ActionTargetReader",
+        "src/application/ports/repair/repositories.ts#ActionPolicyAuthorizer",
+        "src/application/ports/repair/repositories.ts#HookExecutionEvidenceRepository",
+      ],
     ),
     edge(
       "src/application/services/run_action.ts",
@@ -315,4 +321,39 @@ Deno.test("application adapter inventory exactly matches the frozen migration se
       assertMatch(replacement, /^src\/application\/ports\/.+#[A-Z]/);
     }
   }
+});
+
+Deno.test("high-surface concrete imports map to complete semantic ports", () => {
+  const replacements = (importer: string, target: string) =>
+    EXPECTED_APPLICATION_ADAPTER_EDGES.find((edge) =>
+      edge.importer === importer && edge.target === target
+    )?.replacements;
+
+  assertEquals(
+    replacements(
+      "src/application/services/process_outbox.ts",
+      "src/adapters/outbound/postgres/outbox_repository.ts",
+    ),
+    ["src/application/ports/repair/repositories.ts#OutboxRepository"],
+  );
+  assertEquals(
+    replacements(
+      "src/application/services/run_action.ts",
+      "src/adapters/outbound/postgres/client.ts",
+    ),
+    [
+      "src/application/ports/repair/repositories.ts#ActionCatalog",
+      "src/application/ports/repair/repositories.ts#PinnedActionHookCatalog",
+      "src/application/ports/repair/repositories.ts#ActionTargetReader",
+      "src/application/ports/repair/repositories.ts#ActionPolicyAuthorizer",
+      "src/application/ports/repair/repositories.ts#HookExecutionEvidenceRepository",
+    ],
+  );
+  assertEquals(
+    replacements(
+      "src/application/services/migration_services.ts",
+      "src/adapters/outbound/postgres/pack_migration_repository.ts",
+    ),
+    ["src/application/ports/repair/repositories.ts#MigrationRepository"],
+  );
 });

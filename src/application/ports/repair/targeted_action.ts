@@ -90,19 +90,12 @@ export function canonicalTargetDigestInput(
     ),
     role_assignment_ids: evidence.roleAssignmentIds.toSorted(compareText),
     relationship_ids: evidence.relationshipIds.toSorted(compareText),
-  })).toSorted((left, right) =>
-    compareText(left.project_id, right.project_id) ||
-    compareText(left.resource, right.resource) ||
-    compareText(left.object_id ?? "", right.object_id ?? "") ||
-    compareText(left.object_version_id ?? "", right.object_version_id ?? "")
-  );
+  }));
 
   return Object.freeze({
     actor: cutoff.actor,
     authorization_root_id: cutoff.authorizationRootId,
-    authorization_lineage_ids: cutoff.authorizationLineageIds.toSorted(
-      compareText,
-    ),
+    authorization_lineage_ids: [...cutoff.authorizationLineageIds],
     targets,
   });
 }

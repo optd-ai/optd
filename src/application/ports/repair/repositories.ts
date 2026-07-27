@@ -128,20 +128,34 @@ export interface PackCatalog<TPackRevision> {
   revision(id: string): Promise<TPackRevision | null>;
 }
 
+export type MigrationApplyAttempt = Readonly<{
+  planId: string;
+  authContextId: string;
+  attempt: number;
+  outcome: string;
+}>;
+
 export interface MigrationRepository<
   TPlanRequest,
   TPlan,
   TInspection,
   TValidation,
+  TApplyRequest,
   TApplyResult,
 > {
   plan(request: TPlanRequest): Promise<TPlan>;
-  inspect(id: string): Promise<TInspection>;
-  validate(id: string): Promise<TValidation>;
+  inspect(id: string): Promise<TInspection | null>;
+  validate(id: string): Promise<TValidation | null>;
+  generatedSql(id: string): Promise<readonly string[] | null>;
   apply(
-    id: string,
+    request: TApplyRequest,
     transaction: RepositoryTransaction,
-  ): Promise<TApplyResult>;
+  ): Promise<TApplyResult | null>;
+  /** Records denied, transient/retried and terminal failed apply attempts. */
+  recordApplyAttempt(
+    request: MigrationApplyAttempt,
+    transaction: RepositoryTransaction,
+  ): Promise<void>;
 }
 
 export type CuratedHookInput = Readonly<{ [key: string]: JsonValue }>;
@@ -285,13 +299,102 @@ export interface HookSecretGrantRepository<
   ): Promise<void>;
 }
 
-export interface OutboxRepository<TDelivery, TEvidence> {
-  lease(batchSize: number, now: string): Promise<readonly TDelivery[]>;
-  markDelivered(id: string, evidence: TEvidence): Promise<void>;
-  markRetry(id: string, retryAt: string, evidence: TEvidence): Promise<void>;
-  markFailed(id: string, evidence: TEvidence): Promise<void>;
+export type OutboxMutationAuthority = Readonly<{
+  authContextId: string;
+  /** Called after the delivery row is locked, in the mutation transaction. */
+  revalidate(transaction: RepositoryTransaction): Promise<boolean>;
+}>;
+
+export type OutboxOperatorMutation = Readonly<{
+  deliveryId: string;
+  reason?: string;
+  authority: OutboxMutationAuthority;
+}>;
+
+export type OutboxDrainAudit = Readonly<{
+  authContextId: string;
+  limit: number;
+}>;
+
+export type OutboxOperatorMutationStatus =
+  | "pending"
+  | "cancelled"
+  | "authorization_changed"
+  | "delivery_not_found"
+  | "delivery_not_retryable"
+  | "delivery_in_progress";
+
+/** Atomic delivery lifecycle, inspection, operator control and drain audit. */
+export interface OutboxRepository<
+  TClaimRequest,
+  TClaimedDelivery,
+  TCompletionRequest,
+  TCompletionStatus,
+  TListRequest,
+  TDelivery,
+  TAttemptRequest,
+  TAttempt,
+> {
+  claim(request: TClaimRequest): Promise<readonly TClaimedDelivery[]>;
+  complete(request: TCompletionRequest): Promise<TCompletionStatus>;
+  list(request: TListRequest): Promise<readonly TDelivery[]>;
+  inspect(id: string): Promise<TDelivery | null>;
+  attempts(request: TAttemptRequest): Promise<readonly TAttempt[]>;
+  retry(request: OutboxOperatorMutation): Promise<OutboxOperatorMutationStatus>;
+  cancel(
+    request: OutboxOperatorMutation,
+  ): Promise<OutboxOperatorMutationStatus>;
+  auditDrain(audit: OutboxDrainAudit): Promise<void>;
 }
 
-export interface ActionCatalog<TActionDefinition> {
-  definition(identity: string): Promise<TActionDefinition | null>;
+export interface ActionCatalog<TActionRequest, TActionDefinition> {
+  definition(request: TActionRequest): Promise<TActionDefinition | null>;
+}
+
+/** Resolves the exact hook revision and source pinned by the action definition. */
+export interface PinnedActionHookCatalog<THookRequest, TPinnedHook> {
+  pinned(request: THookRequest): Promise<TPinnedHook | null>;
+}
+
+export type ActionTarget<TObject> = Readonly<{
+  resource: string;
+  name: string;
+  objectId: string;
+  objectVersionId: string;
+  object: TObject;
+}>;
+
+/** Reads the active target object, including its immutable version evidence. */
+export interface ActionTargetReader<TTargetRequest, TObject> {
+  current(request: TTargetRequest): Promise<ActionTarget<TObject> | null>;
+}
+
+/** Evaluates and asserts semantic-action authority for the reviewed target. */
+export interface ActionPolicyAuthorizer<TAuthorizationRequest, TDecision> {
+  assertAllowed(request: TAuthorizationRequest): Promise<TDecision>;
+}
+
+export type ActionHookExecutionEvidence<TOutput, TError> = Readonly<{
+  hookIdentity: string;
+  revisionId: string;
+  scriptDigest: string;
+  actorId: string;
+  phase: "action.preview" | "action.commit";
+  status: "succeeded" | "failed";
+  durationMs: number;
+  exitCode: number | null;
+  logs: string;
+  output: TOutput | null;
+  error: TError | null;
+}>;
+
+/** Persists one immutable success/failure record for the pinned hook execution. */
+export interface HookExecutionEvidenceRepository<
+  TOutput,
+  TError,
+  TEvidenceId,
+> {
+  record(
+    evidence: ActionHookExecutionEvidence<TOutput, TError>,
+  ): Promise<TEvidenceId>;
 }

@@ -1,5 +1,5 @@
 // deno-lint-ignore-file no-import-prefix no-unversioned-import
-import { assertEquals, assertFalse } from "jsr:@std/assert";
+import { assertEquals, assertFalse, assertNotEquals } from "jsr:@std/assert";
 import {
   canonicalTargetDigestInput,
   type EffectManifest,
@@ -29,6 +29,11 @@ Deno.test("target authority evidence canonicalizes exact reviewed targets", () =
         policyVersionId: "version-2",
         policyVersion: 2,
         rule: "update",
+      }, {
+        policy: "publisher/crm:accounts",
+        policyVersionId: "version-1",
+        policyVersion: 1,
+        rule: "viewer",
       }],
       roleAssignmentIds: ["role-2", "role-1"],
       relationshipIds: ["relationship-2", "relationship-1"],
@@ -49,18 +54,62 @@ Deno.test("target authority evidence canonicalizes exact reviewed targets", () =
   });
 
   assertEquals(canonical.authorization_lineage_ids, [
-    "authorization-1",
     "authorization-2",
+    "authorization-1",
   ]);
   assertEquals(canonical.targets.map((target) => target.object_id), [
-    "lead-1",
     "lead-2",
+    "lead-1",
   ]);
   assertEquals(canonical.targets.map((target) => target.object_version_id), [
-    "019b1234-5678-7abc-8def-012345678901",
     "019b1234-5678-7abc-8def-012345678902",
+    "019b1234-5678-7abc-8def-012345678901",
   ]);
-  assertEquals(canonical.targets[1].role_assignment_ids, ["role-1", "role-2"]);
+  assertEquals(canonical.targets[0].matched_rules.map((rule) => rule.policy), [
+    "publisher/crm:accounts",
+    "publisher/crm:sales",
+  ]);
+  assertEquals(canonical.targets[0].role_assignment_ids, ["role-1", "role-2"]);
+});
+
+Deno.test("canonical target evidence preserves reviewed target and lineage order", () => {
+  const actor = {
+    id: "agent-principal",
+    principal_type: "agent_user" as const,
+    human_user_id: "human-1",
+  };
+  const target = (id: string) => ({
+    target: {
+      projectId: "project-1",
+      resource: "publisher/crm:lead",
+      object: { id, versionId: `version-${id}` },
+    },
+    policyDigest: `digest-${id}`,
+    matchedRules: [],
+    roleAssignmentIds: [],
+    relationshipIds: [],
+  });
+  const first = canonicalTargetDigestInput({
+    actor,
+    authorizationRootId: "root-1",
+    authorizationLineageIds: ["root-1", "child-1"],
+    targets: [target("lead-1"), target("lead-2")],
+  });
+  const reversedTargets = canonicalTargetDigestInput({
+    actor,
+    authorizationRootId: "root-1",
+    authorizationLineageIds: ["root-1", "child-1"],
+    targets: [target("lead-2"), target("lead-1")],
+  });
+  const reversedLineage = canonicalTargetDigestInput({
+    actor,
+    authorizationRootId: "root-1",
+    authorizationLineageIds: ["child-1", "root-1"],
+    targets: [target("lead-1"), target("lead-2")],
+  });
+
+  assertNotEquals(JSON.stringify(first), JSON.stringify(reversedTargets));
+  assertNotEquals(JSON.stringify(first), JSON.stringify(reversedLineage));
 });
 
 Deno.test("effect manifests cannot become authorization digest targets", () => {
