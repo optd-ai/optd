@@ -1,19 +1,15 @@
-import type { Clock } from "../../../application/ports/clock.ts";
-import type { AuthorizationRepository } from "../../../application/ports/authorization.ts";
-import type { AuthContext } from "../../../domain/auth/model.ts";
-import { query, type Queryable } from "../postgres/client.ts";
-import {
-  getActivePack,
-  getDefinition,
-  listPacks,
-} from "../postgres/pack_repository.ts";
+import type { Clock } from "../../../../application/ports/clock.ts";
+import type { AuthorizationRepository } from "../../../../application/ports/authorization.ts";
+import type { AuthContext } from "../../../../domain/auth/model.ts";
+import { query, type Queryable } from "../client.ts";
+import { getActivePack, getDefinition, listPacks } from "../pack_repository.ts";
 import {
   err,
   ok,
   type Result,
   type StableError,
-} from "../../../domain/errors/result.ts";
-import { isUuidV7 } from "../../../domain/ids/uuid_v7.ts";
+} from "../../../../domain/errors/result.ts";
+import { isUuidV7 } from "../../../../domain/ids/uuid_v7.ts";
 
 export type HomeDto = {
   version: string;
@@ -31,7 +27,7 @@ export type MetadataOptions = Readonly<
   { auth: AuthContext; projectId?: string; includeSecurity?: boolean }
 >;
 
-export function makeInspectMetadataService(
+export function makePostgresMetadataRepository(
   deps: {
     sql: Queryable;
     clock: Clock;

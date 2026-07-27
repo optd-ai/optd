@@ -3,21 +3,15 @@ import {
   ok,
   type Result,
   validationError,
-} from "../../../domain/errors/result.ts";
-import {
-  loadPackFromFiles,
-  type UploadedPackFile,
-} from "../yaml/pack_loader.ts";
-import {
-  countPackRevisions,
-  summarizePack,
-} from "../postgres/pack_repository.ts";
-import { createPackMigrationPlan } from "../postgres/pack_migration_repository.ts";
-import type { Queryable } from "../postgres/client.ts";
-import type { MigrationPlan } from "../../../domain/migrations/pack_migration.ts";
-import type { AuthContext } from "../../../domain/auth/model.ts";
-import type { AuthorizationRepository } from "../../../application/ports/authorization.ts";
-import type { TransactionManager } from "../../../application/ports/transaction_manager.ts";
+} from "../../../../domain/errors/result.ts";
+import { loadPackFromFiles } from "../../yaml/pack_loader.ts";
+import type { UploadedPackFile } from "../../../../domain/packs/loaded_pack.ts";
+import { countPackRevisions, summarizePack } from "../pack_repository.ts";
+import { createPackMigrationPlan } from "../pack_migration_repository.ts";
+import type { Queryable } from "../client.ts";
+import type { MigrationPlan } from "../../../../domain/migrations/pack_migration.ts";
+import type { AuthContext } from "../../../../domain/auth/model.ts";
+import type { TransactionManager } from "../../../../application/ports/transaction_manager.ts";
 
 export type PackPreviewDto = {
   candidate: {
@@ -30,10 +24,9 @@ export type PackPreviewDto = {
   active: false;
 };
 
-export function makePackServices(
+export function makePostgresPackRepository(
   deps: {
     sql: Queryable;
-    authorization: AuthorizationRepository;
     tx: TransactionManager<Queryable>;
   },
 ) {
@@ -43,13 +36,6 @@ export function makePackServices(
       auth: AuthContext,
     ): Promise<Result<PackPreviewDto>> {
       try {
-        const authorized = await deps.authorization.authorize({
-          auth,
-          boundary: { type: "system" },
-          action: "pack.preview",
-          resource: "system:pack",
-        });
-        if (!authorized.ok) return err(authorized.error);
         const pack = await loadPackFromFiles(files);
         const { before, after, plan, candidate_reused } = await deps.tx
           .transaction(async (sql) => {

@@ -13,7 +13,7 @@ import {
   validationError,
 } from "../../../../domain/errors/result.ts";
 
-export function makeObjectReadService(deps: {
+export function makePostgresObjectReadRepository(deps: {
   boundary: ObjectReadBoundary;
   cursors: () => HistoryCursorSigner;
 }) {

@@ -1,3 +1,6 @@
+import type { AuthContext } from "../../../domain/auth/model.ts";
+import type { Result } from "../../../domain/errors/result.ts";
+import type { StageDto } from "../../ports/stage_repository.ts";
 import { validateFieldMap } from "../../../schemas/changesets/field_values.ts";
 import type { TargetedActionPolicyTarget } from "../query_objects.ts";
 
@@ -36,4 +39,32 @@ function parseResourceIdentity(value: string): {
   return match
     ? { kind: "resource", publisher: match[1], pack: match[2], name: match[3] }
     : null;
+}
+
+export type StageActionResult = StageDto | {
+  status: "no_changes";
+  stage: null;
+};
+
+/** Application use-case boundary; the adapter owns SQL and pinned hook execution. */
+export interface ActionStagePort {
+  stage(
+    publisher: string,
+    pack: string,
+    name: string,
+    raw: unknown,
+    auth: AuthContext,
+  ): Promise<Result<StageActionResult>>;
+}
+
+export function makeStageActionService(port: ActionStagePort) {
+  return Object.freeze({
+    stage: (
+      publisher: string,
+      pack: string,
+      name: string,
+      raw: unknown,
+      auth: AuthContext,
+    ) => port.stage(publisher, pack, name, raw, auth),
+  });
 }

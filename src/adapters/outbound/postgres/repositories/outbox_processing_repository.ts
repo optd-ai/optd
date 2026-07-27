@@ -3,32 +3,32 @@ import {
   ok,
   type Result,
   validationError,
-} from "../../../domain/errors/result.ts";
-import type { AuthContext } from "../../../domain/auth/model.ts";
-import { isUuidV7, uuidV7 } from "../../../domain/ids/uuid_v7.ts";
-import { canonicalSha256 } from "../../../domain/ids/canonical_json.ts";
+} from "../../../../domain/errors/result.ts";
+import type { AuthContext } from "../../../../domain/auth/model.ts";
+import { isUuidV7, uuidV7 } from "../../../../domain/ids/uuid_v7.ts";
+import { canonicalSha256 } from "../../../../domain/ids/canonical_json.ts";
 import {
   type DeliveryOutcome,
   parseDeliveryOutput,
   retryDelayMs,
-} from "../../../domain/outbox/delivery.ts";
+} from "../../../../domain/outbox/delivery.ts";
 import {
   normalizeFilters,
   OutboxCursorSigner,
-} from "../../../domain/outbox/cursor.ts";
-import { attemptDto, deliveryDto } from "../../../domain/outbox/dto.ts";
+} from "../../../../domain/outbox/cursor.ts";
+import { attemptDto, deliveryDto } from "../../../../domain/outbox/dto.ts";
 import {
   DenoHookRunner,
   type DenoHookRunnerOptions,
   type HookDefinition,
-} from "../deno-hooks/hook_runner.ts";
+} from "../../deno-hooks/hook_runner.ts";
 import {
   type ClaimedDelivery,
   PostgresOutboxRepository,
-} from "../postgres/outbox_repository.ts";
-import type { PostgresHookSecretRepository } from "../postgres/hook_secret_repository.ts";
-import type { AuthorizationRepository } from "../../../application/ports/authorization.ts";
-import { query, type Queryable } from "../postgres/client.ts";
+} from "../outbox_repository.ts";
+import type { PostgresHookSecretRepository } from "../hook_secret_repository.ts";
+import type { AuthorizationRepository } from "../../../../application/ports/authorization.ts";
+import { query, type Queryable } from "../client.ts";
 
 export type OutboxConfig = ReturnType<typeof loadOutboxConfig>;
 
@@ -74,7 +74,7 @@ export function loadOutboxConfig(env = Deno.env.toObject()) {
   };
 }
 
-export function makeProcessOutboxService(deps: {
+export function makePostgresOutboxProcessingRepository(deps: {
   sql: Queryable;
   repository: PostgresOutboxRepository;
   authorization: AuthorizationRepository;

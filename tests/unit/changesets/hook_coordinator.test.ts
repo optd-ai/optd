@@ -1,7 +1,7 @@
 import {
   type ActionStageHookDeclaration,
   TrustedStageHookCoordinator,
-} from "../../../src/adapters/outbound/use-cases/hooks/stage_hook_coordinator.ts";
+} from "../../../src/adapters/outbound/deno-hooks/trusted_stage_hook_adapter.ts";
 import type {
   StageHookDeclaration,
   StageHookInput,

@@ -1,4 +1,4 @@
-import { query, type Queryable } from "../../postgres/client.ts";
+import { query, type Queryable } from "../client.ts";
 import type { TransactionManager } from "../../../../application/ports/transaction_manager.ts";
 import type { AuthorizationRepository } from "../../../../application/ports/authorization.ts";
 import type { AuthContext } from "../../../../domain/auth/model.ts";
@@ -24,7 +24,7 @@ type SecretRow = {
   status: "active" | "disabled";
 };
 
-export function makeSecretsService(deps: {
+export function makePostgresSecretLifecycleRepository(deps: {
   sql: Queryable;
   tx: TransactionManager<Queryable>;
   authorization: AuthorizationRepository;

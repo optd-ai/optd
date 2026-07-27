@@ -8,7 +8,7 @@ import {
 import type { AuthContext } from "../../../domain/auth/model.ts";
 import { PostgresAuthorizationRepository } from "./authorization_repository.ts";
 import { PostgresObjectReader } from "./object_reader.ts";
-import { evaluateObjectPolicy } from "../use-cases/query_objects.ts";
+import { evaluateObjectPolicy } from "./repositories/query_object_repository.ts";
 import { query, type Queryable, type Sql } from "./client.ts";
 
 type LineageRow = {

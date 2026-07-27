@@ -18,3 +18,8 @@ export type MetadataOptions = Readonly<{
   projectId?: string;
   includeSecurity?: boolean;
 }>;
+
+/** Application-owned orchestration boundary over the typed outbound port. */
+export function makeInspectMetadataService<T extends object>(metadata: T): T {
+  return Object.freeze(metadata);
+}

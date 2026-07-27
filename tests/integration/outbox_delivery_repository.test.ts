@@ -19,7 +19,7 @@ import {
   PostgresHookSecretRepository,
 } from "../../src/adapters/outbound/postgres/hook_secret_repository.ts";
 import { PostgresOutboxRepository } from "../../src/adapters/outbound/postgres/outbox_repository.ts";
-import { makeProcessOutboxService } from "../../src/adapters/outbound/use-cases/process_outbox.ts";
+import { makePostgresOutboxProcessingRepository } from "../../src/adapters/outbound/postgres/repositories/outbox_processing_repository.ts";
 import { canonicalSha256 } from "../../src/domain/ids/canonical_json.ts";
 import { uuidV7 } from "../../src/domain/ids/uuid_v7.ts";
 
@@ -329,7 +329,7 @@ Deno.test("production service dead-letters pinned permanent failures before prov
       | "retry"
       | "retry_after";
     let runnerMode: RunnerMode = "success";
-    const service = makeProcessOutboxService({
+    const service = makePostgresOutboxProcessingRepository({
       sql,
       repository,
       authorization: {

@@ -14,7 +14,7 @@ import {
   type MigrationApplyResult,
   type MigrationStatus,
 } from "./adapters/outbound/postgres/migrations.ts";
-import { assertSecretSubsystemReady } from "./adapters/outbound/use-cases/secrets/manage_secrets.ts";
+import { assertSecretSubsystemReady } from "./adapters/outbound/postgres/repositories/hook_secret_lifecycle_repository.ts";
 import { resolveHookDenoBinary } from "./adapters/outbound/deno-hooks/hook_runner.ts";
 import {
   assertSupportedPostgresVersionNumber,

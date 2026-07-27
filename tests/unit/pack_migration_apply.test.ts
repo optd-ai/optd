@@ -1,7 +1,7 @@
 // deno-lint-ignore-file no-import-prefix no-unversioned-import no-explicit-any require-await
 import { assertEquals } from "jsr:@std/assert";
 import { MigrationApplyError } from "../../src/adapters/outbound/postgres/pack_migration_repository.ts";
-import { makeMigrationServices } from "../../src/adapters/outbound/use-cases/migration_services.ts";
+import { makePostgresMigrationRepository } from "../../src/adapters/outbound/postgres/repositories/migration_application_repository.ts";
 import type { AuthContext } from "../../src/domain/auth/model.ts";
 
 const auth: AuthContext = Object.freeze({
@@ -18,7 +18,7 @@ const auth: AuthContext = Object.freeze({
 Deno.test("migration validate maps stale typed failures without apply-attempt mutation", async () => {
   let transactions = 0;
   let queries = 0;
-  const services = makeMigrationServices({
+  const services = makePostgresMigrationRepository({
     sql: {
       unsafe: async () => {
         queries++;
@@ -57,7 +57,7 @@ Deno.test("migration validate maps stale typed failures without apply-attempt mu
 Deno.test("migration apply retries only 40P01 and 40001 with fresh transactions", async () => {
   for (const state of ["40P01", "40001"]) {
     let attempts = 0;
-    const services = makeMigrationServices({
+    const services = makePostgresMigrationRepository({
       sql: { unsafe: async () => [] },
       authorization: {
         authorize: async () => ({ ok: true, value: {} }),
@@ -96,7 +96,7 @@ Deno.test("migration apply never retries timeout or non-transient SQLSTATEs", as
     ]] as const
   ) {
     let attempts = 0;
-    const services = makeMigrationServices({
+    const services = makePostgresMigrationRepository({
       sql: { unsafe: async () => [] },
       authorization: {
         authorize: async () => ({ ok: true, value: {} }),

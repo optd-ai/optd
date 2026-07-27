@@ -6,41 +6,32 @@ import type {
   StageHookExecution,
   StageHookInput,
   StageHookOutput,
-} from "../../../../domain/changesets/stage.ts";
-import { canonicalSha256 } from "../../../../domain/ids/canonical_json.ts";
-import { uuidV7 } from "../../../../domain/ids/uuid_v7.ts";
-import { applyPatches } from "../../../../domain/changesets/patch.ts";
+} from "../../../domain/changesets/stage.ts";
+import { StageHookError } from "../../../application/ports/hook_executor.ts";
+import { canonicalSha256 } from "../../../domain/ids/canonical_json.ts";
+import { uuidV7 } from "../../../domain/ids/uuid_v7.ts";
+import { applyPatches } from "../../../domain/changesets/patch.ts";
 import {
   canonicalizeResolvedOperations,
   type CanonicalOperation,
   DEFAULT_OPERATION_LIMITS,
   type OperationLimits,
   resolveAddedOperations,
-} from "../../../../domain/changesets/operations.ts";
+} from "../../../domain/changesets/operations.ts";
 import {
   type AuthoredOperation,
   authoredOperationContract,
-} from "../../../../schemas/changesets/operations.ts";
+} from "../../../schemas/changesets/operations.ts";
 import {
   DenoHookRunner,
   type HookDefinition,
   type HookEnvelope,
-} from "../../deno-hooks/hook_runner.ts";
+} from "./hook_runner.ts";
 import {
   HookSecretGrantUnavailableError,
   HookSecretUnavailableError,
   type ResolvedHookSecrets,
-} from "../../postgres/hook_secret_repository.ts";
-
-export class StageHookError extends Error {
-  readonly code: string;
-  readonly details: Record<string, unknown>;
-  constructor(code: string, message: string, details: Record<string, unknown>) {
-    super(message);
-    this.code = code;
-    this.details = details;
-  }
-}
+} from "../postgres/hook_secret_repository.ts";
 
 export type ActionStageHookDeclaration =
   & Omit<

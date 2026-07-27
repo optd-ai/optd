@@ -1,7 +1,7 @@
 // deno-lint-ignore-file no-import-prefix no-unversioned-import
 import { assertEquals } from "jsr:@std/assert";
 import { queryRequestContract } from "../../src/schemas/queries/query.ts";
-import { evaluateTargetedActionPolicy } from "../../src/adapters/outbound/use-cases/query_objects.ts";
+import { evaluateTargetedActionPolicy } from "../../src/adapters/outbound/postgres/repositories/query_object_repository.ts";
 import type { AuthContext } from "../../src/domain/auth/model.ts";
 
 Deno.test("query contract is strict, Project-scoped, and bounded", () => {

@@ -1,5 +1,5 @@
-import type { LoadedPack } from "../../adapters/outbound/yaml/pack_loader.ts";
-import { canonicalJson } from "../../adapters/outbound/yaml/pack_loader.ts";
+import type { LoadedPack } from "../packs/loaded_pack.ts";
+import { canonicalJson } from "../ids/canonical_json.ts";
 import { uuidV7 } from "../ids/uuid_v7.ts";
 
 export type MigrationClass = "safe" | "risky" | "destructive";

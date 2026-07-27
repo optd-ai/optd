@@ -28,3 +28,8 @@ function record(value: unknown): Record<string, unknown> {
     ? value as Record<string, unknown>
     : {};
 }
+
+/** Application-owned orchestration boundary over the typed outbound port. */
+export function makeProcessOutboxService<T extends object>(outbox: T): T {
+  return Object.freeze(outbox);
+}

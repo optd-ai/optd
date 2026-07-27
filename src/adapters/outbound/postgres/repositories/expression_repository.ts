@@ -10,7 +10,7 @@ import {
   type FieldSpec,
   lowerExpression,
 } from "../../../../domain/expressions/cel.ts";
-import { query, type Queryable } from "../../postgres/client.ts";
+import { query, type Queryable } from "../client.ts";
 
 const CONTEXTS = new Set([
   "query",
@@ -33,7 +33,7 @@ export type ExpressionValidationRequest = {
   expression: string;
 };
 
-export function makeExpressionService(sql: Queryable) {
+export function makePostgresExpressionRepository(sql: Queryable) {
   return {
     help(context = "query"): Result<{ context: string; help: string }> {
       if (!CONTEXTS.has(context)) {

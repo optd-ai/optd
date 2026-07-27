@@ -81,7 +81,7 @@ export async function startPostgresRuntime(
     };
   }
 
-  const rootDir = env.get("OPERANT_DATA_DIR") ?? "./.operant-data";
+  const rootDir = env.get("OPERANT_DATA_DIR") ?? ".operant-data";
   const managed = await startManagedPostgres(rootDir, env);
   return {
     ...managed,

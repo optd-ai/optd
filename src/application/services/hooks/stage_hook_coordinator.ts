@@ -2,16 +2,7 @@ import type {
   StageHookDeclaration,
   StageHookInput,
 } from "../../../domain/changesets/stage.ts";
-
-export class StageHookError extends Error {
-  readonly code: string;
-  readonly details: Record<string, unknown>;
-  constructor(code: string, message: string, details: Record<string, unknown>) {
-    super(message);
-    this.code = code;
-    this.details = details;
-  }
-}
+export { StageHookError } from "../../ports/hook_executor.ts";
 
 export type HookEnvelope = Readonly<{
   hook: string;

@@ -3,31 +3,25 @@ import {
   ok,
   type Result,
   validationError,
-} from "../../../domain/errors/result.ts";
-import type { AuthContext } from "../../../domain/auth/model.ts";
+} from "../../../../domain/errors/result.ts";
+import type { AuthContext } from "../../../../domain/auth/model.ts";
 import {
   ExpressionError,
   type FieldSpec,
   lowerExpression,
-} from "../../../domain/expressions/cel.ts";
-import { canonicalJson } from "../../../domain/ids/canonical_json.ts";
-import { uuidV7 } from "../../../domain/ids/uuid_v7.ts";
-import { QueryCursorSigner } from "../../../domain/queries/cursor.ts";
+} from "../../../../domain/expressions/cel.ts";
+import { canonicalJson } from "../../../../domain/ids/canonical_json.ts";
+import { uuidV7 } from "../../../../domain/ids/uuid_v7.ts";
+import { QueryCursorSigner } from "../../../../domain/queries/cursor.ts";
 import {
   type QueryRequest,
-  queryRequestContract,
   type QueryResponse,
   type ResolvedSort,
-} from "../../../schemas/queries/query.ts";
-import {
-  query,
-  type Queryable,
-  quoteIdentifier,
-  type Sql,
-} from "../postgres/client.ts";
-import { lockReadAuthority } from "../postgres/object_read_boundary.ts";
-import { ObjectReadAuthorityInvalidError } from "../../../application/ports/object_reader.ts";
-import type { DefinitionIdentity } from "../../../domain/objects/read.ts";
+} from "../../../../schemas/queries/query.ts";
+import { query, type Queryable, quoteIdentifier, type Sql } from "../client.ts";
+import { lockReadAuthority } from "../object_read_boundary.ts";
+import { ObjectReadAuthorityInvalidError } from "../../../../application/ports/object_reader.ts";
+import type { DefinitionIdentity } from "../../../../domain/objects/read.ts";
 
 export type QueryObjectsRequest = QueryRequest;
 export type QueryObjectsDto = QueryResponse;
@@ -83,29 +77,16 @@ class QueryFailure extends Error {
   }
 }
 
-export function makeQueryObjectsService(
+export function makePostgresQueryObjectRepository(
   deps: { sql: Sql; cursors?: () => QueryCursorSigner },
 ) {
   let cursor: QueryCursorSigner | undefined;
   return {
     async query(
-      input: unknown,
-      auth?: AuthContext,
+      request: QueryRequest,
+      auth: AuthContext,
     ): Promise<Result<QueryResponse>> {
       try {
-        if (!auth) {
-          throw new QueryFailure(
-            "authentication_required",
-            "authentication is required",
-          );
-        }
-        const issues = queryRequestContract.issues(input);
-        if (issues.length) {
-          throw new QueryFailure("bad_request", "query request is invalid", {
-            issues,
-          });
-        }
-        const request = input as QueryRequest;
         return ok(
           await deps.sql.begin(async (tx) => {
             await lockReadAuthority(tx, auth, request.project_id);

@@ -11,7 +11,7 @@ import { applyPlatformMigrations } from "../../src/adapters/outbound/postgres/mi
 import { getDefinition } from "../../src/adapters/outbound/postgres/pack_repository.ts";
 import { PostgresTransactionManager } from "../../src/adapters/outbound/postgres/transaction_manager.ts";
 import { PostgresAuthorizationRepository } from "../../src/adapters/outbound/postgres/authorization_repository.ts";
-import { makeMigrationServices } from "../../src/adapters/outbound/use-cases/migration_services.ts";
+import { makePostgresMigrationRepository } from "../../src/adapters/outbound/postgres/repositories/migration_application_repository.ts";
 import type { AuthorizationRepository } from "../../src/application/ports/authorization.ts";
 import {
   findPostgresBins,
@@ -222,7 +222,7 @@ Deno.test("atomic pack apply activates globally, is idempotent, and rolls back i
     });
     await lockHeld.promise;
     const applyStarted = Promise.withResolvers<number>();
-    const revokedServices = makeMigrationServices({
+    const revokedServices = makePostgresMigrationRepository({
       sql,
       tx: new PostgresTransactionManager(sql),
       authorization: allowAuthorization(),
@@ -583,7 +583,7 @@ Deno.test("atomic pack apply activates globally, is idempotent, and rolls back i
     assertEquals(acknowledgementAttempts, 1);
 
     let deniedAttempts = 0;
-    const deniedServices = makeMigrationServices({
+    const deniedServices = makePostgresMigrationRepository({
       sql,
       tx: new PostgresTransactionManager(sql),
       authorization: denyAuthorization(),
@@ -926,7 +926,7 @@ function migrationServices(
   beforeApplyAttempt: (sql: Queryable, attempt: number) => Promise<void>,
   applyTestFault?: "after_sql" | "after_application",
 ) {
-  return makeMigrationServices({
+  return makePostgresMigrationRepository({
     sql,
     tx: new PostgresTransactionManager(sql),
     authorization: allowAuthorization(),

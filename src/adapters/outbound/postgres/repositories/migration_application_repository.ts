@@ -1,4 +1,4 @@
-import { err, ok, type Result } from "../../../domain/errors/result.ts";
+import { err, ok, type Result } from "../../../../domain/errors/result.ts";
 import {
   applyMigrationPlan,
   getMigrationPlan,
@@ -6,14 +6,20 @@ import {
   MigrationApplyError,
   recordMigrationAttempt,
   validateMigrationPlan,
-} from "../postgres/pack_migration_repository.ts";
-import type { MigrationApplyRequest } from "../../../domain/migrations/pack_migration.ts";
-import type { Queryable } from "../postgres/client.ts";
-import type { AuthorizationRepository } from "../../../application/ports/authorization.ts";
-import type { AuthContext } from "../../../domain/auth/model.ts";
-import type { TransactionManager } from "../../../application/ports/transaction_manager.ts";
+} from "../pack_migration_repository.ts";
+import type { MigrationApplyRequest } from "../../../../domain/migrations/pack_migration.ts";
+import type { Queryable } from "../client.ts";
+import type { AuthorizationRepository } from "../../../../application/ports/authorization.ts";
+import type { AuthContext } from "../../../../domain/auth/model.ts";
+import type { TransactionManager } from "../../../../application/ports/transaction_manager.ts";
 
-export function makeMigrationServices(
+export type MigrationRetryConfig = Readonly<{
+  maximumRetries: number;
+  jitterMinimumMs: number;
+  jitterMaximumMs: number;
+}>;
+
+export function makePostgresMigrationRepository(
   deps: {
     sql: Queryable;
     authorization: AuthorizationRepository;
@@ -22,6 +28,9 @@ export function makeMigrationServices(
       sql: Queryable,
       auth: AuthContext,
     ) => Promise<Result<unknown>>;
+    retry?: MigrationRetryConfig;
+    random?: () => number;
+    sleep?: (milliseconds: number) => Promise<void>;
     /** Test-only dependency seams. Production composition never supplies them. */
     beforeApplyAttempt?: (sql: Queryable, attempt: number) => Promise<void>;
     applyTestFault?: "after_sql" | "after_application";
@@ -117,24 +126,15 @@ export function makeMigrationServices(
         return err(authorized.error);
       }
       let transientFailures = 0;
-      const maximumRetries = boundedEnvironmentInteger(
-        "OPERANT_PACK_APPLY_MAX_RETRIES",
-        2,
-        0,
-        10,
-      );
-      const jitterMinimum = boundedEnvironmentInteger(
-        "OPERANT_PACK_APPLY_RETRY_JITTER_MIN_MS",
-        1,
-        0,
-        1_000,
-      );
-      const jitterMaximum = boundedEnvironmentInteger(
-        "OPERANT_PACK_APPLY_RETRY_JITTER_MAX_MS",
-        25,
-        jitterMinimum,
-        5_000,
-      );
+      const retry = deps.retry ?? {
+        maximumRetries: 2,
+        jitterMinimumMs: 1,
+        jitterMaximumMs: 25,
+      };
+      const random = deps.random ?? Math.random;
+      const sleep = deps.sleep ??
+        ((milliseconds: number) =>
+          new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
       while (true) {
         const attempt = transientFailures + 1;
         try {
@@ -168,14 +168,16 @@ export function makeMigrationServices(
             : "";
           if (
             (sqlState === "40P01" || sqlState === "40001") &&
-            transientFailures < maximumRetries
+            transientFailures < retry.maximumRetries
           ) {
             transientFailures++;
             await recordFailedAttempt(id, auth.id, sqlState);
             await retryJitter(
               transientFailures,
-              jitterMinimum,
-              jitterMaximum,
+              retry.jitterMinimumMs,
+              retry.jitterMaximumMs,
+              random,
+              sleep,
             );
             continue;
           }
@@ -212,26 +214,15 @@ export function makeMigrationServices(
   };
 }
 
-function boundedEnvironmentInteger(
-  name: string,
-  fallback: number,
-  minimum: number,
-  maximum: number,
-): number {
-  const value = Number(Deno.env.get(name) ?? fallback);
-  return Number.isInteger(value) && value >= minimum && value <= maximum
-    ? value
-    : fallback;
-}
-
 async function retryJitter(
   attempt: number,
   minimum: number,
   maximum: number,
+  random: () => number,
+  sleep: (milliseconds: number) => Promise<void>,
 ): Promise<void> {
   const ceiling = Math.min(maximum, Math.max(minimum, minimum * attempt));
   const span = ceiling - minimum + 1;
-  const delay = minimum +
-    (span > 1 ? crypto.getRandomValues(new Uint32Array(1))[0] % span : 0);
-  await new Promise((resolve) => setTimeout(resolve, delay));
+  const delay = minimum + Math.floor(random() * span);
+  await sleep(delay);
 }

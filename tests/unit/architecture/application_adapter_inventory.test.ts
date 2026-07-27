@@ -403,21 +403,25 @@ async function applicationFiles(root: string): Promise<string[]> {
   return files.toSorted();
 }
 
+const importPattern =
+  /\b(?:import|export)\s+(?:type\s+)?[\s\S]*?\s+from\s+["']([^"']+)["']/g;
+
+async function localImports(importer: string): Promise<string[]> {
+  const source = await Deno.readTextFile(importer);
+  return [...source.matchAll(importPattern)].map((match) => match[1]).filter(
+    (specifier) => specifier.startsWith("."),
+  ).map((specifier) =>
+    canonical(relative(Deno.cwd(), resolve(dirname(importer), specifier)))
+  );
+}
+
 async function actualEdges(): Promise<
   Omit<ApplicationAdapterEdge, "replacements">[]
 > {
   const occurrences = new Map<string, number>();
   const result: Omit<ApplicationAdapterEdge, "replacements">[] = [];
-  const importPattern =
-    /\bimport\s+(?:type\s+)?[\s\S]*?\s+from\s+["']([^"']+)["']/g;
   for (const importer of await applicationFiles("src/application")) {
-    const source = await Deno.readTextFile(importer);
-    for (const match of source.matchAll(importPattern)) {
-      const specifier = match[1];
-      if (!specifier.startsWith(".")) continue;
-      const target = canonical(
-        relative(Deno.cwd(), resolve(dirname(importer), specifier)),
-      );
+    for (const target of await localImports(importer)) {
       if (!target.startsWith("src/adapters/")) continue;
       const key = `${importer}\0${target}`;
       const occurrence = (occurrences.get(key) ?? 0) + 1;
@@ -428,8 +432,33 @@ async function actualEdges(): Promise<
   return result;
 }
 
-Deno.test("application has zero adapter dependencies after the frozen migration", async () => {
+async function transitiveAdapterPaths(): Promise<string[]> {
+  const findings = new Set<string>();
+  for (const root of await applicationFiles("src/application")) {
+    const visit = async (
+      file: string,
+      path: readonly string[],
+    ): Promise<void> => {
+      if (path.includes(file)) return;
+      for (const target of await localImports(file)) {
+        const next = [...path, file, target];
+        if (target.startsWith("src/adapters/")) {
+          findings.add(next.join(" -> "));
+          continue;
+        }
+        if (target.startsWith("src/") && target.endsWith(".ts")) {
+          await visit(target, [...path, file]);
+        }
+      }
+    };
+    await visit(root, []);
+  }
+  return [...findings].toSorted();
+}
+
+Deno.test("application has zero direct or transitive adapter dependencies after the frozen migration", async () => {
   assertEquals(await actualEdges(), []);
+  assertEquals(await transitiveAdapterPaths(), []);
   assertEquals(EXPECTED_APPLICATION_ADAPTER_EDGES.length, 45);
   for (const item of EXPECTED_APPLICATION_ADAPTER_EDGES) {
     for (const replacement of item.replacements) {

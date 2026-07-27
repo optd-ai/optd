@@ -1,5 +1,5 @@
-import type { Sql } from "../../postgres/client.ts";
-import { query, quoteIdentifier } from "../../postgres/client.ts";
+import type { Sql } from "../client.ts";
+import { query, quoteIdentifier } from "../client.ts";
 import type { AuthContext } from "../../../../domain/auth/model.ts";
 import { err, ok, type Result } from "../../../../domain/errors/result.ts";
 import { isUuidV7 } from "../../../../domain/ids/uuid_v7.ts";
@@ -10,21 +10,23 @@ import type {
 import {
   type ActionStageHookDeclaration,
   TrustedStageHookCoordinator,
-} from "../hooks/stage_hook_coordinator.ts";
+} from "../../deno-hooks/trusted_stage_hook_adapter.ts";
 import { validateFieldMap } from "../../../../schemas/changesets/field_values.ts";
 import {
   evaluateTargetedActionPolicy,
   lockTargetedActionAuthority,
   targetedActionAuthorityFactsDigest,
   type TargetedActionPolicyTarget,
-} from "../query_objects.ts";
+} from "./query_object_repository.ts";
 import {
   type FieldSpec,
   lowerCelToSql,
 } from "../../../../domain/queries/expression_lowerer.ts";
-import { lockReadAuthority } from "../../postgres/object_read_boundary.ts";
+import { lockReadAuthority } from "../object_read_boundary.ts";
+import { ObjectReadAuthorityInvalidError } from "../../../../application/ports/object_reader.ts";
+import { StageHookError } from "../../../../application/ports/hook_executor.ts";
 
-export function makeStageActionService(
+export function makePostgresActionStageRepository(
   sql: Sql,
   coordinator: TrustedStageHookCoordinator,
   common: {
@@ -388,6 +390,27 @@ export function makeStageActionService(
         );
         return staged.ok ? ok(staged.value!) : staged;
       } catch (error) {
+        if (error instanceof StageHookError) {
+          return err({
+            code: error.code,
+            message: error.message,
+            severity: error.code === "hook_timeout"
+              ? "unavailable"
+              : "validation",
+            details: error.details,
+          });
+        }
+        if (
+          error instanceof ObjectReadAuthorityInvalidError ||
+          isPostgresConcurrencyError(error)
+        ) {
+          return err({
+            code: "project_conflict",
+            message: "action authority changed while staging",
+            severity: "conflict",
+            details: {},
+          });
+        }
         console.error(error);
         return err({
           code: "internal_error",
@@ -557,6 +580,11 @@ function invalid(message: string): Result<never> {
     severity: "validation",
     details: {},
   });
+}
+function isPostgresConcurrencyError(error: unknown): boolean {
+  if (error === null || typeof error !== "object") return false;
+  const code = (error as { code?: unknown }).code;
+  return code === "40001" || code === "40P01" || code === "55P03";
 }
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);

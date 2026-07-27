@@ -10,7 +10,7 @@ import {
   findPostgresBins,
   startPostgresRuntime,
 } from "../../src/adapters/outbound/postgres-process/lifecycle.ts";
-import { makeQueryObjectsService } from "../../src/adapters/outbound/use-cases/query_objects.ts";
+import { makePostgresQueryObjectRepository } from "../../src/adapters/outbound/postgres/repositories/query_object_repository.ts";
 import { QueryCursorSigner } from "../../src/domain/queries/cursor.ts";
 import { uuidV7 } from "../../src/domain/ids/uuid_v7.ts";
 
@@ -139,7 +139,7 @@ Deno.test("query pushes assigned ABAC before count and page on PostgreSQL", asyn
       roles: [],
       createdAt: new Date().toISOString(),
     };
-    const service = makeQueryObjectsService({
+    const service = makePostgresQueryObjectRepository({
       sql,
       cursors: () => new QueryCursorSigner("integration master key"),
     });

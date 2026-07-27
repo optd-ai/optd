@@ -1,5 +1,5 @@
-import type { Sql } from "../../postgres/client.ts";
-import { query, quoteIdentifier } from "../../postgres/client.ts";
+import type { Sql } from "../client.ts";
+import { query, quoteIdentifier } from "../client.ts";
 import type { AuthContext } from "../../../../domain/auth/model.ts";
 import { err, ok, type Result } from "../../../../domain/errors/result.ts";
 import { canonicalJson } from "../../../../domain/ids/canonical_json.ts";
@@ -8,7 +8,7 @@ import type {
   StageDto,
   StageSource,
 } from "../../../../application/ports/stage_repository.ts";
-import { PostgresAuthorizationRepository } from "../../postgres/authorization_repository.ts";
+import { PostgresAuthorizationRepository } from "../authorization_repository.ts";
 
 export type SeedStageDto = {
   status: "staged" | "unchanged";
@@ -18,7 +18,7 @@ export type SeedStageDto = {
   stage: StageDto | null;
 };
 
-export function makeStageSeedsService(
+export function makePostgresSeedStageRepository(
   sql: Sql,
   common: {
     stageSource(
