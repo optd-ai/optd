@@ -239,6 +239,45 @@ Deno.test("action stage authority freezes cutoff before post-hook persistence", 
   );
   assertActionStageAuthorityCutoff(cutoff);
 
+  const forgedSpread = Object.freeze({
+    ...cutoff,
+    canonicalTargetDigest: "forged",
+    authorityFactsDigest: "contradictory",
+    authorization: Object.freeze({
+      ...cutoff.authorization,
+      authorizationRootId: "other-root",
+    }),
+  });
+  assertThrows(
+    () => assertActionStageAuthorityCutoff(forgedSpread),
+    InvalidActionStageAuthorityCutoffError,
+    "was not created by the validated factory",
+  );
+  assertThrows(
+    () => assertActionStageAuthorityCutoff(Object.create(cutoff)),
+    InvalidActionStageAuthorityCutoffError,
+    "was not created by the validated factory",
+  );
+  assertThrows(
+    () => assertActionStageAuthorityCutoff(structuredClone(cutoff)),
+    InvalidActionStageAuthorityCutoffError,
+    "was not created by the validated factory",
+  );
+  assertThrows(
+    () => {
+      (cutoff.authorization.authorizationLineageIds as string[]).push(
+        "forged-lineage",
+      );
+    },
+    TypeError,
+  );
+  assertThrows(
+    () => {
+      (cutoff.authorization.targets[0].matchedRules as unknown[]).push({});
+    },
+    TypeError,
+  );
+
   await assertRejects(
     () =>
       createActionStageAuthorityCutoff(

@@ -3,6 +3,7 @@ import { assertEquals } from "jsr:@std/assert";
 import type {
   ActionCatalog,
   ActionCuratedReadRepository,
+  ActionHookExecutionEvidence,
   ActionPolicyAuthorizer,
   ActionStageHookCatalog,
   ActionTargetReader,
@@ -216,11 +217,7 @@ Deno.test("run-action ports separate pinned reads, policy and evidence", async (
   const policy: ActionPolicyAuthorizer<string, { allowed: true }> = {
     assertAllowed: () => Promise.resolve({ allowed: true }),
   };
-  const evidence: HookExecutionEvidenceRepository<
-    { operations: readonly unknown[] },
-    { code: string },
-    string
-  > = {
+  const evidence: HookExecutionEvidenceRepository<string> = {
     record: () => Promise.resolve("execution-1"),
   };
 
@@ -230,26 +227,21 @@ Deno.test("run-action ports separate pinned reads, policy and evidence", async (
   assertEquals(Object.keys(policy), ["assertAllowed"]);
   assertEquals(
     await evidence.record({
-      hookIdentity: "publisher/crm:convert_lead",
-      revisionId: "revision-1",
-      sourceDigest: "source-digest-1",
-      scriptDigest: "script-digest-1",
-      securityDigest: "security-digest-1",
-      attachmentId: "attachment-1",
-      attachmentDigest: "attachment-digest-1",
-      configurationDigest: "configuration-digest-1",
-      outputSchema: "changeset.operations.v1",
+      program: actionProgram,
       actorId: "principal-1",
-      phase: "action.stage",
-      status: "failed",
-      durationMs: 12,
-      exitCode: 1,
-      logs: "redacted",
-      logsTruncated: false,
-      secretsRedacted: true,
       grants: [],
-      output: null,
-      error: { code: "hook_failed" },
+      result: {
+        phase: "action.stage",
+        outputSchema: "changeset.operations.v1",
+        status: "failed",
+        durationMs: 12,
+        exitCode: 1,
+        logs: "redacted",
+        logsTruncated: false,
+        secretsRedacted: true,
+        output: null,
+        error: { code: "hook_failed", message: "hook failed" },
+      },
     }),
     "execution-1",
   );
@@ -373,6 +365,50 @@ Deno.test("hook phases and outputs are canonical and phase-specific", () => {
     // @ts-expect-error delivery catalogs cannot return action-stage programs.
     deliveryHook: () => Promise.resolve(actionProgram),
   };
+  const failedResult = <TPhase extends HookPhase>(
+    phase: TPhase,
+    outputSchema: PinnedHookProgram<TPhase>["outputSchema"],
+  ): HookExecutionResult<TPhase> =>
+    ({
+      phase,
+      outputSchema,
+      status: "failed",
+      output: null,
+      logs: "redacted",
+      logsTruncated: false,
+      secretsRedacted: true,
+      durationMs: 1,
+      exitCode: 1,
+      error: { code: "failed", message: "failed" },
+    }) as HookExecutionResult<TPhase>;
+  const wrongEvidenceProgram: ActionHookExecutionEvidence<"action.stage"> = {
+    // @ts-expect-error action evidence cannot pin an after-commit program.
+    program: deliveryProgram,
+    actorId: "principal-1",
+    grants: [],
+    result: failedResult("action.stage", "changeset.operations.v1"),
+  };
+  const wrongPatchEvidence: ActionHookExecutionEvidence<"action.stage"> = {
+    program: actionProgram,
+    actorId: "principal-1",
+    grants: [],
+    // @ts-expect-error action evidence cannot persist a patch-family result.
+    result: failedResult("changeset.before_stage", "patch.v1"),
+  };
+  const wrongValidationEvidence: ActionHookExecutionEvidence<"action.stage"> = {
+    program: actionProgram,
+    actorId: "principal-1",
+    grants: [],
+    // @ts-expect-error action evidence cannot persist a validation-family result.
+    result: failedResult("changeset.validate", "validation.v1"),
+  };
+  const wrongDeliveryEvidence: ActionHookExecutionEvidence<"action.stage"> = {
+    program: actionProgram,
+    actorId: "principal-1",
+    grants: [],
+    // @ts-expect-error action evidence cannot persist a delivery-family result.
+    result: failedResult("event.after_commit", "delivery.v1"),
+  };
   assertEquals(
     [
       actionProgram,
@@ -386,8 +422,12 @@ Deno.test("hook phases and outputs are canonical and phase-specific", () => {
       wrongStageCatalog,
       wrongActionCatalog,
       wrongDeliveryCatalog,
+      wrongEvidenceProgram,
+      wrongPatchEvidence,
+      wrongValidationEvidence,
+      wrongDeliveryEvidence,
     ].length,
-    11,
+    15,
   );
 
   const contradictoryValidation: HookOutput = {
@@ -442,6 +482,8 @@ Deno.test("hook ports preserve pinned execution and grant evidence", async () =>
         throw new Error("unexpected test phase");
       }
       return Promise.resolve({
+        phase: "changeset.validate",
+        outputSchema: "validation.v1",
         status: "succeeded",
         output: {
           phase: "changeset.validate",

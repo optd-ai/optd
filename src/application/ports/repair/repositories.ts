@@ -339,22 +339,26 @@ export type HookOutputFor<TPhase extends HookPhase> = Extract<
 >;
 
 export type HookExecutionResult<TPhase extends HookPhase = HookPhase> =
-  Readonly<{
-    status: "succeeded" | "failed" | "timed_out" | "invalid_output";
-    output: HookOutputFor<TPhase> | null;
-    logs: string;
-    logsTruncated: boolean;
-    secretsRedacted: boolean;
-    durationMs: number;
-    exitCode: number | null;
-    error:
-      | Readonly<{
-        code: string;
-        message: string;
-        details?: JsonValue;
-      }>
-      | null;
-  }>;
+  TPhase extends HookPhase ? Readonly<{
+      /** Retained even for failures whose output is null. */
+      phase: TPhase;
+      outputSchema: HookOutputSchemaFor<TPhase>;
+      status: "succeeded" | "failed" | "timed_out" | "invalid_output";
+      output: HookOutputFor<TPhase> | null;
+      logs: string;
+      logsTruncated: boolean;
+      secretsRedacted: boolean;
+      durationMs: number;
+      exitCode: number | null;
+      error:
+        | Readonly<{
+          code: string;
+          message: string;
+          details?: JsonValue;
+        }>
+        | null;
+    }>
+    : never;
 
 export type HookInvocation<TPhase extends HookPhase = HookPhase> = Readonly<{
   program: PinnedHookProgram<TPhase>;
@@ -584,13 +588,13 @@ export interface ActionStageHookCatalog<TRequest> {
   ): Promise<readonly PinnedHookProgram<"action.stage">[]>;
 }
 
-const ACTION_STAGE_AUTHORITY_CUTOFF: unique symbol = Symbol(
-  "ActionStageAuthorityCutoff",
-);
+declare const ACTION_STAGE_AUTHORITY_CUTOFF: unique symbol;
+const validatedActionStageAuthorityCutoffs = new WeakSet<object>();
 
 /**
  * Opaque validated authority cutoff. All target digest input is derived from
  * `authorization`; no caller-supplied duplicate actor/root/target facts exist.
+ * Runtime authenticity is object identity registered by the private factory.
  */
 export type ActionStageAuthorityCutoff = Readonly<{
   authorization: AuthorizationCutoff;
@@ -618,10 +622,7 @@ export function assertActionStageAuthorityCutoff(
 ): asserts value is ActionStageAuthorityCutoff {
   if (
     typeof value !== "object" || value === null ||
-    !(ACTION_STAGE_AUTHORITY_CUTOFF in value) ||
-    (value as Record<PropertyKey, unknown>)[ACTION_STAGE_AUTHORITY_CUTOFF] !==
-      true ||
-    !Object.isFrozen(value)
+    !validatedActionStageAuthorityCutoffs.has(value)
   ) {
     throw new InvalidActionStageAuthorityCutoffError(
       "action stage authority cutoff was not created by the validated factory",
@@ -676,12 +677,13 @@ export async function createActionStageAuthorityCutoff(
   ) {
     throw new InvalidActionStageAuthorityCutoffError();
   }
-  return Object.freeze({
+  const cutoff = Object.freeze({
     authorization,
     canonicalTargetDigest: computed,
     authorityFactsDigest: input.authorityFactsDigest,
-    [ACTION_STAGE_AUTHORITY_CUTOFF]: true as const,
-  });
+  }) as ActionStageAuthorityCutoff;
+  validatedActionStageAuthorityCutoffs.add(cutoff);
+  return cutoff;
 }
 
 /**
@@ -734,36 +736,21 @@ export interface ActionPolicyAuthorizer<TAuthorizationRequest, TDecision> {
   assertAllowed(request: TAuthorizationRequest): Promise<TDecision>;
 }
 
-export type ActionHookExecutionEvidence<TOutput, TError> = Readonly<{
-  hookIdentity: string;
-  revisionId: string;
-  sourceDigest: string;
-  scriptDigest: string;
-  securityDigest: string;
-  attachmentId: string | null;
-  attachmentDigest: string | null;
-  configurationDigest: string;
-  outputSchema: string;
-  actorId: string;
-  phase: HookPhase;
-  status: "succeeded" | "failed" | "timed_out" | "invalid_output";
-  durationMs: number;
-  exitCode: number | null;
-  logs: string;
-  logsTruncated: boolean;
-  secretsRedacted: boolean;
-  grants: readonly HookSecretGrantEvidence[];
-  output: TOutput | null;
-  error: TError | null;
-}>;
+export type ActionHookExecutionEvidence<
+  TPhase extends HookPhase = "action.stage",
+> = TPhase extends HookPhase ? Readonly<{
+    /** Program is the single source for phase, schema and immutable pin facts. */
+    program: PinnedHookProgram<TPhase>;
+    actorId: string;
+    grants: readonly HookSecretGrantEvidence[];
+    /** Result output is constrained to the same phase family as the program. */
+    result: HookExecutionResult<TPhase>;
+  }>
+  : never;
 
-/** Persists one immutable success/failure record for the pinned hook execution. */
-export interface HookExecutionEvidenceRepository<
-  TOutput,
-  TError,
-  TEvidenceId,
-> {
+/** Persists immutable action-stage evidence; no commit hook path exists. */
+export interface HookExecutionEvidenceRepository<TEvidenceId> {
   record(
-    evidence: ActionHookExecutionEvidence<TOutput, TError>,
+    evidence: ActionHookExecutionEvidence<"action.stage">,
   ): Promise<TEvidenceId>;
 }
