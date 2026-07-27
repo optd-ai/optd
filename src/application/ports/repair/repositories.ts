@@ -1,6 +1,7 @@
-import type {
-  AuthorizationCutoff,
-  TargetDigestInput,
+import {
+  type AuthorizationCutoff,
+  canonicalTargetDigestInput,
+  type TargetDigestInput,
 } from "./targeted_action.ts";
 
 export type JsonScalar = string | number | boolean | null;
@@ -217,7 +218,14 @@ export type HookSecretDeclaration = Readonly<{
 }>;
 
 /** Immutable hook program, attachment and capability declaration. */
-export type PinnedHookProgram<TPhase extends HookPhase = HookPhase> = Readonly<{
+type HookOutputSchemaFor<TPhase extends HookPhase> = TPhase extends
+  "action.stage" ? "changeset.operations.v1"
+  : TPhase extends "changeset.before_stage" ? "patch.v1"
+  : TPhase extends "changeset.validate" ? "validation.v1"
+  : TPhase extends "event.after_commit" ? "delivery.v1"
+  : never;
+
+type PinnedHookProgramFields = Readonly<{
   hookIdentity: string;
   revisionId: string;
   source: string;
@@ -230,9 +238,7 @@ export type PinnedHookProgram<TPhase extends HookPhase = HookPhase> = Readonly<{
   declarationDigest: string | null;
   declaration: JsonValue;
   ordinal: number;
-  phase: TPhase;
   timeoutMs: number;
-  outputSchema: string;
   permissions: Readonly<{
     net: readonly string[];
     env: readonly string[];
@@ -240,6 +246,16 @@ export type PinnedHookProgram<TPhase extends HookPhase = HookPhase> = Readonly<{
   secretDeclarations: readonly HookSecretDeclaration[];
   enabled: boolean;
 }>;
+
+/** A pinned program's phase determines its one allowed output schema. */
+export type PinnedHookProgram<TPhase extends HookPhase = HookPhase> =
+  TPhase extends HookPhase ?
+      & PinnedHookProgramFields
+      & Readonly<{
+        phase: TPhase;
+        outputSchema: HookOutputSchemaFor<TPhase>;
+      }>
+    : never;
 
 export type HookSecretGrantEvidence = Readonly<{
   grantId: string;
@@ -561,22 +577,112 @@ export interface ActionCuratedReadRepository<TReadRequest, TReadResult> {
   read(request: TReadRequest): Promise<TReadResult | null>;
 }
 
-/** Resolves ordered action-stage attachments and their pinned programs. */
+/** Resolves ordered action-stage attachments and only action-stage programs. */
 export interface ActionStageHookCatalog<TRequest> {
-  stageHooks(request: TRequest): Promise<readonly PinnedHookProgram[]>;
+  stageHooks(
+    request: TRequest,
+  ): Promise<readonly PinnedHookProgram<"action.stage">[]>;
 }
 
+const ACTION_STAGE_AUTHORITY_CUTOFF: unique symbol = Symbol(
+  "ActionStageAuthorityCutoff",
+);
+
+/**
+ * Opaque validated authority cutoff. All target digest input is derived from
+ * `authorization`; no caller-supplied duplicate actor/root/target facts exist.
+ */
 export type ActionStageAuthorityCutoff = Readonly<{
-  /**
-   * The single authoritative actor/root/lineage/ordered-target tuple evaluated
-   * in the lock transaction and later revalidated at commit.
-   */
   authorization: AuthorizationCutoff;
-  /** RFC 8785 input preserving the authorization target and lineage order. */
-  targetDigestInput: TargetDigestInput;
   canonicalTargetDigest: string;
   authorityFactsDigest: string;
+  readonly [ACTION_STAGE_AUTHORITY_CUTOFF]: true;
 }>;
+
+export type CanonicalTargetDigester = (
+  input: TargetDigestInput,
+) => string | Promise<string>;
+
+export class InvalidActionStageAuthorityCutoffError extends Error {
+  constructor(
+    message = "canonical target digest does not match authorization cutoff",
+  ) {
+    super(message);
+    this.name = "InvalidActionStageAuthorityCutoffError";
+  }
+}
+
+/** Runtime trust-boundary guard for untyped adapter/caller values. */
+export function assertActionStageAuthorityCutoff(
+  value: unknown,
+): asserts value is ActionStageAuthorityCutoff {
+  if (
+    typeof value !== "object" || value === null ||
+    !(ACTION_STAGE_AUTHORITY_CUTOFF in value) ||
+    (value as Record<PropertyKey, unknown>)[ACTION_STAGE_AUTHORITY_CUTOFF] !==
+      true ||
+    !Object.isFrozen(value)
+  ) {
+    throw new InvalidActionStageAuthorityCutoffError(
+      "action stage authority cutoff was not created by the validated factory",
+    );
+  }
+}
+
+function immutableAuthorizationCutoff(
+  authorization: AuthorizationCutoff,
+): AuthorizationCutoff {
+  return Object.freeze({
+    actor: Object.freeze({ ...authorization.actor }),
+    authorizationRootId: authorization.authorizationRootId,
+    authorizationLineageIds: Object.freeze([
+      ...authorization.authorizationLineageIds,
+    ]),
+    targets: Object.freeze(
+      authorization.targets.map((evidence) =>
+        Object.freeze({
+          target: Object.freeze({
+            ...evidence.target,
+            ...(evidence.target.object
+              ? { object: Object.freeze({ ...evidence.target.object }) }
+              : {}),
+          }),
+          policyDigest: evidence.policyDigest,
+          matchedRules: Object.freeze(
+            evidence.matchedRules.map((rule) => Object.freeze({ ...rule })),
+          ),
+          roleAssignmentIds: Object.freeze([...evidence.roleAssignmentIds]),
+          relationshipIds: Object.freeze([...evidence.relationshipIds]),
+        })
+      ),
+    ),
+  });
+}
+
+/** Creates the only valid cutoff, verifying any persisted digest first. */
+export async function createActionStageAuthorityCutoff(
+  input: Readonly<{
+    authorization: AuthorizationCutoff;
+    authorityFactsDigest: string;
+    canonicalTargetDigest?: string;
+  }>,
+  digest: CanonicalTargetDigester,
+): Promise<ActionStageAuthorityCutoff> {
+  const authorization = immutableAuthorizationCutoff(input.authorization);
+  const computed = await digest(canonicalTargetDigestInput(authorization));
+  if (
+    input.canonicalTargetDigest !== undefined &&
+    input.canonicalTargetDigest !== computed
+  ) {
+    throw new InvalidActionStageAuthorityCutoffError();
+  }
+  return Object.freeze({
+    authorization,
+    canonicalTargetDigest: computed,
+    authorityFactsDigest: input.authorityFactsDigest,
+    [ACTION_STAGE_AUTHORITY_CUTOFF]: true as const,
+  });
+}
 
 /**
  * Locks and evaluates exact action authority in one transaction, then persists
@@ -596,14 +702,18 @@ export interface ActionStageAuthorityPort<
   ): Promise<TStageResult>;
 }
 
-/** Resolves the exact hook revision and source pinned by the action definition. */
-export interface PinnedActionHookCatalog<THookRequest, TPinnedHook> {
-  pinned(request: THookRequest): Promise<TPinnedHook | null>;
+/** Resolves the exact action-stage hook pinned by the action definition. */
+export interface PinnedActionHookCatalog<THookRequest> {
+  pinned(
+    request: THookRequest,
+  ): Promise<PinnedHookProgram<"action.stage"> | null>;
 }
 
-/** Resolves and verifies the enabled delivery hook pinned by an outbox row. */
+/** Resolves and verifies only an after-commit delivery hook. */
 export interface PinnedDeliveryHookCatalog<TRequest> {
-  deliveryHook(request: TRequest): Promise<PinnedHookProgram | null>;
+  deliveryHook(
+    request: TRequest,
+  ): Promise<PinnedHookProgram<"event.after_commit"> | null>;
 }
 
 export type ActionTarget<TObject> = Readonly<{

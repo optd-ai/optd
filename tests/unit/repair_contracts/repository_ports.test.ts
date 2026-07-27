@@ -1,13 +1,16 @@
 // deno-lint-ignore-file no-import-prefix no-unversioned-import
-import { assertEquals } from "jsr:@std/assert";
-import type {
-  ActionStageAuthorityCutoff,
-  ActionStageAuthorityPort,
-  ChangesetFactRepository,
-  HookSecretGrantRepository,
-  QueryPolicyRepository,
-  ReadSessionPort,
-  SecretRepository,
+import { assertEquals, assertRejects, assertThrows } from "jsr:@std/assert";
+import {
+  type ActionStageAuthorityCutoff,
+  type ActionStageAuthorityPort,
+  assertActionStageAuthorityCutoff,
+  type ChangesetFactRepository,
+  createActionStageAuthorityCutoff,
+  type HookSecretGrantRepository,
+  InvalidActionStageAuthorityCutoffError,
+  type QueryPolicyRepository,
+  type ReadSessionPort,
+  type SecretRepository,
 } from "../../../src/application/ports/repair/repositories.ts";
 import {
   canonicalTargetDigestInput,
@@ -45,6 +48,8 @@ const authorizationCutoff = {
   targets: reviewedTargets,
 } as const;
 const targetDigestInput = canonicalTargetDigestInput(authorizationCutoff);
+const digestTarget = (input: typeof targetDigestInput): string =>
+  JSON.stringify(input);
 
 const secretRepository: SecretRepository<unknown, unknown, unknown> = {
   list: () => Promise.resolve([]),
@@ -118,12 +123,13 @@ const readSession: ReadSessionPort<
   },
 };
 
-const exactStageCutoff: ActionStageAuthorityCutoff = {
-  authorization: authorizationCutoff,
-  targetDigestInput,
-  canonicalTargetDigest: "canonical-target-digest",
-  authorityFactsDigest: "authority-facts-digest",
-};
+const exactStageCutoff = await createActionStageAuthorityCutoff(
+  {
+    authorization: authorizationCutoff,
+    authorityFactsDigest: "authority-facts-digest",
+  },
+  digestTarget,
+);
 
 const actionStageAuthority: ActionStageAuthorityPort<
   { projectId: string },
@@ -212,13 +218,41 @@ Deno.test("action stage authority freezes cutoff before post-hook persistence", 
     "authorization-root",
   );
   assertEquals(cutoff.authorization.targets, reviewedTargets);
-  assertEquals(cutoff.targetDigestInput, targetDigestInput);
-  assertEquals(cutoff.canonicalTargetDigest, "canonical-target-digest");
+  assertEquals(
+    canonicalTargetDigestInput(cutoff.authorization),
+    targetDigestInput,
+  );
+  assertEquals(cutoff.canonicalTargetDigest, digestTarget(targetDigestInput));
   assertEquals(cutoff.authorityFactsDigest, "authority-facts-digest");
 
-  // @ts-expect-error a boolean decision cannot substitute exact target evidence.
-  const incompleteCutoff: ActionStageAuthorityCutoff = { allowed: true };
+  // @ts-expect-error callers cannot construct the opaque validated cutoff.
+  const incompleteCutoff: ActionStageAuthorityCutoff = {
+    authorization: authorizationCutoff,
+    canonicalTargetDigest: "forged",
+    authorityFactsDigest: "facts",
+  };
   assertEquals(Boolean(incompleteCutoff), true);
+  assertThrows(
+    () => assertActionStageAuthorityCutoff(incompleteCutoff),
+    InvalidActionStageAuthorityCutoffError,
+    "was not created by the validated factory",
+  );
+  assertActionStageAuthorityCutoff(cutoff);
+
+  await assertRejects(
+    () =>
+      createActionStageAuthorityCutoff(
+        {
+          authorization: authorizationCutoff,
+          authorityFactsDigest: "authority-facts-digest",
+          canonicalTargetDigest: "mismatched",
+        },
+        digestTarget,
+      ),
+    InvalidActionStageAuthorityCutoffError,
+    "canonical target digest does not match",
+  );
+
   assertEquals(
     await actionStageAuthority.persistAfterHooks(
       { operations: ["op"] },

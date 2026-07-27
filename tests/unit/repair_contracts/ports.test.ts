@@ -19,6 +19,7 @@ import type {
   PackCatalog,
   PinnedActionHookCatalog,
   PinnedDeliveryHookCatalog,
+  PinnedHookProgram,
   ReadSessionPort,
   RepositoryTransaction,
   TransactionPort,
@@ -175,12 +176,32 @@ Deno.test("catalog ports cover action staging, metadata, packs, and delivery pin
 });
 
 Deno.test("run-action ports separate pinned reads, policy and evidence", async () => {
+  const actionProgram: PinnedHookProgram<"action.stage"> = {
+    hookIdentity: "publisher/crm:convert_lead",
+    revisionId: "revision-1",
+    source: "export default () => ({ operations: [] })",
+    sourceDigest: "source-digest-1",
+    scriptDigest: "script-digest-1",
+    securityDigest: "security-digest-1",
+    attachmentId: "attachment-1",
+    attachmentDigest: "attachment-digest-1",
+    configurationDigest: "configuration-digest-1",
+    declarationDigest: null,
+    declaration: {},
+    ordinal: 0,
+    phase: "action.stage",
+    timeoutMs: 1_000,
+    outputSchema: "changeset.operations.v1",
+    permissions: { net: [], env: [] },
+    secretDeclarations: [],
+    enabled: true,
+  };
   const actions: ActionCatalog<string, { hook: string }> = {
     definition: () => Promise.resolve({ hook: "hook-1" }),
     availability: () => Promise.resolve({ hook: "hook-1" }),
   };
-  const hooks: PinnedActionHookCatalog<string, { revision: string }> = {
-    pinned: () => Promise.resolve({ revision: "revision-1" }),
+  const hooks: PinnedActionHookCatalog<string> = {
+    pinned: () => Promise.resolve(actionProgram),
   };
   const targets: ActionTargetReader<string, { title: string }> = {
     current: () =>
@@ -275,6 +296,99 @@ Deno.test("hook phases and outputs are canonical and phase-specific", () => {
     },
   ] as const satisfies readonly HookOutput[];
   assertEquals(outputs.map((output) => output.phase), [...phases]);
+
+  const programBase = {
+    hookIdentity: "publisher/pack:hook",
+    revisionId: "revision-1",
+    source: "export default () => ({})",
+    sourceDigest: "source-digest",
+    scriptDigest: "script-digest",
+    securityDigest: "security-digest",
+    attachmentId: null,
+    attachmentDigest: null,
+    configurationDigest: "configuration-digest",
+    declarationDigest: null,
+    declaration: {},
+    ordinal: 0,
+    timeoutMs: 1_000,
+    permissions: { net: [], env: [] },
+    secretDeclarations: [],
+    enabled: true,
+  } as const;
+  const actionProgram = {
+    ...programBase,
+    phase: "action.stage",
+    outputSchema: "changeset.operations.v1",
+  } satisfies PinnedHookProgram<"action.stage">;
+  const beforeStageProgram = {
+    ...programBase,
+    phase: "changeset.before_stage",
+    outputSchema: "patch.v1",
+  } satisfies PinnedHookProgram<"changeset.before_stage">;
+  const validateProgram = {
+    ...programBase,
+    phase: "changeset.validate",
+    outputSchema: "validation.v1",
+  } satisfies PinnedHookProgram<"changeset.validate">;
+  const deliveryProgram = {
+    ...programBase,
+    phase: "event.after_commit",
+    outputSchema: "delivery.v1",
+  } satisfies PinnedHookProgram<"event.after_commit">;
+
+  const wrongActionSchema: PinnedHookProgram<"action.stage"> = {
+    ...programBase,
+    phase: "action.stage",
+    // @ts-expect-error action.stage has exactly the operations schema.
+    outputSchema: "delivery.v1",
+  };
+  const wrongBeforeStageSchema: PinnedHookProgram<"changeset.before_stage"> = {
+    ...programBase,
+    phase: "changeset.before_stage",
+    // @ts-expect-error before-stage has exactly the patch schema.
+    outputSchema: "validation.v1",
+  };
+  const wrongValidateSchema: PinnedHookProgram<"changeset.validate"> = {
+    ...programBase,
+    phase: "changeset.validate",
+    // @ts-expect-error validate has exactly the validation schema.
+    outputSchema: "changeset.operations.v1",
+  };
+  const wrongDeliverySchema: PinnedHookProgram<"event.after_commit"> = {
+    ...programBase,
+    phase: "event.after_commit",
+    // @ts-expect-error after-commit has exactly the delivery schema.
+    outputSchema: "patch.v1",
+  };
+
+  const wrongStageCatalog: ActionStageHookCatalog<string> = {
+    // @ts-expect-error stage catalogs cannot return after-commit programs.
+    stageHooks: () => Promise.resolve([deliveryProgram]),
+  };
+  const wrongActionCatalog: PinnedActionHookCatalog<string> = {
+    // @ts-expect-error action catalogs cannot return validation programs.
+    pinned: () => Promise.resolve(validateProgram),
+  };
+  const wrongDeliveryCatalog: PinnedDeliveryHookCatalog<string> = {
+    // @ts-expect-error delivery catalogs cannot return action-stage programs.
+    deliveryHook: () => Promise.resolve(actionProgram),
+  };
+  assertEquals(
+    [
+      actionProgram,
+      beforeStageProgram,
+      validateProgram,
+      deliveryProgram,
+      wrongActionSchema,
+      wrongBeforeStageSchema,
+      wrongValidateSchema,
+      wrongDeliverySchema,
+      wrongStageCatalog,
+      wrongActionCatalog,
+      wrongDeliveryCatalog,
+    ].length,
+    11,
+  );
 
   const contradictoryValidation: HookOutput = {
     phase: "changeset.validate",
