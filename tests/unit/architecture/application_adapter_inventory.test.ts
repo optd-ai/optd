@@ -527,6 +527,27 @@ Deno.test("completed catalog and seed families keep orchestration inward", async
   assertMatch(packApplication, /PackParser/);
 });
 
+Deno.test("action staging orchestration stays inward over granular capabilities", async () => {
+  const application = await Deno.readTextFile(
+    "src/application/services/actions/stage_actions.ts",
+  );
+  const adapter = await Deno.readTextFile(
+    "src/adapters/outbound/postgres/repositories/action_stage_repository.ts",
+  );
+
+  assertMatch(application, /ActionCatalog/);
+  assertMatch(application, /ActionCuratedReadRepository/);
+  assertMatch(application, /ActionStageHookCatalog/);
+  assertMatch(application, /evaluateAuthority/);
+  assertMatch(application, /executeHooks/);
+  assertMatch(application, /port\.persist/);
+  assertEquals(application.includes("stageValidated"), false);
+  assertEquals(adapter.includes("stageValidated"), false);
+  assertEquals(adapter.includes("validateActionInput"), false);
+  assertEquals(adapter.includes("resolveActionPolicyTargets"), false);
+  assertEquals(adapter.includes("StageSource ="), false);
+});
+
 Deno.test("high-surface concrete imports map to complete semantic ports", () => {
   const replacements = (importer: string, target: string) =>
     EXPECTED_APPLICATION_ADAPTER_EDGES.find((edge) =>
