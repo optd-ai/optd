@@ -502,6 +502,31 @@ Deno.test("every importing service freezes its complete semantic capability set"
   }
 });
 
+Deno.test("completed catalog and seed families keep orchestration inward", async () => {
+  const seedApplication = await Deno.readTextFile(
+    "src/application/services/seeds/stage_seeds.ts",
+  );
+  const seedAdapter = await Deno.readTextFile(
+    "src/adapters/outbound/postgres/repositories/seed_stage_repository.ts",
+  );
+  const metadataApplication = await Deno.readTextFile(
+    "src/application/services/inspect_metadata.ts",
+  );
+  const packApplication = await Deno.readTextFile(
+    "src/application/services/pack_services.ts",
+  );
+
+  assertMatch(seedApplication, /validateSeedSelection/);
+  assertMatch(seedApplication, /reconcileSeedRow/);
+  assertEquals(seedAdapter.includes("reconcileSeedRow"), false);
+  assertEquals(seedAdapter.includes("validateSeedSelection"), false);
+  assertMatch(
+    metadataApplication,
+    /ports\/repair\/repositories\.ts/,
+  );
+  assertMatch(packApplication, /PackParser/);
+});
+
 Deno.test("high-surface concrete imports map to complete semantic ports", () => {
   const replacements = (importer: string, target: string) =>
     EXPECTED_APPLICATION_ADAPTER_EDGES.find((edge) =>

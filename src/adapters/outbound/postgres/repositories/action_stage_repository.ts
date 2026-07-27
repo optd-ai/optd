@@ -8,10 +8,16 @@ import type {
   StageSource,
 } from "../../../../application/ports/stage_repository.ts";
 import {
+  type ActionStagePort,
+  type ActionStageRequest,
+  parseResourceIdentity,
+  resolveActionPolicyTargets,
+  validateActionInput,
+} from "../../../../application/services/actions/stage_actions.ts";
+import {
   type ActionStageHookDeclaration,
   TrustedStageHookCoordinator,
 } from "../../deno-hooks/trusted_stage_hook_adapter.ts";
-import { validateFieldMap } from "../../../../schemas/changesets/field_values.ts";
 import {
   evaluateTargetedActionPolicy,
   lockTargetedActionAuthority,
@@ -36,24 +42,16 @@ export function makePostgresActionStageRepository(
       auth: AuthContext,
     ): Promise<Result<StageDto | null>>;
   },
-) {
+): ActionStagePort {
   return {
-    async stage(
+    async stageValidated(
       publisher: string,
       pack: string,
       name: string,
-      raw: unknown,
+      raw: ActionStageRequest,
       auth: AuthContext,
     ): Promise<Result<StageDto | { status: "no_changes"; stage: null }>> {
       try {
-        if (
-          !isRecord(raw) || Object.keys(raw).some((key) =>
-            key !== "project_id" && key !== "input"
-          ) || typeof raw.project_id !== "string" ||
-          !isUuidV7(raw.project_id) || !isRecord(raw.input)
-        ) {
-          return invalid("action stage request is invalid");
-        }
         const revision = (await query<{ id: string; normalized: unknown }>(
           sql,
           `select cr.id,cr.normalized from pack_active_revisions ar join pack_candidate_revisions cr on cr.id=ar.candidate_revision_id where ar.publisher=$1 and ar.pack_name=$2`,
@@ -229,12 +227,11 @@ export function makePostgresActionStageRepository(
         });
         const effects = declarations.flatMap((declaration) =>
           declaration.effects
-        ).filter((value): value is Record<string, unknown> =>
-          isRecord(value)
-        ).map((effect) => ({
-          resource: String(effect.resource),
-          ops: array(effect.ops).map(String),
-        }));
+        ).filter((value): value is Record<string, unknown> => isRecord(value))
+          .map((effect) => ({
+            resource: String(effect.resource),
+            ops: array(effect.ops).map(String),
+          }));
         const resolvedPolicyTargets = resolveActionPolicyTargets(
           policyTargets,
           effects,
@@ -520,41 +517,6 @@ function curatedReadValue(field: string, value: unknown): unknown {
   return value instanceof Date ? value.toISOString() : value;
 }
 
-export function validateActionInput(
-  input: Record<string, unknown>,
-  fields: Record<string, unknown>,
-): string | null {
-  return validateFieldMap(input, fields, true);
-}
-export function resolveActionPolicyTargets(
-  reads: TargetedActionPolicyTarget[],
-  effects: Array<{ resource: string }>,
-): TargetedActionPolicyTarget[] | null {
-  if (reads.length) return reads;
-  const targets: TargetedActionPolicyTarget[] = [];
-  for (
-    const resource of [...new Set(effects.map((effect) => effect.resource))]
-  ) {
-    const definition = parseResourceIdentity(resource);
-    if (!definition) return null;
-    targets.push({ definition });
-  }
-  return targets.length ? targets : null;
-}
-
-function parseResourceIdentity(value: string): {
-  kind: "resource";
-  publisher: string;
-  pack: string;
-  name: string;
-} | null {
-  const match =
-    /^([a-z][a-z0-9-]{0,62})\/([a-z][a-z0-9_]{0,62}):([a-z][a-z0-9_]{0,62})$/
-      .exec(value);
-  return match
-    ? { kind: "resource", publisher: match[1], pack: match[2], name: match[3] }
-    : null;
-}
 function policyDenied(
   action: string,
   projectId: string,

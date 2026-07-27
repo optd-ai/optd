@@ -1,5 +1,6 @@
 import type { AuthContext } from "../../../domain/auth/model.ts";
-import type { Result } from "../../../domain/errors/result.ts";
+import { err, type Result } from "../../../domain/errors/result.ts";
+import { isUuidV7 } from "../../../domain/ids/uuid_v7.ts";
 import type { StageDto } from "../../ports/stage_repository.ts";
 import { validateFieldMap } from "../../../schemas/changesets/field_values.ts";
 import type { TargetedActionPolicyTarget } from "../query_objects.ts";
@@ -27,7 +28,7 @@ export function resolveActionPolicyTargets(
   return targets.length ? targets : null;
 }
 
-function parseResourceIdentity(value: string): {
+export function parseResourceIdentity(value: string): {
   kind: "resource";
   publisher: string;
   pack: string;
@@ -45,26 +46,55 @@ export type StageActionResult = StageDto | {
   status: "no_changes";
   stage: null;
 };
+export type ActionStageRequest = Readonly<{
+  project_id: string;
+  input: Record<string, unknown>;
+}>;
 
-/** Application use-case boundary; the adapter owns SQL and pinned hook execution. */
+/** Physical action catalog/read/authority/hook/persistence workflow pending finer port extraction. */
 export interface ActionStagePort {
-  stage(
+  stageValidated(
     publisher: string,
     pack: string,
     name: string,
-    raw: unknown,
+    request: ActionStageRequest,
     auth: AuthContext,
   ): Promise<Result<StageActionResult>>;
 }
 
+/** Owns the strict public request boundary before physical action capabilities run. */
 export function makeStageActionService(port: ActionStagePort) {
   return Object.freeze({
-    stage: (
+    stage(
       publisher: string,
       pack: string,
       name: string,
       raw: unknown,
       auth: AuthContext,
-    ) => port.stage(publisher, pack, name, raw, auth),
+    ): Promise<Result<StageActionResult>> {
+      if (
+        !isRecord(raw) ||
+        Object.keys(raw).some((key) =>
+          key !== "project_id" && key !== "input"
+        ) ||
+        typeof raw.project_id !== "string" || !isUuidV7(raw.project_id) ||
+        !isRecord(raw.input)
+      ) {
+        return Promise.resolve(err({
+          code: "validation_failed",
+          message: "action stage request is invalid",
+          severity: "validation",
+          details: {},
+        }));
+      }
+      return port.stageValidated(publisher, pack, name, {
+        project_id: raw.project_id,
+        input: raw.input,
+      }, auth);
+    },
   });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }

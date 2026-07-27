@@ -4,7 +4,10 @@ import { makeStageChangesetService } from "../application/services/changesets/st
 import { PostgresStageRepository } from "../adapters/outbound/postgres/stage_repository.ts";
 import { PostgresCommitRepository } from "../adapters/outbound/postgres/commit_repository.ts";
 import { makeCommitChangesetService } from "../application/services/commit/commit_changeset.ts";
-import { makePostgresPackRepository } from "../adapters/outbound/postgres/repositories/pack_application_repository.ts";
+import {
+  makePostgresPackRepository,
+  yamlPackParser,
+} from "../adapters/outbound/postgres/repositories/pack_application_repository.ts";
 import { makePostgresQueryObjectRepository } from "../adapters/outbound/postgres/repositories/query_object_repository.ts";
 import { makePostgresMigrationPersistence } from "../adapters/outbound/postgres/repositories/migration_application_repository.ts";
 import {
@@ -124,17 +127,18 @@ export function makeApplication(
     agentAuth: makeAgentAuthService(authentication),
     projects: makeProjectService(new PostgresProjectRepository(sql)),
     authorization,
-    metadata: makeInspectMetadataService(makePostgresMetadataRepository({
-      sql,
+    metadata: makeInspectMetadataService({
+      catalog: makePostgresMetadataRepository(sql),
       clock,
       version: OPERANT_VERSION,
       authorization: authorizationRepository,
-    })),
+    }),
     objectReads: makeObjectReadService({
       boundary: new PostgresObjectReadBoundary(sql),
       cursors: () => historyCursors ??= HistoryCursorSigner.fromEnvironment(),
     }),
     packs: makePackServices(
+      yamlPackParser,
       makePostgresPackRepository({
         sql: sql as Queryable,
         tx,

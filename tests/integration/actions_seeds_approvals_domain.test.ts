@@ -2,10 +2,10 @@
 import { assert, assertEquals } from "jsr:@std/assert";
 import { normalizeOperations } from "../../src/domain/changesets/operations.ts";
 import {
-  makePostgresSeedStageRepository,
+  makeStageSeedsService,
   reconcileSeedRow,
   validateSeedSelection,
-} from "../../src/adapters/outbound/postgres/repositories/seed_stage_repository.ts";
+} from "../../src/application/services/seeds/stage_seeds.ts";
 import { isUuidV7 } from "../../src/domain/ids/uuid_v7.ts";
 
 const project = "019b7a2e-7c10-7000-8000-000000000001";
@@ -17,9 +17,7 @@ const context = {
 };
 
 Deno.test("seed stage rejects names alias and unknown DTO fields before persistence", async () => {
-  const service = makePostgresSeedStageRepository({} as never, {
-    stageSource: () => Promise.reject(new Error("must not persist")),
-  });
+  const service = makeStageSeedsService({} as never);
   const auth = {} as never;
   for (
     const body of [{ project_id: project, all: false, names: ["a"] }, {
