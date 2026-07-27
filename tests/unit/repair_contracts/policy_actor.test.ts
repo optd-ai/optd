@@ -1,3 +1,4 @@
+// deno-lint-ignore-file no-import-prefix no-unversioned-import
 import { assertEquals, assertThrows } from "jsr:@std/assert";
 import {
   derivePolicyActor,

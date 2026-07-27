@@ -1,3 +1,4 @@
+// deno-lint-ignore-file no-import-prefix no-unversioned-import
 import { assertEquals, assertMatch } from "jsr:@std/assert";
 import { dirname, relative, resolve } from "jsr:@std/path";
 

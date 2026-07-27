@@ -1,3 +1,4 @@
+// deno-lint-ignore-file no-import-prefix no-unversioned-import
 import { assert, assertFalse } from "jsr:@std/assert";
 import { currentIdentityContract } from "../../../src/schemas/repair/current_identity.ts";
 

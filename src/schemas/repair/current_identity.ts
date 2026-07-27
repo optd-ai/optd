@@ -1,3 +1,4 @@
+// deno-lint-ignore-file no-import-prefix
 import { type Static, Type } from "npm:@sinclair/typebox@0.34.38";
 import { compileContract } from "../api/contracts.ts";
 
