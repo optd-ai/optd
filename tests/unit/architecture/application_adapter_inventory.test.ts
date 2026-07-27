@@ -346,7 +346,7 @@ export const EXPECTED_IMPORTER_CAPABILITIES: Readonly<
     "pinned_enabled_delivery_hook",
     "attachment_and_config_digest_verification",
     "security_digest_secret_grants",
-    "generic_delivery_hook_evidence",
+    "event_after_commit_delivery_evidence",
     "operator_authority_transaction",
   ],
   "src/application/services/queries/expressions.ts": [
@@ -365,8 +365,8 @@ export const EXPECTED_IMPORTER_CAPABILITIES: Readonly<
     "pinned_action_hook",
     "current_target_version",
     "target_policy_assertion",
-    "generic_action_hook_execution",
-    "immutable_success_and_failure_evidence",
+    "action_stage_hook_execution_only",
+    "immutable_stage_success_and_failure_evidence",
   ],
   "src/application/services/secrets/manage_grants.ts": [
     "grant_list_authorize",

@@ -1,3 +1,8 @@
+import type {
+  AuthorizationCutoff,
+  TargetDigestInput,
+} from "./targeted_action.ts";
+
 export type JsonScalar = string | number | boolean | null;
 export type JsonValue =
   | JsonScalar
@@ -198,15 +203,13 @@ export interface MigrationRepository<
 }
 
 export type CuratedHookInput = Readonly<{ [key: string]: JsonValue }>;
+
+/** The four frozen attachment phases. Commit never executes hooks. */
 export type HookPhase =
-  | "before_validate"
-  | "validate"
-  | "before_apply"
-  | "after_apply"
   | "action.stage"
-  | "action.preview"
-  | "action.commit"
-  | "delivery";
+  | "changeset.before_stage"
+  | "changeset.validate"
+  | "event.after_commit";
 
 export type HookSecretDeclaration = Readonly<{
   slot: string;
@@ -214,7 +217,7 @@ export type HookSecretDeclaration = Readonly<{
 }>;
 
 /** Immutable hook program, attachment and capability declaration. */
-export type PinnedHookProgram = Readonly<{
+export type PinnedHookProgram<TPhase extends HookPhase = HookPhase> = Readonly<{
   hookIdentity: string;
   revisionId: string;
   source: string;
@@ -227,7 +230,7 @@ export type PinnedHookProgram = Readonly<{
   declarationDigest: string | null;
   declaration: JsonValue;
   ordinal: number;
-  phase: HookPhase;
+  phase: TPhase;
   timeoutMs: number;
   outputSchema: string;
   permissions: Readonly<{
@@ -253,45 +256,92 @@ export type ResolvedHookSecrets = Readonly<{
   grants: readonly HookSecretGrantEvidence[];
 }>;
 
-export type HookOutput =
-  | Readonly<{ kind: "patch"; patch: JsonValue }>
-  | Readonly<{
-    kind: "validation";
-    valid: boolean;
-    code?: string;
-    message?: string;
-    details?: JsonValue;
-  }>
-  | Readonly<{
-    kind: "action";
-    operations: readonly JsonValue[];
-    attachments: readonly JsonValue[];
-  }>
-  | Readonly<{
-    kind: "delivery";
-    outcome: "delivered" | "retry" | "failed";
-    providerEvidence: JsonValue;
-  }>;
-
-export type HookExecutionResult = Readonly<{
-  status: "succeeded" | "failed" | "timed_out" | "invalid_output";
-  output: HookOutput | null;
-  logs: string;
-  logsTruncated: boolean;
-  secretsRedacted: boolean;
-  durationMs: number;
-  exitCode: number | null;
-  error:
-    | Readonly<{
-      code: string;
-      message: string;
-      details?: JsonValue;
-    }>
-    | null;
+export type HookIssue = Readonly<{
+  path: string;
+  code: string;
+  message: string;
+  details?: JsonValue;
 }>;
 
-export type HookInvocation = Readonly<{
-  program: PinnedHookProgram;
+/** Each phase has exactly one strict output family. */
+export type HookOutput =
+  | Readonly<{
+    phase: "action.stage";
+    schema: "changeset.operations.v1";
+    operations: readonly JsonValue[];
+    warnings?: readonly HookIssue[];
+    errors?: readonly HookIssue[];
+  }>
+  | Readonly<{
+    phase: "changeset.before_stage";
+    schema: "patch.v1";
+    patches: readonly JsonValue[];
+    warnings?: readonly HookIssue[];
+  }>
+  | Readonly<{
+    phase: "changeset.validate";
+    schema: "validation.v1";
+    allow: true;
+    errors: readonly [];
+    warnings: readonly HookIssue[];
+    required_approvals: readonly JsonValue[];
+  }>
+  | Readonly<{
+    phase: "changeset.validate";
+    schema: "validation.v1";
+    allow: false;
+    errors: readonly [HookIssue, ...HookIssue[]];
+    warnings: readonly HookIssue[];
+    required_approvals: readonly JsonValue[];
+  }>
+  | Readonly<{
+    phase: "event.after_commit";
+    schema: "delivery.v1";
+    outcome: "succeeded";
+    summary: string;
+    external_id?: string;
+  }>
+  | Readonly<{
+    phase: "event.after_commit";
+    schema: "delivery.v1";
+    outcome: "retry";
+    code: string;
+    message: string;
+    retry_after?: string;
+  }>
+  | Readonly<{
+    phase: "event.after_commit";
+    schema: "delivery.v1";
+    outcome: "dead_letter";
+    code: string;
+    message: string;
+  }>;
+
+export type HookOutputFor<TPhase extends HookPhase> = Extract<
+  HookOutput,
+  { phase: TPhase }
+>;
+
+export type HookExecutionResult<TPhase extends HookPhase = HookPhase> =
+  Readonly<{
+    status: "succeeded" | "failed" | "timed_out" | "invalid_output";
+    output: HookOutputFor<TPhase> | null;
+    logs: string;
+    logsTruncated: boolean;
+    secretsRedacted: boolean;
+    durationMs: number;
+    exitCode: number | null;
+    error:
+      | Readonly<{
+        code: string;
+        message: string;
+        details?: JsonValue;
+      }>
+      | null;
+  }>;
+
+export type HookInvocation<TPhase extends HookPhase = HookPhase> = Readonly<{
+  program: PinnedHookProgram<TPhase>;
   input: CuratedHookInput;
   capabilities: Readonly<{
     net: readonly string[];
@@ -301,7 +351,9 @@ export type HookInvocation = Readonly<{
 }>;
 
 export interface HookExecutor {
-  execute(invocation: HookInvocation): Promise<HookExecutionResult>;
+  execute<TPhase extends HookPhase>(
+    invocation: HookInvocation<TPhase>,
+  ): Promise<HookExecutionResult<TPhase>>;
 }
 
 export interface HookSecretResolver {
@@ -514,28 +566,33 @@ export interface ActionStageHookCatalog<TRequest> {
   stageHooks(request: TRequest): Promise<readonly PinnedHookProgram[]>;
 }
 
-export type ActionStageAuthorityCutoff<TTargetedResult> = Readonly<{
-  authorizationRootId: string;
-  targetedResult: TTargetedResult;
+export type ActionStageAuthorityCutoff = Readonly<{
+  /**
+   * The single authoritative actor/root/lineage/ordered-target tuple evaluated
+   * in the lock transaction and later revalidated at commit.
+   */
+  authorization: AuthorizationCutoff;
+  /** RFC 8785 input preserving the authorization target and lineage order. */
+  targetDigestInput: TargetDigestInput;
+  canonicalTargetDigest: string;
   authorityFactsDigest: string;
 }>;
 
 /**
- * Locks and evaluates action authority in one transaction, then persists the
- * immutable stage only after hooks have completed outside that transaction.
+ * Locks and evaluates exact action authority in one transaction, then persists
+ * that same immutable root/target/digest tuple after hooks complete outside it.
  */
 export interface ActionStageAuthorityPort<
   TAuthorityRequest,
-  TTargetedResult,
   TStageRequest,
   TStageResult,
 > {
   lockAndEvaluate(
     request: TAuthorityRequest,
-  ): Promise<ActionStageAuthorityCutoff<TTargetedResult>>;
+  ): Promise<ActionStageAuthorityCutoff>;
   persistAfterHooks(
     request: TStageRequest,
-    cutoff: ActionStageAuthorityCutoff<TTargetedResult>,
+    cutoff: ActionStageAuthorityCutoff,
   ): Promise<TStageResult>;
 }
 
@@ -578,7 +635,7 @@ export type ActionHookExecutionEvidence<TOutput, TError> = Readonly<{
   configurationDigest: string;
   outputSchema: string;
   actorId: string;
-  phase: "action.preview" | "action.commit";
+  phase: HookPhase;
   status: "succeeded" | "failed" | "timed_out" | "invalid_output";
   durationMs: number;
   exitCode: number | null;

@@ -1,6 +1,7 @@
 // deno-lint-ignore-file no-import-prefix no-unversioned-import
 import { assertEquals } from "jsr:@std/assert";
 import type {
+  ActionStageAuthorityCutoff,
   ActionStageAuthorityPort,
   ChangesetFactRepository,
   HookSecretGrantRepository,
@@ -8,6 +9,42 @@ import type {
   ReadSessionPort,
   SecretRepository,
 } from "../../../src/application/ports/repair/repositories.ts";
+import {
+  canonicalTargetDigestInput,
+  type TargetAuthorityEvidence,
+} from "../../../src/application/ports/repair/targeted_action.ts";
+
+const actor = {
+  id: "agent-principal",
+  principal_type: "agent_user",
+  human_user_id: "anchoring-human",
+} as const;
+const reviewedTargets: readonly TargetAuthorityEvidence[] = [{
+  target: {
+    projectId: "019b1234-5678-7abc-8def-012345678900",
+    resource: "publisher/crm:lead",
+    object: {
+      id: "019b1234-5678-7abc-8def-012345678901",
+      versionId: "019b1234-5678-7abc-8def-012345678902",
+    },
+  },
+  policyDigest: "policy-digest",
+  matchedRules: [{
+    policy: "publisher/crm:sales_access",
+    policyVersionId: "policy-version-id",
+    policyVersion: 3,
+    rule: "convert",
+  }],
+  roleAssignmentIds: ["role-assignment"],
+  relationshipIds: ["relationship"],
+}];
+const authorizationCutoff = {
+  actor,
+  authorizationRootId: "authorization-root",
+  authorizationLineageIds: ["authorization-root", "authorization-current"],
+  targets: reviewedTargets,
+} as const;
+const targetDigestInput = canonicalTargetDigestInput(authorizationCutoff);
 
 const secretRepository: SecretRepository<unknown, unknown, unknown> = {
   list: () => Promise.resolve([]),
@@ -81,19 +118,23 @@ const readSession: ReadSessionPort<
   },
 };
 
+const exactStageCutoff: ActionStageAuthorityCutoff = {
+  authorization: authorizationCutoff,
+  targetDigestInput,
+  canonicalTargetDigest: "canonical-target-digest",
+  authorityFactsDigest: "authority-facts-digest",
+};
+
 const actionStageAuthority: ActionStageAuthorityPort<
   { projectId: string },
-  { allowed: boolean },
   { operations: readonly string[] },
   { stageId: string }
 > = {
-  lockAndEvaluate: () =>
-    Promise.resolve({
-      authorizationRootId: "authorization-root",
-      targetedResult: { allowed: true },
-      authorityFactsDigest: "facts-digest",
-    }),
-  persistAfterHooks: () => Promise.resolve({ stageId: "stage" }),
+  lockAndEvaluate: () => Promise.resolve(exactStageCutoff),
+  persistAfterHooks: (_request, cutoff) => {
+    assertEquals(cutoff, exactStageCutoff);
+    return Promise.resolve({ stageId: "stage" });
+  },
 };
 
 const queryPolicy: QueryPolicyRepository<
@@ -165,11 +206,19 @@ Deno.test("action stage authority freezes cutoff before post-hook persistence", 
   const cutoff = await actionStageAuthority.lockAndEvaluate({
     projectId: "project",
   });
-  assertEquals(cutoff, {
-    authorizationRootId: "authorization-root",
-    targetedResult: { allowed: true },
-    authorityFactsDigest: "facts-digest",
-  });
+  assertEquals(cutoff.authorization.actor, actor);
+  assertEquals(
+    cutoff.authorization.authorizationRootId,
+    "authorization-root",
+  );
+  assertEquals(cutoff.authorization.targets, reviewedTargets);
+  assertEquals(cutoff.targetDigestInput, targetDigestInput);
+  assertEquals(cutoff.canonicalTargetDigest, "canonical-target-digest");
+  assertEquals(cutoff.authorityFactsDigest, "authority-facts-digest");
+
+  // @ts-expect-error a boolean decision cannot substitute exact target evidence.
+  const incompleteCutoff: ActionStageAuthorityCutoff = { allowed: true };
+  assertEquals(Boolean(incompleteCutoff), true);
   assertEquals(
     await actionStageAuthority.persistAfterHooks(
       { operations: ["op"] },

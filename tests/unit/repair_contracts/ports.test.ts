@@ -7,7 +7,11 @@ import type {
   ActionStageHookCatalog,
   ActionTargetReader,
   HookExecutionEvidenceRepository,
+  HookExecutionResult,
   HookExecutor,
+  HookInvocation,
+  HookOutput,
+  HookPhase,
   HookSecretResolver,
   MetadataCatalog,
   MigrationRepository,
@@ -215,7 +219,7 @@ Deno.test("run-action ports separate pinned reads, policy and evidence", async (
       configurationDigest: "configuration-digest-1",
       outputSchema: "changeset.operations.v1",
       actorId: "principal-1",
-      phase: "action.commit",
+      phase: "action.stage",
       status: "failed",
       durationMs: 12,
       exitCode: 1,
@@ -228,6 +232,74 @@ Deno.test("run-action ports separate pinned reads, policy and evidence", async (
     }),
     "execution-1",
   );
+});
+
+Deno.test("hook phases and outputs are canonical and phase-specific", () => {
+  const phases = [
+    "action.stage",
+    "changeset.before_stage",
+    "changeset.validate",
+    "event.after_commit",
+  ] as const satisfies readonly HookPhase[];
+  assertEquals(phases, [
+    "action.stage",
+    "changeset.before_stage",
+    "changeset.validate",
+    "event.after_commit",
+  ]);
+
+  const outputs = [
+    {
+      phase: "action.stage",
+      schema: "changeset.operations.v1",
+      operations: [],
+    },
+    {
+      phase: "changeset.before_stage",
+      schema: "patch.v1",
+      patches: [],
+    },
+    {
+      phase: "changeset.validate",
+      schema: "validation.v1",
+      allow: true,
+      errors: [],
+      warnings: [],
+      required_approvals: [],
+    },
+    {
+      phase: "event.after_commit",
+      schema: "delivery.v1",
+      outcome: "succeeded",
+      summary: "delivered",
+    },
+  ] as const satisfies readonly HookOutput[];
+  assertEquals(outputs.map((output) => output.phase), [...phases]);
+
+  const contradictoryValidation: HookOutput = {
+    phase: "changeset.validate",
+    schema: "validation.v1",
+    allow: true,
+    // @ts-expect-error validation success cannot carry errors.
+    errors: [{ path: "/", code: "denied", message: "denied" }],
+    warnings: [],
+    required_approvals: [],
+  };
+  const legacyDelivery: HookOutput = {
+    phase: "event.after_commit",
+    schema: "delivery.v1",
+    // @ts-expect-error delivery uses succeeded/retry/dead_letter exactly.
+    outcome: "delivered",
+  };
+  assertEquals(Boolean(contradictoryValidation && legacyDelivery), true);
+
+  // @ts-expect-error commit must apply the immutable stage without hooks.
+  const commitPhase: HookPhase = "action.commit";
+  // @ts-expect-error preview is not a frozen attachment phase.
+  const previewPhase: HookPhase = "action.preview";
+  // @ts-expect-error generic delivery cannot replace event.after_commit.
+  const deliveryPhase: HookPhase = "delivery";
+  assertEquals([commitPhase, previewPhase, deliveryPhase].length, 3);
 });
 
 Deno.test("hook ports preserve pinned execution and grant evidence", async () => {
@@ -249,17 +321,30 @@ Deno.test("hook ports preserve pinned execution and grant evidence", async () =>
       }),
   };
   const executor: HookExecutor = {
-    execute: (_invocation) =>
-      Promise.resolve({
+    execute: <TPhase extends HookPhase>(
+      invocation: HookInvocation<TPhase>,
+    ): Promise<HookExecutionResult<TPhase>> => {
+      if (invocation.program.phase !== "changeset.validate") {
+        throw new Error("unexpected test phase");
+      }
+      return Promise.resolve({
         status: "succeeded",
-        output: { kind: "validation", valid: true },
+        output: {
+          phase: "changeset.validate",
+          schema: "validation.v1",
+          allow: true,
+          errors: [],
+          warnings: [],
+          required_approvals: [],
+        },
         logs: "secret=[REDACTED]",
         logsTruncated: false,
         secretsRedacted: true,
         durationMs: 4,
         exitCode: 0,
         error: null,
-      }),
+      } as unknown as HookExecutionResult<TPhase>);
+    },
   };
   const resolved = await secrets.resolve({
     revisionId: "revision-1",
@@ -281,7 +366,7 @@ Deno.test("hook ports preserve pinned execution and grant evidence", async () =>
       declarationDigest: "declaration-digest",
       declaration: { condition: "true", input: {} },
       ordinal: 0,
-      phase: "validate",
+      phase: "changeset.validate",
       timeoutMs: 1000,
       outputSchema: "validation.v1",
       permissions: { net: [], env: ["API_TOKEN"] },
@@ -293,7 +378,14 @@ Deno.test("hook ports preserve pinned execution and grant evidence", async () =>
   });
   assertEquals(resolved.grants[0].grantId, "grant-api");
   assertEquals(result.secretsRedacted, true);
-  assertEquals(result.output, { kind: "validation", valid: true });
+  assertEquals(result.output, {
+    phase: "changeset.validate",
+    schema: "validation.v1",
+    allow: true,
+    errors: [],
+    warnings: [],
+    required_approvals: [],
+  });
 });
 
 Deno.test("migration port exposes SQL and durable apply attempts", async () => {
