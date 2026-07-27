@@ -46,13 +46,6 @@ const RoleAssignmentSchema = Type.Object({
   boundary: AuthorizationBoundarySchema,
 }, { additionalProperties: false });
 
-const SessionSchema = Type.Object({ id: NonEmptyString }, {
-  additionalProperties: false,
-});
-const AuthContextSchema = Type.Object({
-  id: NonEmptyString,
-  active: Type.Boolean(),
-}, { additionalProperties: false });
 const HumanCredentialKindSchema = Type.Union([
   Type.Literal("human_full"),
   Type.Literal("authorization_request"),
@@ -61,8 +54,8 @@ const HumanCredentialKindSchema = Type.Union([
 const Common = {
   human_user: CurrentHumanUserSchema,
   role_assignments: Type.Array(RoleAssignmentSchema),
-  session: SessionSchema,
-  auth_context: AuthContextSchema,
+  session_id: NonEmptyString,
+  auth_context_id: NonEmptyString,
 };
 
 export const HumanCurrentIdentitySchema = Type.Object({
@@ -77,8 +70,8 @@ export const AgentCurrentIdentitySchema = Type.Object({
   human_user: CurrentHumanUserSchema,
   agent: CurrentAgentSchema,
   role_assignments: Type.Array(RoleAssignmentSchema),
-  session: SessionSchema,
-  auth_context: AuthContextSchema,
+  session_id: NonEmptyString,
+  auth_context_id: NonEmptyString,
 }, { additionalProperties: false });
 
 export const CurrentIdentitySchema = Type.Union([

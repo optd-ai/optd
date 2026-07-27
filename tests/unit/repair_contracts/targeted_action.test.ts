@@ -18,8 +18,10 @@ Deno.test("target authority evidence canonicalizes exact reviewed targets", () =
       target: {
         projectId: "project-b",
         resource: "publisher/crm:lead",
-        objectId: "lead-2",
-        objectVersion: 7,
+        object: {
+          id: "lead-2",
+          versionId: "019b1234-5678-7abc-8def-012345678902",
+        },
       },
       policyDigest: "digest-b",
       matchedRules: [{
@@ -34,8 +36,10 @@ Deno.test("target authority evidence canonicalizes exact reviewed targets", () =
       target: {
         projectId: "project-a",
         resource: "publisher/crm:lead",
-        objectId: "lead-1",
-        objectVersion: 3,
+        object: {
+          id: "lead-1",
+          versionId: "019b1234-5678-7abc-8def-012345678901",
+        },
       },
       policyDigest: "digest-a",
       matchedRules: [],
@@ -51,6 +55,10 @@ Deno.test("target authority evidence canonicalizes exact reviewed targets", () =
   assertEquals(canonical.targets.map((target) => target.object_id), [
     "lead-1",
     "lead-2",
+  ]);
+  assertEquals(canonical.targets.map((target) => target.object_version_id), [
+    "019b1234-5678-7abc-8def-012345678901",
+    "019b1234-5678-7abc-8def-012345678902",
   ]);
   assertEquals(canonical.targets[1].role_assignment_ids, ["role-1", "role-2"]);
 });
@@ -72,8 +80,10 @@ Deno.test("effect manifests cannot become authorization digest targets", () => {
       target: {
         projectId: "project-1",
         resource: "publisher/crm:lead",
-        objectId: "lead-1",
-        objectVersion: 1,
+        object: {
+          id: "lead-1",
+          versionId: "019b1234-5678-7abc-8def-012345678901",
+        },
       },
       policyDigest: "policy-digest",
       matchedRules: [],
@@ -85,4 +95,37 @@ Deno.test("effect manifests cannot become authorization digest targets", () => {
   assertEquals(effects.resourceIdentities, ["publisher/crm:opportunity"]);
   assertEquals(canonical.targets[0].resource, "publisher/crm:lead");
   assertFalse("effects" in canonical);
+});
+
+Deno.test("definition-level reviewed targets omit object evidence canonically", () => {
+  const canonical = canonicalTargetDigestInput({
+    actor: {
+      id: "human-principal",
+      principal_type: "human_user",
+      human_user_id: "human-1",
+    },
+    authorizationRootId: "authorization-root",
+    authorizationLineageIds: [],
+    targets: [{
+      target: {
+        projectId: "project-1",
+        resource: "publisher/crm:lead",
+      },
+      policyDigest: "policy-digest",
+      matchedRules: [],
+      roleAssignmentIds: [],
+      relationshipIds: [],
+    }],
+  });
+
+  assertEquals(canonical.targets[0], {
+    project_id: "project-1",
+    resource: "publisher/crm:lead",
+    policy_digest: "policy-digest",
+    matched_rules: [],
+    role_assignment_ids: [],
+    relationship_ids: [],
+  });
+  assertFalse("object_id" in canonical.targets[0]);
+  assertFalse("object_version_id" in canonical.targets[0]);
 });

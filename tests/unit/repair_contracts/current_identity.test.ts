@@ -16,8 +16,8 @@ const human = {
     role: "system:super_admin",
     boundary: { type: "system" },
   }],
-  session: { id: "session-1" },
-  auth_context: { id: "context-1", active: true },
+  session_id: "session-1",
+  auth_context_id: "context-1",
 } as const;
 
 const agent = {
@@ -37,8 +37,8 @@ const agent = {
     role: "crm:sales_rep",
     boundary: { type: "project", project_id: "project-1" },
   }],
-  session: { id: "session-agent" },
-  auth_context: { id: "context-agent", active: true },
+  session_id: "session-agent",
+  auth_context_id: "context-agent",
 } as const;
 
 Deno.test("current identity has explicit human and agent structures", () => {
@@ -48,6 +48,14 @@ Deno.test("current identity has explicit human and agent structures", () => {
 
 Deno.test("current identity rejects aliases, unknown fields, and contradictory shapes", () => {
   assertFalse(currentIdentityContract.check({ ...agent, id: "agent-1" }));
+  assertFalse(currentIdentityContract.check({
+    ...agent,
+    session: { id: agent.session_id },
+  }));
+  assertFalse(currentIdentityContract.check({
+    ...agent,
+    auth_context: { id: agent.auth_context_id, active: true },
+  }));
   assertFalse(currentIdentityContract.check({
     ...agent,
     principal_type: "human_user",

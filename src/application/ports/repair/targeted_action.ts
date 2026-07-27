@@ -3,8 +3,12 @@ import type { PolicyActor } from "./policy_actor.ts";
 export type ReviewedTarget = Readonly<{
   projectId: string;
   resource: string;
-  objectId: string;
-  objectVersion: number;
+  /** Definition-level targets omit object evidence entirely. */
+  object?: Readonly<{
+    id: string;
+    /** Exact immutable object_versions.id evidence, not a mutable version number. */
+    versionId: string;
+  }>;
 }>;
 
 export type MatchedRuleEvidence = Readonly<{
@@ -42,8 +46,8 @@ export type TargetDigestInput = Readonly<{
   targets: readonly Readonly<{
     project_id: string;
     resource: string;
-    object_id: string;
-    object_version: number;
+    object_id?: string;
+    object_version_id?: string;
     policy_digest: string;
     matched_rules: readonly Readonly<{
       policy: string;
@@ -66,8 +70,12 @@ export function canonicalTargetDigestInput(
   const targets = cutoff.targets.map((evidence) => ({
     project_id: evidence.target.projectId,
     resource: evidence.target.resource,
-    object_id: evidence.target.objectId,
-    object_version: evidence.target.objectVersion,
+    ...(evidence.target.object
+      ? {
+        object_id: evidence.target.object.id,
+        object_version_id: evidence.target.object.versionId,
+      }
+      : {}),
     policy_digest: evidence.policyDigest,
     matched_rules: evidence.matchedRules.map((rule) => ({
       policy: rule.policy,
@@ -85,8 +93,8 @@ export function canonicalTargetDigestInput(
   })).toSorted((left, right) =>
     compareText(left.project_id, right.project_id) ||
     compareText(left.resource, right.resource) ||
-    compareText(left.object_id, right.object_id) ||
-    left.object_version - right.object_version
+    compareText(left.object_id ?? "", right.object_id ?? "") ||
+    compareText(left.object_version_id ?? "", right.object_version_id ?? "")
   );
 
   return Object.freeze({

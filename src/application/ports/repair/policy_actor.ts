@@ -4,6 +4,24 @@ export type PolicyActor = Readonly<{
   human_user_id: string | null;
 }>;
 
+export type AuthorizationLineageFact = Readonly<{
+  id: string;
+  parentAuthorizationId: string | null;
+  rootAuthorizationId: string;
+  status: "active" | "revoked" | "replaced";
+  replacedByAuthorizationId?: string;
+}>;
+
+export type ServerDerivedAuthorizationLineage = Readonly<{
+  currentAuthorizationId: string;
+  rootAuthorizationId: string;
+  /** Canonical root-to-current path, inclusive. */
+  authorizationAncestryIds: readonly string[];
+  facts: readonly AuthorizationLineageFact[];
+  /** Set only when the current authorization is a server-issued replacement. */
+  replacesAuthorizationId?: string;
+}>;
+
 export type ServerDerivedPolicySubject =
   | Readonly<{
     principalType: "human_user";
@@ -14,8 +32,7 @@ export type ServerDerivedPolicySubject =
     principalType: "agent_user";
     principalId: string;
     humanUserId: string;
-    authorizationId: string;
-    authorizationActive: boolean;
+    authorization: ServerDerivedAuthorizationLineage;
   }>
   | Readonly<{
     principalType: "system";
@@ -36,6 +53,59 @@ function required(value: string, field: string): string {
   return value;
 }
 
+function assertActiveAuthorizationLineage(
+  lineage: ServerDerivedAuthorizationLineage,
+): void {
+  const current = required(
+    lineage.currentAuthorizationId,
+    "currentAuthorizationId",
+  );
+  const root = required(lineage.rootAuthorizationId, "rootAuthorizationId");
+  const ancestry = lineage.authorizationAncestryIds;
+  if (
+    ancestry.length === 0 || ancestry[0] !== root ||
+    ancestry[ancestry.length - 1] !== current ||
+    new Set(ancestry).size !== ancestry.length
+  ) {
+    throw new InvalidPolicySubjectError(
+      "agent authorization ancestry is invalid",
+    );
+  }
+
+  const facts = new Map(lineage.facts.map((fact) => [fact.id, fact]));
+  for (let index = 0; index < ancestry.length; index++) {
+    const id = ancestry[index];
+    const fact = facts.get(id);
+    const expectedParent = index === 0 ? null : ancestry[index - 1];
+    if (
+      !fact || fact.rootAuthorizationId !== root ||
+      fact.parentAuthorizationId !== expectedParent || fact.status !== "active"
+    ) {
+      throw new InvalidPolicySubjectError(
+        "agent authorization lineage is not active",
+      );
+    }
+  }
+
+  if (lineage.replacesAuthorizationId !== undefined) {
+    const replacedId = required(
+      lineage.replacesAuthorizationId,
+      "replacesAuthorizationId",
+    );
+    const replaced = facts.get(replacedId);
+    if (
+      ancestry.includes(replacedId) || !replaced ||
+      replaced.status !== "replaced" ||
+      replaced.replacedByAuthorizationId !== current ||
+      replaced.rootAuthorizationId !== root
+    ) {
+      throw new InvalidPolicySubjectError(
+        "agent replacement authorization is invalid",
+      );
+    }
+  }
+}
+
 /** Maps immutable, server-authenticated identity state into policy input. */
 export function derivePolicyActor(
   subject: ServerDerivedPolicySubject,
@@ -50,14 +120,8 @@ export function derivePolicyActor(
   }
 
   const humanUserId = required(subject.humanUserId, "humanUserId");
-  if (
-    subject.principalType === "agent_user" &&
-    (!subject.authorizationActive ||
-      subject.authorizationId.trim().length === 0)
-  ) {
-    throw new InvalidPolicySubjectError(
-      "agent authorization lineage is not active",
-    );
+  if (subject.principalType === "agent_user") {
+    assertActiveAuthorizationLineage(subject.authorization);
   }
 
   return Object.freeze({

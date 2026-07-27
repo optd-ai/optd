@@ -1,6 +1,10 @@
 // deno-lint-ignore-file no-import-prefix no-unversioned-import
 import { assertEquals, assertThrows } from "jsr:@std/assert";
-import { decideSeedReconciliation } from "../../../src/application/ports/repair/seeds.ts";
+import {
+  ACTIVE_SEED_KEY_CONFLICT,
+  decideSeedReconciliation,
+  seedReplacementCommitResult,
+} from "../../../src/application/ports/repair/seeds.ts";
 
 const replacementId = "019b1234-5678-7abc-8def-0123456789ab";
 const ids = { nextUuidV7: () => replacementId };
@@ -58,6 +62,41 @@ Deno.test("seed reconciliation repeats unchanged and updates active identity", (
       objectId: "active-object",
       objectVersion: 2,
     },
+  );
+});
+
+Deno.test("concurrent archived-seed replacement has one winner and one stable loser", () => {
+  const constraint = {
+    name: "lead_status_project_key_active_uidx",
+    projectScoped: true as const,
+    fields: ["project_id", "key"],
+    predicate: "active()" as const,
+  };
+  assertEquals(
+    [
+      seedReplacementCommitResult({
+        kind: "inserted",
+        objectId: replacementId,
+      }, constraint),
+      seedReplacementCommitResult({
+        kind: "unique_conflict",
+        constraint: constraint.name,
+      }, constraint),
+    ],
+    [{ kind: "created", objectId: replacementId }, {
+      kind: "conflict",
+      code: ACTIVE_SEED_KEY_CONFLICT,
+      constraint: constraint.name,
+    }],
+  );
+  assertThrows(
+    () =>
+      seedReplacementCommitResult({
+        kind: "unique_conflict",
+        constraint: "unrelated_constraint",
+      }, constraint),
+    Error,
+    "unexpected seed replacement uniqueness conflict",
   );
 });
 

@@ -6,15 +6,20 @@ export type ApplicationAdapterEdge = Readonly<{
   importer: string;
   target: string;
   occurrence: number;
-  replacement: string;
+  replacements: readonly string[];
 }>;
 
 const edge = (
   importer: string,
   target: string,
-  replacement: string,
+  replacement: string | readonly string[],
   occurrence = 1,
-): ApplicationAdapterEdge => ({ importer, target, occurrence, replacement });
+): ApplicationAdapterEdge => ({
+  importer,
+  target,
+  occurrence,
+  replacements: typeof replacement === "string" ? [replacement] : replacement,
+});
 
 /** Frozen migration inventory. Chunk 2 removes every entry rather than ratcheting it. */
 export const EXPECTED_APPLICATION_ADAPTER_EDGES:
@@ -103,7 +108,11 @@ export const EXPECTED_APPLICATION_ADAPTER_EDGES:
     edge(
       "src/application/services/changeset_services.ts",
       "src/adapters/outbound/postgres/client.ts",
-      "src/application/ports/repair/repositories.ts#DefinitionCatalog",
+      [
+        "src/application/ports/repair/repositories.ts#DefinitionCatalog",
+        "src/application/ports/repair/repositories.ts#ChangesetFactRepository",
+        "src/application/ports/repair/repositories.ts#QueryPolicyRepository",
+      ],
     ),
     edge(
       "src/application/services/changeset_services.ts",
@@ -198,7 +207,12 @@ export const EXPECTED_APPLICATION_ADAPTER_EDGES:
     edge(
       "src/application/services/query_objects.ts",
       "src/adapters/outbound/postgres/client.ts",
-      "src/application/ports/repair/repositories.ts#QueryObjectRepository",
+      [
+        "src/application/ports/repair/repositories.ts#QueryObjectRepository",
+        "src/application/ports/repair/repositories.ts#QueryPolicyRepository",
+        "src/application/ports/repair/targeted_action.ts#TargetedPolicyEvaluator",
+        "src/application/ports/repair/targeted_action.ts#TargetedAuthorityCutoff",
+      ],
     ),
     edge(
       "src/application/services/query_objects.ts",
@@ -218,7 +232,10 @@ export const EXPECTED_APPLICATION_ADAPTER_EDGES:
     edge(
       "src/application/services/secrets/manage_grants.ts",
       "src/adapters/outbound/postgres/client.ts",
-      "src/application/ports/repair/repositories.ts#HookSecretGrantRepository",
+      [
+        "src/application/ports/repair/repositories.ts#HookSecretGrantRepository",
+        "src/application/ports/authorization.ts#AuthorizationRepository",
+      ],
     ),
     edge(
       "src/application/services/secrets/manage_secrets.ts",
@@ -263,10 +280,10 @@ async function applicationFiles(root: string): Promise<string[]> {
 }
 
 async function actualEdges(): Promise<
-  Omit<ApplicationAdapterEdge, "replacement">[]
+  Omit<ApplicationAdapterEdge, "replacements">[]
 > {
   const occurrences = new Map<string, number>();
-  const result: Omit<ApplicationAdapterEdge, "replacement">[] = [];
+  const result: Omit<ApplicationAdapterEdge, "replacements">[] = [];
   const importPattern =
     /\bimport\s+(?:type\s+)?[\s\S]*?\s+from\s+["']([^"']+)["']/g;
   for (const importer of await applicationFiles("src/application")) {
@@ -294,6 +311,8 @@ Deno.test("application adapter inventory exactly matches the frozen migration se
   assertEquals(await actualEdges(), expected);
   assertEquals(EXPECTED_APPLICATION_ADAPTER_EDGES.length, 45);
   for (const item of EXPECTED_APPLICATION_ADAPTER_EDGES) {
-    assertMatch(item.replacement, /^src\/application\/ports\/.+#[A-Z]/);
+    for (const replacement of item.replacements) {
+      assertMatch(replacement, /^src\/application\/ports\/.+#[A-Z]/);
+    }
   }
 });

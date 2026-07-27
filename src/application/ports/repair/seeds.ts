@@ -68,7 +68,46 @@ export interface SeedCatalog {
   definitions(seedIdentities: readonly string[]): Promise<SeedDefinition[]>;
 }
 
+export const ACTIVE_SEED_KEY_CONFLICT = "active_seed_key_conflict" as const;
+
+export type SeedReplacementCommitAttempt =
+  | Readonly<{ kind: "inserted"; objectId: string }>
+  | Readonly<{ kind: "unique_conflict"; constraint: string }>;
+
+export type SeedReplacementCommitResult =
+  | Readonly<{ kind: "created"; objectId: string }>
+  | Readonly<{
+    kind: "conflict";
+    code: typeof ACTIVE_SEED_KEY_CONFLICT;
+    constraint: string;
+  }>;
+
+/** Normalizes an ordinary active-only uniqueness loser to one stable conflict. */
+export function seedReplacementCommitResult(
+  attempt: SeedReplacementCommitAttempt,
+  constraint: ActiveUniqueConstraint,
+): SeedReplacementCommitResult {
+  if (attempt.kind === "inserted") {
+    return Object.freeze({
+      kind: "created" as const,
+      objectId: attempt.objectId,
+    });
+  }
+  if (attempt.constraint !== constraint.name) {
+    throw new Error("unexpected seed replacement uniqueness conflict");
+  }
+  return Object.freeze({
+    kind: "conflict" as const,
+    code: ACTIVE_SEED_KEY_CONFLICT,
+    constraint: attempt.constraint,
+  });
+}
+
 export interface SeedReconciliationRepository {
   findByActiveBusinessKey(seed: SeedDefinition): Promise<SeedMatch | null>;
   verifyActiveUniqueness(constraint: ActiveUniqueConstraint): Promise<boolean>;
+  createActiveReplacement(
+    seed: SeedDefinition,
+    objectId: string,
+  ): Promise<SeedReplacementCommitResult>;
 }
