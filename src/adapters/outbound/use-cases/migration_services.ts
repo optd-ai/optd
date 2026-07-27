@@ -1,4 +1,4 @@
-import { err, ok, type Result } from "../../domain/errors/result.ts";
+import { err, ok, type Result } from "../../../domain/errors/result.ts";
 import {
   applyMigrationPlan,
   getMigrationPlan,
@@ -6,12 +6,12 @@ import {
   MigrationApplyError,
   recordMigrationAttempt,
   validateMigrationPlan,
-} from "../../adapters/outbound/postgres/pack_migration_repository.ts";
-import type { MigrationApplyRequest } from "../../domain/migrations/pack_migration.ts";
-import type { Queryable } from "../../adapters/outbound/postgres/client.ts";
-import type { AuthorizationRepository } from "../ports/authorization.ts";
-import type { AuthContext } from "../../domain/auth/model.ts";
-import type { TransactionManager } from "../ports/transaction_manager.ts";
+} from "../postgres/pack_migration_repository.ts";
+import type { MigrationApplyRequest } from "../../../domain/migrations/pack_migration.ts";
+import type { Queryable } from "../postgres/client.ts";
+import type { AuthorizationRepository } from "../../../application/ports/authorization.ts";
+import type { AuthContext } from "../../../domain/auth/model.ts";
+import type { TransactionManager } from "../../../application/ports/transaction_manager.ts";
 
 export function makeMigrationServices(
   deps: {

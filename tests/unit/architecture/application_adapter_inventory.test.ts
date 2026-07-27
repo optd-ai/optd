@@ -428,17 +428,32 @@ async function actualEdges(): Promise<
   return result;
 }
 
-Deno.test("application adapter inventory exactly matches the frozen migration set", async () => {
-  const expected = EXPECTED_APPLICATION_ADAPTER_EDGES.map(
-    ({ importer, target, occurrence }) => ({ importer, target, occurrence }),
-  );
-  assertEquals(await actualEdges(), expected);
+Deno.test("application has zero adapter dependencies after the frozen migration", async () => {
+  assertEquals(await actualEdges(), []);
   assertEquals(EXPECTED_APPLICATION_ADAPTER_EDGES.length, 45);
   for (const item of EXPECTED_APPLICATION_ADAPTER_EDGES) {
     for (const replacement of item.replacements) {
       assertMatch(replacement, /^src\/application\/ports\/.+#[A-Z]/);
     }
   }
+});
+
+Deno.test("application contains no concrete infrastructure implementation", async () => {
+  const forbidden = [
+    /\bDeno\.env\b/,
+    /\bDeno\.(?:read|write|open|Command)\b/,
+    /\bcrypto\.(?:randomUUID|subtle|getRandomValues)\b/,
+    /\b(?:Queryable|quoteIdentifier|sqlBegin)\b/,
+    /[`"']\s*(?:select|insert|update|delete|create|alter|drop)\s+/i,
+  ];
+  const findings: string[] = [];
+  for (const file of await applicationFiles("src/application")) {
+    const source = await Deno.readTextFile(file);
+    for (const pattern of forbidden) {
+      if (pattern.test(source)) findings.push(`${file}: ${pattern.source}`);
+    }
+  }
+  assertEquals(findings, []);
 });
 
 Deno.test("every importing service freezes its complete semantic capability set", () => {

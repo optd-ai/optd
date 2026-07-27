@@ -9,8 +9,12 @@ import {
   validatePassword,
 } from "../../../domain/auth/validation.ts";
 
+export interface PasswordPolicyEnvironment {
+  get(name: string): string | undefined;
+}
+
 export function loadPasswordPolicy(
-  env: Deno.Env = Deno.env,
+  env: PasswordPolicyEnvironment,
   warn: (message: string) => void = (message) => console.warn(message),
 ): PasswordPolicy {
   const integer = env.get("OPERANT_PASSWORD_MIN_LENGTH") ?? "8";

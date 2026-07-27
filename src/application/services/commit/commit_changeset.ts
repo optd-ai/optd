@@ -7,12 +7,17 @@ import {
 import { err, type Result } from "../../../domain/errors/result.ts";
 import { isUuidV7 } from "../../../domain/ids/uuid_v7.ts";
 
-export function makeCommitChangesetService(repository: CommitRepository) {
-  const configured = durationMs(
-    Deno.env.get("OPERANT_COMMIT_LOCK_TIMEOUT") ?? "10s",
-  ) ?? DEFAULT_COMMIT_LOCK_TIMEOUT_MS;
-  const safetyMaximum = Deno.env.get("OPERANT_COMMIT_LOCK_TIMEOUT_MAX")
-    ? durationMs(Deno.env.get("OPERANT_COMMIT_LOCK_TIMEOUT_MAX")!)
+export function makeCommitChangesetService(
+  repository: CommitRepository,
+  config: Readonly<{
+    lockTimeout?: string;
+    maximumLockTimeout?: string;
+  }> = {},
+) {
+  const configured = durationMs(config.lockTimeout ?? "10s") ??
+    DEFAULT_COMMIT_LOCK_TIMEOUT_MS;
+  const safetyMaximum = config.maximumLockTimeout
+    ? durationMs(config.maximumLockTimeout)
     : null;
   return {
     async commit(

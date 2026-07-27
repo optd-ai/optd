@@ -3,17 +3,14 @@ import {
   ok,
   type Result,
   validationError,
-} from "../../../domain/errors/result.ts";
+} from "../../../../domain/errors/result.ts";
 import {
   ExpressionError,
   expressionHelp,
   type FieldSpec,
   lowerExpression,
-} from "../../../domain/expressions/cel.ts";
-import {
-  query,
-  type Queryable,
-} from "../../../adapters/outbound/postgres/client.ts";
+} from "../../../../domain/expressions/cel.ts";
+import { query, type Queryable } from "../../postgres/client.ts";
 
 const CONTEXTS = new Set([
   "query",

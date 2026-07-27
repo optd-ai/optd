@@ -4,7 +4,7 @@ import { PostgresCommitRepository } from "../../src/adapters/outbound/postgres/c
 import { PostgresStageRepository } from "../../src/adapters/outbound/postgres/stage_repository.ts";
 import { PostgresHookSecretRepository } from "../../src/adapters/outbound/postgres/hook_secret_repository.ts";
 import { EnvelopeCrypto } from "../../src/adapters/outbound/crypto/envelope.ts";
-import { TrustedStageHookCoordinator } from "../../src/application/services/hooks/stage_hook_coordinator.ts";
+import { TrustedStageHookCoordinator } from "../../src/adapters/outbound/use-cases/hooks/stage_hook_coordinator.ts";
 import { makeCommitChangesetService } from "../../src/application/services/commit/commit_changeset.ts";
 import { makeStageChangesetService } from "../../src/application/services/changesets/stage_changesets.ts";
 import {

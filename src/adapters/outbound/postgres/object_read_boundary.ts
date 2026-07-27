@@ -1,4 +1,5 @@
 import {
+  type ObjectPolicyReader,
   ObjectReadAuthorityInvalidError,
   type ObjectReadBoundary,
   type ReadAddress,
@@ -7,6 +8,7 @@ import {
 import type { AuthContext } from "../../../domain/auth/model.ts";
 import { PostgresAuthorizationRepository } from "./authorization_repository.ts";
 import { PostgresObjectReader } from "./object_reader.ts";
+import { evaluateObjectPolicy } from "../use-cases/query_objects.ts";
 import { query, type Queryable, type Sql } from "./client.ts";
 
 type LineageRow = {
@@ -29,7 +31,7 @@ export class PostgresObjectReadBoundary implements ObjectReadBoundary {
       reader: PostgresObjectReader,
       authorization: PostgresAuthorizationRepository,
       anchor: ReadAuthorityAnchor,
-      sql: Queryable,
+      policy: ObjectPolicyReader,
     ) => Promise<T>,
   ): Promise<T> {
     return await this.sql.begin(async (tx) => {
@@ -38,7 +40,14 @@ export class PostgresObjectReadBoundary implements ObjectReadBoundary {
         new PostgresObjectReader(tx),
         new PostgresAuthorizationRepository(tx as unknown as Sql),
         anchor,
-        tx,
+        {
+          evaluate: (input, actor) =>
+            evaluateObjectPolicy(
+              tx,
+              { ...input, actions: [...input.actions] },
+              actor,
+            ),
+        },
       );
     }) as T;
   }

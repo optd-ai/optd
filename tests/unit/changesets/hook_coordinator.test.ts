@@ -1,7 +1,7 @@
 import {
   type ActionStageHookDeclaration,
   TrustedStageHookCoordinator,
-} from "../../../src/application/services/hooks/stage_hook_coordinator.ts";
+} from "../../../src/adapters/outbound/use-cases/hooks/stage_hook_coordinator.ts";
 import type {
   StageHookDeclaration,
   StageHookInput,

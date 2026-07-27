@@ -1,3 +1,4 @@
+// deno-lint-ignore-file no-import-prefix no-unversioned-import
 import { assertEquals } from "jsr:@std/assert";
 import { applyPlatformMigrations } from "../../src/adapters/outbound/postgres/migrations.ts";
 import {
@@ -9,7 +10,7 @@ import {
   findPostgresBins,
   startPostgresRuntime,
 } from "../../src/adapters/outbound/postgres-process/lifecycle.ts";
-import { makeQueryObjectsService } from "../../src/application/services/query_objects.ts";
+import { makeQueryObjectsService } from "../../src/adapters/outbound/use-cases/query_objects.ts";
 import { QueryCursorSigner } from "../../src/domain/queries/cursor.ts";
 import { uuidV7 } from "../../src/domain/ids/uuid_v7.ts";
 

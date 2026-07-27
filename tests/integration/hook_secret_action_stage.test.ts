@@ -6,7 +6,7 @@ import { PostgresHookSecretRepository } from "../../src/adapters/outbound/postgr
 import {
   type ActionStageHookDeclaration,
   TrustedStageHookCoordinator,
-} from "../../src/application/services/hooks/stage_hook_coordinator.ts";
+} from "../../src/adapters/outbound/use-cases/hooks/stage_hook_coordinator.ts";
 import { uuidV7 } from "../../src/domain/ids/uuid_v7.ts";
 import { startAuthenticatedHarness } from "../support/authenticated_harness.ts";
 import { startHttpProvider } from "../support/http_provider.ts";

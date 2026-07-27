@@ -5,7 +5,7 @@ import {
   makeStageSeedsService,
   reconcileSeedRow,
   validateSeedSelection,
-} from "../../src/application/services/seeds/stage_seeds.ts";
+} from "../../src/adapters/outbound/use-cases/seeds/stage_seeds.ts";
 import { isUuidV7 } from "../../src/domain/ids/uuid_v7.ts";
 
 const project = "019b7a2e-7c10-7000-8000-000000000001";

@@ -36,7 +36,7 @@ import {
   lockTargetedActionAuthority,
   targetedActionAuthorityFactsDigest,
   type TargetedActionPolicyTarget,
-} from "../../../application/services/query_objects.ts";
+} from "../use-cases/query_objects.ts";
 
 type Revision = {
   id: string;

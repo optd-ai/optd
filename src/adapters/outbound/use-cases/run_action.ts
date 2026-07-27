@@ -3,15 +3,12 @@ import {
   ok,
   type Result,
   validationError,
-} from "../../domain/errors/result.ts";
-import {
-  query,
-  type Queryable,
-} from "../../adapters/outbound/postgres/client.ts";
+} from "../../../domain/errors/result.ts";
+import { query, type Queryable } from "../postgres/client.ts";
 import type {
   DenoHookRunner,
   HookDefinition,
-} from "../../adapters/outbound/deno-hooks/hook_runner.ts";
+} from "../deno-hooks/hook_runner.ts";
 import type {
   ChangesetCommitDto,
   ChangesetPreviewDto,
@@ -22,7 +19,7 @@ import {
   authorizeObjectRuntime,
   normalizeActor,
   PolicyDeniedError,
-} from "../../domain/policies/policy_engine.ts";
+} from "../../../domain/policies/policy_engine.ts";
 
 type JsonRecord = Record<string, unknown>;
 

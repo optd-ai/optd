@@ -1,14 +1,14 @@
-import type { Sql } from "../../../adapters/outbound/postgres/client.ts";
-import {
-  query,
-  quoteIdentifier,
-} from "../../../adapters/outbound/postgres/client.ts";
-import type { AuthContext } from "../../../domain/auth/model.ts";
-import { err, ok, type Result } from "../../../domain/errors/result.ts";
-import { canonicalJson } from "../../../domain/ids/canonical_json.ts";
-import { isUuidV7 } from "../../../domain/ids/uuid_v7.ts";
-import type { StageDto, StageSource } from "../../ports/stage_repository.ts";
-import { PostgresAuthorizationRepository } from "../../../adapters/outbound/postgres/authorization_repository.ts";
+import type { Sql } from "../../postgres/client.ts";
+import { query, quoteIdentifier } from "../../postgres/client.ts";
+import type { AuthContext } from "../../../../domain/auth/model.ts";
+import { err, ok, type Result } from "../../../../domain/errors/result.ts";
+import { canonicalJson } from "../../../../domain/ids/canonical_json.ts";
+import { isUuidV7 } from "../../../../domain/ids/uuid_v7.ts";
+import type {
+  StageDto,
+  StageSource,
+} from "../../../../application/ports/stage_repository.ts";
+import { PostgresAuthorizationRepository } from "../../postgres/authorization_repository.ts";
 
 export type SeedStageDto = {
   status: "staged" | "unchanged";

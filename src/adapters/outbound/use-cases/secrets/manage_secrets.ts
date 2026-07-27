@@ -1,19 +1,16 @@
-import {
-  query,
-  type Queryable,
-} from "../../../adapters/outbound/postgres/client.ts";
-import type { TransactionManager } from "../../ports/transaction_manager.ts";
-import type { AuthorizationRepository } from "../../ports/authorization.ts";
-import type { AuthContext } from "../../../domain/auth/model.ts";
-import { err, ok, type Result } from "../../../domain/errors/result.ts";
-import { uuidV7 } from "../../../domain/ids/uuid_v7.ts";
+import { query, type Queryable } from "../../postgres/client.ts";
+import type { TransactionManager } from "../../../../application/ports/transaction_manager.ts";
+import type { AuthorizationRepository } from "../../../../application/ports/authorization.ts";
+import type { AuthContext } from "../../../../domain/auth/model.ts";
+import { err, ok, type Result } from "../../../../domain/errors/result.ts";
+import { uuidV7 } from "../../../../domain/ids/uuid_v7.ts";
 import {
   EnvelopeCrypto,
   SecretDecryptError,
   SecretKeyMalformedError,
   SecretKeyMismatchError,
   SecretKeyMissingError,
-} from "../../../adapters/outbound/crypto/envelope.ts";
+} from "../../crypto/envelope.ts";
 
 type SecretRow = {
   id: string;

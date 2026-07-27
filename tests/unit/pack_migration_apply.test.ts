@@ -1,7 +1,7 @@
 // deno-lint-ignore-file no-import-prefix no-unversioned-import no-explicit-any require-await
 import { assertEquals } from "jsr:@std/assert";
 import { MigrationApplyError } from "../../src/adapters/outbound/postgres/pack_migration_repository.ts";
-import { makeMigrationServices } from "../../src/application/services/migration_services.ts";
+import { makeMigrationServices } from "../../src/adapters/outbound/use-cases/migration_services.ts";
 import type { AuthContext } from "../../src/domain/auth/model.ts";
 
 const auth: AuthContext = Object.freeze({

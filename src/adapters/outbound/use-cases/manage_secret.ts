@@ -3,22 +3,19 @@ import {
   ok,
   type Result,
   validationError,
-} from "../../domain/errors/result.ts";
-import {
-  query,
-  type Queryable,
-} from "../../adapters/outbound/postgres/client.ts";
-import type { TransactionManager } from "../ports/transaction_manager.ts";
+} from "../../../domain/errors/result.ts";
+import { query, type Queryable } from "../postgres/client.ts";
+import type { TransactionManager } from "../../../application/ports/transaction_manager.ts";
 import {
   EnvelopeCrypto,
   SecretDecryptError,
   SecretKeyMissingError,
-} from "../../adapters/outbound/crypto/envelope.ts";
+} from "../crypto/envelope.ts";
 import {
   type ActorContext,
   auditPolicy,
   normalizeActor,
-} from "../../domain/policies/policy_engine.ts";
+} from "../../../domain/policies/policy_engine.ts";
 
 type JsonRecord = Record<string, unknown>;
 

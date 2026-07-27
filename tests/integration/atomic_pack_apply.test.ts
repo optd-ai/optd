@@ -1,3 +1,4 @@
+// deno-lint-ignore-file no-import-prefix no-unversioned-import
 import { assert, assertEquals, assertRejects } from "jsr:@std/assert";
 import {
   closePostgresClient,
@@ -10,7 +11,7 @@ import { applyPlatformMigrations } from "../../src/adapters/outbound/postgres/mi
 import { getDefinition } from "../../src/adapters/outbound/postgres/pack_repository.ts";
 import { PostgresTransactionManager } from "../../src/adapters/outbound/postgres/transaction_manager.ts";
 import { PostgresAuthorizationRepository } from "../../src/adapters/outbound/postgres/authorization_repository.ts";
-import { makeMigrationServices } from "../../src/application/services/migration_services.ts";
+import { makeMigrationServices } from "../../src/adapters/outbound/use-cases/migration_services.ts";
 import type { AuthorizationRepository } from "../../src/application/ports/authorization.ts";
 import {
   findPostgresBins,

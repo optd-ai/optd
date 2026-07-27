@@ -1,7 +1,6 @@
 import type { DefinitionIdentity } from "../../domain/objects/read.ts";
 import type { AuthContext } from "../../domain/auth/model.ts";
 import type { AuthorizationRepository } from "./authorization.ts";
-import type { Queryable } from "../../adapters/outbound/postgres/client.ts";
 import type {
   HistoryEntry,
   ObjectDto,
@@ -29,6 +28,18 @@ export class ObjectReadAuthorityInvalidError extends Error {
   }
 }
 
+export interface ObjectPolicyReader {
+  evaluate(
+    input: Readonly<{
+      projectId: string;
+      objectId: string;
+      definition: DefinitionIdentity;
+      actions: readonly string[];
+    }>,
+    auth: AuthContext,
+  ): Promise<Readonly<{ allowed: boolean; policyDigest: string }>>;
+}
+
 export interface ObjectReadBoundary {
   execute<T>(
     auth: AuthContext,
@@ -37,7 +48,7 @@ export interface ObjectReadBoundary {
       reader: ObjectReader,
       authorization: AuthorizationRepository,
       anchor: ReadAuthorityAnchor,
-      sql: Queryable,
+      policy: ObjectPolicyReader,
     ) => Promise<T>,
   ): Promise<T>;
 }

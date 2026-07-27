@@ -3,17 +3,13 @@ import {
   ok,
   type Result,
   validationError,
-} from "../../domain/errors/result.ts";
-import {
-  query,
-  type Queryable,
-  quoteIdentifier,
-} from "../../adapters/outbound/postgres/client.ts";
-import type { TransactionManager } from "../ports/transaction_manager.ts";
+} from "../../../domain/errors/result.ts";
+import { query, type Queryable, quoteIdentifier } from "../postgres/client.ts";
+import type { TransactionManager } from "../../../application/ports/transaction_manager.ts";
 import type {
   DenoHookRunner,
   HookDefinition,
-} from "../../adapters/outbound/deno-hooks/hook_runner.ts";
+} from "../deno-hooks/hook_runner.ts";
 import { loadHook, recordHookExecution } from "./run_action.ts";
 import {
   type ActorContext,
@@ -22,8 +18,8 @@ import {
   authorizeObjectRuntime,
   normalizeActor,
   PolicyDeniedError,
-} from "../../domain/policies/policy_engine.ts";
-import type { FieldSpec } from "../../domain/queries/expression_lowerer.ts";
+} from "../../../domain/policies/policy_engine.ts";
+import type { FieldSpec } from "../../../domain/queries/expression_lowerer.ts";
 
 type JsonRecord = Record<string, unknown>;
 export type ChangesetOperation = {

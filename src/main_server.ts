@@ -1,4 +1,4 @@
-import { makeApplication } from "./application/app.ts";
+import { makeApplication } from "./composition/application.ts";
 import { loadRuntimeConfig, OPERANT_VERSION } from "./config/runtime.ts";
 import { makeHttpApp } from "./adapters/inbound/http-hono/app.ts";
 import {
@@ -14,7 +14,7 @@ import {
   type MigrationApplyResult,
   type MigrationStatus,
 } from "./adapters/outbound/postgres/migrations.ts";
-import { assertSecretSubsystemReady } from "./application/services/secrets/manage_secrets.ts";
+import { assertSecretSubsystemReady } from "./adapters/outbound/use-cases/secrets/manage_secrets.ts";
 import { resolveHookDenoBinary } from "./adapters/outbound/deno-hooks/hook_runner.ts";
 import {
   assertSupportedPostgresVersionNumber,
