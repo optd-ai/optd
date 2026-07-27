@@ -20,9 +20,12 @@ import {
 } from "../adapters/outbound/postgres/repositories/outbox_processing_repository.ts";
 import { PostgresOutboxRepository } from "../adapters/outbound/postgres/outbox_repository.ts";
 import type { DenoHookRunnerOptions } from "../adapters/outbound/deno-hooks/hook_runner.ts";
-import { makePostgresSecretLifecycleRepository } from "../adapters/outbound/postgres/repositories/hook_secret_lifecycle_repository.ts";
-import { makePostgresHookSecretGrantRepository } from "../adapters/outbound/postgres/repositories/hook_secret_grant_repository.ts";
-import { EnvelopeCrypto } from "../adapters/outbound/crypto/envelope.ts";
+import { makePostgresSecretLifecyclePersistence } from "../adapters/outbound/postgres/repositories/hook_secret_lifecycle_repository.ts";
+import { makePostgresHookSecretGrantPersistence } from "../adapters/outbound/postgres/repositories/hook_secret_grant_repository.ts";
+import {
+  EnvelopeCrypto,
+  makeEnvelopeSecretCipher,
+} from "../adapters/outbound/crypto/envelope.ts";
 import { PostgresHookSecretRepository } from "../adapters/outbound/postgres/hook_secret_repository.ts";
 import { TrustedStageHookCoordinator } from "../adapters/outbound/deno-hooks/trusted_stage_hook_adapter.ts";
 import { OPERANT_VERSION } from "../config/runtime.ts";
@@ -72,17 +75,18 @@ export function makeApplication(
   const tx = new PostgresTransactionManager(sql);
   const authorizationRepository = new PostgresAuthorizationRepository(sql);
   const cryptoAdapter = new EnvelopeCrypto();
-  const secrets = makeSecretsService(makePostgresSecretLifecycleRepository({
-    sql: sql as Queryable,
-    tx,
-    authorization: authorizationRepository,
-    crypto: cryptoAdapter,
-  }));
-  const hookSecretGrants = makeHookSecretGrantService(
-    makePostgresHookSecretGrantRepository({
+  const secrets = makeSecretsService({
+    persistence: makePostgresSecretLifecyclePersistence({
       sql: sql as Queryable,
       tx,
-      authorization: authorizationRepository,
+    }),
+    authorization: authorizationRepository,
+    cipher: makeEnvelopeSecretCipher(cryptoAdapter),
+  });
+  const hookSecretGrants = makeHookSecretGrantService({
+    persistence: makePostgresHookSecretGrantPersistence({
+      sql: sql as Queryable,
+      tx,
       authorizeInTransaction: (lockedSql, auth, action) =>
         new PostgresAuthorizationRepository(lockedSql as Sql).authorize({
           auth,
@@ -91,7 +95,8 @@ export function makeApplication(
           resource: "system:hook-secret-grant",
         }),
     }),
-  );
+    authorization: authorizationRepository,
+  });
   const hookSecretRepository = new PostgresHookSecretRepository(
     sql,
     cryptoAdapter,

@@ -15,6 +15,7 @@ import {
   type MigrationStatus,
 } from "./adapters/outbound/postgres/migrations.ts";
 import { assertSecretSubsystemReady } from "./adapters/outbound/postgres/repositories/hook_secret_lifecycle_repository.ts";
+import { EnvelopeCrypto } from "./adapters/outbound/crypto/envelope.ts";
 import { resolveHookDenoBinary } from "./adapters/outbound/deno-hooks/hook_runner.ts";
 import {
   assertSupportedPostgresVersionNumber,
@@ -56,7 +57,7 @@ export async function createFetchHandler(
     migrationResult = await sql.begin(async (tx) =>
       await applyPlatformMigrations(tx)
     );
-    await assertSecretSubsystemReady(sql);
+    await assertSecretSubsystemReady(sql, new EnvelopeCrypto());
     denoBin = await resolveHookDenoBinary();
   } catch (error) {
     await closePostgresClient(sql).catch(() => undefined);

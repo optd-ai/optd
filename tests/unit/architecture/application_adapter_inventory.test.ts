@@ -579,6 +579,43 @@ Deno.test("outbox orchestration stays inward over lifecycle capabilities", async
   assertMatch(composition, /makeDenoDeliveryHookExecutor/);
 });
 
+Deno.test("secret and grant orchestration stays inward over frozen lifecycle ports", async () => {
+  const secretApplication = await Deno.readTextFile(
+    "src/application/services/secrets/manage_secrets.ts",
+  );
+  const grantApplication = await Deno.readTextFile(
+    "src/application/services/secrets/manage_grants.ts",
+  );
+  const secretAdapter = await Deno.readTextFile(
+    "src/adapters/outbound/postgres/repositories/hook_secret_lifecycle_repository.ts",
+  );
+  const grantAdapter = await Deno.readTextFile(
+    "src/adapters/outbound/postgres/repositories/hook_secret_grant_repository.ts",
+  );
+  const composition = await Deno.readTextFile("src/composition/application.ts");
+
+  assertMatch(secretApplication, /SecretRepository/);
+  assertMatch(secretApplication, /SecretCipher/);
+  assertMatch(secretApplication, /validateMutation/);
+  assertMatch(secretApplication, /authorization\.authorize/);
+  assertMatch(secretApplication, /cipher\.encrypt/);
+  assertMatch(secretApplication, /secretError/);
+  assertMatch(grantApplication, /HookSecretGrantRepository/);
+  assertMatch(grantApplication, /authorization\.authorize/);
+  assertMatch(grantApplication, /HookSecretGrantPersistenceError/);
+  assertEquals(secretApplication.includes("<T extends object>"), false);
+  assertEquals(grantApplication.includes("<T extends object>"), false);
+  assertEquals(secretAdapter.includes("validateMutation"), false);
+  assertEquals(secretAdapter.includes("authorization.authorize"), false);
+  assertEquals(secretAdapter.includes("EnvelopeCrypto()"), false);
+  assertEquals(grantAdapter.includes("function invalid"), false);
+  assertEquals(grantAdapter.includes("function grantError"), false);
+  assertEquals(grantAdapter.includes("authorization.authorize"), false);
+  assertMatch(composition, /makeEnvelopeSecretCipher/);
+  assertMatch(composition, /makePostgresSecretLifecyclePersistence/);
+  assertMatch(composition, /makePostgresHookSecretGrantPersistence/);
+});
+
 Deno.test("high-surface concrete imports map to complete semantic ports", () => {
   const replacements = (importer: string, target: string) =>
     EXPECTED_APPLICATION_ADAPTER_EDGES.find((edge) =>

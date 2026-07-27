@@ -1,3 +1,9 @@
+import type {
+  SecretCipher,
+  SecretCiphertext,
+  SecretValueAad as ApplicationSecretValueAad,
+} from "../../../application/ports/repair/repositories.ts";
+
 export const SECRET_VALUE_SCHEMA = "secret.value.v1" as const;
 export const SECRET_ALGORITHM = "AES-256-GCM" as const;
 
@@ -45,7 +51,7 @@ export class SecretDecryptError extends Error {
   }
 }
 
-/** Application-layer AES-GCM envelope encryption for one mutable secret row. */
+/** Outbound AES-GCM envelope adapter for one mutable secret row. */
 export class EnvelopeCrypto {
   readonly #material: string | null;
   #bytes?: Uint8Array;
@@ -221,6 +227,33 @@ function validateAadIdentity(input: SecretValueAad): void {
   if (input.key_id !== undefined && input.key_id.length === 0) {
     throw new TypeError("key_id must not be empty");
   }
+}
+
+export function makeEnvelopeSecretCipher(
+  envelope = new EnvelopeCrypto(),
+): SecretCipher {
+  const aad = (value: ApplicationSecretValueAad, keyId?: string) => ({
+    secret_id: value.rowId,
+    value_version: value.version,
+    ...(keyId === undefined ? {} : { key_id: keyId }),
+  });
+  return Object.freeze({
+    hasKey: () => envelope.hasKey(),
+    validateKey: () => envelope.validateKey(),
+    keyId: () => envelope.keyId(),
+    async encrypt(
+      plaintext: string,
+      value: ApplicationSecretValueAad,
+    ): Promise<SecretCiphertext> {
+      const encrypted = await envelope.encrypt(plaintext, aad(value));
+      return {
+        ...encrypted,
+        valueVersion: value.version,
+      };
+    },
+    decrypt: (encrypted: SecretCiphertext, value: ApplicationSecretValueAad) =>
+      envelope.decrypt(encrypted, aad(value, encrypted.keyId)),
+  });
 }
 
 function hex(bytes: Uint8Array): string {
