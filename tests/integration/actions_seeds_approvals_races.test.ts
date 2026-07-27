@@ -1,5 +1,6 @@
 // deno-lint-ignore-file no-import-prefix no-unversioned-import
 import { assertEquals, assertRejects } from "jsr:@std/assert";
+import { FixedClock } from "../../src/application/ports/clock.ts";
 import { query } from "../../src/adapters/outbound/postgres/client.ts";
 import { PostgresStageRepository } from "../../src/adapters/outbound/postgres/stage_repository.ts";
 import type { AuthContext } from "../../src/domain/auth/model.ts";
@@ -139,12 +140,31 @@ Deno.test({
         )).ok,
         false,
       );
-      const expired = await stage(auth, 1, {
-        expires_at: new Date(Date.now() + 2_000).toISOString(),
+      const invalidExpiry = await runStageApproval(harness, projectId, 1, {
+        expires_at: new Date(Date.now() - 1_000).toISOString(),
       });
-      await new Promise((resolve) => setTimeout(resolve, 2_100));
+      assertEquals(invalidExpiry.code, 1);
+      assertEquals(JSON.parse(invalidExpiry.stderr).error, {
+        code: "validation_failed",
+        message: "approval requirements failed validation",
+        details: {
+          issues: [{
+            path: "/approval_requirements/0/expires_at",
+            code: "invalid_approval_requirement",
+            message: "expires_at is outside the allowed future window",
+          }],
+        },
+      });
+      const expiresAt = new Date(Date.now() + 5 * 60_000);
+      const expired = await stage(auth, 1, {
+        expires_at: expiresAt.toISOString(),
+      });
+      const expiredRepository = new PostgresStageRepository(
+        harness.server.sql,
+        new FixedClock(new Date(expiresAt.getTime() + 1)),
+      );
       assertEquals(
-        (await repository.decideApproval(
+        (await expiredRepository.decideApproval(
           expired.stageId,
           expired.requirementId,
           { decision: "approve", reason: null },
@@ -177,6 +197,23 @@ Deno.test({
       const ordinaryGrant = await grantReviewer(
         harness.server.sql,
         ordinary.principalId,
+      );
+      const reviewExpiryAt = new Date(Date.now() + 5 * 60_000);
+      const expiredReviewStage = await stage(auth, 1, {
+        role: ordinaryGrant.role,
+        allow_initiator: false,
+        expires_at: reviewExpiryAt.toISOString(),
+      });
+      const expiredReviewRepository = new PostgresStageRepository(
+        harness.server.sql,
+        new FixedClock(new Date(reviewExpiryAt.getTime() + 1)),
+      );
+      assertEquals(
+        (await expiredReviewRepository.approvals(
+          expiredReviewStage.stageId,
+          ordinary,
+        )).ok,
+        false,
       );
       const reviewerStage = await stage(auth, 1, {
         role: ordinaryGrant.role,
@@ -259,20 +296,25 @@ Deno.test({
         [policyGrant.policyAssignmentId],
       );
 
+      const lockedExpiryAt = new Date(Date.now() + 5 * 60_000);
       const expiringStage = await stage(auth, 1, {
-        expires_at: new Date(Date.now() + 2_000).toISOString(),
+        expires_at: lockedExpiryAt.toISOString(),
       });
+      const expiryRepository = new PostgresStageRepository(
+        harness.server.sql,
+        new FixedClock(new Date(lockedExpiryAt.getTime() + 1)),
+      );
       const expiryResult = await queueOneWithMutation(
         harness.server.sql,
         expiringStage.stageId,
         () =>
-          repository.decideApproval(
+          expiryRepository.decideApproval(
             expiringStage.stageId,
             expiringStage.requirementId,
             { decision: "approve", reason: null },
             auth,
           ),
-        () => new Promise((resolve) => setTimeout(resolve, 2_100)),
+        () => Promise.resolve(),
       );
       assertEquals(expiryResult.ok, false);
       await assertUnchangedLifecycle(harness.server.sql, expiringStage.stageId);
@@ -818,14 +860,13 @@ async function writeRacePack(root: string): Promise<void> {
   );
 }
 
-async function stageApproval(
+function runStageApproval(
   harness: Awaited<ReturnType<typeof startAuthenticatedHarness>>,
   projectId: string,
-  _actor: AuthContext,
   minimum: number,
   overrides: Record<string, unknown> = {},
 ) {
-  const result = await harness.runJson(["--json", "changeset", "stage"], {
+  return harness.runJson(["--json", "changeset", "stage"], {
     project_id: projectId,
     operations: [{
       op: "create",
@@ -842,6 +883,16 @@ async function stageApproval(
       },
     }],
   });
+}
+
+async function stageApproval(
+  harness: Awaited<ReturnType<typeof startAuthenticatedHarness>>,
+  projectId: string,
+  _actor: AuthContext,
+  minimum: number,
+  overrides: Record<string, unknown> = {},
+) {
+  const result = await runStageApproval(harness, projectId, minimum, overrides);
   assertEquals(result.code, 0, result.stderr);
   const dto = JSON.parse(result.stdout).data;
   assertEquals(dto.operations.length, 1);

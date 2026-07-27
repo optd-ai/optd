@@ -1,3 +1,4 @@
+import { type Clock, SystemClock } from "../../../application/ports/clock.ts";
 import { ObjectReadAuthorityInvalidError } from "../../../application/ports/object_reader.ts";
 import { validateFieldValue as validateCanonicalFieldValue } from "../../../schemas/changesets/field_values.ts";
 import type {
@@ -7,7 +8,10 @@ import type {
 } from "../../../application/ports/stage_repository.ts";
 import type { AuthContext } from "../../../domain/auth/model.ts";
 import type { CanonicalOperation } from "../../../domain/changesets/operations.ts";
-import { canonicalizeApprovalRequirements } from "../../../domain/approvals/requirements.ts";
+import {
+  ApprovalContractError,
+  canonicalizeApprovalRequirements,
+} from "../../../domain/approvals/requirements.ts";
 import {
   stageDigest,
   type StageHookDeclaration,
@@ -59,7 +63,10 @@ type Prepared = {
 };
 
 export class PostgresStageRepository implements StageRepository {
-  constructor(private readonly sql: Sql) {}
+  constructor(
+    private readonly sql: Sql,
+    private readonly clock: Clock = new SystemClock(),
+  ) {}
 
   async hasHooks(operations: CanonicalOperation[]): Promise<boolean> {
     const identities = [...new Set(operations.map(componentIdentity))].sort();
@@ -354,6 +361,7 @@ export class PostgresStageRepository implements StageRepository {
         const approvalRequirements = canonicalizeApprovalRequirements(
           hook?.approval_requirements ?? [],
           new Set(input.operations.map((operation) => operation.project_id)),
+          this.clock.now(),
         );
         const evidence = {
           operation_graph_digest: operationGraphDigest,
@@ -589,7 +597,7 @@ export class PostgresStageRepository implements StageRepository {
       return await this.sql.begin(async (tx) => {
         if (
           !await canAccess(tx, id, auth, "changeset.inspect", false) &&
-          !await canReviewAny(tx, id, auth)
+          !await canReviewAny(tx, id, auth, this.clock.now())
         ) return err(notFound());
         const value = await load(tx, id);
         return value ? ok(value) : err(notFound());
@@ -663,7 +671,7 @@ export class PostgresStageRepository implements StageRepository {
         }
         if (
           requirement.expires_at &&
-          new Date(String(requirement.expires_at)) <= new Date()
+          new Date(String(requirement.expires_at)) <= this.clock.now()
         ) {
           throw domain(
             "approval_expired",
@@ -2483,6 +2491,7 @@ async function canReviewAny(
   sql: Queryable,
   stageId: string,
   auth: AuthContext,
+  now: Date,
 ): Promise<boolean> {
   const rows =
     (await query<{ requirement_json: unknown; created_principal_id: string }>(
@@ -2505,7 +2514,7 @@ async function canReviewAny(
     ) continue;
     if (
       requirement.expires_at &&
-      new Date(String(requirement.expires_at)) <= new Date()
+      new Date(String(requirement.expires_at)) <= now
     ) continue;
     const value = record(requirement.boundary);
     const boundary = value.type === "project"
@@ -2933,6 +2942,20 @@ function mapError(error: unknown): Result<never> {
   });
 }
 function mapStageError(error: unknown): Result<never> {
+  if (error instanceof ApprovalContractError) {
+    return err({
+      code: "validation_failed",
+      message: "approval requirements failed validation",
+      severity: "validation",
+      details: {
+        issues: [{
+          path: error.path,
+          code: "invalid_approval_requirement",
+          message: error.message,
+        }],
+      },
+    });
+  }
   if (error instanceof ObjectReadAuthorityInvalidError) {
     return err({
       code: "authorization_insufficient",
