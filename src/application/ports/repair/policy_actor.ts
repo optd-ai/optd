@@ -108,22 +108,36 @@ function assertActiveAuthorizationLineage(
     }
   }
 
-  if (lineage.replacesAuthorizationId !== undefined) {
-    const replacedId = required(
-      lineage.replacesAuthorizationId,
-      "replacesAuthorizationId",
-    );
-    const replaced = facts.get(replacedId);
-    if (
-      ancestry.includes(replacedId) || !replaced ||
-      replaced.status !== "replaced" ||
-      replaced.replacedByAuthorizationId !== current ||
-      replaced.rootAuthorizationId !== root
-    ) {
+  const replacedByCurrent = [...facts.values()].filter((fact) =>
+    fact.status === "replaced" && fact.replacedByAuthorizationId === current
+  );
+  if (lineage.replacesAuthorizationId === undefined) {
+    if (replacedByCurrent.length !== 0 || facts.size !== ancestry.length) {
       throw new InvalidPolicySubjectError(
-        "agent replacement authorization is invalid",
+        "agent replacement authorization is contradictory",
       );
     }
+    return;
+  }
+
+  const replacedId = required(
+    lineage.replacesAuthorizationId,
+    "replacesAuthorizationId",
+  );
+  const replaced = facts.get(replacedId);
+  const currentFact = facts.get(current);
+  if (
+    ancestry.includes(replacedId) || !replaced || !currentFact ||
+    replacedByCurrent.length !== 1 || replacedByCurrent[0].id !== replacedId ||
+    replaced.status !== "replaced" ||
+    replaced.replacedByAuthorizationId !== current ||
+    replaced.rootAuthorizationId !== root ||
+    replaced.parentAuthorizationId !== currentFact.parentAuthorizationId ||
+    facts.size !== ancestry.length + 1
+  ) {
+    throw new InvalidPolicySubjectError(
+      "agent replacement authorization is invalid",
+    );
   }
 }
 

@@ -40,22 +40,45 @@ export interface AuthorizationReaderPort<TAuthorizationRequest> {
   authorize(request: TAuthorizationRequest): Promise<boolean>;
 }
 
+export type ReadSessionAuthority<
+  TReadRequest,
+  TObject,
+  THistoryRequest,
+  THistory,
+  TAuthorizationRequest,
+> = Readonly<{
+  reader: ObjectReaderPort<
+    TReadRequest,
+    TObject,
+    THistoryRequest,
+    THistory
+  >;
+  /** Reusable for every policy evaluation in this one immutable session. */
+  authorization: AuthorizationReaderPort<TAuthorizationRequest>;
+  /** Frozen into history/query cursors and compared at the next request. */
+  authorizationRootId: string;
+}>;
+
 export interface ReadSessionPort<
   TReadRequest,
   TObject,
   THistoryRequest,
   THistory,
   TAuthorizationRequest,
+  TAuthContext,
+  TAddress,
 > {
   execute<T>(
+    auth: TAuthContext,
+    address: TAddress,
     work: (
-      reader: ObjectReaderPort<
+      authority: ReadSessionAuthority<
         TReadRequest,
         TObject,
         THistoryRequest,
-        THistory
+        THistory,
+        TAuthorizationRequest
       >,
-      authorization: AuthorizationReaderPort<TAuthorizationRequest>,
     ) => Promise<T>,
   ): Promise<T>;
 }
@@ -316,6 +339,27 @@ export type SecretCiphertext = Readonly<{
 /** Complete persistence lifecycle; plaintext remains outside this port. */
 export interface SecretRepository<TMetadata, TLockedSecret, TAudit> {
   list(): Promise<readonly TMetadata[]>;
+  /** Preserves the legacy name-keyed set operation and its audit atomically. */
+  upsertByName(
+    secret: Readonly<{
+      name: string;
+      description: string | null;
+      encrypted: SecretCiphertext;
+      authContextId: string;
+      audit: TAudit;
+    }>,
+    transaction: RepositoryTransaction,
+  ): Promise<TMetadata>;
+  /** Preserves hard delete-by-name and its deleted/not-found audit atomically. */
+  hardDeleteByName(
+    request: Readonly<{
+      name: string;
+      authContextId: string;
+      audit: TAudit;
+    }>,
+    transaction: RepositoryTransaction,
+  ): Promise<boolean>;
+  resolveActiveByName(name: string): Promise<TLockedSecret | null>;
   create(
     secret: Readonly<{
       id: string;
@@ -468,6 +512,31 @@ export interface ActionCuratedReadRepository<TReadRequest, TReadResult> {
 /** Resolves ordered action-stage attachments and their pinned programs. */
 export interface ActionStageHookCatalog<TRequest> {
   stageHooks(request: TRequest): Promise<readonly PinnedHookProgram[]>;
+}
+
+export type ActionStageAuthorityCutoff<TTargetedResult> = Readonly<{
+  authorizationRootId: string;
+  targetedResult: TTargetedResult;
+  authorityFactsDigest: string;
+}>;
+
+/**
+ * Locks and evaluates action authority in one transaction, then persists the
+ * immutable stage only after hooks have completed outside that transaction.
+ */
+export interface ActionStageAuthorityPort<
+  TAuthorityRequest,
+  TTargetedResult,
+  TStageRequest,
+  TStageResult,
+> {
+  lockAndEvaluate(
+    request: TAuthorityRequest,
+  ): Promise<ActionStageAuthorityCutoff<TTargetedResult>>;
+  persistAfterHooks(
+    request: TStageRequest,
+    cutoff: ActionStageAuthorityCutoff<TTargetedResult>,
+  ): Promise<TStageResult>;
 }
 
 /** Resolves the exact hook revision and source pinned by the action definition. */

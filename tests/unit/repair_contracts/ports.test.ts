@@ -34,16 +34,19 @@ Deno.test("transaction and read-session ports expose opaque capabilities", async
     { id: string },
     { objectId: string },
     readonly string[],
+    { objectId: string },
+    { id: string },
     { objectId: string }
   > = {
-    execute: (work) =>
-      work(
-        {
+    execute: (_auth, _address, work) =>
+      work({
+        reader: {
           read: () => Promise.resolve({ id: "object-1" }),
           history: () => Promise.resolve([]),
         },
-        { authorize: () => Promise.resolve(true) },
-      ),
+        authorization: { authorize: () => Promise.resolve(true) },
+        authorizationRootId: "authorization-root",
+      }),
   };
 
   assertEquals(
@@ -51,11 +54,20 @@ Deno.test("transaction and read-session ports expose opaque capabilities", async
     "transaction-1",
   );
   assertEquals(
-    await reads.execute(async (reader, authorization) => ({
-      allowed: await authorization.authorize({ objectId: "object-1" }),
-      object: await reader.read({ objectId: "object-1" }),
-    })),
-    { allowed: true, object: { id: "object-1" } },
+    await reads.execute(
+      { id: "auth-context" },
+      { objectId: "object-1" },
+      async ({ reader, authorization, authorizationRootId }) => ({
+        allowed: await authorization.authorize({ objectId: "object-1" }),
+        object: await reader.read({ objectId: "object-1" }),
+        authorizationRootId,
+      }),
+    ),
+    {
+      allowed: true,
+      object: { id: "object-1" },
+      authorizationRootId: "authorization-root",
+    },
   );
 });
 

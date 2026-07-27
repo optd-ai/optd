@@ -96,6 +96,7 @@ export const EXPECTED_APPLICATION_ADAPTER_EDGES:
         "src/application/ports/repair/repositories.ts#ActionCatalog",
         "src/application/ports/repair/repositories.ts#ActionCuratedReadRepository",
         "src/application/ports/repair/repositories.ts#ActionStageHookCatalog",
+        "src/application/ports/repair/repositories.ts#ActionStageAuthorityPort",
       ],
     ),
     edge(
@@ -290,8 +291,10 @@ export const EXPECTED_IMPORTER_CAPABILITIES: Readonly<
     "compose_read_boundary",
   ],
   "src/application/ports/object_reader.ts": [
+    "immutable_auth_and_address_input",
     "read_object_and_history",
-    "authorize_in_same_read_session",
+    "authorization_root_anchor",
+    "repeated_policy_evaluation_in_same_read_session",
   ],
   "src/application/services/actions/stage_actions.ts": [
     "load_action_definition_and_availability",
@@ -299,7 +302,8 @@ export const EXPECTED_IMPORTER_CAPABILITIES: Readonly<
     "immutable_object_version_evidence",
     "ordered_pinned_stage_hooks",
     "target_policy_evaluation",
-    "authority_lock_transaction",
+    "authority_lock_transaction_with_root_target_and_facts_digest",
+    "post_hook_stage_persistence_against_frozen_cutoff",
   ],
   "src/application/services/changeset_services.ts": [
     "definition_catalog",
@@ -318,7 +322,9 @@ export const EXPECTED_IMPORTER_CAPABILITIES: Readonly<
     "active_and_pinned_pack_revision",
   ],
   "src/application/services/manage_secret.ts": [
-    "secret_lifecycle_transaction",
+    "name_keyed_atomic_upsert_with_audit",
+    "name_keyed_hard_delete_with_audit",
+    "name_keyed_active_resolution",
     "row_version_aead",
   ],
   "src/application/services/migration_services.ts": [
@@ -351,7 +357,8 @@ export const EXPECTED_IMPORTER_CAPABILITIES: Readonly<
     "definition_role_policy_relationship_facts",
     "read_authority_lock",
     "target_policy_and_cutoff",
-    "same_read_session",
+    "immutable_auth_address_and_root_anchor",
+    "repeated_policy_evaluation_in_same_read_session",
   ],
   "src/application/services/run_action.ts": [
     "action_definition",
@@ -376,7 +383,7 @@ export const EXPECTED_IMPORTER_CAPABILITIES: Readonly<
   "src/application/services/seeds/stage_seeds.ts": [
     "active_definition_and_unique_key_catalog",
     "active_only_match",
-    "freeze_and_revalidate_presence",
+    "freeze_and_revalidate_exact_object_version_id_presence",
     "ordinary_unique_conflict",
     "seed_authorization",
   ],
@@ -466,6 +473,7 @@ Deno.test("high-surface concrete imports map to complete semantic ports", () => 
       "src/application/ports/repair/repositories.ts#ActionCatalog",
       "src/application/ports/repair/repositories.ts#ActionCuratedReadRepository",
       "src/application/ports/repair/repositories.ts#ActionStageHookCatalog",
+      "src/application/ports/repair/repositories.ts#ActionStageAuthorityPort",
     ],
   );
   assertEquals(

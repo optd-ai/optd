@@ -17,13 +17,65 @@ export type SeedDefinition = Readonly<{
 export type SeedMatch = Readonly<{
   objectId: string;
   objectVersion: number;
+  /** Exact immutable object_versions.id dependency. */
+  objectVersionId: string;
   archivedAt: string | null;
   valuesDigest: string;
 }>;
 
+export type SeedActivePresence =
+  | Readonly<{ kind: "absent" }>
+  | Readonly<{
+    kind: "present";
+    objectId: string;
+    currentObjectVersionId: string;
+  }>;
+
+const UUID_V7 =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/** Freezes the exact active-only presence dependency staged for commit. */
+export function freezeSeedActivePresence(
+  match: SeedMatch | null,
+): SeedActivePresence {
+  if (!match || match.archivedAt !== null) {
+    return Object.freeze({ kind: "absent" as const });
+  }
+  if (!UUID_V7.test(match.objectVersionId)) {
+    throw new Error("seed current_object_version_id must be UUIDv7");
+  }
+  return Object.freeze({
+    kind: "present" as const,
+    objectId: match.objectId,
+    currentObjectVersionId: match.objectVersionId,
+  });
+}
+
+export function seedActivePresenceMatches(
+  frozen: SeedActivePresence,
+  current: SeedMatch | null,
+): boolean {
+  const observed = freezeSeedActivePresence(current);
+  return frozen.kind === "absent"
+    ? observed.kind === "absent"
+    : observed.kind === "present" &&
+      observed.objectId === frozen.objectId &&
+      observed.currentObjectVersionId === frozen.currentObjectVersionId;
+}
+
 export type SeedReconciliationDecision =
-  | Readonly<{ kind: "unchanged"; objectId: string; objectVersion: number }>
-  | Readonly<{ kind: "update"; objectId: string; objectVersion: number }>
+  | Readonly<{
+    kind: "unchanged";
+    objectId: string;
+    objectVersion: number;
+    objectVersionId: string;
+  }>
+  | Readonly<{
+    kind: "update";
+    objectId: string;
+    objectVersion: number;
+    objectVersionId: string;
+  }>
   | Readonly<{ kind: "create"; objectId: string }>;
 
 export interface IdAllocator {
@@ -51,16 +103,19 @@ export function decideSeedReconciliation(
     return Object.freeze({ kind: "create" as const, objectId });
   }
   const match = active[0];
+  freezeSeedActivePresence(match);
   return match.valuesDigest === desiredValuesDigest
     ? Object.freeze({
       kind: "unchanged" as const,
       objectId: match.objectId,
       objectVersion: match.objectVersion,
+      objectVersionId: match.objectVersionId,
     })
     : Object.freeze({
       kind: "update" as const,
       objectId: match.objectId,
       objectVersion: match.objectVersion,
+      objectVersionId: match.objectVersionId,
     });
 }
 
@@ -105,6 +160,11 @@ export function seedReplacementCommitResult(
 
 export interface SeedReconciliationRepository {
   findByActiveBusinessKey(seed: SeedDefinition): Promise<SeedMatch | null>;
+  freezeActivePresence(seed: SeedDefinition): Promise<SeedActivePresence>;
+  revalidateActivePresence(
+    seed: SeedDefinition,
+    frozen: SeedActivePresence,
+  ): Promise<boolean>;
   verifyActiveUniqueness(constraint: ActiveUniqueConstraint): Promise<boolean>;
   createActiveReplacement(
     seed: SeedDefinition,

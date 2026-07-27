@@ -3,11 +3,35 @@ import { assertEquals, assertThrows } from "jsr:@std/assert";
 import {
   ACTIVE_SEED_KEY_CONFLICT,
   decideSeedReconciliation,
+  freezeSeedActivePresence,
+  seedActivePresenceMatches,
+  type SeedReconciliationRepository,
   seedReplacementCommitResult,
 } from "../../../src/application/ports/repair/seeds.ts";
 
 const replacementId = "019b1234-5678-7abc-8def-0123456789ab";
+const versionId = "019b1234-5678-7abc-8def-0123456789ac";
+const nextVersionId = "019b1234-5678-7abc-8def-0123456789ad";
 const ids = { nextUuidV7: () => replacementId };
+
+const seedRepository: SeedReconciliationRepository = {
+  findByActiveBusinessKey: () => Promise.resolve(null),
+  freezeActivePresence: () => Promise.resolve({ kind: "absent" }),
+  revalidateActivePresence: () => Promise.resolve(true),
+  verifyActiveUniqueness: () => Promise.resolve(true),
+  createActiveReplacement: (_, objectId) =>
+    Promise.resolve({ kind: "created", objectId }),
+};
+
+Deno.test("seed repository freezes and revalidates exact active presence", () => {
+  assertEquals(Object.keys(seedRepository).toSorted(), [
+    "createActiveReplacement",
+    "findByActiveBusinessKey",
+    "freezeActivePresence",
+    "revalidateActivePresence",
+    "verifyActiveUniqueness",
+  ]);
+});
 
 Deno.test("archived seed matches are absent and receive a new UUIDv7", () => {
   assertEquals(
@@ -15,6 +39,7 @@ Deno.test("archived seed matches are absent and receive a new UUIDv7", () => {
       [{
         objectId: "archived-object",
         objectVersion: 9,
+        objectVersionId: versionId,
         archivedAt: "2026-07-01T00:00:00.000Z",
         valuesDigest: "old",
       }],
@@ -34,6 +59,7 @@ Deno.test("seed reconciliation repeats unchanged and updates active identity", (
       [{
         objectId: "active-object",
         objectVersion: 2,
+        objectVersionId: versionId,
         archivedAt: null,
         valuesDigest: "desired",
       }],
@@ -44,6 +70,7 @@ Deno.test("seed reconciliation repeats unchanged and updates active identity", (
       kind: "unchanged",
       objectId: "active-object",
       objectVersion: 2,
+      objectVersionId: versionId,
     },
   );
   assertEquals(
@@ -51,6 +78,7 @@ Deno.test("seed reconciliation repeats unchanged and updates active identity", (
       [{
         objectId: "active-object",
         objectVersion: 2,
+        objectVersionId: versionId,
         archivedAt: null,
         valuesDigest: "old",
       }],
@@ -61,8 +89,47 @@ Deno.test("seed reconciliation repeats unchanged and updates active identity", (
       kind: "update",
       objectId: "active-object",
       objectVersion: 2,
+      objectVersionId: versionId,
     },
   );
+});
+
+Deno.test("seed presence freezes immutable version identity and detects change", () => {
+  const active = {
+    objectId: "active-object",
+    objectVersion: 2,
+    objectVersionId: versionId,
+    archivedAt: null,
+    valuesDigest: "desired",
+  };
+  const frozen = freezeSeedActivePresence(active);
+  assertEquals(frozen, {
+    kind: "present",
+    objectId: "active-object",
+    currentObjectVersionId: versionId,
+  });
+  assertEquals(seedActivePresenceMatches(frozen, active), true);
+  assertEquals(
+    seedActivePresenceMatches(frozen, {
+      ...active,
+      objectVersion: 3,
+      objectVersionId: nextVersionId,
+    }),
+    false,
+  );
+  assertEquals(
+    seedActivePresenceMatches(frozen, { ...active, archivedAt: "now" }),
+    false,
+  );
+  assertEquals(freezeSeedActivePresence(null), { kind: "absent" });
+  assertEquals(
+    seedActivePresenceMatches({ kind: "absent" }, {
+      ...active,
+      archivedAt: "now",
+    }),
+    true,
+  );
+  assertEquals(seedActivePresenceMatches({ kind: "absent" }, active), false);
 });
 
 Deno.test("concurrent archived-seed replacement has one winner and one stable loser", () => {
@@ -100,10 +167,11 @@ Deno.test("concurrent archived-seed replacement has one winner and one stable lo
   );
 });
 
-Deno.test("multiple active matches and non-UUIDv7 allocation fail closed", () => {
+Deno.test("multiple active matches and invalid immutable IDs fail closed", () => {
   const active = {
     objectId: "active-object",
     objectVersion: 1,
+    objectVersionId: versionId,
     archivedAt: null,
     valuesDigest: "desired",
   };
@@ -119,5 +187,10 @@ Deno.test("multiple active matches and non-UUIDv7 allocation fail closed", () =>
       }),
     Error,
     "must be UUIDv7",
+  );
+  assertThrows(
+    () => freezeSeedActivePresence({ ...active, objectVersionId: "version-2" }),
+    Error,
+    "current_object_version_id must be UUIDv7",
   );
 });

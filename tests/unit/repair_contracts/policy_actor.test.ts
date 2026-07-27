@@ -259,6 +259,103 @@ Deno.test("policy actor rejects mismatched ancestry and replacement claims", () 
   );
 });
 
+Deno.test("replacement lineage rejects one-sided pointers and unrelated facts", () => {
+  const root = active("authorization-root", null, "authorization-root");
+  const current = active(
+    "authorization-new",
+    "authorization-root",
+    "authorization-root",
+  );
+  const replaced = {
+    id: "authorization-old",
+    parentAuthorizationId: "authorization-root",
+    rootAuthorizationId: "authorization-root",
+    status: "replaced" as const,
+    replacedByAuthorizationId: "authorization-new",
+  };
+
+  assertThrows(
+    () =>
+      actorFor("replacement-agent", {
+        currentAuthorizationId: "authorization-new",
+        rootAuthorizationId: "authorization-root",
+        authorizationAncestryIds: ["authorization-root", "authorization-new"],
+        facts: [root, current, replaced],
+      }),
+    InvalidPolicySubjectError,
+    "replacement authorization is contradictory",
+  );
+
+  for (
+    const facts of [
+      [root, current, { ...replaced, parentAuthorizationId: "unrelated" }],
+      [
+        root,
+        current,
+        { ...replaced, replacedByAuthorizationId: "authorization-other" },
+      ],
+      [
+        root,
+        current,
+        replaced,
+        {
+          ...replaced,
+          id: "authorization-other-old",
+        },
+      ],
+      [
+        root,
+        current,
+        replaced,
+        {
+          id: "unrelated",
+          parentAuthorizationId: null,
+          rootAuthorizationId: "unrelated",
+          status: "revoked" as const,
+        },
+      ],
+    ]
+  ) {
+    assertThrows(
+      () =>
+        actorFor("replacement-agent", {
+          currentAuthorizationId: "authorization-new",
+          rootAuthorizationId: "authorization-root",
+          authorizationAncestryIds: [
+            "authorization-root",
+            "authorization-new",
+          ],
+          replacesAuthorizationId: "authorization-old",
+          facts,
+        }),
+      InvalidPolicySubjectError,
+      "replacement authorization is invalid",
+    );
+  }
+});
+
+Deno.test("non-replacement lineage rejects unrelated extra facts", () => {
+  assertThrows(
+    () =>
+      actorFor("agent", {
+        currentAuthorizationId: "authorization-root",
+        rootAuthorizationId: "authorization-root",
+        authorizationAncestryIds: ["authorization-root"],
+        facts: [
+          active("authorization-root", null, "authorization-root"),
+          {
+            id: "unrelated",
+            parentAuthorizationId: null,
+            rootAuthorizationId: "unrelated",
+            status: "revoked",
+          },
+        ],
+      }),
+    InvalidPolicySubjectError,
+    "replacement authorization is contradictory",
+  );
+});
+
 Deno.test("only a system subject has no human anchor", () => {
   assertEquals(
     derivePolicyActor({
