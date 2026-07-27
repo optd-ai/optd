@@ -164,6 +164,61 @@ Deno.test("policy actor rejects missing anchors and revoked ancestors", () => {
   );
 });
 
+Deno.test("policy actor rejects duplicate and contradictory lineage facts", () => {
+  const root = active("authorization-root", null, "authorization-root");
+  const child = active(
+    "authorization-child",
+    "authorization-root",
+    "authorization-root",
+  );
+  for (
+    const facts of [
+      [
+        { ...root, status: "revoked" as const },
+        root,
+        child,
+      ],
+      [
+        root,
+        { ...root, parentAuthorizationId: "other" },
+        child,
+      ],
+      [
+        root,
+        child,
+        { ...child, rootAuthorizationId: "other-root" },
+      ],
+    ]
+  ) {
+    assertThrows(
+      () =>
+        actorFor("delegated-agent", {
+          currentAuthorizationId: "authorization-child",
+          rootAuthorizationId: "authorization-root",
+          authorizationAncestryIds: [
+            "authorization-root",
+            "authorization-child",
+          ],
+          facts,
+        }),
+      InvalidPolicySubjectError,
+      "duplicate facts",
+    );
+  }
+
+  assertThrows(
+    () =>
+      actorFor("agent", {
+        currentAuthorizationId: "authorization-root",
+        rootAuthorizationId: "authorization-root",
+        authorizationAncestryIds: ["authorization-root"],
+        facts: [{ ...root, replacedByAuthorizationId: "authorization-next" }],
+      }),
+    InvalidPolicySubjectError,
+    "contradictory facts",
+  );
+});
+
 Deno.test("policy actor rejects mismatched ancestry and replacement claims", () => {
   assertThrows(
     () =>

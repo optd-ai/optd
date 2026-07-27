@@ -11,6 +11,28 @@ export type ReviewedTarget = Readonly<{
   }>;
 }>;
 
+const UUID_V7 =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export class InvalidReviewedTargetError extends Error {
+  constructor(field: "object.id" | "object.versionId") {
+    super(`${field} must be a UUIDv7`);
+    this.name = "InvalidReviewedTargetError";
+  }
+}
+
+/** Creates validated server-issued immutable object evidence. */
+export function reviewedObjectEvidence(
+  id: string,
+  versionId: string,
+): NonNullable<ReviewedTarget["object"]> {
+  if (!UUID_V7.test(id)) throw new InvalidReviewedTargetError("object.id");
+  if (!UUID_V7.test(versionId)) {
+    throw new InvalidReviewedTargetError("object.versionId");
+  }
+  return Object.freeze({ id, versionId });
+}
+
 export type MatchedRuleEvidence = Readonly<{
   policy: string;
   policyVersionId: string;

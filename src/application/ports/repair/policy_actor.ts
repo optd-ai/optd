@@ -72,7 +72,28 @@ function assertActiveAuthorizationLineage(
     );
   }
 
-  const facts = new Map(lineage.facts.map((fact) => [fact.id, fact]));
+  const facts = new Map<string, AuthorizationLineageFact>();
+  for (const fact of lineage.facts) {
+    const id = required(fact.id, "authorization fact id");
+    required(
+      fact.rootAuthorizationId,
+      "authorization fact rootAuthorizationId",
+    );
+    if (facts.has(id)) {
+      throw new InvalidPolicySubjectError(
+        "agent authorization lineage contains duplicate facts",
+      );
+    }
+    if (
+      (fact.status === "replaced") !==
+        (fact.replacedByAuthorizationId !== undefined)
+    ) {
+      throw new InvalidPolicySubjectError(
+        "agent authorization lineage contains contradictory facts",
+      );
+    }
+    facts.set(id, fact);
+  }
   for (let index = 0; index < ancestry.length; index++) {
     const id = ancestry[index];
     const fact = facts.get(id);

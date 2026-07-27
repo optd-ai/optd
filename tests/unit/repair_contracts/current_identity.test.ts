@@ -69,6 +69,21 @@ Deno.test("current identity rejects aliases, unknown fields, and contradictory s
     principal: { id: "principal-agent", type: "human_user" },
   }));
   assertFalse(currentIdentityContract.check({
+    ...agent,
+    principal: { ...agent.principal, id: "different-agent-principal" },
+  }));
+  assertFalse(currentIdentityContract.check({
+    ...human,
+    principal: { ...human.principal, id: "different-human-principal" },
+  }));
+  assertFalse(currentIdentityContract.check({
+    ...agent,
+    human_user: {
+      ...agent.human_user,
+      principal_id: agent.principal.id,
+    },
+  }));
+  assertFalse(currentIdentityContract.check({
     ...human,
     agent: agent.agent,
   }));

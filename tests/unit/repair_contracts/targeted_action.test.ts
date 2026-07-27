@@ -1,8 +1,15 @@
 // deno-lint-ignore-file no-import-prefix no-unversioned-import
-import { assertEquals, assertFalse, assertNotEquals } from "jsr:@std/assert";
+import {
+  assertEquals,
+  assertFalse,
+  assertNotEquals,
+  assertThrows,
+} from "jsr:@std/assert";
 import {
   canonicalTargetDigestInput,
   type EffectManifest,
+  InvalidReviewedTargetError,
+  reviewedObjectEvidence,
 } from "../../../src/application/ports/repair/targeted_action.ts";
 
 Deno.test("target authority evidence canonicalizes exact reviewed targets", () => {
@@ -110,6 +117,37 @@ Deno.test("canonical target evidence preserves reviewed target and lineage order
 
   assertNotEquals(JSON.stringify(first), JSON.stringify(reversedTargets));
   assertNotEquals(JSON.stringify(first), JSON.stringify(reversedLineage));
+});
+
+Deno.test("reviewed object evidence requires server UUIDv7 identities", () => {
+  assertEquals(
+    reviewedObjectEvidence(
+      "019b1234-5678-7abc-8def-012345678901",
+      "019b1234-5678-7abc-8def-012345678902",
+    ),
+    {
+      id: "019b1234-5678-7abc-8def-012345678901",
+      versionId: "019b1234-5678-7abc-8def-012345678902",
+    },
+  );
+  assertThrows(
+    () =>
+      reviewedObjectEvidence(
+        "object-1",
+        "019b1234-5678-7abc-8def-012345678902",
+      ),
+    InvalidReviewedTargetError,
+    "object.id",
+  );
+  assertThrows(
+    () =>
+      reviewedObjectEvidence(
+        "019b1234-5678-7abc-8def-012345678901",
+        "version-1",
+      ),
+    InvalidReviewedTargetError,
+    "object.versionId",
+  );
 });
 
 Deno.test("effect manifests cannot become authorization digest targets", () => {

@@ -115,17 +115,33 @@ export interface ChangesetFactRepository<
   history(request: THistoryRequest): Promise<THistoryResult>;
 }
 
-export interface MetadataCatalog<TRequest, TMetadata> {
-  inspect(request: TRequest): Promise<TMetadata>;
+export interface MetadataCatalog<
+  TRequest,
+  THome,
+  TPack,
+  TDefinition,
+  TListItem,
+> {
+  home(request: TRequest): Promise<THome>;
+  listPacks(request: TRequest): Promise<readonly TListItem[]>;
+  pack(request: TRequest): Promise<TPack | null>;
+  definition(request: TRequest): Promise<TDefinition | null>;
+  hookScriptDigest(request: TRequest): Promise<string | null>;
 }
 
 export interface PackParser<TSource, TPack> {
   parse(source: TSource): Promise<TPack>;
 }
 
-export interface PackCatalog<TPackRevision> {
-  activePack(): Promise<TPackRevision | null>;
+export interface PackCatalog<TPackRequest, TPackRevision, TCandidate> {
+  list(request: TPackRequest): Promise<readonly TPackRevision[]>;
+  active(request: TPackRequest): Promise<TPackRevision | null>;
   revision(id: string): Promise<TPackRevision | null>;
+  revisionCount(transaction?: RepositoryTransaction): Promise<number>;
+  storeOrReuseCandidate(
+    candidate: TCandidate,
+    transaction: RepositoryTransaction,
+  ): Promise<TPackRevision>;
 }
 
 export type MigrationApplyAttempt = Readonly<{
@@ -159,46 +175,134 @@ export interface MigrationRepository<
 }
 
 export type CuratedHookInput = Readonly<{ [key: string]: JsonValue }>;
-export type HookResult<TOperation, TAttachment> = Readonly<{
-  operations: readonly TOperation[];
-  attachments: readonly TAttachment[];
+export type HookPhase =
+  | "before_validate"
+  | "validate"
+  | "before_apply"
+  | "after_apply"
+  | "action.stage"
+  | "action.preview"
+  | "action.commit"
+  | "delivery";
+
+export type HookSecretDeclaration = Readonly<{
+  slot: string;
+  env: string;
 }>;
 
-export interface HookExecutor<TOperation, TAttachment> {
-  execute(
-    hookIdentity: string,
-    input: CuratedHookInput,
-    capabilities: Readonly<{
-      net: readonly string[];
-      env: Readonly<Record<string, string>>;
-      secrets: Readonly<Record<string, string>>;
-    }>,
-  ): Promise<HookResult<TOperation, TAttachment>>;
+/** Immutable hook program, attachment and capability declaration. */
+export type PinnedHookProgram = Readonly<{
+  hookIdentity: string;
+  revisionId: string;
+  source: string;
+  sourceDigest: string;
+  scriptDigest: string;
+  securityDigest: string;
+  attachmentId: string | null;
+  attachmentDigest: string | null;
+  configurationDigest: string;
+  declarationDigest: string | null;
+  declaration: JsonValue;
+  ordinal: number;
+  phase: HookPhase;
+  timeoutMs: number;
+  outputSchema: string;
+  permissions: Readonly<{
+    net: readonly string[];
+    env: readonly string[];
+  }>;
+  secretDeclarations: readonly HookSecretDeclaration[];
+  enabled: boolean;
+}>;
+
+export type HookSecretGrantEvidence = Readonly<{
+  grantId: string;
+  secretId: string;
+  secretVersion: number;
+  hookRevisionId: string;
+  securityDigest: string;
+  slot: string;
+  env: string;
+}>;
+
+export type ResolvedHookSecrets = Readonly<{
+  values: Readonly<Record<string, string>>;
+  grants: readonly HookSecretGrantEvidence[];
+}>;
+
+export type HookOutput =
+  | Readonly<{ kind: "patch"; patch: JsonValue }>
+  | Readonly<{
+    kind: "validation";
+    valid: boolean;
+    code?: string;
+    message?: string;
+    details?: JsonValue;
+  }>
+  | Readonly<{
+    kind: "action";
+    operations: readonly JsonValue[];
+    attachments: readonly JsonValue[];
+  }>
+  | Readonly<{
+    kind: "delivery";
+    outcome: "delivered" | "retry" | "failed";
+    providerEvidence: JsonValue;
+  }>;
+
+export type HookExecutionResult = Readonly<{
+  status: "succeeded" | "failed" | "timed_out" | "invalid_output";
+  output: HookOutput | null;
+  logs: string;
+  logsTruncated: boolean;
+  secretsRedacted: boolean;
+  durationMs: number;
+  exitCode: number | null;
+  error:
+    | Readonly<{
+      code: string;
+      message: string;
+      details?: JsonValue;
+    }>
+    | null;
+}>;
+
+export type HookInvocation = Readonly<{
+  program: PinnedHookProgram;
+  input: CuratedHookInput;
+  capabilities: Readonly<{
+    net: readonly string[];
+    env: Readonly<Record<string, string>>;
+    secrets: ResolvedHookSecrets;
+  }>;
+}>;
+
+export interface HookExecutor {
+  execute(invocation: HookInvocation): Promise<HookExecutionResult>;
 }
 
 export interface HookSecretResolver {
   resolve(
-    revisionId: string,
-    hookIdentity: string,
-    slots: readonly string[],
-  ): Promise<Readonly<Record<string, string>>>;
+    request: Readonly<{
+      revisionId: string;
+      hookIdentity: string;
+      securityDigest: string;
+      declarations: readonly HookSecretDeclaration[];
+    }>,
+  ): Promise<ResolvedHookSecrets>;
 }
 
+export type SecretValueAad = Readonly<{
+  rowId: string;
+  version: number;
+}>;
+
 export interface SecretCipher {
-  encrypt(
-    input: Readonly<{
-      plaintext: Uint8Array;
-      rowId: string;
-      version: number;
-    }>,
-  ): Promise<Uint8Array>;
-  decrypt(
-    input: Readonly<{
-      ciphertext: Uint8Array;
-      rowId: string;
-      version: number;
-    }>,
-  ): Promise<Uint8Array>;
+  hasKey(): boolean;
+  validateKey(): void;
+  keyId(): Promise<string>;
+  encrypt(plaintext: string, aad: SecretValueAad): Promise<SecretCiphertext>;
+  decrypt(encrypted: SecretCiphertext, aad: SecretValueAad): Promise<string>;
 }
 
 export type SecretCiphertext = Readonly<{
@@ -347,13 +451,33 @@ export interface OutboxRepository<
   auditDrain(audit: OutboxDrainAudit): Promise<void>;
 }
 
-export interface ActionCatalog<TActionRequest, TActionDefinition> {
+export interface ActionCatalog<
+  TActionRequest,
+  TActionDefinition,
+  TAvailability = TActionDefinition,
+> {
   definition(request: TActionRequest): Promise<TActionDefinition | null>;
+  availability(request: TActionRequest): Promise<TAvailability | null>;
+}
+
+/** Curated action reads include immutable object-version evidence. */
+export interface ActionCuratedReadRepository<TReadRequest, TReadResult> {
+  read(request: TReadRequest): Promise<TReadResult | null>;
+}
+
+/** Resolves ordered action-stage attachments and their pinned programs. */
+export interface ActionStageHookCatalog<TRequest> {
+  stageHooks(request: TRequest): Promise<readonly PinnedHookProgram[]>;
 }
 
 /** Resolves the exact hook revision and source pinned by the action definition. */
 export interface PinnedActionHookCatalog<THookRequest, TPinnedHook> {
   pinned(request: THookRequest): Promise<TPinnedHook | null>;
+}
+
+/** Resolves and verifies the enabled delivery hook pinned by an outbox row. */
+export interface PinnedDeliveryHookCatalog<TRequest> {
+  deliveryHook(request: TRequest): Promise<PinnedHookProgram | null>;
 }
 
 export type ActionTarget<TObject> = Readonly<{
@@ -377,13 +501,22 @@ export interface ActionPolicyAuthorizer<TAuthorizationRequest, TDecision> {
 export type ActionHookExecutionEvidence<TOutput, TError> = Readonly<{
   hookIdentity: string;
   revisionId: string;
+  sourceDigest: string;
   scriptDigest: string;
+  securityDigest: string;
+  attachmentId: string | null;
+  attachmentDigest: string | null;
+  configurationDigest: string;
+  outputSchema: string;
   actorId: string;
   phase: "action.preview" | "action.commit";
-  status: "succeeded" | "failed";
+  status: "succeeded" | "failed" | "timed_out" | "invalid_output";
   durationMs: number;
   exitCode: number | null;
   logs: string;
+  logsTruncated: boolean;
+  secretsRedacted: boolean;
+  grants: readonly HookSecretGrantEvidence[];
   output: TOutput | null;
   error: TError | null;
 }>;

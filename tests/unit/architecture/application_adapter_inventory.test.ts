@@ -92,7 +92,11 @@ export const EXPECTED_APPLICATION_ADAPTER_EDGES:
     edge(
       "src/application/services/actions/stage_actions.ts",
       "src/adapters/outbound/postgres/client.ts",
-      "src/application/ports/repair/repositories.ts#ActionCatalog",
+      [
+        "src/application/ports/repair/repositories.ts#ActionCatalog",
+        "src/application/ports/repair/repositories.ts#ActionCuratedReadRepository",
+        "src/application/ports/repair/repositories.ts#ActionStageHookCatalog",
+      ],
     ),
     edge(
       "src/application/services/actions/stage_actions.ts",
@@ -197,7 +201,10 @@ export const EXPECTED_APPLICATION_ADAPTER_EDGES:
     edge(
       "src/application/services/process_outbox.ts",
       "src/adapters/outbound/postgres/client.ts",
-      "src/application/ports/repair/repositories.ts#TransactionPort",
+      [
+        "src/application/ports/repair/repositories.ts#TransactionPort",
+        "src/application/ports/repair/repositories.ts#PinnedDeliveryHookCatalog",
+      ],
     ),
     edge(
       "src/application/services/queries/expressions.ts",
@@ -271,6 +278,110 @@ export const EXPECTED_APPLICATION_ADAPTER_EDGES:
     ),
   ];
 
+export const EXPECTED_IMPORTER_CAPABILITIES: Readonly<
+  Record<string, readonly string[]>
+> = {
+  "src/application/app.ts": [
+    "compose_stage_commit_outbox",
+    "compose_pinned_hook_executor",
+    "compose_secret_cipher_and_grants",
+    "compose_transactions",
+    "compose_auth_projects_authorization",
+    "compose_read_boundary",
+  ],
+  "src/application/ports/object_reader.ts": [
+    "read_object_and_history",
+    "authorize_in_same_read_session",
+  ],
+  "src/application/services/actions/stage_actions.ts": [
+    "load_action_definition_and_availability",
+    "curated_resource_reads",
+    "immutable_object_version_evidence",
+    "ordered_pinned_stage_hooks",
+    "target_policy_evaluation",
+    "authority_lock_transaction",
+  ],
+  "src/application/services/changeset_services.ts": [
+    "definition_catalog",
+    "immutable_changeset_fact_persistence",
+    "query_policy_cutoff",
+    "pinned_hook_execution_and_evidence",
+  ],
+  "src/application/services/hooks/stage_hook_coordinator.ts": [
+    "pinned_program_execution",
+    "security_digest_secret_resolution",
+    "immutable_secret_grant_evidence",
+    "generic_hook_outputs_and_failure_evidence",
+  ],
+  "src/application/services/inspect_metadata.ts": [
+    "metadata_inspection",
+    "active_and_pinned_pack_revision",
+  ],
+  "src/application/services/manage_secret.ts": [
+    "secret_lifecycle_transaction",
+    "row_version_aead",
+  ],
+  "src/application/services/migration_services.ts": [
+    "plan_inspect_validate",
+    "generated_sql",
+    "atomic_apply",
+    "durable_failed_and_retry_attempts",
+    "authority_cutoff_transaction",
+  ],
+  "src/application/services/pack_services.ts": [
+    "strict_pack_parse",
+    "pack_revision_catalog",
+    "migration_plan_and_apply",
+    "atomic_pack_transaction",
+  ],
+  "src/application/services/process_outbox.ts": [
+    "claim_complete_list_inspect_attempts",
+    "operator_retry_cancel_drain_audit",
+    "pinned_enabled_delivery_hook",
+    "attachment_and_config_digest_verification",
+    "security_digest_secret_grants",
+    "generic_delivery_hook_evidence",
+    "operator_authority_transaction",
+  ],
+  "src/application/services/queries/expressions.ts": [
+    "active_definition_schema",
+  ],
+  "src/application/services/query_objects.ts": [
+    "query_view_history",
+    "definition_role_policy_relationship_facts",
+    "read_authority_lock",
+    "target_policy_and_cutoff",
+    "same_read_session",
+  ],
+  "src/application/services/run_action.ts": [
+    "action_definition",
+    "pinned_action_hook",
+    "current_target_version",
+    "target_policy_assertion",
+    "generic_action_hook_execution",
+    "immutable_success_and_failure_evidence",
+  ],
+  "src/application/services/secrets/manage_grants.ts": [
+    "grant_list_authorize",
+    "lock_hook_slot_and_secret",
+    "create_replace_revoke",
+    "immutable_grant_audit",
+  ],
+  "src/application/services/secrets/manage_secrets.ts": [
+    "secret_list_create_rotate_disable",
+    "lock_and_active_resolution",
+    "secret_audit_and_readiness",
+    "row_version_aead",
+  ],
+  "src/application/services/seeds/stage_seeds.ts": [
+    "active_definition_and_unique_key_catalog",
+    "active_only_match",
+    "freeze_and_revalidate_presence",
+    "ordinary_unique_conflict",
+    "seed_authorization",
+  ],
+};
+
 function canonical(path: string): string {
   return path.replaceAll("\\", "/");
 }
@@ -323,6 +434,23 @@ Deno.test("application adapter inventory exactly matches the frozen migration se
   }
 });
 
+Deno.test("every importing service freezes its complete semantic capability set", () => {
+  const importers = [
+    ...new Set(
+      EXPECTED_APPLICATION_ADAPTER_EDGES.map(({ importer }) => importer),
+    ),
+  ].toSorted();
+  assertEquals(
+    Object.keys(EXPECTED_IMPORTER_CAPABILITIES).toSorted(),
+    importers,
+  );
+  for (const importer of importers) {
+    const capabilities = EXPECTED_IMPORTER_CAPABILITIES[importer];
+    assertEquals(capabilities.length > 0, true, importer);
+    assertEquals(new Set(capabilities).size, capabilities.length, importer);
+  }
+});
+
 Deno.test("high-surface concrete imports map to complete semantic ports", () => {
   const replacements = (importer: string, target: string) =>
     EXPECTED_APPLICATION_ADAPTER_EDGES.find((edge) =>
@@ -331,10 +459,31 @@ Deno.test("high-surface concrete imports map to complete semantic ports", () => 
 
   assertEquals(
     replacements(
+      "src/application/services/actions/stage_actions.ts",
+      "src/adapters/outbound/postgres/client.ts",
+    ),
+    [
+      "src/application/ports/repair/repositories.ts#ActionCatalog",
+      "src/application/ports/repair/repositories.ts#ActionCuratedReadRepository",
+      "src/application/ports/repair/repositories.ts#ActionStageHookCatalog",
+    ],
+  );
+  assertEquals(
+    replacements(
       "src/application/services/process_outbox.ts",
       "src/adapters/outbound/postgres/outbox_repository.ts",
     ),
     ["src/application/ports/repair/repositories.ts#OutboxRepository"],
+  );
+  assertEquals(
+    replacements(
+      "src/application/services/process_outbox.ts",
+      "src/adapters/outbound/postgres/client.ts",
+    ),
+    [
+      "src/application/ports/repair/repositories.ts#TransactionPort",
+      "src/application/ports/repair/repositories.ts#PinnedDeliveryHookCatalog",
+    ],
   );
   assertEquals(
     replacements(

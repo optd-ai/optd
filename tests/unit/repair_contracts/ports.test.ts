@@ -2,12 +2,19 @@
 import { assertEquals } from "jsr:@std/assert";
 import type {
   ActionCatalog,
+  ActionCuratedReadRepository,
   ActionPolicyAuthorizer,
+  ActionStageHookCatalog,
   ActionTargetReader,
   HookExecutionEvidenceRepository,
+  HookExecutor,
+  HookSecretResolver,
+  MetadataCatalog,
   MigrationRepository,
   OutboxRepository,
+  PackCatalog,
   PinnedActionHookCatalog,
+  PinnedDeliveryHookCatalog,
   ReadSessionPort,
   RepositoryTransaction,
   TransactionPort,
@@ -102,9 +109,59 @@ Deno.test("outbox port freezes the complete delivery and operator lifecycle", as
   );
 });
 
+Deno.test("catalog ports cover action staging, metadata, packs, and delivery pins", () => {
+  const curated: ActionCuratedReadRepository<string, { versionId: string }> = {
+    read: () => Promise.resolve({ versionId: "version-1" }),
+  };
+  const stageHooks: ActionStageHookCatalog<string> = {
+    stageHooks: () => Promise.resolve([]),
+  };
+  const deliveryHooks: PinnedDeliveryHookCatalog<string> = {
+    deliveryHook: () => Promise.resolve(null),
+  };
+  const metadata: MetadataCatalog<
+    string,
+    { ready: true },
+    { id: string },
+    { identity: string },
+    { id: string }
+  > = {
+    home: () => Promise.resolve({ ready: true }),
+    listPacks: () => Promise.resolve([]),
+    pack: () => Promise.resolve(null),
+    definition: () => Promise.resolve(null),
+    hookScriptDigest: () => Promise.resolve(null),
+  };
+  const packs: PackCatalog<string, { id: string }, { id: string }> = {
+    list: () => Promise.resolve([]),
+    active: () => Promise.resolve(null),
+    revision: () => Promise.resolve(null),
+    revisionCount: () => Promise.resolve(0),
+    storeOrReuseCandidate: (candidate) => Promise.resolve(candidate),
+  };
+  assertEquals(Object.keys(curated), ["read"]);
+  assertEquals(Object.keys(stageHooks), ["stageHooks"]);
+  assertEquals(Object.keys(deliveryHooks), ["deliveryHook"]);
+  assertEquals(Object.keys(metadata).toSorted(), [
+    "definition",
+    "home",
+    "hookScriptDigest",
+    "listPacks",
+    "pack",
+  ]);
+  assertEquals(Object.keys(packs).toSorted(), [
+    "active",
+    "list",
+    "revision",
+    "revisionCount",
+    "storeOrReuseCandidate",
+  ]);
+});
+
 Deno.test("run-action ports separate pinned reads, policy and evidence", async () => {
   const actions: ActionCatalog<string, { hook: string }> = {
     definition: () => Promise.resolve({ hook: "hook-1" }),
+    availability: () => Promise.resolve({ hook: "hook-1" }),
   };
   const hooks: PinnedActionHookCatalog<string, { revision: string }> = {
     pinned: () => Promise.resolve({ revision: "revision-1" }),
@@ -130,7 +187,7 @@ Deno.test("run-action ports separate pinned reads, policy and evidence", async (
     record: () => Promise.resolve("execution-1"),
   };
 
-  assertEquals(Object.keys(actions), ["definition"]);
+  assertEquals(Object.keys(actions).toSorted(), ["availability", "definition"]);
   assertEquals(Object.keys(hooks), ["pinned"]);
   assertEquals(Object.keys(targets), ["current"]);
   assertEquals(Object.keys(policy), ["assertAllowed"]);
@@ -138,18 +195,93 @@ Deno.test("run-action ports separate pinned reads, policy and evidence", async (
     await evidence.record({
       hookIdentity: "publisher/crm:convert_lead",
       revisionId: "revision-1",
-      scriptDigest: "digest-1",
+      sourceDigest: "source-digest-1",
+      scriptDigest: "script-digest-1",
+      securityDigest: "security-digest-1",
+      attachmentId: "attachment-1",
+      attachmentDigest: "attachment-digest-1",
+      configurationDigest: "configuration-digest-1",
+      outputSchema: "changeset.operations.v1",
       actorId: "principal-1",
       phase: "action.commit",
       status: "failed",
       durationMs: 12,
       exitCode: 1,
       logs: "redacted",
+      logsTruncated: false,
+      secretsRedacted: true,
+      grants: [],
       output: null,
       error: { code: "hook_failed" },
     }),
     "execution-1",
   );
+});
+
+Deno.test("hook ports preserve pinned execution and grant evidence", async () => {
+  const secrets: HookSecretResolver = {
+    resolve: (request) =>
+      Promise.resolve({
+        values: Object.fromEntries(
+          request.declarations.map(({ env }) => [env, "redacted"]),
+        ),
+        grants: request.declarations.map(({ slot, env }) => ({
+          grantId: `grant-${slot}`,
+          secretId: `secret-${slot}`,
+          secretVersion: 2,
+          hookRevisionId: request.revisionId,
+          securityDigest: request.securityDigest,
+          slot,
+          env,
+        })),
+      }),
+  };
+  const executor: HookExecutor = {
+    execute: (_invocation) =>
+      Promise.resolve({
+        status: "succeeded",
+        output: { kind: "validation", valid: true },
+        logs: "secret=[REDACTED]",
+        logsTruncated: false,
+        secretsRedacted: true,
+        durationMs: 4,
+        exitCode: 0,
+        error: null,
+      }),
+  };
+  const resolved = await secrets.resolve({
+    revisionId: "revision-1",
+    hookIdentity: "publisher/pack:validate",
+    securityDigest: "security-digest",
+    declarations: [{ slot: "api", env: "API_TOKEN" }],
+  });
+  const result = await executor.execute({
+    program: {
+      hookIdentity: "publisher/pack:validate",
+      revisionId: "revision-1",
+      source: "export default () => ({valid:true})",
+      sourceDigest: "source-digest",
+      scriptDigest: "script-digest",
+      securityDigest: "security-digest",
+      attachmentId: "attachment-1",
+      attachmentDigest: "attachment-digest",
+      configurationDigest: "config-digest",
+      declarationDigest: "declaration-digest",
+      declaration: { condition: "true", input: {} },
+      ordinal: 0,
+      phase: "validate",
+      timeoutMs: 1000,
+      outputSchema: "validation.v1",
+      permissions: { net: [], env: ["API_TOKEN"] },
+      secretDeclarations: [{ slot: "api", env: "API_TOKEN" }],
+      enabled: true,
+    },
+    input: { object: { id: "object-1" } },
+    capabilities: { net: [], env: {}, secrets: resolved },
+  });
+  assertEquals(resolved.grants[0].grantId, "grant-api");
+  assertEquals(result.secretsRedacted, true);
+  assertEquals(result.output, { kind: "validation", valid: true });
 });
 
 Deno.test("migration port exposes SQL and durable apply attempts", async () => {
@@ -193,9 +325,24 @@ Deno.test("complete public-flow harness is backend neutral", async () => {
         wait: () => Promise.resolve(ok),
         terminate: () => Promise.resolve(),
       }),
+    createProcessTreeLauncher: (kind) =>
+      Promise.resolve({
+        kind,
+        runCli: () => Promise.resolve(ok),
+        spawnCli: () =>
+          Promise.resolve({
+            pid: 43,
+            wait: () => Promise.resolve(ok),
+            terminate: () => Promise.resolve(),
+          }),
+        close: () => Promise.resolve(),
+      }),
+    runConcurrent: (requests) => Promise.resolve(requests.map(() => ok)),
     packPath: (pack) => Promise.resolve(`/packs/${pack}`),
     uploadPack: () => Promise.resolve("revision-1"),
+    crashServer: () => Promise.resolve(),
     restartServer: () => Promise.resolve(),
+    waitUntilReady: () => Promise.resolve(),
     waitForProviderBarrier: () => Promise.resolve(),
     releaseProviderBarrier: () => Promise.resolve(),
     diagnostics: () =>
@@ -207,6 +354,22 @@ Deno.test("complete public-flow harness is backend neutral", async () => {
     cleanup: () => Promise.resolve(),
   };
 
-  assertEquals((await harness.runCli(["auth", "whoami"])).stdout, "ok");
+  assertEquals(
+    (await harness.runCli(["auth", "login"], { stdin: "password\n" }))
+      .stdout,
+    "ok",
+  );
+  const launcher = await harness.createProcessTreeLauncher("agent");
+  assertEquals(
+    (await launcher.runCli(["auth", "whoami"])).stdout,
+    "ok",
+  );
+  assertEquals(
+    (await harness.runConcurrent([
+      { args: ["query"] },
+      { args: ["query"], launcher },
+    ])).length,
+    2,
+  );
   assertEquals(await harness.packPath("projects"), "/packs/projects");
 });

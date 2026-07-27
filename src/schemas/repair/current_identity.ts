@@ -1,6 +1,11 @@
 // deno-lint-ignore-file no-import-prefix
 import { type Static, Type } from "npm:@sinclair/typebox@0.34.38";
-import { compileContract } from "../api/contracts.ts";
+import {
+  compileContract,
+  ContractValidationError,
+  type ContractValidator,
+  type ValidationIssue,
+} from "../api/contracts.ts";
 
 const NonEmptyString = Type.String({ minLength: 1 });
 
@@ -80,6 +85,52 @@ export const CurrentIdentitySchema = Type.Union([
 ]);
 
 export type CurrentIdentityDto = Static<typeof CurrentIdentitySchema>;
-export const currentIdentityContract = compileContract<CurrentIdentityDto>(
+
+const currentIdentityShape = compileContract<CurrentIdentityDto>(
   CurrentIdentitySchema,
 );
+
+function identityConsistencyIssues(
+  value: CurrentIdentityDto,
+): ValidationIssue[] {
+  if (!("agent" in value)) {
+    return value.principal.id === value.human_user.principal_id ? [] : [{
+      path: "/human_user/principal_id",
+      code: "identity_mismatch",
+      message: "human principal IDs must match",
+    }];
+  }
+
+  const issues: ValidationIssue[] = [];
+  if (value.principal.id !== value.agent.principal_id) {
+    issues.push({
+      path: "/agent/principal_id",
+      code: "identity_mismatch",
+      message: "agent principal IDs must match",
+    });
+  }
+  if (value.principal.id === value.human_user.principal_id) {
+    issues.push({
+      path: "/human_user/principal_id",
+      code: "identity_mismatch",
+      message: "agent principal and anchoring human principal must be distinct",
+    });
+  }
+  return issues;
+}
+
+export const currentIdentityContract: ContractValidator<CurrentIdentityDto> = {
+  check(value: unknown): value is CurrentIdentityDto {
+    return currentIdentityShape.check(value) &&
+      identityConsistencyIssues(value).length === 0;
+  },
+  issues(value: unknown): ValidationIssue[] {
+    const shapeIssues = currentIdentityShape.issues(value);
+    if (shapeIssues.length > 0) return shapeIssues;
+    return identityConsistencyIssues(value as CurrentIdentityDto);
+  },
+  assert(value: unknown): asserts value is CurrentIdentityDto {
+    const issues = currentIdentityContract.issues(value);
+    if (issues.length > 0) throw new ContractValidationError(issues);
+  },
+};
