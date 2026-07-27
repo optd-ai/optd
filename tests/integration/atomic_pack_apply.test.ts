@@ -11,7 +11,11 @@ import { applyPlatformMigrations } from "../../src/adapters/outbound/postgres/mi
 import { getDefinition } from "../../src/adapters/outbound/postgres/pack_repository.ts";
 import { PostgresTransactionManager } from "../../src/adapters/outbound/postgres/transaction_manager.ts";
 import { PostgresAuthorizationRepository } from "../../src/adapters/outbound/postgres/authorization_repository.ts";
-import { makePostgresMigrationRepository } from "../../src/adapters/outbound/postgres/repositories/migration_application_repository.ts";
+import { makePostgresMigrationPersistence } from "../../src/adapters/outbound/postgres/repositories/migration_application_repository.ts";
+import {
+  makeMigrationServices,
+  type MigrationRetryConfig,
+} from "../../src/application/services/migration_services.ts";
 import type { AuthorizationRepository } from "../../src/application/ports/authorization.ts";
 import {
   findPostgresBins,
@@ -28,6 +32,26 @@ import {
   type UploadedPackFile,
 } from "../../src/adapters/outbound/yaml/pack_loader.ts";
 import { uuidV7 } from "../../src/domain/ids/uuid_v7.ts";
+
+type MigrationTestDeps =
+  & Parameters<typeof makePostgresMigrationPersistence>[0]
+  & {
+    authorization: AuthorizationRepository;
+    retry?: MigrationRetryConfig;
+    random?: () => number;
+    sleep?: (milliseconds: number) => Promise<void>;
+  };
+
+function makeMigrationTestServices(deps: MigrationTestDeps) {
+  return makeMigrationServices({
+    persistence: makePostgresMigrationPersistence(deps),
+    authorization: deps.authorization,
+    retry: deps.retry ??
+      { maximumRetries: 2, jitterMinimumMs: 0, jitterMaximumMs: 0 },
+    random: deps.random ?? (() => 0),
+    sleep: deps.sleep ?? (() => Promise.resolve()),
+  });
+}
 
 Deno.test("atomic pack apply activates globally, is idempotent, and rolls back injected failures", async () => {
   if (Deno.env.get("OPERANT_DATABASE_URL") || !await findPostgresBins()) {
@@ -222,7 +246,7 @@ Deno.test("atomic pack apply activates globally, is idempotent, and rolls back i
     });
     await lockHeld.promise;
     const applyStarted = Promise.withResolvers<number>();
-    const revokedServices = makePostgresMigrationRepository({
+    const revokedServices = makeMigrationTestServices({
       sql,
       tx: new PostgresTransactionManager(sql),
       authorization: allowAuthorization(),
@@ -233,7 +257,7 @@ Deno.test("atomic pack apply activates globally, is idempotent, and rolls back i
           action: "migration.apply",
           resource: "system:migration",
         }),
-      beforeApplyAttempt: async (tx) => {
+      beforeApplyAttempt: async (tx: Queryable) => {
         applyStarted.resolve(
           Number(
             (await query<{ pid: number }>(tx, "select pg_backend_pid() pid"))
@@ -583,7 +607,7 @@ Deno.test("atomic pack apply activates globally, is idempotent, and rolls back i
     assertEquals(acknowledgementAttempts, 1);
 
     let deniedAttempts = 0;
-    const deniedServices = makePostgresMigrationRepository({
+    const deniedServices = makeMigrationTestServices({
       sql,
       tx: new PostgresTransactionManager(sql),
       authorization: denyAuthorization(),
@@ -926,7 +950,7 @@ function migrationServices(
   beforeApplyAttempt: (sql: Queryable, attempt: number) => Promise<void>,
   applyTestFault?: "after_sql" | "after_application",
 ) {
-  return makePostgresMigrationRepository({
+  return makeMigrationTestServices({
     sql,
     tx: new PostgresTransactionManager(sql),
     authorization: allowAuthorization(),

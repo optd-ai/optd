@@ -6,7 +6,7 @@ import { PostgresCommitRepository } from "../adapters/outbound/postgres/commit_r
 import { makeCommitChangesetService } from "../application/services/commit/commit_changeset.ts";
 import { makePostgresPackRepository } from "../adapters/outbound/postgres/repositories/pack_application_repository.ts";
 import { makePostgresQueryObjectRepository } from "../adapters/outbound/postgres/repositories/query_object_repository.ts";
-import { makePostgresMigrationRepository } from "../adapters/outbound/postgres/repositories/migration_application_repository.ts";
+import { makePostgresMigrationPersistence } from "../adapters/outbound/postgres/repositories/migration_application_repository.ts";
 import {
   loadOutboxConfig,
   makePostgresOutboxProcessingRepository,
@@ -33,9 +33,8 @@ import { makeProjectService } from "../application/services/projects/manage_proj
 import { PostgresAuthorizationRepository } from "../adapters/outbound/postgres/authorization_repository.ts";
 import { makeAuthorizationService } from "../application/services/authorization/manage_assignments.ts";
 import { PostgresObjectReadBoundary } from "../adapters/outbound/postgres/object_read_boundary.ts";
-import { makePostgresObjectReadRepository } from "../adapters/outbound/postgres/repositories/object_read_repository.ts";
 import { HistoryCursorSigner } from "../domain/history/cursor.ts";
-import { makePostgresExpressionRepository } from "../adapters/outbound/postgres/repositories/expression_repository.ts";
+import { makePostgresExpressionDefinitionPort } from "../adapters/outbound/postgres/repositories/expression_repository.ts";
 import { err } from "../domain/errors/result.ts";
 import type { StageHookCoordinator } from "../domain/changesets/stage.ts";
 import { makePostgresActionStageRepository } from "../adapters/outbound/postgres/repositories/action_stage_repository.ts";
@@ -131,10 +130,10 @@ export function makeApplication(
       version: OPERANT_VERSION,
       authorization: authorizationRepository,
     })),
-    objectReads: makeObjectReadService(makePostgresObjectReadRepository({
+    objectReads: makeObjectReadService({
       boundary: new PostgresObjectReadBoundary(sql),
       cursors: () => historyCursors ??= HistoryCursorSigner.fromEnvironment(),
-    })),
+    }),
     packs: makePackServices(
       makePostgresPackRepository({
         sql: sql as Queryable,
@@ -144,29 +143,31 @@ export function makeApplication(
     ),
 
     changesets,
-    migrations: makeMigrationServices(makePostgresMigrationRepository({
-      sql: sql as Queryable,
+    migrations: makeMigrationServices({
+      persistence: makePostgresMigrationPersistence({
+        sql: sql as Queryable,
+        tx,
+        authorizeApplyInTransaction: (lockedSql, auth) =>
+          new PostgresAuthorizationRepository(lockedSql as Sql).authorize({
+            auth,
+            boundary: { type: "system" },
+            action: "migration.apply",
+            resource: "system:migration",
+          }),
+      }),
       authorization: authorizationRepository,
-      tx,
       retry: migrationRetryConfig(Deno.env),
       random: Math.random,
       sleep: (milliseconds) =>
         new Promise<void>((resolve) => setTimeout(resolve, milliseconds)),
-      authorizeApplyInTransaction: (lockedSql, auth) =>
-        new PostgresAuthorizationRepository(lockedSql as Sql).authorize({
-          auth,
-          boundary: { type: "system" },
-          action: "migration.apply",
-          resource: "system:migration",
-        }),
-    })),
+    }),
 
     hookSecretGrants,
     queries: makeQueryObjectsService({
       query: ({ input, auth }) => queryRepository.query(input, auth),
     }),
     expressions: makeExpressionService(
-      makePostgresExpressionRepository(sql as Queryable),
+      makePostgresExpressionDefinitionPort(sql as Queryable),
     ),
     outbox: makeProcessOutboxService(makePostgresOutboxProcessingRepository({
       sql: sql as Queryable,
