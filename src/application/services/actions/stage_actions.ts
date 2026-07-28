@@ -9,8 +9,11 @@ import type {
 import type { StageDto, StageSource } from "../../ports/stage_repository.ts";
 import type {
   ActionCatalog,
-  ActionCuratedReadRepository,
-  ActionStageHookCatalog,
+  ActionPolicyAuthorizer,
+  ActionStageAuthorityPort,
+  ActionTargetReader,
+  HookExecutionEvidenceRepository,
+  PinnedActionHookCatalog,
   PinnedHookProgram,
 } from "../../ports/repair/repositories.ts";
 import { StageHookError } from "../../ports/hook_executor.ts";
@@ -168,8 +171,27 @@ type ActionHookRequest = Readonly<{
 export interface ActionStageCapabilities
   extends
     ActionCatalog<ActionIdentity, ActionDefinition>,
-    ActionCuratedReadRepository<ActionReadRequest, ActionReadResult>,
-    ActionStageHookCatalog<ActionIdentity & { revisionId: string }> {
+    ActionTargetReader<ActionReadRequest, ActionReadResult>,
+    PinnedActionHookCatalog<ActionIdentity & { revisionId: string }>,
+    ActionStageAuthorityPort<
+      Readonly<{
+        projectId: string;
+        action: string;
+        targets: TargetedActionPolicyTarget[];
+        auth: AuthContext;
+      }>,
+      ActionAuthorityResult
+    >,
+    ActionPolicyAuthorizer<ActionAuthorityResult, ActionAuthorityResult>,
+    HookExecutionEvidenceRepository<
+      Readonly<{
+        input: unknown;
+        source: StageSource;
+        auth: AuthContext;
+        cutoff: ActionAuthorityResult;
+      }>,
+      Result<StageDto | null>
+    > {
   availabilityState(
     request: Readonly<{
       projectId: string;
@@ -188,20 +210,7 @@ export interface ActionStageCapabilities
       auth: AuthContext;
     }>,
   ): Promise<boolean>;
-  evaluateAuthority(
-    request: Readonly<{
-      projectId: string;
-      action: string;
-      targets: TargetedActionPolicyTarget[];
-      auth: AuthContext;
-    }>,
-  ): Promise<ActionAuthorityResult>;
   executeHooks(request: ActionHookRequest): Promise<ActionHookResult>;
-  persist(
-    input: unknown,
-    source: StageSource,
-    auth: AuthContext,
-  ): Promise<Result<StageDto | null>>;
 }
 
 /** Owns action selection, reads, availability, authority, hooks and persistence ordering. */
@@ -270,7 +279,7 @@ export function makeStageActionService(port: ActionStageCapabilities) {
           const fields = Array.isArray(declaration.fields)
             ? declaration.fields.map(String)
             : [];
-          const result = await port.read({
+          const result = await port.current({
             projectId: raw.project_id,
             target,
             objectId,
@@ -308,7 +317,7 @@ export function makeStageActionService(port: ActionStageCapabilities) {
           });
         }
 
-        const programs = await port.stageHooks({
+        const programs = await port.pinned({
           ...identity,
           revisionId: definition.revisionId,
         });
@@ -328,12 +337,14 @@ export function makeStageActionService(port: ActionStageCapabilities) {
           return invalid("action effects have no exact authorization target");
         }
 
-        const authority = await port.evaluateAuthority({
-          projectId: raw.project_id,
-          action: semantic,
-          targets,
-          auth,
-        });
+        const authority = await port.assertAllowed(
+          await port.lockAndEvaluate({
+            projectId: raw.project_id,
+            action: semantic,
+            targets,
+            auth,
+          }),
+        );
         if (!authority.allowed) {
           return policyDenied(semantic, raw.project_id, auth);
         }
@@ -440,11 +451,12 @@ export function makeStageActionService(port: ActionStageCapabilities) {
             grant_snapshot: execution.grant_snapshot,
           })),
         };
-        const staged = await port.persist(
-          { operations: hookResult.added_operations },
+        const staged = await port.record({
+          input: { operations: hookResult.added_operations },
           source,
           auth,
-        );
+          cutoff: authority,
+        });
         return staged.ok ? ok(staged.value!) : staged;
       } catch (error) {
         if (error instanceof StageHookError) {

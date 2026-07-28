@@ -27,7 +27,11 @@ import {
   makeEnvelopeSecretCipher,
 } from "../adapters/outbound/crypto/envelope.ts";
 import { PostgresHookSecretRepository } from "../adapters/outbound/postgres/hook_secret_repository.ts";
-import { TrustedStageHookCoordinator } from "../adapters/outbound/deno-hooks/trusted_stage_hook_adapter.ts";
+import {
+  DenoHookExecutor,
+  makeHookSecretResolver,
+} from "../adapters/outbound/deno-hooks/trusted_stage_hook_adapter.ts";
+import { TrustedStageHookCoordinator } from "../application/services/hooks/trusted_stage_hook_coordinator.ts";
 import { OPERANT_VERSION } from "../config/runtime.ts";
 import type { Queryable, Sql } from "../adapters/outbound/postgres/client.ts";
 import { PostgresTransactionManager } from "../adapters/outbound/postgres/transaction_manager.ts";
@@ -103,8 +107,8 @@ export function makeApplication(
   );
   const stageHookCoordinator = options.stageHookCoordinator ??
     new TrustedStageHookCoordinator(
-      hookSecretRepository,
-      options.hookRunnerOptions,
+      makeHookSecretResolver(hookSecretRepository),
+      new DenoHookExecutor(options.hookRunnerOptions),
     );
   const stageRepository = new PostgresStageRepository(sql);
   const stageChangesets = makeStageChangesetService(
@@ -208,11 +212,11 @@ export function makeApplication(
     secrets,
     actions: stageHookCoordinator instanceof TrustedStageHookCoordinator
       ? makeStageActionService(
-        makePostgresActionStageRepository(
-          sql,
-          stageHookCoordinator,
-          changesets,
-        ),
+        {
+          ...makePostgresActionStageRepository(sql, changesets),
+          executeHooks: (request) =>
+            stageHookCoordinator.runActionStage(request),
+        },
       )
       : {
         stage: () =>

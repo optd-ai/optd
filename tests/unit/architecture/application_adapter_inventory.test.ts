@@ -94,9 +94,11 @@ export const EXPECTED_APPLICATION_ADAPTER_EDGES:
       "src/adapters/outbound/postgres/client.ts",
       [
         "src/application/ports/repair/repositories.ts#ActionCatalog",
-        "src/application/ports/repair/repositories.ts#ActionCuratedReadRepository",
-        "src/application/ports/repair/repositories.ts#ActionStageHookCatalog",
+        "src/application/ports/repair/repositories.ts#ActionTargetReader",
+        "src/application/ports/repair/repositories.ts#PinnedActionHookCatalog",
         "src/application/ports/repair/repositories.ts#ActionStageAuthorityPort",
+        "src/application/ports/repair/repositories.ts#ActionPolicyAuthorizer",
+        "src/application/ports/repair/repositories.ts#HookExecutionEvidenceRepository",
       ],
     ),
     edge(
@@ -536,16 +538,56 @@ Deno.test("action staging orchestration stays inward over granular capabilities"
   );
 
   assertMatch(application, /ActionCatalog/);
-  assertMatch(application, /ActionCuratedReadRepository/);
-  assertMatch(application, /ActionStageHookCatalog/);
-  assertMatch(application, /evaluateAuthority/);
+  assertMatch(application, /ActionTargetReader/);
+  assertMatch(application, /PinnedActionHookCatalog/);
+  assertMatch(application, /ActionStageAuthorityPort/);
+  assertMatch(application, /ActionPolicyAuthorizer/);
+  assertMatch(application, /HookExecutionEvidenceRepository/);
+  assertMatch(application, /lockAndEvaluate/);
   assertMatch(application, /executeHooks/);
-  assertMatch(application, /port\.persist/);
+  assertMatch(application, /port\.record/);
   assertEquals(application.includes("stageValidated"), false);
   assertEquals(adapter.includes("stageValidated"), false);
   assertEquals(adapter.includes("validateActionInput"), false);
   assertEquals(adapter.includes("resolveActionPolicyTargets"), false);
   assertEquals(adapter.includes("StageSource ="), false);
+});
+
+Deno.test("all frozen hook and action ports have production consumers and implementations", async () => {
+  const application = await Promise.all([
+    "src/application/services/actions/stage_actions.ts",
+    "src/application/services/hooks/trusted_stage_hook_coordinator.ts",
+  ].map((path) => Deno.readTextFile(path))).then((values) => values.join("\n"));
+  const implementations = await Promise.all([
+    "src/adapters/outbound/deno-hooks/trusted_stage_hook_adapter.ts",
+    "src/adapters/outbound/postgres/repositories/action_stage_repository.ts",
+    "src/composition/application.ts",
+  ].map((path) => Deno.readTextFile(path))).then((values) => values.join("\n"));
+
+  for (
+    const port of [
+      "HookExecutor",
+      "HookSecretResolver",
+      "ActionStageAuthorityPort",
+      "PinnedActionHookCatalog",
+      "ActionTargetReader",
+      "ActionPolicyAuthorizer",
+      "HookExecutionEvidenceRepository",
+    ]
+  ) {
+    assertMatch(application, new RegExp(`\\b${port}\\b`));
+  }
+  assertMatch(implementations, /DenoHookExecutor/);
+  assertMatch(implementations, /makeHookSecretResolver/);
+  assertMatch(implementations, /lockAndEvaluate/);
+  assertMatch(implementations, /pinned/);
+  assertMatch(implementations, /current/);
+  assertMatch(implementations, /assertAllowed/);
+  assertMatch(implementations, /record/);
+  assertEquals(
+    implementations.includes("TrustedStageHookCoordinator implements"),
+    false,
+  );
 });
 
 Deno.test("outbox orchestration stays inward over lifecycle capabilities", async () => {
@@ -685,9 +727,11 @@ Deno.test("high-surface concrete imports map to complete semantic ports", () => 
     ),
     [
       "src/application/ports/repair/repositories.ts#ActionCatalog",
-      "src/application/ports/repair/repositories.ts#ActionCuratedReadRepository",
-      "src/application/ports/repair/repositories.ts#ActionStageHookCatalog",
+      "src/application/ports/repair/repositories.ts#ActionTargetReader",
+      "src/application/ports/repair/repositories.ts#PinnedActionHookCatalog",
       "src/application/ports/repair/repositories.ts#ActionStageAuthorityPort",
+      "src/application/ports/repair/repositories.ts#ActionPolicyAuthorizer",
+      "src/application/ports/repair/repositories.ts#HookExecutionEvidenceRepository",
     ],
   );
   assertEquals(

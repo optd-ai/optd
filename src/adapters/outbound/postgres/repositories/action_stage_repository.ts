@@ -13,7 +13,6 @@ import type {
   ActionReadResult,
   ActionStageCapabilities,
 } from "../../../../application/services/actions/stage_actions.ts";
-import { TrustedStageHookCoordinator } from "../../deno-hooks/trusted_stage_hook_adapter.ts";
 import type { PinnedHookProgram } from "../../../../application/ports/repair/repositories.ts";
 import {
   evaluateTargetedActionPolicy,
@@ -28,7 +27,6 @@ import { lockReadAuthority } from "../object_read_boundary.ts";
 
 export function makePostgresActionStageRepository(
   sql: Sql,
-  coordinator: TrustedStageHookCoordinator,
   common: {
     stageSource(
       input: unknown,
@@ -36,7 +34,7 @@ export function makePostgresActionStageRepository(
       auth: AuthContext,
     ): Promise<Result<StageDto | null>>;
   },
-): ActionStageCapabilities {
+): Omit<ActionStageCapabilities, "executeHooks"> {
   return {
     async definition(
       identity: ActionIdentity,
@@ -64,7 +62,9 @@ export function makePostgresActionStageRepository(
       return await this.definition(identity);
     },
 
-    async read(request: ActionReadRequest): Promise<ActionReadResult | null> {
+    async current(
+      request: ActionReadRequest,
+    ): Promise<ActionReadResult | null> {
       const table = await runtimeTable(sql, request.target);
       if (!table) return null;
       const columns = [
@@ -146,7 +146,7 @@ export function makePostgresActionStageRepository(
       )).rows[0]?.allowed === true;
     },
 
-    async stageHooks(
+    async pinned(
       request,
     ): Promise<readonly PinnedHookProgram<"action.stage">[]> {
       const rows = (await query<Record<string, unknown>>(
@@ -163,7 +163,7 @@ export function makePostgresActionStageRepository(
       return rows.map((row) => pinnedProgram(row, request));
     },
 
-    async evaluateAuthority(request) {
+    async lockAndEvaluate(request) {
       return await sql.begin(async (tx) => {
         const anchor = await lockReadAuthority(
           tx,
@@ -189,12 +189,30 @@ export function makePostgresActionStageRepository(
       });
     },
 
-    async executeHooks(request) {
-      return await coordinator.runActionStage(request);
+    assertAllowed(decision) {
+      return Promise.resolve(decision);
     },
 
-    async persist(input, source, auth) {
-      return await common.stageSource(input, source, auth);
+    async record(request) {
+      const persisted = request.source.authority?.targeted?.cutoff;
+      if (
+        !persisted ||
+        persisted.authorization_root_id !==
+          request.cutoff.authorizationRootId ||
+        persisted.facts_digest !== request.cutoff.factsDigest ||
+        persisted.principal_id !== request.auth.principalId ||
+        persisted.auth_context_id !== request.auth.id
+      ) {
+        throw Object.assign(
+          new Error("action authority cutoff changed before persistence"),
+          { code: "40001" },
+        );
+      }
+      return await common.stageSource(
+        request.input,
+        request.source,
+        request.auth,
+      );
     },
   };
 }

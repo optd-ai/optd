@@ -6,6 +6,10 @@ import { PostgresHookSecretRepository } from "../../src/adapters/outbound/postgr
 import {
   type ActionStageHookDeclaration,
   TrustedStageHookCoordinator,
+} from "../../src/application/services/hooks/trusted_stage_hook_coordinator.ts";
+import {
+  DenoHookExecutor,
+  makeHookSecretResolver,
 } from "../../src/adapters/outbound/deno-hooks/trusted_stage_hook_adapter.ts";
 import { uuidV7 } from "../../src/domain/ids/uuid_v7.ts";
 import { startAuthenticatedHarness } from "../support/authenticated_harness.ts";
@@ -55,13 +59,15 @@ Deno.test({
         "select id,principal_id from auth_contexts order by created_at desc limit 1",
       )).rows[0];
       const coordinator = new TrustedStageHookCoordinator(
-        new PostgresHookSecretRepository(
-          harness.server.sql,
-          new EnvelopeCrypto(null),
+        makeHookSecretResolver(
+          new PostgresHookSecretRepository(
+            harness.server.sql,
+            new EnvelopeCrypto(null),
+          ),
         ),
-        {
+        new DenoHookExecutor({
           cacheDir: await Deno.makeTempDir({ prefix: "operant-action-child-" }),
-        },
+        }),
       );
       const authority = {
         principal_id: auth.principal_id,

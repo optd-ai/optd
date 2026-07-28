@@ -128,14 +128,9 @@ const exactStageCutoff = await createActionStageAuthorityCutoff(
 
 const actionStageAuthority: ActionStageAuthorityPort<
   { projectId: string },
-  { operations: readonly string[] },
-  { stageId: string }
+  ActionStageAuthorityCutoff
 > = {
   lockAndEvaluate: () => Promise.resolve(exactStageCutoff),
-  persistAfterHooks: (_request, cutoff) => {
-    assertEquals(cutoff, exactStageCutoff);
-    return Promise.resolve({ stageId: "stage" });
-  },
 };
 
 const queryPolicy: QueryPolicyRepository<unknown, unknown> = {
@@ -266,14 +261,6 @@ Deno.test("action stage authority freezes cutoff before post-hook persistence", 
       ),
     InvalidActionStageAuthorityCutoffError,
     "canonical target digest does not match",
-  );
-
-  assertEquals(
-    await actionStageAuthority.persistAfterHooks(
-      { operations: ["op"] },
-      cutoff,
-    ),
-    { stageId: "stage" },
   );
 });
 

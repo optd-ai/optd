@@ -2,10 +2,8 @@
 import { assertEquals } from "jsr:@std/assert";
 import type {
   ActionCatalog,
-  ActionCuratedReadRepository,
   ActionHookExecutionEvidence,
   ActionPolicyAuthorizer,
-  ActionStageHookCatalog,
   ActionTargetReader,
   HookExecutionEvidenceRepository,
   HookExecutionResult,
@@ -131,11 +129,11 @@ Deno.test("outbox port freezes the complete delivery and operator lifecycle", as
 });
 
 Deno.test("catalog ports cover action staging, metadata, packs, and delivery pins", () => {
-  const curated: ActionCuratedReadRepository<string, { versionId: string }> = {
-    read: () => Promise.resolve({ versionId: "version-1" }),
+  const curated: ActionTargetReader<string, { versionId: string }> = {
+    current: () => Promise.resolve({ versionId: "version-1" }),
   };
-  const stageHooks: ActionStageHookCatalog<string> = {
-    stageHooks: () => Promise.resolve([]),
+  const stageHooks: PinnedActionHookCatalog<string> = {
+    pinned: () => Promise.resolve([]),
   };
   const deliveryHooks: PinnedDeliveryHookCatalog<string> = {
     deliveryHook: () => Promise.resolve(null),
@@ -162,8 +160,8 @@ Deno.test("catalog ports cover action staging, metadata, packs, and delivery pin
     plan: (identity) => Promise.resolve({ id: identity }),
     summarize: (pack, revisionId) => ({ id: pack.id, revisionId }),
   };
-  assertEquals(Object.keys(curated), ["read"]);
-  assertEquals(Object.keys(stageHooks), ["stageHooks"]);
+  assertEquals(Object.keys(curated), ["current"]);
+  assertEquals(Object.keys(stageHooks), ["pinned"]);
   assertEquals(Object.keys(deliveryHooks), ["deliveryHook"]);
   assertEquals(Object.keys(metadata).toSorted(), [
     "definition",
@@ -201,9 +199,15 @@ Deno.test("run-action ports separate pinned reads, policy and evidence", async (
     availability: () => Promise.resolve({ hook: "hook-1" }),
   };
   const hooks: PinnedActionHookCatalog<string> = {
-    pinned: () => Promise.resolve(actionProgram),
+    pinned: () => Promise.resolve([actionProgram]),
   };
-  const targets: ActionTargetReader<string, { title: string }> = {
+  const targets: ActionTargetReader<string, {
+    resource: string;
+    name: string;
+    objectId: string;
+    objectVersionId: string;
+    object: { title: string };
+  }> = {
     current: () =>
       Promise.resolve({
         resource: "publisher/crm:lead",
@@ -216,7 +220,10 @@ Deno.test("run-action ports separate pinned reads, policy and evidence", async (
   const policy: ActionPolicyAuthorizer<string, { allowed: true }> = {
     assertAllowed: () => Promise.resolve({ allowed: true }),
   };
-  const evidence: HookExecutionEvidenceRepository<string> = {
+  const evidence: HookExecutionEvidenceRepository<
+    ActionHookExecutionEvidence,
+    string
+  > = {
     record: () => Promise.resolve("execution-1"),
   };
 
@@ -352,13 +359,9 @@ Deno.test("hook phases and outputs are canonical and phase-specific", () => {
     outputSchema: "patch.v1",
   };
 
-  const wrongStageCatalog: ActionStageHookCatalog<string> = {
-    // @ts-expect-error stage catalogs cannot return after-commit programs.
-    stageHooks: () => Promise.resolve([deliveryProgram]),
-  };
   const wrongActionCatalog: PinnedActionHookCatalog<string> = {
     // @ts-expect-error action catalogs cannot return validation programs.
-    pinned: () => Promise.resolve(validateProgram),
+    pinned: () => Promise.resolve([validateProgram]),
   };
   const wrongDeliveryCatalog: PinnedDeliveryHookCatalog<string> = {
     // @ts-expect-error delivery catalogs cannot return action-stage programs.
@@ -418,7 +421,6 @@ Deno.test("hook phases and outputs are canonical and phase-specific", () => {
       wrongBeforeStageSchema,
       wrongValidateSchema,
       wrongDeliverySchema,
-      wrongStageCatalog,
       wrongActionCatalog,
       wrongDeliveryCatalog,
       wrongEvidenceProgram,
@@ -426,7 +428,7 @@ Deno.test("hook phases and outputs are canonical and phase-specific", () => {
       wrongValidationEvidence,
       wrongDeliveryEvidence,
     ].length,
-    15,
+    14,
   );
 
   const contradictoryValidation: HookOutput = {

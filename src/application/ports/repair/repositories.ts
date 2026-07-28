@@ -525,18 +525,6 @@ export interface ActionCatalog<
   availability(request: TActionRequest): Promise<TAvailability | null>;
 }
 
-/** Curated action reads include immutable object-version evidence. */
-export interface ActionCuratedReadRepository<TReadRequest, TReadResult> {
-  read(request: TReadRequest): Promise<TReadResult | null>;
-}
-
-/** Resolves ordered action-stage attachments and only action-stage programs. */
-export interface ActionStageHookCatalog<TRequest> {
-  stageHooks(
-    request: TRequest,
-  ): Promise<readonly PinnedHookProgram<"action.stage">[]>;
-}
-
 declare const ACTION_STAGE_AUTHORITY_CUTOFF: unique symbol;
 const validatedActionStageAuthorityCutoffs = new WeakSet<object>();
 
@@ -639,25 +627,16 @@ export async function createActionStageAuthorityCutoff(
  * Locks and evaluates exact action authority in one transaction, then persists
  * that same immutable root/target/digest tuple after hooks complete outside it.
  */
-export interface ActionStageAuthorityPort<
-  TAuthorityRequest,
-  TStageRequest,
-  TStageResult,
-> {
-  lockAndEvaluate(
-    request: TAuthorityRequest,
-  ): Promise<ActionStageAuthorityCutoff>;
-  persistAfterHooks(
-    request: TStageRequest,
-    cutoff: ActionStageAuthorityCutoff,
-  ): Promise<TStageResult>;
+export interface ActionStageAuthorityPort<TAuthorityRequest, TCutoff> {
+  lockAndEvaluate(request: TAuthorityRequest): Promise<TCutoff>;
 }
 
-/** Resolves the exact action-stage hook pinned by the action definition. */
-export interface PinnedActionHookCatalog<THookRequest> {
-  pinned(
-    request: THookRequest,
-  ): Promise<PinnedHookProgram<"action.stage"> | null>;
+/** Resolves the exact ordered action-stage hooks pinned by the definition. */
+export interface PinnedActionHookCatalog<
+  THookRequest,
+  THookResult = PinnedHookProgram<"action.stage">,
+> {
+  pinned(request: THookRequest): Promise<readonly THookResult[]>;
 }
 
 /** Resolves and verifies only an after-commit delivery hook. */
@@ -676,8 +655,8 @@ export type ActionTarget<TObject> = Readonly<{
 }>;
 
 /** Reads the active target object, including its immutable version evidence. */
-export interface ActionTargetReader<TTargetRequest, TObject> {
-  current(request: TTargetRequest): Promise<ActionTarget<TObject> | null>;
+export interface ActionTargetReader<TTargetRequest, TResult> {
+  current(request: TTargetRequest): Promise<TResult | null>;
 }
 
 /** Evaluates and asserts semantic-action authority for the reviewed target. */
@@ -698,8 +677,7 @@ export type ActionHookExecutionEvidence<
   : never;
 
 /** Persists immutable action-stage evidence; no commit hook path exists. */
-export interface HookExecutionEvidenceRepository<TEvidenceId> {
-  record(
-    evidence: ActionHookExecutionEvidence<"action.stage">,
-  ): Promise<TEvidenceId>;
+export interface HookExecutionEvidenceRepository<TEvidence, TResult> {
+  /** Atomically persists the post-hook staged facts and immutable evidence. */
+  record(evidence: TEvidence): Promise<TResult>;
 }

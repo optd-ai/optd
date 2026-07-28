@@ -1,7 +1,8 @@
 import {
   type ActionStageHookDeclaration,
   TrustedStageHookCoordinator,
-} from "../../../src/adapters/outbound/deno-hooks/trusted_stage_hook_adapter.ts";
+} from "../../../src/application/services/hooks/trusted_stage_hook_coordinator.ts";
+import { DenoHookExecutor } from "../../../src/adapters/outbound/deno-hooks/trusted_stage_hook_adapter.ts";
 import type {
   StageHookDeclaration,
   StageHookInput,
@@ -76,9 +77,9 @@ Deno.test("trusted stage coordinator chains before-stage state in deterministic 
   };
   const coordinator = new TrustedStageHookCoordinator({
     resolve() {
-      return Promise.resolve({ values: {}, evidence: [] });
+      return Promise.resolve({ values: {}, grants: [] });
     },
-  }, { cacheDir: await Deno.makeTempDir() });
+  }, new DenoHookExecutor({ cacheDir: await Deno.makeTempDir() }));
   const result = await coordinator.coordinate(input);
   equals(result.hook_executions.length, 2);
   equals(
@@ -92,9 +93,9 @@ Deno.test("trusted stage coordinator chains before-stage state in deterministic 
 Deno.test("trusted action-stage seam enforces declared operation effects", async () => {
   const coordinator = new TrustedStageHookCoordinator({
     resolve() {
-      return Promise.resolve({ values: {}, evidence: [] });
+      return Promise.resolve({ values: {}, grants: [] });
     },
-  }, { cacheDir: await Deno.makeTempDir() });
+  }, new DenoHookExecutor({ cacheDir: await Deno.makeTempDir() }));
   const action = {
     ...declaration(
       1,
