@@ -26,42 +26,23 @@ export type DefinitionDescriptor<TSchema extends JsonValue> = Readonly<{
   schema: TSchema;
 }>;
 
-export interface DefinitionCatalog<TSchema extends JsonValue> {
-  active(identity: string): Promise<DefinitionDescriptor<TSchema> | null>;
+export interface DefinitionCatalog<TRequest, TDefinition> {
+  definition(request: TRequest): Promise<TDefinition | null>;
 }
 
 export interface ObjectReaderPort<
-  TReadRequest,
+  TReadArgs extends readonly unknown[],
   TObject,
-  THistoryRequest,
+  THistoryArgs extends readonly unknown[],
   THistory,
 > {
-  read(request: TReadRequest): Promise<TObject | null>;
-  history(request: THistoryRequest): Promise<THistory | null>;
+  read(...args: TReadArgs): Promise<TObject | null>;
+  history(...args: THistoryArgs): Promise<THistory | null>;
 }
 
-export interface AuthorizationReaderPort<TAuthorizationRequest> {
-  authorize(request: TAuthorizationRequest): Promise<boolean>;
+export interface AuthorizationReaderPort<TAuthorizationRequest, TResult> {
+  authorize(request: TAuthorizationRequest): Promise<TResult>;
 }
-
-export type ReadSessionAuthority<
-  TReadRequest,
-  TObject,
-  THistoryRequest,
-  THistory,
-  TAuthorizationRequest,
-> = Readonly<{
-  reader: ObjectReaderPort<
-    TReadRequest,
-    TObject,
-    THistoryRequest,
-    THistory
-  >;
-  /** Reusable for every policy evaluation in this one immutable session. */
-  authorization: AuthorizationReaderPort<TAuthorizationRequest>;
-  /** Frozen into history/query cursors and compared at the next request. */
-  authorizationRootId: string;
-}>;
 
 /**
  * Executes application orchestration inside one adapter-owned immutable read
@@ -88,46 +69,26 @@ export interface QueryObjectRepository<
   history(request: THistoryRequest): Promise<THistoryPage | null>;
 }
 
-/** Supplies every frozen policy fact needed by query and target cutoffs. */
-export interface QueryPolicyRepository<
-  TAuthorityRequest,
-  TDefinitionRequest,
-  TDefinition,
-  TRoleRequest,
-  TRoleFacts,
-  TPolicyRequest,
-  TPolicyFacts,
-  TRelationshipRequest,
-  TRelationshipFacts,
-> {
-  lockReadAuthority(
-    request: TAuthorityRequest,
-    transaction: RepositoryTransaction,
-  ): Promise<void>;
-  definition(request: TDefinitionRequest): Promise<TDefinition | null>;
-  roleFacts(request: TRoleRequest): Promise<TRoleFacts>;
-  policyFacts(request: TPolicyRequest): Promise<TPolicyFacts>;
-  relationshipFacts(request: TRelationshipRequest): Promise<TRelationshipFacts>;
-}
+/** Same-session physical policy/page primitive selected by application query orchestration. */
+export interface QueryPolicyRepository<TRequest, TResult> extends
+  Pick<
+    QueryObjectRepository<TRequest, TResult, never, never, never, never>,
+    "query"
+  > {}
 
-/** Persists changeset requests, immutable object/version facts and evidence. */
+/** Persists staged changeset facts, evidence, approvals and cancellation atomically. */
 export interface ChangesetFactRepository<
-  TPreviewRequest,
-  TPreviewResult,
-  TCommitRequest,
-  TCommitResult,
-  TViewRequest,
-  TViewResult,
-  THistoryRequest,
-  THistoryResult,
+  TCreateArgs extends readonly unknown[],
+  TInspectArgs extends readonly unknown[],
+  TDecisionArgs extends readonly unknown[],
+  TCancelArgs extends readonly unknown[],
+  TResult,
 > {
-  persistPreview(request: TPreviewRequest): Promise<TPreviewResult>;
-  commitFacts(
-    request: TCommitRequest,
-    transaction: RepositoryTransaction,
-  ): Promise<TCommitResult>;
-  view(request: TViewRequest): Promise<TViewResult | null>;
-  history(request: THistoryRequest): Promise<THistoryResult>;
+  create(...args: TCreateArgs): Promise<TResult>;
+  inspect(...args: TInspectArgs): Promise<TResult>;
+  approvals(...args: TInspectArgs): Promise<TResult>;
+  decideApproval(...args: TDecisionArgs): Promise<TResult>;
+  cancel(...args: TCancelArgs): Promise<TResult>;
 }
 
 export interface MetadataCatalog<
@@ -148,15 +109,14 @@ export interface PackParser<TSource, TPack> {
   parse(source: TSource): Promise<TPack>;
 }
 
-export interface PackCatalog<TPackRequest, TPackRevision, TCandidate> {
-  list(request: TPackRequest): Promise<readonly TPackRevision[]>;
-  active(request: TPackRequest): Promise<TPackRevision | null>;
-  revision(id: string): Promise<TPackRevision | null>;
-  revisionCount(transaction?: RepositoryTransaction): Promise<number>;
-  storeOrReuseCandidate(
-    candidate: TCandidate,
-    transaction: RepositoryTransaction,
-  ): Promise<TPackRevision>;
+export interface PackCatalog<
+  TPlanArgs extends readonly unknown[],
+  TPlanResult,
+  TSummaryArgs extends readonly unknown[],
+  TSummary,
+> {
+  plan(...args: TPlanArgs): Promise<TPlanResult>;
+  summarize(...args: TSummaryArgs): TSummary;
 }
 
 export type MigrationApplyAttempt = Readonly<{

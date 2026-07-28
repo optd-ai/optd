@@ -9,19 +9,28 @@ import type {
   RoleDefinition,
 } from "../../domain/authorization/model.ts";
 import type { Result } from "../../domain/errors/result.ts";
+import type { AuthorizationReaderPort } from "./repair/repositories.ts";
 
-export interface AuthorizationRepository {
+type AuthorizationReadRequest = {
+  auth: AuthContext;
+  boundary: AuthorizationBoundary;
+  action: string;
+  resource: string;
+};
+
+export interface AuthorizationRepository extends
+  AuthorizationReaderPort<
+    AuthorizationReadRequest,
+    Result<BoundaryAuthority>
+  > {
   authority(
     auth: AuthContext,
     boundary: AuthorizationBoundary,
     includeSecurity?: boolean,
   ): Promise<Result<BoundaryAuthority>>;
-  authorize(input: {
-    auth: AuthContext;
-    boundary: AuthorizationBoundary;
-    action: string;
-    resource: string;
-  }): Promise<Result<BoundaryAuthority>>;
+  authorize(
+    input: AuthorizationReadRequest,
+  ): Promise<Result<BoundaryAuthority>>;
   listRoleDefinitions(
     boundary: AuthorizationBoundary,
     auth: AuthContext,

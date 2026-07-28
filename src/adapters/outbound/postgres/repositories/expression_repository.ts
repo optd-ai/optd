@@ -10,7 +10,7 @@ export function makePostgresExpressionDefinitionPort(
   sql: Queryable,
 ): ExpressionDefinitionPort {
   return {
-    async fields(identity: ExpressionValidationRequest["definition"]) {
+    async definition(identity: ExpressionValidationRequest["definition"]) {
       const section = identity.kind === "resource"
         ? "resources"
         : "relationships";

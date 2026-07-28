@@ -153,12 +153,14 @@ Deno.test("catalog ports cover action staging, metadata, packs, and delivery pin
     definition: () => Promise.resolve(null),
     hookScriptDigest: () => Promise.resolve(null),
   };
-  const packs: PackCatalog<string, { id: string }, { id: string }> = {
-    list: () => Promise.resolve([]),
-    active: () => Promise.resolve(null),
-    revision: () => Promise.resolve(null),
-    revisionCount: () => Promise.resolve(0),
-    storeOrReuseCandidate: (candidate) => Promise.resolve(candidate),
+  const packs: PackCatalog<
+    readonly [identity: string],
+    { id: string },
+    readonly [pack: { id: string }, revisionId: string],
+    { id: string; revisionId: string }
+  > = {
+    plan: (identity) => Promise.resolve({ id: identity }),
+    summarize: (pack, revisionId) => ({ id: pack.id, revisionId }),
   };
   assertEquals(Object.keys(curated), ["read"]);
   assertEquals(Object.keys(stageHooks), ["stageHooks"]);
@@ -170,13 +172,7 @@ Deno.test("catalog ports cover action staging, metadata, packs, and delivery pin
     "listPacks",
     "pack",
   ]);
-  assertEquals(Object.keys(packs).toSorted(), [
-    "active",
-    "list",
-    "revision",
-    "revisionCount",
-    "storeOrReuseCandidate",
-  ]);
+  assertEquals(Object.keys(packs).toSorted(), ["plan", "summarize"]);
 });
 
 Deno.test("run-action ports separate pinned reads, policy and evidence", async () => {

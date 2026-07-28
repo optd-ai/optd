@@ -11,7 +11,7 @@ import type {
   LoadedPack,
   UploadedPackFile,
 } from "../../domain/packs/loaded_pack.ts";
-import type { PackParser } from "../ports/repair/repositories.ts";
+import type { PackCatalog, PackParser } from "../ports/repair/repositories.ts";
 
 export type PackPreviewDto = {
   candidate: {
@@ -24,15 +24,20 @@ export type PackPreviewDto = {
   active: false;
 };
 
-export interface PackPreviewPersistence {
-  plan(pack: LoadedPack, authContextId: string): Promise<{
-    before: number;
-    after: number;
-    plan: MigrationPlan;
-    candidate_reused: boolean;
-  }>;
-  summarize(pack: LoadedPack, revisionId: string): unknown;
-}
+export type PackPreviewPlan = {
+  before: number;
+  after: number;
+  plan: MigrationPlan;
+  candidate_reused: boolean;
+};
+
+export interface PackPreviewPersistence extends
+  PackCatalog<
+    readonly [pack: LoadedPack, authContextId: string],
+    PackPreviewPlan,
+    readonly [pack: LoadedPack, revisionId: string],
+    unknown
+  > {}
 
 /** Owns preview authorization, parser error mapping, and migration-preview orchestration. */
 export function makePackServices(

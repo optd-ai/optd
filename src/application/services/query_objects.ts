@@ -15,6 +15,7 @@ import {
 } from "../../schemas/queries/query.ts";
 import type {
   QueryObjectRepository,
+  QueryPolicyRepository,
   ReadSessionPort,
 } from "../ports/repair/repositories.ts";
 
@@ -55,17 +56,22 @@ export class QueryRepositoryError extends Error {
   }
 }
 
-type QueryPagePort = Pick<
-  QueryObjectRepository<
+type QueryPagePort =
+  & QueryPolicyRepository<
     QueryExecutionPlan,
-    QueryResponse,
-    never,
-    never,
-    never,
-    never
-  >,
-  "query"
->;
+    QueryResponse
+  >
+  & Pick<
+    QueryObjectRepository<
+      QueryExecutionPlan,
+      QueryResponse,
+      never,
+      never,
+      never,
+      never
+    >,
+    "query"
+  >;
 
 export type QueryReadSession = Readonly<{
   definition(): Promise<QueryDefinition | null>;

@@ -10,6 +10,7 @@ import {
   type FieldSpec,
   lowerExpression,
 } from "../../../domain/expressions/cel.ts";
+import type { DefinitionCatalog } from "../../ports/repair/repositories.ts";
 
 const CONTEXTS = new Set([
   "query",
@@ -31,11 +32,10 @@ export type ExpressionValidationRequest = {
   context: string;
   expression: string;
 };
-export interface ExpressionDefinitionPort {
-  fields(
-    identity: ExpressionValidationRequest["definition"],
-  ): Promise<Record<string, FieldSpec> | null>;
-}
+export type ExpressionDefinitionPort = DefinitionCatalog<
+  ExpressionValidationRequest["definition"],
+  Record<string, FieldSpec>
+>;
 
 /** Validates and lowers public expressions; persistence only supplies fields. */
 export function makeExpressionService(definitions: ExpressionDefinitionPort) {
@@ -61,7 +61,7 @@ export function makeExpressionService(definitions: ExpressionDefinitionPort) {
           validationError("bad_request", "unknown expression context"),
         );
       }
-      const metadata = await definitions.fields(input.definition);
+      const metadata = await definitions.definition(input.definition);
       if (!metadata) {
         return err({
           code: "not_found",

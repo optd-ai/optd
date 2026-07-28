@@ -626,6 +626,7 @@ Deno.test("query orchestration owns same-session definition-aware decisions", as
   const composition = await Deno.readTextFile("src/composition/application.ts");
 
   assertMatch(application, /QueryObjectRepository/);
+  assertMatch(application, /QueryPolicyRepository/);
   assertMatch(application, /QueryReadSessionPort/);
   assertMatch(application, /resolveFields/);
   assertMatch(application, /resolveSort/);
@@ -636,6 +637,39 @@ Deno.test("query orchestration owns same-session definition-aware decisions", as
   assertEquals(adapter.includes("resolveFields"), false);
   assertEquals(adapter.includes("resolveSort"), false);
   assertMatch(composition, /makeQueryObjectsService\(queryRepository\)/);
+});
+
+Deno.test("read/query/changeset/pack frozen ports have real consumers and adapters", async () => {
+  const sources = await Promise.all([
+    "src/application/services/queries/expressions.ts",
+    "src/adapters/outbound/postgres/repositories/expression_repository.ts",
+    "src/application/ports/object_reader.ts",
+    "src/adapters/outbound/postgres/object_read_boundary.ts",
+    "src/application/ports/authorization.ts",
+    "src/adapters/outbound/postgres/authorization_repository.ts",
+    "src/application/services/query_objects.ts",
+    "src/adapters/outbound/postgres/repositories/query_object_repository.ts",
+    "src/application/ports/stage_repository.ts",
+    "src/adapters/outbound/postgres/stage_repository.ts",
+    "src/application/services/pack_services.ts",
+    "src/adapters/outbound/postgres/repositories/pack_application_repository.ts",
+  ].map((path) => Deno.readTextFile(path)));
+
+  const expected = [
+    /DefinitionCatalog/,
+    /ExpressionDefinitionPort/,
+    /ObjectReaderPort/,
+    /ObjectReader/,
+    /AuthorizationReaderPort/,
+    /AuthorizationRepository/,
+    /QueryPolicyRepository/,
+    /QueryReadSessionPort/,
+    /ChangesetFactRepository/,
+    /StageRepository/,
+    /PackCatalog/,
+    /PackPreviewPersistence/,
+  ];
+  expected.forEach((pattern, index) => assertMatch(sources[index], pattern));
 });
 
 Deno.test("high-surface concrete imports map to complete semantic ports", () => {

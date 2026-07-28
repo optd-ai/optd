@@ -85,19 +85,17 @@ const grantRepository: HookSecretGrantRepository<
 };
 
 const changesets: ChangesetFactRepository<
-  unknown,
-  unknown,
-  unknown,
-  unknown,
-  unknown,
-  unknown,
-  unknown,
+  readonly [input: unknown, auth: unknown],
+  readonly [id: string, auth: unknown],
+  readonly [id: string, requirementId: string, input: unknown, auth: unknown],
+  readonly [id: string, reason: string | null, auth: unknown],
   unknown
 > = {
-  persistPreview: () => Promise.resolve({}),
-  commitFacts: () => Promise.resolve({}),
-  view: () => Promise.resolve(null),
-  history: () => Promise.resolve({}),
+  create: () => Promise.resolve({}),
+  inspect: () => Promise.resolve({}),
+  approvals: () => Promise.resolve({}),
+  decideApproval: () => Promise.resolve({}),
+  cancel: () => Promise.resolve({}),
 };
 
 const readSession: ReadSessionPort<
@@ -140,22 +138,8 @@ const actionStageAuthority: ActionStageAuthorityPort<
   },
 };
 
-const queryPolicy: QueryPolicyRepository<
-  unknown,
-  unknown,
-  unknown,
-  unknown,
-  unknown,
-  unknown,
-  unknown,
-  unknown,
-  unknown
-> = {
-  lockReadAuthority: () => Promise.resolve(),
-  definition: () => Promise.resolve(null),
-  roleFacts: () => Promise.resolve({}),
-  policyFacts: () => Promise.resolve({}),
-  relationshipFacts: () => Promise.resolve({}),
+const queryPolicy: QueryPolicyRepository<unknown, unknown> = {
+  query: () => Promise.resolve({}),
 };
 
 Deno.test("repository ports cover complete secret and grant lifecycles", () => {
@@ -295,16 +279,11 @@ Deno.test("action stage authority freezes cutoff before post-hook persistence", 
 
 Deno.test("repository ports cover changeset facts and query policy cutoffs", () => {
   assertEquals(Object.keys(changesets).toSorted(), [
-    "commitFacts",
-    "history",
-    "persistPreview",
-    "view",
+    "approvals",
+    "cancel",
+    "create",
+    "decideApproval",
+    "inspect",
   ]);
-  assertEquals(Object.keys(queryPolicy).toSorted(), [
-    "definition",
-    "lockReadAuthority",
-    "policyFacts",
-    "relationshipFacts",
-    "roleFacts",
-  ]);
+  assertEquals(Object.keys(queryPolicy), ["query"]);
 });

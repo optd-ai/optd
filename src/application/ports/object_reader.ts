@@ -6,6 +6,7 @@ import type {
   ObjectDto,
   RelationshipDto,
 } from "../../schemas/api/objects.ts";
+import type { ObjectReaderPort } from "./repair/repositories.ts";
 
 export type ReadAddress = Readonly<{
   projectId: string;
@@ -53,11 +54,14 @@ export interface ObjectReadBoundary {
   ): Promise<T>;
 }
 
-export interface ObjectReader {
-  read(address: ReadAddress): Promise<ObjectDto | RelationshipDto | null>;
-  history(
-    address: ReadAddress,
-    limit: number,
-    before?: { createdAt: string; id: string },
-  ): Promise<HistoryPage | null>;
-}
+export interface ObjectReader extends
+  ObjectReaderPort<
+    readonly [address: ReadAddress],
+    ObjectDto | RelationshipDto,
+    readonly [
+      address: ReadAddress,
+      limit: number,
+      before?: { createdAt: string; id: string },
+    ],
+    HistoryPage
+  > {}

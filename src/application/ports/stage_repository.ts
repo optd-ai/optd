@@ -6,6 +6,7 @@ import type {
   StageHookInput,
   StageHookResult,
 } from "../../domain/changesets/stage.ts";
+import type { ChangesetFactRepository } from "./repair/repositories.ts";
 
 export type StageSource = Readonly<{
   kind: "direct" | "action" | "seed";
@@ -75,33 +76,30 @@ export type StageDto = {
   cancellation: unknown | null;
 };
 
-export interface StageRepository {
+export type StageCreateInput = {
+  operations: CanonicalOperation[];
+  operationGraphDigest: string;
+  hookResult?: StageHookResult;
+  hookDeclarations?: readonly StageHookDeclaration[];
+  source?: StageSource;
+};
+
+export interface StageRepository extends
+  ChangesetFactRepository<
+    readonly [input: StageCreateInput, auth: AuthContext],
+    readonly [id: string, auth: AuthContext],
+    readonly [
+      id: string,
+      requirementId: string,
+      input: { decision: "approve" | "reject"; reason: string | null },
+      auth: AuthContext,
+    ],
+    readonly [id: string, reason: string | null, auth: AuthContext],
+    Result<StageDto>
+  > {
   hasHooks?(operations: CanonicalOperation[]): Promise<boolean>;
   hookInput?(
     operations: CanonicalOperation[],
     auth: AuthContext,
   ): Promise<Result<StageHookInput>>;
-  create(
-    input: {
-      operations: CanonicalOperation[];
-      operationGraphDigest: string;
-      hookResult?: StageHookResult;
-      hookDeclarations?: readonly StageHookDeclaration[];
-      source?: StageSource;
-    },
-    auth: AuthContext,
-  ): Promise<Result<StageDto>>;
-  inspect(id: string, auth: AuthContext): Promise<Result<StageDto>>;
-  approvals(id: string, auth: AuthContext): Promise<Result<StageDto>>;
-  decideApproval(
-    id: string,
-    requirementId: string,
-    input: { decision: "approve" | "reject"; reason: string | null },
-    auth: AuthContext,
-  ): Promise<Result<StageDto>>;
-  cancel(
-    id: string,
-    reason: string | null,
-    auth: AuthContext,
-  ): Promise<Result<StageDto>>;
 }
