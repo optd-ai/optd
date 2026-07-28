@@ -1,6 +1,9 @@
 // deno-lint-ignore-file no-import-prefix
 import { assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
-import { query } from "../../src/adapters/outbound/postgres/client.ts";
+import {
+  query,
+  type Sql,
+} from "../../src/adapters/outbound/postgres/client.ts";
 import { EnvelopeCrypto } from "../../src/adapters/outbound/crypto/envelope.ts";
 import { PostgresHookSecretRepository } from "../../src/adapters/outbound/postgres/hook_secret_repository.ts";
 import {
@@ -380,9 +383,13 @@ Deno.test({
       const unrelatedProjectId = JSON.parse(unrelatedProject.stdout).data
         .id as string;
       const read = await seedRead(harness, projectId);
-      const auth = (await query<{ id: string; principal_id: string }>(
+      const auth = (await query<{
+        id: string;
+        principal_id: string;
+        session_id: string;
+      }>(
         harness.server.sql,
-        "select id,principal_id from auth_contexts order by created_at desc limit 1",
+        "select id,principal_id,session_id from auth_contexts order by created_at desc limit 1",
       )).rows[0];
       const roleAssignment = (await query<{ id: string }>(
         harness.server.sql,
@@ -453,8 +460,21 @@ Deno.test({
         ]);
         expectedAttempts++;
         await provider.waitForAttemptsBefore(expectedAttempts, pending);
-        await mutate();
+        const persistenceBarrier = await holdSessionAuthority(
+          harness.server.sql,
+          auth.session_id,
+        );
         provider.release(token);
+        try {
+          await observePostHookPersistence(
+            harness.server.sql,
+            persistenceBarrier.pid,
+          );
+          await mutate();
+        } finally {
+          persistenceBarrier.release();
+          await persistenceBarrier.done;
+        }
         const result = await pending;
         try {
           assertEquals(result.code, 1, `${name}: ${result.stderr}`);
@@ -576,7 +596,9 @@ Deno.test({
 
       const control = async (unrelated = false) => {
         const token = unrelated ? "unrelated" : "unchanged";
-        provider.enqueue({ kind: "hold", token });
+        provider.enqueue(
+          unrelated ? { kind: "hold", token } : { kind: "success" },
+        );
         const pending = harness.runOptctl([
           "--json",
           "--project",
@@ -588,15 +610,28 @@ Deno.test({
           JSON.stringify({ source_id: read.id }),
         ]);
         expectedAttempts++;
-        await provider.waitForAttemptsBefore(expectedAttempts, pending);
         if (unrelated) {
-          await query(
+          await provider.waitForAttemptsBefore(expectedAttempts, pending);
+          const persistenceBarrier = await holdSessionAuthority(
             harness.server.sql,
-            "insert into role_assignments(id,principal_id,role_id,boundary_type,project_id,active) values($1,$2,'test/actionproof:operator','project',$3,true)",
-            [uuidV7(), auth.principal_id, unrelatedProjectId],
+            auth.session_id,
           );
+          provider.release(token);
+          try {
+            await observePostHookPersistence(
+              harness.server.sql,
+              persistenceBarrier.pid,
+            );
+            await query(
+              harness.server.sql,
+              "insert into role_assignments(id,principal_id,role_id,boundary_type,project_id,active) values($1,$2,'test/actionproof:operator','project',$3,true)",
+              [uuidV7(), auth.principal_id, unrelatedProjectId],
+            );
+          } finally {
+            persistenceBarrier.release();
+            await persistenceBarrier.done;
+          }
         }
-        provider.release(token);
         const result = await pending;
         assertEquals(result.code, 0, `${token}: ${result.stderr}`);
         assertEquals(provider.attempts.length, expectedAttempts);
@@ -631,6 +666,69 @@ Deno.test({
     }
   },
 });
+
+async function holdSessionAuthority(sql: Sql, sessionId: string): Promise<{
+  pid: number;
+  release(): void;
+  done: Promise<void>;
+}> {
+  let locked!: (pid: number) => void;
+  let release!: () => void;
+  const lockedPromise = new Promise<number>((resolve) => locked = resolve);
+  const released = new Promise<void>((resolve) => release = resolve);
+  const done = sql.begin(async (tx) => {
+    const pid = (await query<{ pid: number }>(
+      tx,
+      "select pg_backend_pid()::int pid",
+    )).rows[0].pid;
+    await query(
+      tx,
+      "select id from auth_sessions where id=$1 for update",
+      [sessionId],
+    );
+    locked(pid);
+    await released;
+  }).then(() => undefined);
+  const pid = await Promise.race([
+    lockedPromise,
+    done.then(() => {
+      throw new Error("session authority barrier completed before locking");
+    }),
+  ]);
+  return { pid, release, done };
+}
+
+async function observePostHookPersistence(
+  sql: Sql,
+  blockerPid: number,
+): Promise<void> {
+  for (let attempt = 0; attempt < 500; attempt++) {
+    const waiting = (await query<{ waiting: boolean }>(
+      sql,
+      `select exists(
+         select 1 from pg_stat_activity
+          where pid<>$1
+            and $1=any(pg_blocking_pids(pid))
+            and wait_event_type='Lock'
+            and position('auth_sessions' in query)>0
+       ) waiting`,
+      [blockerPid],
+    )).rows[0].waiting;
+    if (waiting) return;
+    await Promise.resolve();
+  }
+  const diagnostics = (await query(
+    sql,
+    `select pid,state,wait_event_type,wait_event,pg_blocking_pids(pid) blockers,
+       left(query,200) query from pg_stat_activity
+      where datname=current_database() order by pid`,
+  )).rows;
+  throw new Error(
+    `post-hook persistence did not reach the session authority lock: ${
+      JSON.stringify(diagnostics)
+    }`,
+  );
+}
 
 async function evidenceCounts(sql: Parameters<typeof query>[0]) {
   return (await query<{ stages: string; hooks: string }>(
