@@ -13,7 +13,10 @@ import {
   type QueryResponse,
   type ResolvedSort,
 } from "../../schemas/queries/query.ts";
-import type { QueryObjectRepository } from "../ports/repair/repositories.ts";
+import type {
+  QueryObjectRepository,
+  ReadSessionPort,
+} from "../ports/repair/repositories.ts";
 
 export type QueryObjectsRequest = QueryRequest;
 export type QueryObjectsDto = QueryResponse;
@@ -73,12 +76,10 @@ export type QueryReadSession = Readonly<{
  * Same-transaction read session. The adapter locks immutable authority before
  * invoking application orchestration and retains every physical handle.
  */
-export interface QueryReadSessionPort {
-  execute<T>(
-    request: Readonly<{ input: QueryRequest; auth: AuthContext }>,
-    work: (session: QueryReadSession) => Promise<T>,
-  ): Promise<T>;
-}
+export type QueryReadSessionPort = ReadSessionPort<
+  Readonly<{ input: QueryRequest; auth: AuthContext }>,
+  QueryReadSession
+>;
 
 /** Application-owned public query use case over a same-session read port. */
 export function makeQueryObjectsService(port: QueryReadSessionPort) {

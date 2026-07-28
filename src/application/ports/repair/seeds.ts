@@ -119,8 +119,11 @@ export function decideSeedReconciliation(
     });
 }
 
-export interface SeedCatalog {
-  definitions(seedIdentities: readonly string[]): Promise<SeedDefinition[]>;
+export interface SeedCatalog<TRevision> {
+  loadActiveRevision(
+    publisher: string,
+    pack: string,
+  ): Promise<TRevision | null>;
 }
 
 export const ACTIVE_SEED_KEY_CONFLICT = "active_seed_key_conflict" as const;
@@ -158,16 +161,20 @@ export function seedReplacementCommitResult(
   });
 }
 
-export interface SeedReconciliationRepository {
-  findByActiveBusinessKey(seed: SeedDefinition): Promise<SeedMatch | null>;
-  freezeActivePresence(seed: SeedDefinition): Promise<SeedActivePresence>;
-  revalidateActivePresence(
-    seed: SeedDefinition,
-    frozen: SeedActivePresence,
-  ): Promise<boolean>;
-  verifyActiveUniqueness(constraint: ActiveUniqueConstraint): Promise<boolean>;
-  createActiveReplacement(
-    seed: SeedDefinition,
-    objectId: string,
-  ): Promise<SeedReplacementCommitResult>;
+export interface SeedReconciliationRepository<
+  TLookup,
+  TRow,
+  TStageInput,
+  TStageSource,
+  TAuthContext,
+  TStageResult,
+> {
+  /** Active-only business-key lookup; archived rows are absent. */
+  findActiveRow(input: TLookup): Promise<TRow | undefined>;
+  /** Persists the reconciled operation graph through the immutable stage path. */
+  stageSource(
+    input: TStageInput,
+    source: TStageSource,
+    auth: TAuthContext,
+  ): Promise<TStageResult>;
 }

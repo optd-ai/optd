@@ -14,22 +14,22 @@ const versionId = "019b1234-5678-7abc-8def-0123456789ac";
 const nextVersionId = "019b1234-5678-7abc-8def-0123456789ad";
 const ids = { nextUuidV7: () => replacementId };
 
-const seedRepository: SeedReconciliationRepository = {
-  findByActiveBusinessKey: () => Promise.resolve(null),
-  freezeActivePresence: () => Promise.resolve({ kind: "absent" }),
-  revalidateActivePresence: () => Promise.resolve(true),
-  verifyActiveUniqueness: () => Promise.resolve(true),
-  createActiveReplacement: (_, objectId) =>
-    Promise.resolve({ kind: "created", objectId }),
+const seedRepository: SeedReconciliationRepository<
+  { key: string },
+  { id: string },
+  unknown,
+  { kind: string },
+  { id: string },
+  { stageId: string }
+> = {
+  findActiveRow: () => Promise.resolve(undefined),
+  stageSource: () => Promise.resolve({ stageId: "stage-1" }),
 };
 
-Deno.test("seed repository freezes and revalidates exact active presence", () => {
+Deno.test("seed repository exposes active-only lookup and immutable staging", () => {
   assertEquals(Object.keys(seedRepository).toSorted(), [
-    "createActiveReplacement",
-    "findByActiveBusinessKey",
-    "freezeActivePresence",
-    "revalidateActivePresence",
-    "verifyActiveUniqueness",
+    "findActiveRow",
+    "stageSource",
   ]);
 });
 

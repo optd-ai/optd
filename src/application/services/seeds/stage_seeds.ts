@@ -3,6 +3,10 @@ import { err, ok, type Result } from "../../../domain/errors/result.ts";
 import { canonicalJson } from "../../../domain/ids/canonical_json.ts";
 import { isUuidV7 } from "../../../domain/ids/uuid_v7.ts";
 import type { StageDto, StageSource } from "../../ports/stage_repository.ts";
+import type {
+  SeedCatalog,
+  SeedReconciliationRepository,
+} from "../../ports/repair/seeds.ts";
 
 export type SeedStageDto = {
   status: "staged" | "unchanged";
@@ -22,25 +26,23 @@ export type SeedRowLookup = Readonly<{
   value: unknown;
 }>;
 
+type FrozenSeedReconciliation = SeedReconciliationRepository<
+  SeedRowLookup,
+  Record<string, unknown>,
+  unknown,
+  StageSource,
+  AuthContext,
+  Result<StageDto | null>
+>;
+
 /** Physical capabilities used by the seed reconciliation use case. */
-export interface SeedStagePort {
-  loadActiveRevision(
-    publisher: string,
-    pack: string,
-  ): Promise<ActiveSeedRevision | null>;
+export interface SeedStagePort
+  extends SeedCatalog<ActiveSeedRevision>, FrozenSeedReconciliation {
   authorize(
     auth: AuthContext,
     projectId: string,
     action: string,
   ): Promise<Result<void>>;
-  findActiveRow(
-    input: SeedRowLookup,
-  ): Promise<Record<string, unknown> | undefined>;
-  stageSource(
-    input: unknown,
-    source: StageSource,
-    auth: AuthContext,
-  ): Promise<Result<StageDto | null>>;
 }
 
 /** Owns seed selection, active-only reconciliation, evidence, and stage orchestration. */

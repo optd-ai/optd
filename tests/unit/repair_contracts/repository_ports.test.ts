@@ -101,23 +101,20 @@ const changesets: ChangesetFactRepository<
 };
 
 const readSession: ReadSessionPort<
-  string,
-  string,
-  string,
-  string,
-  string,
-  { authContextId: string },
-  { projectId: string; objectId: string }
+  {
+    auth: { authContextId: string };
+    address: { projectId: string; objectId: string };
+  },
+  {
+    object: string;
+    authorizationRootId: string;
+  }
 > = {
-  async execute(auth, address, work) {
-    assertEquals(auth.authContextId, "auth-context");
-    assertEquals(address, { projectId: "project", objectId: "object" });
+  async execute(request, work) {
+    assertEquals(request.auth.authContextId, "auth-context");
+    assertEquals(request.address, { projectId: "project", objectId: "object" });
     return await work({
-      reader: {
-        read: () => Promise.resolve("object"),
-        history: () => Promise.resolve("history"),
-      },
-      authorization: { authorize: () => Promise.resolve(true) },
+      object: "object",
       authorizationRootId: "authorization-root",
     });
   },
@@ -189,21 +186,16 @@ Deno.test("repository ports cover complete secret and grant lifecycles", () => {
   ]);
 });
 
-Deno.test("read session preserves address, root anchor and repeated same-session policy", async () => {
+Deno.test("read session preserves immutable request and root anchor", async () => {
   const result = await readSession.execute(
-    { authContextId: "auth-context" },
-    { projectId: "project", objectId: "object" },
-    async ({ reader, authorization, authorizationRootId }) => ({
-      object: await reader.read("read"),
-      first: await authorization.authorize("first"),
-      second: await authorization.authorize("second"),
-      authorizationRootId,
-    }),
+    {
+      auth: { authContextId: "auth-context" },
+      address: { projectId: "project", objectId: "object" },
+    },
+    (session) => Promise.resolve(session),
   );
   assertEquals(result, {
     object: "object",
-    first: true,
-    second: true,
     authorizationRootId: "authorization-root",
   });
 });

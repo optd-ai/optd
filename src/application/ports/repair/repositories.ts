@@ -15,10 +15,8 @@ export type RepositoryTransaction = Readonly<{
   id: string;
 }>;
 
-export interface TransactionPort {
-  transaction<T>(
-    work: (transaction: RepositoryTransaction) => Promise<T>,
-  ): Promise<T>;
+export interface TransactionPort<TContext = RepositoryTransaction> {
+  transaction<T>(work: (transaction: TContext) => Promise<T>): Promise<T>;
 }
 
 export type DefinitionDescriptor<TSchema extends JsonValue> = Readonly<{
@@ -65,27 +63,15 @@ export type ReadSessionAuthority<
   authorizationRootId: string;
 }>;
 
-export interface ReadSessionPort<
-  TReadRequest,
-  TObject,
-  THistoryRequest,
-  THistory,
-  TAuthorizationRequest,
-  TAuthContext,
-  TAddress,
-> {
+/**
+ * Executes application orchestration inside one adapter-owned immutable read
+ * session. The request and session capability are application types; physical
+ * transaction handles never cross this boundary.
+ */
+export interface ReadSessionPort<TRequest, TSession> {
   execute<T>(
-    auth: TAuthContext,
-    address: TAddress,
-    work: (
-      authority: ReadSessionAuthority<
-        TReadRequest,
-        TObject,
-        THistoryRequest,
-        THistory,
-        TAuthorizationRequest
-      >,
-    ) => Promise<T>,
+    request: TRequest,
+    work: (session: TSession) => Promise<T>,
   ): Promise<T>;
 }
 
@@ -181,25 +167,28 @@ export type MigrationApplyAttempt = Readonly<{
 }>;
 
 export interface MigrationRepository<
-  TPlanRequest,
-  TPlan,
   TInspection,
+  TViolations,
   TValidation,
   TApplyRequest,
+  TAuthContext,
   TApplyResult,
 > {
-  plan(request: TPlanRequest): Promise<TPlan>;
   inspect(id: string): Promise<TInspection | null>;
-  validate(id: string): Promise<TValidation | null>;
+  violations(id: string): Promise<TViolations | null>;
+  validate(id: string, authContextId: string): Promise<TValidation | null>;
   generatedSql(id: string): Promise<readonly string[] | null>;
-  apply(
+  applyOnce(
+    id: string,
     request: TApplyRequest,
-    transaction: RepositoryTransaction,
+    auth: TAuthContext,
+    attempt: number,
   ): Promise<TApplyResult | null>;
   /** Records denied, transient/retried and terminal failed apply attempts. */
-  recordApplyAttempt(
-    request: MigrationApplyAttempt,
-    transaction: RepositoryTransaction,
+  recordFailedAttempt(
+    id: string,
+    authContextId: string,
+    outcome: string,
   ): Promise<void>;
 }
 

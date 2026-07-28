@@ -1,4 +1,5 @@
 import type { AuthorizationRepository } from "../ports/authorization.ts";
+import type { MigrationRepository } from "../ports/repair/repositories.ts";
 import type { AuthContext } from "../../domain/auth/model.ts";
 import type { MigrationApplyRequest } from "../../domain/migrations/pack_migration.ts";
 import { err, ok, type Result } from "../../domain/errors/result.ts";
@@ -10,23 +11,14 @@ export type MigrationRetryConfig = Readonly<{
 }>;
 
 /** Physical migration persistence. Authorization, retries and API errors stay in application. */
-export interface MigrationPersistencePort {
-  inspect(id: string): Promise<unknown | null>;
-  violations(id: string): Promise<unknown | null>;
-  validate(id: string, authContextId: string): Promise<unknown | null>;
-  applyOnce(
-    id: string,
-    input: MigrationApplyRequest,
-    auth: AuthContext,
-    attempt: number,
-  ): Promise<unknown | null>;
-  generatedSql(id: string): Promise<readonly string[] | null>;
-  recordFailedAttempt(
-    id: string,
-    authContextId: string,
-    outcome: string,
-  ): Promise<void>;
-}
+export type MigrationPersistencePort = MigrationRepository<
+  unknown,
+  unknown,
+  unknown,
+  MigrationApplyRequest,
+  AuthContext,
+  unknown
+>;
 
 export class MigrationPersistenceError extends Error {
   constructor(readonly code: string, message: string) {

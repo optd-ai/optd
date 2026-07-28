@@ -35,21 +35,22 @@ Deno.test("transaction and read-session ports expose opaque capabilities", async
   const transactions: TransactionPort = {
     transaction: (work) => work(transaction),
   };
+  type TestReadSession = Readonly<{
+    reader: {
+      read(request: { objectId: string }): Promise<{ id: string } | null>;
+    };
+    authorization: {
+      authorize(request: { objectId: string }): Promise<boolean>;
+    };
+    authorizationRootId: string;
+  }>;
   const reads: ReadSessionPort<
-    { objectId: string },
-    { id: string },
-    { objectId: string },
-    readonly string[],
-    { objectId: string },
-    { id: string },
-    { objectId: string }
+    { auth: { id: string }; address: { objectId: string } },
+    TestReadSession
   > = {
-    execute: (_auth, _address, work) =>
+    execute: (_request, work) =>
       work({
-        reader: {
-          read: () => Promise.resolve({ id: "object-1" }),
-          history: () => Promise.resolve([]),
-        },
+        reader: { read: () => Promise.resolve({ id: "object-1" }) },
         authorization: { authorize: () => Promise.resolve(true) },
         authorizationRootId: "authorization-root",
       }),
@@ -61,8 +62,10 @@ Deno.test("transaction and read-session ports expose opaque capabilities", async
   );
   assertEquals(
     await reads.execute(
-      { id: "auth-context" },
-      { objectId: "object-1" },
+      {
+        auth: { id: "auth-context" },
+        address: { objectId: "object-1" },
+      },
       async ({ reader, authorization, authorizationRootId }) => ({
         allowed: await authorization.authorize({ objectId: "object-1" }),
         object: await reader.read({ objectId: "object-1" }),
@@ -546,28 +549,28 @@ Deno.test("hook ports preserve pinned execution and grant evidence", async () =>
 
 Deno.test("migration port exposes SQL and durable apply attempts", async () => {
   const migration: MigrationRepository<
-    string,
     { id: string },
-    { id: string },
+    readonly string[],
     { valid: boolean },
     { id: string },
+    { authContextId: string },
     { applied: boolean }
   > = {
-    plan: (id) => Promise.resolve({ id }),
     inspect: (id) => Promise.resolve({ id }),
+    violations: () => Promise.resolve([]),
     validate: () => Promise.resolve({ valid: true }),
     generatedSql: () => Promise.resolve(["select 1"]),
-    apply: () => Promise.resolve({ applied: true }),
-    recordApplyAttempt: () => Promise.resolve(),
+    applyOnce: () => Promise.resolve({ applied: true }),
+    recordFailedAttempt: () => Promise.resolve(),
   };
 
   assertEquals(Object.keys(migration).toSorted(), [
-    "apply",
+    "applyOnce",
     "generatedSql",
     "inspect",
-    "plan",
-    "recordApplyAttempt",
+    "recordFailedAttempt",
     "validate",
+    "violations",
   ]);
   assertEquals(await migration.generatedSql("migration-1"), ["select 1"]);
 });
