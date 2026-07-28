@@ -2,6 +2,10 @@
 import { assertEquals } from "jsr:@std/assert";
 import { queryRequestContract } from "../../src/schemas/queries/query.ts";
 import { evaluateTargetedActionPolicy } from "../../src/adapters/outbound/postgres/repositories/query_object_repository.ts";
+import {
+  makeQueryObjectsService,
+  type QueryDefinition,
+} from "../../src/application/services/query_objects.ts";
 import type { AuthContext } from "../../src/domain/auth/model.ts";
 
 Deno.test("query contract is strict, Project-scoped, and bounded", () => {
@@ -29,6 +33,64 @@ Deno.test("query contract is strict, Project-scoped, and bounded", () => {
     queryRequestContract.issues({ ...valid, sort: [] })[0]?.code,
     "minItems",
   );
+});
+
+Deno.test("query application owns definition-aware projection and sort validation", async () => {
+  const definition: QueryDefinition = {
+    revisionId: "revision",
+    document: { spec: { axi: { list: { fields: ["name"] } } } },
+    fields: {
+      id: { type: "string" },
+      updated_at: { type: "timestamp" },
+      name: { type: "string" },
+    },
+    packFields: ["name"],
+    identity: "operant/crm:lead",
+  };
+  let pageCalls = 0;
+  const service = makeQueryObjectsService({
+    async execute(_call, work) {
+      return await work({
+        definition: () => Promise.resolve(definition),
+        page: {
+          query: (plan) => {
+            pageCalls++;
+            return Promise.resolve({
+              items: [],
+              resolved_fields: [...plan.fields],
+              resolved_sort: [...plan.sort],
+              next_cursor: null,
+              has_more: false,
+              total: null,
+              policy_context_digest: "digest",
+            });
+          },
+        },
+      });
+    },
+  });
+  const base = {
+    project_id: "019b7a2e-7c10-7000-8000-000000000002",
+    definition: {
+      kind: "resource" as const,
+      publisher: "operant",
+      pack: "crm",
+      name: "lead",
+    },
+  };
+  const rejected = await service.query({ ...base, fields: ["missing"] }, auth);
+  assertEquals(rejected.ok, false);
+  assertEquals(pageCalls, 0);
+  const accepted = await service.query(base, auth);
+  assertEquals(accepted.ok, true);
+  assertEquals(pageCalls, 1);
+  if (accepted.ok) {
+    assertEquals(accepted.value.resolved_fields, ["name"]);
+    assertEquals(accepted.value.resolved_sort, [
+      { field: "updated_at", direction: "desc" },
+      { field: "id", direction: "desc" },
+    ]);
+  }
 });
 
 const auth: AuthContext = {

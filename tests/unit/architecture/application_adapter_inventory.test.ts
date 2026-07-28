@@ -616,6 +616,28 @@ Deno.test("secret and grant orchestration stays inward over frozen lifecycle por
   assertMatch(composition, /makePostgresHookSecretGrantPersistence/);
 });
 
+Deno.test("query orchestration owns same-session definition-aware decisions", async () => {
+  const application = await Deno.readTextFile(
+    "src/application/services/query_objects.ts",
+  );
+  const adapter = await Deno.readTextFile(
+    "src/adapters/outbound/postgres/repositories/query_object_repository.ts",
+  );
+  const composition = await Deno.readTextFile("src/composition/application.ts");
+
+  assertMatch(application, /QueryObjectRepository/);
+  assertMatch(application, /QueryReadSessionPort/);
+  assertMatch(application, /resolveFields/);
+  assertMatch(application, /resolveSort/);
+  assertMatch(application, /QueryRepositoryError/);
+  assertEquals(application.includes("<T extends object>"), false);
+  assertEquals(adapter.includes("validationError"), false);
+  assertEquals(adapter.includes("Result<QueryResponse>"), false);
+  assertEquals(adapter.includes("resolveFields"), false);
+  assertEquals(adapter.includes("resolveSort"), false);
+  assertMatch(composition, /makeQueryObjectsService\(queryRepository\)/);
+});
+
 Deno.test("high-surface concrete imports map to complete semantic ports", () => {
   const replacements = (importer: string, target: string) =>
     EXPECTED_APPLICATION_ADAPTER_EDGES.find((edge) =>

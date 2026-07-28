@@ -1,9 +1,3 @@
-import {
-  err,
-  ok,
-  type Result,
-  validationError,
-} from "../../../../domain/errors/result.ts";
 import type { AuthContext } from "../../../../domain/auth/model.ts";
 import {
   ExpressionError,
@@ -22,10 +16,16 @@ import { query, type Queryable, quoteIdentifier, type Sql } from "../client.ts";
 import { lockReadAuthority } from "../object_read_boundary.ts";
 import { ObjectReadAuthorityInvalidError } from "../../../../application/ports/object_reader.ts";
 import type { DefinitionIdentity } from "../../../../domain/objects/read.ts";
+import {
+  type QueryDefinition,
+  type QueryExecutionPlan,
+  type QueryReadSessionPort,
+  QueryRepositoryError,
+} from "../../../../application/services/query_objects.ts";
 
 export type QueryObjectsRequest = QueryRequest;
 export type QueryObjectsDto = QueryResponse;
-type Definition = {
+type Definition = QueryDefinition & {
   revisionId: string;
   table: string;
   document: Record<string, unknown>;
@@ -67,88 +67,93 @@ export type TargetedActionPolicyTarget = Readonly<{
   objectId?: string;
 }>;
 
-class QueryFailure extends Error {
-  constructor(
-    readonly code: string,
-    message: string,
-    readonly details?: unknown,
-  ) {
-    super(message);
-  }
-}
+type QueryFailure = QueryRepositoryError;
+const QueryFailure = QueryRepositoryError;
 
 export function makePostgresQueryObjectRepository(
   deps: { sql: Sql; cursors?: () => QueryCursorSigner },
-) {
+): QueryReadSessionPort {
   let cursor: QueryCursorSigner | undefined;
-  return {
-    async query(
-      request: QueryRequest,
-      auth: AuthContext,
-    ): Promise<Result<QueryResponse>> {
+  return Object.freeze({
+    async execute<T>(
+      call: Readonly<{ input: QueryRequest; auth: AuthContext }>,
+      work: Parameters<QueryReadSessionPort["execute"]>[1],
+    ): Promise<T> {
       try {
-        return ok(
-          await deps.sql.begin(async (tx) => {
-            await lockReadAuthority(tx, auth, request.project_id);
-            return await execute(
-              tx,
-              request,
-              auth,
-              deps.cursors?.() ??
-                (cursor ??= QueryCursorSigner.fromEnvironment()),
-            );
-          }) as QueryResponse,
-        );
+        return await deps.sql.begin(async (tx) => {
+          await lockReadAuthority(tx, call.auth, call.input.project_id);
+          const project = await query(
+            tx,
+            "select id from projects where id=$1 for share",
+            [call.input.project_id],
+          );
+          if (!project.rows.length) throw hidden();
+          let definition: Definition | null | undefined;
+          return await work(Object.freeze({
+            async definition(): Promise<QueryDefinition | null> {
+              definition ??= await resolveDefinition(tx, call.input);
+              if (!definition) return null;
+              const { table: _table, ...publicDefinition } = definition;
+              return publicDefinition;
+            },
+            page: Object.freeze({
+              async query(plan: QueryExecutionPlan): Promise<QueryResponse> {
+                definition ??= await resolveDefinition(tx, call.input);
+                if (!definition) throw hidden();
+                return await executePage(
+                  tx,
+                  call.input,
+                  call.auth,
+                  definition,
+                  [...plan.fields],
+                  [...plan.sort],
+                  deps.cursors?.() ??
+                    (cursor ??= QueryCursorSigner.fromEnvironment()),
+                );
+              },
+            }),
+          })) as T;
+        }) as T;
       } catch (error) {
-        const failure = error instanceof QueryFailure
-          ? error
-          : error instanceof ExpressionError
-          ? new QueryFailure("bad_request", "query expression is invalid", {
-            issues: [{
-              path: "/where",
-              code: error.code,
-              message: error.message,
-              ...error.details,
-            }],
-          })
-          : error instanceof ObjectReadAuthorityInvalidError
-          ? new QueryFailure(
+        if (error instanceof QueryRepositoryError) throw error;
+        if (error instanceof ExpressionError) {
+          throw new QueryRepositoryError(
+            "bad_request",
+            "query expression is invalid",
+            {
+              issues: [{
+                path: "/where",
+                code: error.code,
+                message: error.message,
+                ...error.details,
+              }],
+            },
+          );
+        }
+        if (error instanceof ObjectReadAuthorityInvalidError) {
+          throw new QueryRepositoryError(
             "credential_invalid",
             "credential authority is no longer valid",
-          )
-          : new QueryFailure("internal_error", "query could not be completed");
-        return err({
-          ...validationError(failure.code, failure.message, failure.details),
-          severity: failure.code === "not_found"
-            ? "not_found"
-            : failure.code === "authentication_required" ||
-                failure.code === "credential_invalid"
-            ? "authentication"
-            : failure.code === "internal_error"
-            ? "internal"
-            : "validation",
-        });
+          );
+        }
+        throw new QueryRepositoryError(
+          "internal_error",
+          "query could not be completed",
+        );
       }
     },
-  };
+  });
 }
 
-async function execute(
+async function executePage(
   sql: Queryable,
   request: QueryRequest,
   auth: AuthContext,
+  definition: Definition,
+  fields: string[],
+  sort: ResolvedSort[],
   cursors: QueryCursorSigner,
 ): Promise<QueryResponse> {
-  const project = await query(
-    sql,
-    "select id from projects where id=$1 for share",
-    [request.project_id],
-  );
-  if (!project.rows.length) throw hidden();
-  const definition = await resolveDefinition(sql, request);
-  if (!definition) throw hidden();
-  const fields = resolveFields(request.fields, definition);
-  const sort = resolveSort(request.sort, definition);
   const params: unknown[] = [request.project_id];
   const user = lowerExpression(request.where ?? "true", {
     fields: definition.fields,
@@ -337,50 +342,6 @@ async function resolveDefinition(
     identity:
       `${request.definition.publisher}/${request.definition.pack}:${request.definition.name}`,
   };
-}
-function resolveFields(
-  requested: string[] | undefined,
-  definition: Definition,
-) {
-  if (requested) {
-    duplicates(requested, "projection");
-    for (const f of requested) {
-      if (!definition.packFields.includes(f)) {
-        throw new QueryFailure("bad_request", `unknown projection field ${f}`);
-      }
-    }
-    return requested;
-  }
-  const list = record(record(record(definition.document.spec).axi).list);
-  const axi = Array.isArray(list.fields)
-    ? list.fields.map(String).filter((f) =>
-      f !== "id" && definition.packFields.includes(f)
-    )
-    : [];
-  return (axi.length ? axi : definition.packFields.slice(0, 20));
-}
-function resolveSort(
-  input: QueryRequest["sort"],
-  definition: Definition,
-): ResolvedSort[] {
-  const raw = input ?? [{ field: "updated_at", direction: "desc" as const }];
-  duplicates(raw.map((s) => s.field), "sort");
-  for (const s of raw) {
-    if (s.field === "id") {
-      throw new QueryFailure(
-        "bad_request",
-        "id is an implicit sort tie-breaker",
-      );
-    }
-    if (!definition.fields[s.field]) {
-      throw new QueryFailure("bad_request", `unknown sort field ${s.field}`);
-    }
-  }
-  const out = [...raw];
-  if (!out.some((s) => s.field === "id")) {
-    out.push({ field: "id", direction: out[out.length - 1].direction });
-  }
-  return out;
 }
 export async function evaluateObjectPolicy(
   sql: Queryable,
@@ -996,14 +957,6 @@ function fieldType(v: unknown): FieldSpec["type"] {
     )
     ? String(v) as FieldSpec["type"]
     : "string";
-}
-function duplicates(values: string[], kind: string) {
-  if (new Set(values).size !== values.length) {
-    throw new QueryFailure(
-      "bad_request",
-      `${kind} fields must not contain duplicates`,
-    );
-  }
 }
 function qi(v: string) {
   return quoteIdentifier(v);

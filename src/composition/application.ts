@@ -177,9 +177,7 @@ export function makeApplication(
     }),
 
     hookSecretGrants,
-    queries: makeQueryObjectsService({
-      query: ({ input, auth }) => queryRepository.query(input, auth),
-    }),
+    queries: makeQueryObjectsService(queryRepository),
     expressions: makeExpressionService(
       makePostgresExpressionDefinitionPort(sql as Queryable),
     ),

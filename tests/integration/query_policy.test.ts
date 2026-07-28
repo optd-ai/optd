@@ -11,6 +11,7 @@ import {
   startPostgresRuntime,
 } from "../../src/adapters/outbound/postgres-process/lifecycle.ts";
 import { makePostgresQueryObjectRepository } from "../../src/adapters/outbound/postgres/repositories/query_object_repository.ts";
+import { makeQueryObjectsService } from "../../src/application/services/query_objects.ts";
 import { QueryCursorSigner } from "../../src/domain/queries/cursor.ts";
 import { uuidV7 } from "../../src/domain/ids/uuid_v7.ts";
 
@@ -139,10 +140,12 @@ Deno.test("query pushes assigned ABAC before count and page on PostgreSQL", asyn
       roles: [],
       createdAt: new Date().toISOString(),
     };
-    const service = makePostgresQueryObjectRepository({
-      sql,
-      cursors: () => new QueryCursorSigner("integration master key"),
-    });
+    const service = makeQueryObjectsService(
+      makePostgresQueryObjectRepository({
+        sql,
+        cursors: () => new QueryCursorSigner("integration master key"),
+      }),
+    );
     const result = await service.query({
       project_id: project,
       definition: {
