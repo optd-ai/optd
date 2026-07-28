@@ -26,6 +26,7 @@ export type HttpProvider = {
   attempts: ProviderAttempt[];
   effects: ProviderAttempt[];
   enqueue(...behaviors: ProviderBehavior[]): void;
+  enqueueUnkeyed(...behaviors: ProviderBehavior[]): void;
   enqueueForKey(idempotencyKey: string, ...behaviors: ProviderBehavior[]): void;
   release(token: string): void;
   waitForAttempts(
@@ -41,6 +42,10 @@ export type HttpProvider = {
     count: number,
     completion: Promise<unknown>,
   ): Promise<ProviderAttempt[]>;
+  waitForUnkeyedAttemptsBefore(
+    count: number,
+    completion: Promise<unknown>,
+  ): Promise<ProviderAttempt[]>;
   close(): Promise<void>;
 };
 
@@ -50,6 +55,7 @@ export function startHttpProvider(
 ): HttpProvider {
   const controller = new AbortController();
   const queue = [...initial];
+  const unkeyedQueue: ProviderBehavior[] = [];
   const keyedQueues = new Map<string, ProviderBehavior[]>();
   const attempts: ProviderAttempt[] = [];
   const effects: ProviderAttempt[] = [];
@@ -64,7 +70,10 @@ export function startHttpProvider(
   }, async (request) => {
     const key = request.headers.get("idempotency-key");
     const keyed = key === null ? undefined : keyedQueues.get(key);
-    const behavior = keyed?.shift() ?? queue.shift() ?? { kind: "success" };
+    const behavior = keyed?.shift() ??
+      (key === null ? unkeyedQueue.shift() : undefined) ?? queue.shift() ?? {
+      kind: "success",
+    };
     if (key !== null && keyed?.length === 0) keyedQueues.delete(key);
     const duplicate = key !== null && effectedKeys.has(key);
     const attempt: ProviderAttempt = {
@@ -123,6 +132,9 @@ export function startHttpProvider(
     enqueue(...behaviors) {
       queue.push(...behaviors);
     },
+    enqueueUnkeyed(...behaviors) {
+      unkeyedQueue.push(...behaviors);
+    },
     enqueueForKey(idempotencyKey, ...behaviors) {
       const existing = keyedQueues.get(idempotencyKey) ?? [];
       existing.push(...behaviors);
@@ -154,40 +166,30 @@ export function startHttpProvider(
       );
     },
     async waitForAttemptsBefore(count, completion) {
-      if (attempts.length >= count) return attempts.slice(0, count);
-      return await new Promise<ProviderAttempt[]>((resolve, reject) => {
-        let settled = false;
-        const notify = () => {
-          if (settled || attempts.length < count) return;
-          settled = true;
-          waiters.delete(notify);
-          resolve(attempts.slice(0, count));
-        };
-        waiters.add(notify);
-        completion.then(
-          () => {
-            if (settled) return;
-            settled = true;
-            waiters.delete(notify);
-            reject(
-              new Error(
-                `command completed after ${attempts.length}/${count} provider attempts`,
-              ),
-            );
-          },
-          (error) => {
-            if (settled) return;
-            settled = true;
-            waiters.delete(notify);
-            reject(error);
-          },
-        );
-      });
+      return await waitForMatchingAttemptsBefore(
+        attempts,
+        waiters,
+        () => true,
+        count,
+        completion,
+        "provider",
+      );
+    },
+    async waitForUnkeyedAttemptsBefore(count, completion) {
+      return await waitForMatchingAttemptsBefore(
+        attempts,
+        waiters,
+        (attempt) => attempt.idempotencyKey === null,
+        count,
+        completion,
+        "unkeyed provider",
+      );
     },
     async close() {
       controller.abort();
       for (const release of holds.values()) release();
       holds.clear();
+      unkeyedQueue.length = 0;
       keyedQueues.clear();
       for (const notify of waiters) notify();
       waiters.clear();
@@ -230,6 +232,47 @@ async function waitForMatchingAttempts(
     if (timer !== undefined) clearTimeout(timer);
   }
   return selected().slice(0, count);
+}
+
+async function waitForMatchingAttemptsBefore(
+  attempts: readonly ProviderAttempt[],
+  waiters: Set<() => void>,
+  matches: (attempt: ProviderAttempt) => boolean,
+  count: number,
+  completion: Promise<unknown>,
+  label: string,
+): Promise<ProviderAttempt[]> {
+  const selected = () => attempts.filter(matches);
+  if (selected().length >= count) return selected().slice(0, count);
+  return await new Promise<ProviderAttempt[]>((resolve, reject) => {
+    let settled = false;
+    const notify = () => {
+      const matching = selected();
+      if (settled || matching.length < count) return;
+      settled = true;
+      waiters.delete(notify);
+      resolve(matching.slice(0, count));
+    };
+    waiters.add(notify);
+    completion.then(
+      () => {
+        if (settled) return;
+        settled = true;
+        waiters.delete(notify);
+        reject(
+          new Error(
+            `command completed after ${selected().length}/${count} ${label} attempts`,
+          ),
+        );
+      },
+      (error) => {
+        if (settled) return;
+        settled = true;
+        waiters.delete(notify);
+        reject(error);
+      },
+    );
+  });
 }
 
 function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {

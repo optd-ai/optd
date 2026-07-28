@@ -221,6 +221,37 @@ Deno.test("DenoHookRunner parent watchdog stops synchronous infinite hooks", asy
   }
 });
 
+Deno.test("DenoHookRunner readiness cannot be preempted by hoisted user declarations", async () => {
+  const runner = new DenoHookRunner({ cacheDir: await Deno.makeTempDir() });
+  const result = await runner.run(
+    hook(
+      "hoisted_timeout",
+      `function TextEncoder() { while (true) { /* hoisted shadow exploit */ } }
+       while (true) { /* top-level user code must run after trusted readiness */ }`,
+      { timeoutMs: 30 },
+    ),
+    { hook: "hoisted_timeout", phase: "changeset.validate", input: {} },
+  );
+  assertEquals(result.ok, false);
+  assertEquals(result.error?.code, "hook_timeout");
+});
+
+Deno.test("DenoHookRunner ignores user readiness-frame forgeries", async () => {
+  const runner = new DenoHookRunner({ cacheDir: await Deno.makeTempDir() });
+  const result = await runner.run(
+    hook(
+      "forged_timeout",
+      `Deno.stderr.writeSync(new TextEncoder().encode("\\u001eOPERANT_HOOK_READY:forged\\u001e\\n"));
+       while (true) { /* a forged generic frame cannot control the parent timer */ }`,
+      { timeoutMs: 30 },
+    ),
+    { hook: "forged_timeout", phase: "changeset.validate", input: {} },
+  );
+  assertEquals(result.ok, false);
+  assertEquals(result.error?.code, "hook_timeout");
+  assertEquals(result.logs.includes("OPERANT_HOOK_READY"), false);
+});
+
 Deno.test("DenoHookRunner injects only declared secret env vars", async () => {
   const runner = new DenoHookRunner({
     cacheDir: await Deno.makeTempDir(),

@@ -183,7 +183,9 @@ export async function startLiveHarness(
     lifecycle = next.then(() => undefined, () => undefined);
     return await next;
   };
-  const runBinary = async (
+  const activeCommands = new Set<Deno.ChildProcess>();
+  const commandSettlements = new Set<Promise<void>>();
+  const runBinaryInner = async (
     args: string[],
     stdin?: string,
   ): Promise<CliResult> => {
@@ -197,14 +199,28 @@ export async function startLiveHarness(
       stdout: "piped",
       stderr: "piped",
     }).spawn();
-    if (stdin !== undefined) {
-      const writer = child.stdin.getWriter();
-      await writer.write(new TextEncoder().encode(stdin));
-      await writer.close();
+    activeCommands.add(child);
+    try {
+      if (stdin !== undefined) {
+        const writer = child.stdin.getWriter();
+        await writer.write(new TextEncoder().encode(stdin));
+        await writer.close();
+      }
+      return cliResult(argv, startedAt, await child.output());
+    } finally {
+      activeCommands.delete(child);
+      await legacyAuthBridge.after(Deno.pid);
     }
-    const result = cliResult(argv, startedAt, await child.output());
-    await legacyAuthBridge.after(Deno.pid);
-    return result;
+  };
+  const runBinary = (
+    args: string[],
+    stdin?: string,
+  ): Promise<CliResult> => {
+    const task = runBinaryInner(args, stdin);
+    const settled = task.then(() => undefined, () => undefined);
+    commandSettlements.add(settled);
+    settled.finally(() => commandSettlements.delete(settled));
+    return task;
   };
   const harness: LiveHarness = {
     rootDir,
@@ -378,6 +394,14 @@ export async function startLiveHarness(
           ),
         );
         launchers.clear();
+        for (const child of activeCommands) {
+          try {
+            child.kill("SIGTERM");
+          } catch {
+            // The command may have exited between snapshot and cancellation.
+          }
+        }
+        await Promise.all([...commandSettlements]);
         await closePostgresClient(sql).catch(() => undefined);
         if (serverRunning) {
           await stopServer(running);

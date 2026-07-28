@@ -446,7 +446,7 @@ Deno.test({
         expectedCode: "project_conflict" | "policy_denied",
       ) => {
         const token = `race-${name}`;
-        provider.enqueue({ kind: "hold", token });
+        provider.enqueueUnkeyed({ kind: "hold", token });
         const beforeStages = await evidenceCounts(harness.server.sql);
         const pending = harness.runOptctl([
           "--json",
@@ -459,7 +459,7 @@ Deno.test({
           JSON.stringify({ source_id: read.id }),
         ]);
         expectedAttempts++;
-        await provider.waitForAttemptsBefore(expectedAttempts, pending);
+        await provider.waitForUnkeyedAttemptsBefore(expectedAttempts, pending);
         const persistenceBarrier = await holdSessionAuthority(
           harness.server.sql,
           auth.session_id,
@@ -469,6 +469,7 @@ Deno.test({
           await observePostHookPersistence(
             harness.server.sql,
             persistenceBarrier.pid,
+            pending,
           );
           await mutate();
         } finally {
@@ -488,7 +489,12 @@ Deno.test({
             beforeStages,
             `${name} persisted partial evidence`,
           );
-          assertEquals(provider.attempts.length, expectedAttempts);
+          assertEquals(
+            provider.attempts.filter((attempt) =>
+              attempt.idempotencyKey === null
+            ).length,
+            expectedAttempts,
+          );
         } finally {
           await restore();
         }
@@ -596,7 +602,7 @@ Deno.test({
 
       const control = async (unrelated = false) => {
         const token = unrelated ? "unrelated" : "unchanged";
-        provider.enqueue(
+        provider.enqueueUnkeyed(
           unrelated ? { kind: "hold", token } : { kind: "success" },
         );
         const pending = harness.runOptctl([
@@ -611,7 +617,10 @@ Deno.test({
         ]);
         expectedAttempts++;
         if (unrelated) {
-          await provider.waitForAttemptsBefore(expectedAttempts, pending);
+          await provider.waitForUnkeyedAttemptsBefore(
+            expectedAttempts,
+            pending,
+          );
           const persistenceBarrier = await holdSessionAuthority(
             harness.server.sql,
             auth.session_id,
@@ -621,6 +630,7 @@ Deno.test({
             await observePostHookPersistence(
               harness.server.sql,
               persistenceBarrier.pid,
+              pending,
             );
             await query(
               harness.server.sql,
@@ -634,7 +644,11 @@ Deno.test({
         }
         const result = await pending;
         assertEquals(result.code, 0, `${token}: ${result.stderr}`);
-        assertEquals(provider.attempts.length, expectedAttempts);
+        assertEquals(
+          provider.attempts.filter((attempt) => attempt.idempotencyKey === null)
+            .length,
+          expectedAttempts,
+        );
         return JSON.parse(result.stdout).data;
       };
       const unchanged = await control();
@@ -701,21 +715,38 @@ async function holdSessionAuthority(sql: Sql, sessionId: string): Promise<{
 async function observePostHookPersistence(
   sql: Sql,
   blockerPid: number,
+  command: Promise<{ code: number; stdout: string; stderr: string }>,
 ): Promise<void> {
+  const completed = command.then((result) => ({
+    completed: true as const,
+    result,
+  }));
   for (let attempt = 0; attempt < 500; attempt++) {
-    const waiting = (await query<{ waiting: boolean }>(
-      sql,
-      `select exists(
-         select 1 from pg_stat_activity
-          where pid<>$1
-            and $1=any(pg_blocking_pids(pid))
-            and wait_event_type='Lock'
-            and position('auth_sessions' in query)>0
-       ) waiting`,
-      [blockerPid],
-    )).rows[0].waiting;
-    if (waiting) return;
-    await Promise.resolve();
+    const observation = await Promise.race([
+      query<{ waiting: boolean }>(
+        sql,
+        `select exists(
+           select 1 from pg_stat_activity
+            where pid<>$1
+              and $1=any(pg_blocking_pids(pid))
+              and wait_event_type='Lock'
+              and position('auth_sessions' in query)>0
+         ) waiting`,
+        [blockerPid],
+      ).then((result) => ({
+        completed: false as const,
+        waiting: result.rows[0].waiting,
+      })),
+      completed,
+    ]);
+    if (observation.completed) {
+      throw new Error(
+        `action command completed before post-hook authority lock: ${
+          JSON.stringify(observation.result)
+        }`,
+      );
+    }
+    if (observation.waiting) return;
   }
   const diagnostics = (await query(
     sql,

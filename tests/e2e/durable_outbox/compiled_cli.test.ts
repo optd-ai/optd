@@ -267,7 +267,11 @@ for (const logLevel of ["info", "trace"] as const) {
           permanentDelivery.id,
         );
         assertEquals(permanentHistory.length, 1);
-        provider.enqueue({ kind: "success" });
+        const repairedToken = `repaired-${permanentDelivery.id}`;
+        provider.enqueueForKey(permanentDelivery.id, {
+          kind: "hold",
+          token: repairedToken,
+        });
         await successful(
           harness.runOptctl([
             "--json",
@@ -279,6 +283,8 @@ for (const logLevel of ["info", "trace"] as const) {
           ]),
           outputs,
         );
+        await provider.waitForKeyAttempts(permanentDelivery.id, 2);
+        provider.release(repairedToken);
         await waitStatus(harness, permanentDelivery.id, "succeeded");
         const repaired = await deliveryAggregate(harness, permanentDelivery.id);
         assertEquals(repaired.retry_generation, 1);

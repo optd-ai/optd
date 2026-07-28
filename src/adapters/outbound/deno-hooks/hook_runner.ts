@@ -416,17 +416,18 @@ export class DenoHookRunner {
     readyFrame: string,
   ): Promise<string> {
     await Deno.mkdir(this.#cacheDir, { recursive: true, mode: 0o700 });
-    const path = await Deno.makeTempFile({
+    const directory = await Deno.makeTempDir({
       dir: this.#cacheDir,
-      prefix: "entry_",
-      suffix: ".ts",
+      prefix: "invocation_",
     });
-    await Deno.chmod(path, 0o600);
-    await Deno.writeTextFile(
-      path,
-      `${trustedPrelude(readyFrame)}\n${hook.scriptContent}`,
-    );
-    return path;
+    await Deno.chmod(directory, 0o700);
+    const entryPath = `${directory}/entry.ts`;
+    const hookPath = `${directory}/hook.ts`;
+    await Deno.writeTextFile(hookPath, hook.scriptContent, { mode: 0o600 });
+    await Deno.writeTextFile(entryPath, trustedPrelude(readyFrame), {
+      mode: 0o600,
+    });
+    return entryPath;
   }
 
   #capabilityError(hook: HookDefinition): string | null {
@@ -627,7 +628,9 @@ export async function resolveHookDenoBinary(
 }
 
 function trustedPrelude(readyFrame: string): string {
-  return `(() => {
+  return `const __operantEncoder = new globalThis.TextEncoder();
+const __operantWriteStderr = Deno.stderr.writeSync.bind(Deno.stderr);
+(() => {
   const nativeFetch = globalThis.fetch.bind(globalThis);
   const safeFetch = async function (input, init = undefined) {
     const response = await nativeFetch(input, { ...(init ?? {}), redirect: "manual" });
@@ -676,14 +679,17 @@ for (const __operantGlobalName of [
     configurable: false,
   });
 }
-Deno.stderr.writeSync(
-  new TextEncoder().encode(${JSON.stringify(readyFrame)}),
+__operantWriteStderr(
+  __operantEncoder.encode(${JSON.stringify(readyFrame)}),
 );
+await import("./hook.ts");
 `;
 }
 
 async function removeEntry(path: string): Promise<void> {
-  await Deno.remove(path).catch(() => undefined);
+  const separator = path.lastIndexOf("/");
+  const directory = separator < 0 ? path : path.slice(0, separator);
+  await Deno.remove(directory, { recursive: true }).catch(() => undefined);
 }
 
 function curatedEnvelope(value: HookEnvelope): HookEnvelope {
@@ -764,13 +770,28 @@ function readControlledBounded(
       }
     }
     resolveReady(false);
-    const text = decode(concat(chunks, retained)).replace(controlFrame, "");
+    const text = stripHookControlFrames(
+      decode(concat(chunks, retained)).replaceAll(controlFrame, ""),
+    );
     return {
       bytes: new TextEncoder().encode(text),
       truncated,
     };
   })();
   return { ready, result };
+}
+
+function stripHookControlFrames(input: string): string {
+  const prefix = "\u001eOPERANT_HOOK_READY:";
+  let output = input;
+  while (true) {
+    const start = output.indexOf(prefix);
+    if (start < 0) return output;
+    const end = output.indexOf("\u001e", start + prefix.length);
+    if (end < 0) return output.slice(0, start);
+    const after = end + 1 + (output[end + 1] === "\n" ? 1 : 0);
+    output = output.slice(0, start) + output.slice(after);
+  }
 }
 
 async function readBounded(

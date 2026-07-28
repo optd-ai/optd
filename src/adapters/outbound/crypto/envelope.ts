@@ -230,7 +230,7 @@ function validateAadIdentity(input: SecretValueAad): void {
 }
 
 export function makeEnvelopeSecretCipher(
-  envelope = new EnvelopeCrypto(),
+  envelope: EnvelopeCrypto,
 ): SecretCipher {
   const aad = (value: ApplicationSecretValueAad, keyId?: string) => ({
     secret_id: value.rowId,

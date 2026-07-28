@@ -110,6 +110,37 @@ Deno.test("production repository preserves stable identity, fixed lease fencing,
     assertEquals(afterRetry.total_attempts, beforeRetry.total_attempts);
     assertEquals(afterRetry.id, beforeRetry.id);
 
+    const generationClaims = (await Promise.all([
+      repository.claim(uuidV7(), 1, 1_000, new Date(started.getTime() + 6)),
+      new PostgresOutboxRepository(sql).claim(
+        uuidV7(),
+        1,
+        1_000,
+        new Date(started.getTime() + 6),
+      ),
+    ])).flat();
+    assertEquals(generationClaims.length, 1);
+    assertEquals(generationClaims[0].retry_generation, 1);
+    assertEquals(generationClaims[0].attempt_number, 1);
+    assertEquals(
+      await repository.complete(
+        generationClaims[0],
+        { outcome: "succeeded" },
+        evidence(),
+        0,
+        new Date(started.getTime() + 7),
+      ),
+      "succeeded",
+    );
+    const completedRetry = await repository.inspect(
+      fixture.deliveryId,
+    ) as Record<
+      string,
+      unknown
+    >;
+    assertEquals(completedRetry.retry_generation, 1);
+    assertEquals(completedRetry.attempts_in_generation, 1);
+
     await assertRejects(() =>
       query(sql!, "delete from outbox_attempts where delivery_id=$1", [
         fixture.deliveryId,
@@ -141,9 +172,9 @@ Deno.test("production repository preserves stable identity, fixed lease fencing,
       ])
     );
     assertEquals(
-      (await repository.claim(worker, 10, 1, new Date(started.getTime() + 6)))
+      (await repository.claim(worker, 10, 1, new Date(started.getTime() + 8)))
         .length,
-      1,
+      0,
     );
   } finally {
     if (sql) await closePostgresClient(sql).catch(() => undefined);
