@@ -14,6 +14,7 @@ import { canonicalSha256 } from "../../../src/domain/ids/canonical_json.ts";
 import { makeStageChangesetService } from "../../../src/application/services/changesets/stage_changesets.ts";
 import { buildHookEnvelope } from "../../../src/application/services/hooks/stage_hook_coordinator.ts";
 import { PostgresStageRepository } from "../../../src/adapters/outbound/postgres/stage_repository.ts";
+import { PostgresAuthorizationRepository } from "../../../src/adapters/outbound/postgres/authorization_repository.ts";
 import type { AuthContext } from "../../../src/domain/auth/model.ts";
 import {
   type LiveHarness,
@@ -803,7 +804,10 @@ Deno.test({
         createdAt: new Date(authRow.created_at as string).toISOString(),
       });
       const injected = makeStageChangesetService(
-        new PostgresStageRepository(harness.server.sql),
+        new PostgresStageRepository(
+          harness.server.sql,
+          (sql) => new PostgresAuthorizationRepository(sql),
+        ),
         {
           async coordinate(input) {
             const declaration = input.hook_declarations[0];
@@ -863,7 +867,10 @@ Deno.test({
       );
       const beforeMalformedCoordinator = await stageEvidenceCounts(harness);
       const malformedInjected = makeStageChangesetService(
-        new PostgresStageRepository(harness.server.sql),
+        new PostgresStageRepository(
+          harness.server.sql,
+          (sql) => new PostgresAuthorizationRepository(sql),
+        ),
         {
           coordinate() {
             return Promise.resolve({

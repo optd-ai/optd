@@ -2,6 +2,8 @@ import {
   type AuthorizationCutoff,
   canonicalTargetDigestInput,
   type TargetDigestInput,
+  type TargetedAuthorityCutoff,
+  type TargetedPolicyEvaluator,
 } from "./targeted_action.ts";
 
 export type JsonScalar = string | number | boolean | null;
@@ -627,9 +629,8 @@ export async function createActionStageAuthorityCutoff(
  * Locks and evaluates exact action authority in one transaction, then persists
  * that same immutable root/target/digest tuple after hooks complete outside it.
  */
-export interface ActionStageAuthorityPort<TAuthorityRequest, TCutoff> {
-  lockAndEvaluate(request: TAuthorityRequest): Promise<TCutoff>;
-}
+export type ActionStageAuthorityPort<TAuthorityRequest, TCutoff> =
+  TargetedPolicyEvaluator<TAuthorityRequest, TCutoff>;
 
 /** Resolves the exact ordered action-stage hooks pinned by the definition. */
 export interface PinnedActionHookCatalog<
@@ -660,9 +661,8 @@ export interface ActionTargetReader<TTargetRequest, TResult> {
 }
 
 /** Evaluates and asserts semantic-action authority for the reviewed target. */
-export interface ActionPolicyAuthorizer<TAuthorizationRequest, TDecision> {
-  assertAllowed(request: TAuthorizationRequest): Promise<TDecision>;
-}
+export type ActionPolicyAuthorizer<TAuthorizationRequest, TDecision> =
+  TargetedAuthorityCutoff<TAuthorizationRequest, TDecision>;
 
 export type ActionHookExecutionEvidence<
   TPhase extends HookPhase = "action.stage",

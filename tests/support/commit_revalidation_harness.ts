@@ -3,6 +3,7 @@ import postgres from "npm:postgres";
 import { assertEquals } from "jsr:@std/assert";
 import type { AuthContext } from "../../src/domain/auth/model.ts";
 import { PostgresStageRepository } from "../../src/adapters/outbound/postgres/stage_repository.ts";
+import { PostgresAuthorizationRepository } from "../../src/adapters/outbound/postgres/authorization_repository.ts";
 import { PostgresCommitRepository } from "../../src/adapters/outbound/postgres/commit_repository.ts";
 import { makeStageChangesetService } from "../../src/application/services/changesets/stage_changesets.ts";
 import { makeCommitChangesetService } from "../../src/application/services/commit/commit_changeset.ts";
@@ -36,7 +37,10 @@ export async function startCommitMatrix(
   ]);
   assertEquals(project.code, 0, project.stderr);
   const auth = await currentAuth(harness.server.sql);
-  const stageRepository = new PostgresStageRepository(harness.server.sql);
+  const stageRepository = new PostgresStageRepository(
+    harness.server.sql,
+    (sql) => new PostgresAuthorizationRepository(sql),
+  );
   const stageService = makeStageChangesetService(stageRepository);
   return {
     harness,

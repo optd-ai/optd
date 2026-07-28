@@ -9,8 +9,6 @@ import type {
 import type { StageDto, StageSource } from "../../ports/stage_repository.ts";
 import type {
   ActionCatalog,
-  ActionPolicyAuthorizer,
-  ActionStageAuthorityPort,
   ActionTargetReader,
   HookExecutionEvidenceRepository,
   PinnedActionHookCatalog,
@@ -19,6 +17,10 @@ import type {
 import { StageHookError } from "../../ports/hook_executor.ts";
 import { validateFieldMap } from "../../../schemas/changesets/field_values.ts";
 import type { TargetedActionPolicyTarget } from "../query_objects.ts";
+import type {
+  TargetedAuthorityCutoff,
+  TargetedPolicyEvaluator,
+} from "../../ports/repair/targeted_action.ts";
 
 export function validateActionInput(
   input: Record<string, unknown>,
@@ -173,7 +175,7 @@ export interface ActionStageCapabilities
     ActionCatalog<ActionIdentity, ActionDefinition>,
     ActionTargetReader<ActionReadRequest, ActionReadResult>,
     PinnedActionHookCatalog<ActionIdentity & { revisionId: string }>,
-    ActionStageAuthorityPort<
+    TargetedPolicyEvaluator<
       Readonly<{
         projectId: string;
         action: string;
@@ -182,7 +184,7 @@ export interface ActionStageCapabilities
       }>,
       ActionAuthorityResult
     >,
-    ActionPolicyAuthorizer<ActionAuthorityResult, ActionAuthorityResult>,
+    TargetedAuthorityCutoff<ActionAuthorityResult, ActionAuthorityResult>,
     HookExecutionEvidenceRepository<
       Readonly<{
         input: unknown;

@@ -53,16 +53,14 @@ Deno.test("query application owns definition-aware projection and sort validatio
       return await work({
         definition: () => Promise.resolve(definition),
         page: {
-          query: (plan) => {
+          query: (_plan) => {
             pageCalls++;
             return Promise.resolve({
-              items: [],
-              resolved_fields: [...plan.fields],
-              resolved_sort: [...plan.sort],
-              next_cursor: null,
-              has_more: false,
+              rows: [],
+              nextCursor: null,
+              hasMore: false,
               total: null,
-              policy_context_digest: "digest",
+              policyDigest: "digest",
             });
           },
         },

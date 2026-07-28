@@ -229,7 +229,11 @@ export function validateSeedSelection(
 export function reconcileSeedRow(
   desired: Record<string, unknown>,
   current: Record<string, unknown> | undefined,
-  context: { operationKey: string; projectId: string; resource: string },
+  context: {
+    operationKey: string;
+    projectId: string;
+    resource: string;
+  },
   fieldDescriptors: Record<string, unknown> = {},
 ): Record<string, unknown> | null {
   if (!current) {

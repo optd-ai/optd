@@ -78,15 +78,11 @@ export type SeedReconciliationDecision =
   }>
   | Readonly<{ kind: "create"; objectId: string }>;
 
-export interface IdAllocator {
-  nextUuidV7(): string;
-}
-
 /** Archived rows are historical evidence and never candidates for restore/update. */
 export function decideSeedReconciliation(
   matches: readonly SeedMatch[],
   desiredValuesDigest: string,
-  ids: IdAllocator,
+  ids: Readonly<{ nextUuidV7(): string }>,
 ): SeedReconciliationDecision {
   const active = matches.filter((match) => match.archivedAt === null);
   if (active.length > 1) {

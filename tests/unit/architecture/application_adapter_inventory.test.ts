@@ -540,8 +540,8 @@ Deno.test("action staging orchestration stays inward over granular capabilities"
   assertMatch(application, /ActionCatalog/);
   assertMatch(application, /ActionTargetReader/);
   assertMatch(application, /PinnedActionHookCatalog/);
-  assertMatch(application, /ActionStageAuthorityPort/);
-  assertMatch(application, /ActionPolicyAuthorizer/);
+  assertMatch(application, /TargetedPolicyEvaluator/);
+  assertMatch(application, /TargetedAuthorityCutoff/);
   assertMatch(application, /HookExecutionEvidenceRepository/);
   assertMatch(application, /lockAndEvaluate/);
   assertMatch(application, /executeHooks/);
@@ -568,10 +568,10 @@ Deno.test("all frozen hook and action ports have production consumers and implem
     const port of [
       "HookExecutor",
       "HookSecretResolver",
-      "ActionStageAuthorityPort",
+      "TargetedPolicyEvaluator",
       "PinnedActionHookCatalog",
       "ActionTargetReader",
-      "ActionPolicyAuthorizer",
+      "TargetedAuthorityCutoff",
       "HookExecutionEvidenceRepository",
     ]
   ) {
@@ -646,6 +646,7 @@ Deno.test("composition owns concrete outbound adapter construction", async () =>
   assertEquals(outbox.includes("PostgresHookSecretRepository"), false);
   assertEquals(action.includes("query_object_repository.ts"), false);
   assertEquals(stage.includes("query_object_repository.ts"), false);
+  assertEquals(stage.includes("PostgresAuthorizationRepository"), false);
   assertMatch(action, /query_policy_sql\.ts/);
   assertMatch(stage, /query_policy_sql\.ts/);
   assertMatch(composition, /new PostgresObjectReader/);
@@ -706,6 +707,8 @@ Deno.test("query orchestration owns same-session definition-aware decisions", as
   assertMatch(application, /resolveFields/);
   assertMatch(application, /resolveSort/);
   assertMatch(application, /QueryRepositoryError/);
+  assertMatch(application, /queryRowDto/);
+  assertMatch(application, /resolved_fields/);
   assertEquals(application.includes("<T extends object>"), false);
   assertEquals(adapter.includes("validationError"), false);
   assertEquals(adapter.includes("Result<QueryResponse>"), false);

@@ -128,15 +128,18 @@ export type TargetEvaluationRequest = Readonly<{
   action: string;
 }>;
 
-export interface TargetedPolicyEvaluator {
-  evaluate(
-    request: TargetEvaluationRequest,
-  ): Promise<readonly TargetAuthorityEvidence[]>;
+export interface TargetedPolicyEvaluator<
+  TRequest = TargetEvaluationRequest,
+  TResult = readonly TargetAuthorityEvidence[],
+> {
+  lockAndEvaluate(request: TRequest): Promise<TResult>;
 }
 
-export interface TargetedAuthorityCutoff {
-  revalidate(cutoff: AuthorizationCutoff): Promise<
+export interface TargetedAuthorityCutoff<
+  TCutoff = AuthorizationCutoff,
+  TResult =
     | Readonly<{ valid: true }>
-    | Readonly<{ valid: false; reason: "stale" | "denied" }>
-  >;
+    | Readonly<{ valid: false; reason: "stale" | "denied" }>,
+> {
+  assertAllowed(cutoff: TCutoff): Promise<TResult>;
 }

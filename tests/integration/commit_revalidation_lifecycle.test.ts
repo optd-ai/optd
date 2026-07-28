@@ -5,6 +5,7 @@ import {
   type Sql,
 } from "../../src/adapters/outbound/postgres/client.ts";
 import { PostgresStageRepository } from "../../src/adapters/outbound/postgres/stage_repository.ts";
+import { PostgresAuthorizationRepository } from "../../src/adapters/outbound/postgres/authorization_repository.ts";
 import { uuidV7 } from "../../src/domain/ids/uuid_v7.ts";
 import {
   assertNoIdleClients,
@@ -144,7 +145,10 @@ Deno.test({
               lockTimeoutMs: 5_000,
             });
           const cancel = () =>
-            new PostgresStageRepository(cancelClient as unknown as Sql).cancel(
+            new PostgresStageRepository(
+              cancelClient as unknown as Sql,
+              (sql) => new PostgresAuthorizationRepository(sql),
+            ).cancel(
               stage.id,
               "ordered",
               matrix.auth,
@@ -259,7 +263,10 @@ Deno.test({
             });
             const blockerPid = await heldPromise;
             const decide = () =>
-              new PostgresStageRepository(decisionClient as unknown as Sql)
+              new PostgresStageRepository(
+                decisionClient as unknown as Sql,
+                (sql) => new PostgresAuthorizationRepository(sql),
+              )
                 .decideApproval(stage.id, stage.requirementId, {
                   decision,
                   reason: decision === "reject" ? "matrix rejection" : null,

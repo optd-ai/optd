@@ -38,6 +38,14 @@ export type QueryDefinition = Readonly<{
   identity: string;
 }>;
 
+export type QueryPhysicalPage = Readonly<{
+  rows: readonly Readonly<Record<string, unknown>>[];
+  nextCursor: string | null;
+  hasMore: boolean;
+  total: number | null;
+  policyDigest: string;
+}>;
+
 export type QueryExecutionPlan = Readonly<{
   request: QueryRequest;
   auth: AuthContext;
@@ -45,6 +53,24 @@ export type QueryExecutionPlan = Readonly<{
   fields: readonly string[];
   sort: readonly ResolvedSort[];
 }>;
+
+export type QueryPhysicalFailureKind =
+  | "hidden"
+  | "invalid_expression"
+  | "cursor_invalid"
+  | "authority_invalid"
+  | "invalid_data"
+  | "unexpected";
+
+export class QueryPhysicalError extends Error {
+  constructor(
+    readonly kind: QueryPhysicalFailureKind,
+    readonly context?: unknown,
+  ) {
+    super(kind);
+    this.name = "QueryPhysicalError";
+  }
+}
 
 export class QueryRepositoryError extends Error {
   constructor(
@@ -59,12 +85,12 @@ export class QueryRepositoryError extends Error {
 type QueryPagePort =
   & QueryPolicyRepository<
     QueryExecutionPlan,
-    QueryResponse
+    QueryPhysicalPage
   >
   & Pick<
     QueryObjectRepository<
       QueryExecutionPlan,
-      QueryResponse,
+      QueryPhysicalPage,
       never,
       never,
       never,
@@ -117,19 +143,32 @@ export function makeQueryObjectsService(port: QueryReadSessionPort) {
             if (!definition) throw hidden();
             const fields = resolveFields(request.fields, definition);
             const sort = resolveSort(request.sort, definition);
-            return await session.page.query({
+            const page = await session.page.query({
               request,
               auth,
               definition,
               fields,
               sort,
             });
+            return {
+              items: page.rows.map((row) =>
+                queryRowDto(row, request, definition, fields)
+              ),
+              resolved_fields: fields,
+              resolved_sort: sort,
+              next_cursor: page.nextCursor,
+              has_more: page.hasMore,
+              total: page.total,
+              policy_context_digest: page.policyDigest,
+            };
           },
         );
         return ok(response);
       } catch (error) {
         const failure = error instanceof QueryRepositoryError
           ? error
+          : error instanceof QueryPhysicalError
+          ? mapPhysicalFailure(error)
           : new QueryRepositoryError(
             "internal_error",
             "query could not be completed",
@@ -148,6 +187,35 @@ export function makeQueryObjectsService(port: QueryReadSessionPort) {
       }
     },
   });
+}
+
+function mapPhysicalFailure(error: QueryPhysicalError): QueryRepositoryError {
+  switch (error.kind) {
+    case "hidden":
+      return hidden();
+    case "invalid_expression":
+      return new QueryRepositoryError(
+        "bad_request",
+        "query expression is invalid",
+        error.context,
+      );
+    case "cursor_invalid":
+      return new QueryRepositoryError(
+        "invalid_cursor",
+        "query cursor is invalid or stale",
+      );
+    case "authority_invalid":
+      return new QueryRepositoryError(
+        "credential_invalid",
+        "credential authority is no longer valid",
+      );
+    case "invalid_data":
+    case "unexpected":
+      return new QueryRepositoryError(
+        "internal_error",
+        "query could not be completed",
+      );
+  }
 }
 
 function resolveFields(
@@ -208,6 +276,112 @@ function rejectDuplicates(values: readonly string[], kind: string): void {
       `${kind} fields must not contain duplicates`,
     );
   }
+}
+
+function queryRowDto(
+  row: Readonly<Record<string, unknown>>,
+  request: QueryRequest,
+  definition: QueryDefinition,
+  fields: readonly string[],
+): Record<string, unknown> {
+  const common = {
+    id: String(row.id),
+    project_id: String(row.project_id),
+    version: Number(row.version),
+    object_version_id: String(row.current_object_version_id),
+    archived_at: timestamp(row.archived_at),
+    created_at: timestamp(row.created_at),
+    updated_at: timestamp(row.updated_at),
+  };
+  const identity = {
+    publisher: request.definition.publisher,
+    pack: request.definition.pack,
+    name: request.definition.name,
+    revision_id: definition.revisionId,
+  };
+  const projected = Object.fromEntries(fields.map((field) => [
+    field,
+    typedQueryValue(row, field, definition.fields[field]),
+  ]));
+  return request.definition.kind === "resource"
+    ? { kind: "object", ...common, resource: identity, data: projected }
+    : {
+      kind: "relationship",
+      ...common,
+      relationship: identity,
+      from: String(row.from_object_id),
+      to: String(row.to_object_id),
+      fields: projected,
+    };
+}
+
+function typedQueryValue(
+  row: Readonly<Record<string, unknown>>,
+  field: string,
+  spec: FieldSpec | undefined,
+): unknown {
+  let found = row[field];
+  if (typeof found === "bigint") found = Number(found);
+  if (found instanceof Date) found = found.toISOString();
+  if (spec?.type === "decimal") return canonicalDecimal(found);
+  if (spec?.type === "timestamp" && found !== null) {
+    const instant = new Date(String(found));
+    if (Number.isNaN(instant.getTime())) {
+      throw new QueryRepositoryError(
+        "internal_error",
+        "database timestamp is invalid",
+      );
+    }
+    return instant.toISOString();
+  }
+  if (spec?.type === "integer" && found !== null) {
+    if (typeof found !== "string" || !/^-?[0-9]+$/.test(found)) {
+      throw new QueryRepositoryError(
+        "internal_error",
+        "database integer was not returned as text",
+      );
+    }
+    const integer = BigInt(found);
+    if (
+      integer > BigInt(Number.MAX_SAFE_INTEGER) ||
+      integer < BigInt(Number.MIN_SAFE_INTEGER)
+    ) {
+      throw new QueryRepositoryError(
+        "internal_error",
+        "database integer exceeds JSON-safe range",
+      );
+    }
+    return Number(integer);
+  }
+  return found;
+}
+
+function canonicalDecimal(value: unknown): unknown {
+  if (value === null) return null;
+  if (typeof value !== "string") {
+    throw new QueryRepositoryError(
+      "internal_error",
+      "database decimal was not returned as text",
+    );
+  }
+  if (!/^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$/.test(value)) {
+    throw new QueryRepositoryError(
+      "internal_error",
+      "database returned a non-canonical decimal",
+    );
+  }
+  const [integer, fraction = ""] = value.split(".");
+  const trimmed = fraction.replace(/0+$/, "");
+  const normalized = trimmed ? `${integer}.${trimmed}` : integer;
+  return /^-0(?:\.0*)?$/.test(normalized) ? "0" : normalized;
+}
+
+function timestamp(value: unknown): string | null {
+  if (value == null) return null;
+  const instant = value instanceof Date ? value : new Date(String(value));
+  return Number.isNaN(instant.getTime())
+    ? String(value)
+    : instant.toISOString();
 }
 
 function record(value: unknown): Record<string, unknown> {

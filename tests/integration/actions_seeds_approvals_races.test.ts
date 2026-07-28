@@ -3,6 +3,7 @@ import { assertEquals, assertRejects } from "jsr:@std/assert";
 import { FixedClock } from "../../src/application/ports/clock.ts";
 import { query } from "../../src/adapters/outbound/postgres/client.ts";
 import { PostgresStageRepository } from "../../src/adapters/outbound/postgres/stage_repository.ts";
+import { PostgresAuthorizationRepository } from "../../src/adapters/outbound/postgres/authorization_repository.ts";
 import type { AuthContext } from "../../src/domain/auth/model.ts";
 import { uuidV7 } from "../../src/domain/ids/uuid_v7.ts";
 import { startAuthenticatedHarness } from "../support/authenticated_harness.ts";
@@ -37,7 +38,10 @@ Deno.test({
       assertEquals(project.code, 0, project.stderr);
       const projectId = JSON.parse(project.stdout).data.id as string;
       const auth = await currentAuth(harness.server.sql);
-      const repository = new PostgresStageRepository(harness.server.sql);
+      const repository = new PostgresStageRepository(
+        harness.server.sql,
+        (sql) => new PostgresAuthorizationRepository(sql),
+      );
       await grantReviewer(harness.server.sql, auth.principalId);
       const stage = (
         actor: AuthContext,
@@ -161,6 +165,7 @@ Deno.test({
       });
       const expiredRepository = new PostgresStageRepository(
         harness.server.sql,
+        (sql) => new PostgresAuthorizationRepository(sql),
         new FixedClock(new Date(expiresAt.getTime() + 1)),
       );
       assertEquals(
@@ -206,6 +211,7 @@ Deno.test({
       });
       const expiredReviewRepository = new PostgresStageRepository(
         harness.server.sql,
+        (sql) => new PostgresAuthorizationRepository(sql),
         new FixedClock(new Date(reviewExpiryAt.getTime() + 1)),
       );
       assertEquals(
@@ -302,6 +308,7 @@ Deno.test({
       });
       const expiryRepository = new PostgresStageRepository(
         harness.server.sql,
+        (sql) => new PostgresAuthorizationRepository(sql),
         new FixedClock(new Date(lockedExpiryAt.getTime() + 1)),
       );
       const expiryResult = await queueOneWithMutation(

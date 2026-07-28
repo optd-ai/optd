@@ -449,7 +449,7 @@ Deno.test({
         body: { allowed: true },
       });
       const pinnedInvocation = stageItem(harness, projectId, "pinned-version");
-      await provider.waitForAttempts(5);
+      await provider.waitForAttemptsBefore(5, pinnedInvocation);
       const rotatedDuringChild = await harness.runOptctl([
         "--json",
         "secret",

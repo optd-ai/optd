@@ -114,7 +114,10 @@ export function makeApplication(
       makeHookSecretResolver(hookSecretRepository),
       new DenoHookExecutor(options.hookRunnerOptions),
     );
-  const stageRepository = new PostgresStageRepository(sql);
+  const stageRepository = new PostgresStageRepository(
+    sql,
+    (transactionSql) => new PostgresAuthorizationRepository(transactionSql),
+  );
   const stageChangesets = makeStageChangesetService(
     stageRepository,
     stageHookCoordinator,
@@ -246,7 +249,11 @@ export function makeApplication(
           ),
       },
     seeds: makeStageSeedsService(
-      makePostgresSeedStageRepository(sql, changesets, authorizationRepository),
+      makePostgresSeedStageRepository(
+        sql,
+        changesets,
+        authorizationRepository,
+      ),
     ),
   };
 }

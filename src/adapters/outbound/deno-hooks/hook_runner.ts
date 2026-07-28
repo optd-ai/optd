@@ -60,6 +60,7 @@ export type DenoHookRunnerOptions = {
   stdoutLimitBytes?: number;
   stderrLimitBytes?: number;
   maximumTimeoutMs?: number;
+  inputDeliveryTimeoutMs?: number;
   serverPort?: number;
   serverHosts?: string[];
   databaseEndpoints?: string[];
@@ -178,25 +179,30 @@ export class DenoHookRunner {
     );
     const statusPromise = child.status;
     const delivery = startInputDelivery(child, curatedEnvelope(envelope));
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const timeout = new Promise<"timeout">((resolve) => {
-      timer = setTimeout(() => resolve("timeout"), hook.timeoutMs);
-    });
     const stdoutOverflow = stdoutPromise.then((value) =>
       value.overflow ? "stdout_overflow" as const : new Promise<never>(() => {})
     );
-    const deliveryFailure = delivery.writeAccepted.then(async (accepted) => {
-      if (accepted || await statusSettlesWithin(statusPromise, 100)) {
-        return await new Promise<never>(() => {});
-      }
-      return "delivery_failure" as const;
-    });
-    const completed = await Promise.race([
-      statusPromise,
-      timeout,
-      stdoutOverflow,
-      deliveryFailure,
+    let deliveryTimer: ReturnType<typeof setTimeout> | undefined;
+    const deliveryAccepted = await Promise.race([
+      delivery.writeAccepted,
+      new Promise<false>((resolve) => {
+        deliveryTimer = setTimeout(
+          () => resolve(false),
+          this.#options.inputDeliveryTimeoutMs ?? 5_000,
+        );
+      }),
     ]);
+    if (deliveryTimer !== undefined) clearTimeout(deliveryTimer);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const completed = deliveryAccepted
+      ? await Promise.race([
+        statusPromise,
+        new Promise<"timeout">((resolve) => {
+          timer = setTimeout(() => resolve("timeout"), hook.timeoutMs);
+        }),
+        stdoutOverflow,
+      ])
+      : "delivery_failure" as const;
     if (timer !== undefined) clearTimeout(timer);
     if (completed === "delivery_failure") {
       await killAndReap(child);
@@ -692,23 +698,6 @@ function concat(chunks: Uint8Array[], size: number): Uint8Array {
   }
   return out;
 }
-async function statusSettlesWithin(
-  status: Promise<Deno.CommandStatus>,
-  milliseconds: number,
-): Promise<boolean> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      status.then(() => true, () => true),
-      new Promise<false>((resolve) => {
-        timer = setTimeout(() => resolve(false), milliseconds);
-      }),
-    ]);
-  } finally {
-    if (timer !== undefined) clearTimeout(timer);
-  }
-}
-
 function startInputDelivery(
   child: Deno.ChildProcess,
   envelope: HookEnvelope,

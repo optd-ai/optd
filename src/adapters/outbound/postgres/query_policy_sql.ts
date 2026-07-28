@@ -9,7 +9,6 @@ import { uuidV7 } from "../../../domain/ids/uuid_v7.ts";
 import { QueryCursorSigner } from "../../../domain/queries/cursor.ts";
 import {
   type QueryRequest,
-  type QueryResponse,
   type ResolvedSort,
 } from "../../../schemas/queries/query.ts";
 import { query, type Queryable, quoteIdentifier, type Sql } from "./client.ts";
@@ -19,12 +18,12 @@ import type { DefinitionIdentity } from "../../../domain/objects/read.ts";
 import {
   type QueryDefinition,
   type QueryExecutionPlan,
+  QueryPhysicalError,
+  type QueryPhysicalPage,
   type QueryReadSessionPort,
-  QueryRepositoryError,
 } from "../../../application/services/query_objects.ts";
 
 export type QueryObjectsRequest = QueryRequest;
-export type QueryObjectsDto = QueryResponse;
 type Definition = QueryDefinition & {
   revisionId: string;
   table: string;
@@ -67,8 +66,8 @@ export type TargetedActionPolicyTarget = Readonly<{
   objectId?: string;
 }>;
 
-type QueryFailure = QueryRepositoryError;
-const QueryFailure = QueryRepositoryError;
+type QueryFailure = QueryPhysicalError;
+const QueryFailure = QueryPhysicalError;
 
 export function makePostgresQueryObjectRepository(
   deps: { sql: Sql; cursors?: () => QueryCursorSigner },
@@ -97,7 +96,9 @@ export function makePostgresQueryObjectRepository(
               return publicDefinition;
             },
             page: Object.freeze({
-              async query(plan: QueryExecutionPlan): Promise<QueryResponse> {
+              async query(
+                plan: QueryExecutionPlan,
+              ): Promise<QueryPhysicalPage> {
                 definition ??= await resolveDefinition(tx, call.input);
                 if (!definition) throw hidden();
                 return await executePage(
@@ -115,31 +116,21 @@ export function makePostgresQueryObjectRepository(
           })) as T;
         }) as T;
       } catch (error) {
-        if (error instanceof QueryRepositoryError) throw error;
+        if (error instanceof QueryPhysicalError) throw error;
         if (error instanceof ExpressionError) {
-          throw new QueryRepositoryError(
-            "bad_request",
-            "query expression is invalid",
-            {
-              issues: [{
-                path: "/where",
-                code: error.code,
-                message: error.message,
-                ...error.details,
-              }],
-            },
-          );
+          throw new QueryPhysicalError("invalid_expression", {
+            issues: [{
+              path: "/where",
+              code: error.code,
+              message: error.message,
+              ...error.details,
+            }],
+          });
         }
         if (error instanceof ObjectReadAuthorityInvalidError) {
-          throw new QueryRepositoryError(
-            "credential_invalid",
-            "credential authority is no longer valid",
-          );
+          throw new QueryPhysicalError("authority_invalid");
         }
-        throw new QueryRepositoryError(
-          "internal_error",
-          "query could not be completed",
-        );
+        throw new QueryPhysicalError("unexpected");
       }
     },
   });
@@ -153,7 +144,7 @@ async function executePage(
   fields: string[],
   sort: ResolvedSort[],
   cursors: QueryCursorSigner,
-): Promise<QueryResponse> {
+): Promise<QueryPhysicalPage> {
   const params: unknown[] = [request.project_id];
   const user = lowerExpression(request.where ?? "true", {
     fields: definition.fields,
@@ -205,16 +196,10 @@ async function executePage(
         sort.map((item) => definition.fields[item.field]),
       );
     } catch {
-      throw new QueryFailure(
-        "invalid_cursor",
-        "query cursor is invalid or stale",
-      );
+      throw new QueryFailure("cursor_invalid");
     }
     if (position.values.length !== sort.length) {
-      throw new QueryFailure(
-        "invalid_cursor",
-        "query cursor is invalid or stale",
-      );
+      throw new QueryFailure("cursor_invalid");
     }
   }
   const keyset = position
@@ -253,7 +238,6 @@ async function executePage(
   const limit = request.limit ?? 50;
   const hasMore = rows.length > limit;
   const page = rows.slice(0, limit);
-  const items = page.map((row) => dto(row, request, definition, fields));
   let next: string | null = null;
   if (hasMore) {
     const last = page[page.length - 1];
@@ -269,13 +253,11 @@ async function executePage(
     });
   }
   return {
-    items,
-    resolved_fields: fields,
-    resolved_sort: sort,
-    next_cursor: next,
-    has_more: hasMore,
+    rows: page,
+    nextCursor: next,
+    hasMore,
     total: request.include_total ? Number(result.rows[0]?.total ?? 0) : null,
-    policy_context_digest: policyDigest,
+    policyDigest,
   };
 }
 
@@ -765,7 +747,7 @@ async function relationSql(
     !rule.relation_object_side || !rule.relation_subject_side ||
     rule.relation_object_side === rule.relation_subject_side ||
     !rule.relation_subject
-  ) throw new QueryFailure("not_found", "requested definition was not found");
+  ) throw new QueryFailure("hidden");
   const parsed =
     /^([a-z][a-z0-9-]{0,62})\/([a-z][a-z0-9_]{0,62}):([a-z][a-z0-9_]{0,62})$/
       .exec(rule.relation_relationship!);
@@ -842,42 +824,6 @@ function keysetSql(
   }
   return `(${clauses.join(" or ")})`;
 }
-function dto(
-  row: Record<string, unknown>,
-  request: QueryRequest,
-  definition: Definition,
-  fields: string[],
-): Record<string, unknown> {
-  const common = {
-    id: String(row.id),
-    project_id: String(row.project_id),
-    version: Number(row.version),
-    object_version_id: String(row.current_object_version_id),
-    archived_at: timestamp(row.archived_at),
-    created_at: timestamp(row.created_at),
-    updated_at: timestamp(row.updated_at),
-  };
-  const identity = {
-    publisher: request.definition.publisher,
-    pack: request.definition.pack,
-    name: request.definition.name,
-    revision_id: definition.revisionId,
-  };
-  const projected = Object.fromEntries(fields.map((f) => [
-    f,
-    typedValue(row, f, definition.fields[f]),
-  ]));
-  return request.definition.kind === "resource"
-    ? { kind: "object", ...common, resource: identity, data: projected }
-    : {
-      kind: "relationship",
-      ...common,
-      relationship: identity,
-      from: String(row.from_object_id),
-      to: String(row.to_object_id),
-      fields: projected,
-    };
-}
 function column(field: string, kind: "resource" | "relationship") {
   return kind === "relationship" && field === "from"
     ? "from_object_id"
@@ -901,26 +847,20 @@ function typedValue(
   if (spec?.type === "timestamp" && found !== null) {
     const instant = new Date(String(found));
     if (Number.isNaN(instant.getTime())) {
-      throw new QueryFailure("internal_error", "database timestamp is invalid");
+      throw new QueryFailure("invalid_data");
     }
     return instant.toISOString();
   }
   if (spec?.type === "integer" && found !== null) {
     if (typeof found !== "string" || !/^-?[0-9]+$/.test(found)) {
-      throw new QueryFailure(
-        "internal_error",
-        "database integer was not returned as text",
-      );
+      throw new QueryFailure("invalid_data");
     }
     const integer = BigInt(found);
     if (
       integer > BigInt(Number.MAX_SAFE_INTEGER) ||
       integer < BigInt(Number.MIN_SAFE_INTEGER)
     ) {
-      throw new QueryFailure(
-        "internal_error",
-        "database integer exceeds JSON-safe range",
-      );
+      throw new QueryFailure("invalid_data");
     }
     return Number(integer);
   }
@@ -929,27 +869,16 @@ function typedValue(
 function canonicalDecimal(value: unknown): unknown {
   if (value === null) return null;
   if (typeof value !== "string") {
-    throw new QueryFailure(
-      "internal_error",
-      "database decimal was not returned as text",
-    );
+    throw new QueryFailure("invalid_data");
   }
   const source = value;
   if (!/^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$/.test(source)) {
-    throw new QueryFailure(
-      "internal_error",
-      "database returned a non-canonical decimal",
-    );
+    throw new QueryFailure("invalid_data");
   }
   const [integer, fraction = ""] = source.split(".");
   const trimmed = fraction.replace(/0+$/, "");
   const normalized = trimmed ? `${integer}.${trimmed}` : integer;
   return /^-0(?:\.0*)?$/.test(normalized) ? "0" : normalized;
-}
-function timestamp(v: unknown) {
-  if (v == null) return null;
-  const instant = v instanceof Date ? v : new Date(String(v));
-  return Number.isNaN(instant.getTime()) ? String(v) : instant.toISOString();
 }
 function fieldType(v: unknown): FieldSpec["type"] {
   return ["integer", "decimal", "boolean", "date", "timestamp"].includes(
@@ -974,10 +903,7 @@ function record(v: unknown): Record<string, unknown> {
     : {};
 }
 function hidden() {
-  return new QueryFailure(
-    "not_found",
-    "requested project or definition was not found",
-  );
+  return new QueryFailure("hidden");
 }
 async function digest(value: unknown) {
   const bytes = await crypto.subtle.digest(

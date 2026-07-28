@@ -2,6 +2,7 @@
 import { assertEquals, assertRejects } from "jsr:@std/assert";
 import { query } from "../../src/adapters/outbound/postgres/client.ts";
 import { PostgresStageRepository } from "../../src/adapters/outbound/postgres/stage_repository.ts";
+import { PostgresAuthorizationRepository } from "../../src/adapters/outbound/postgres/authorization_repository.ts";
 import type { AuthContext } from "../../src/domain/auth/model.ts";
 import { uuidV7 } from "../../src/domain/ids/uuid_v7.ts";
 import {
@@ -31,6 +32,7 @@ Deno.test({
         const stage = await stageApproval(matrix, `observed-${mutation}`);
         const decision = await new PostgresStageRepository(
           matrix.harness.server.sql,
+          (sql) => new PostgresAuthorizationRepository(sql),
         )
           .decideApproval(stage.id, stage.requirementId, {
             decision: "approve",
@@ -124,6 +126,7 @@ Deno.test({
         );
         const agentDecision = await new PostgresStageRepository(
           matrix.harness.server.sql,
+          (sql) => new PostgresAuthorizationRepository(sql),
         )
           .decideApproval(agentStage.id, agentStage.requirementId, {
             decision: "approve",
@@ -154,6 +157,7 @@ Deno.test({
       const rejectedStage = await stageApproval(matrix, "observed-rejection");
       const approved = await new PostgresStageRepository(
         matrix.harness.server.sql,
+        (sql) => new PostgresAuthorizationRepository(sql),
       )
         .decideApproval(rejectedStage.id, rejectedStage.requirementId, {
           decision: "approve",
@@ -196,6 +200,7 @@ Deno.test({
       );
       const expiringApproval = await new PostgresStageRepository(
         matrix.harness.server.sql,
+        (sql) => new PostgresAuthorizationRepository(sql),
       )
         .decideApproval(expiring.id, expiring.requirementId, {
           decision: "approve",
@@ -251,6 +256,7 @@ Deno.test({
         const stage = await stageApproval(matrix, mutation);
         const decision = await new PostgresStageRepository(
           matrix.harness.server.sql,
+          (sql) => new PostgresAuthorizationRepository(sql),
         )
           .decideApproval(stage.id, stage.requirementId, {
             decision: "approve",

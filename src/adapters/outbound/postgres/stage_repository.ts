@@ -24,7 +24,7 @@ import {
 } from "../../../domain/ids/canonical_json.ts";
 import { err, ok, type Result } from "../../../domain/errors/result.ts";
 import { uuidV7 } from "../../../domain/ids/uuid_v7.ts";
-import { PostgresAuthorizationRepository } from "./authorization_repository.ts";
+import type { AuthorizationRepository } from "../../../application/ports/authorization.ts";
 import { query, type Queryable, quoteIdentifier, type Sql } from "./client.ts";
 import { lockReadAuthority } from "./object_read_boundary.ts";
 import {
@@ -62,9 +62,15 @@ type Prepared = {
   >;
 };
 
+export type StageAuthorizationRepositoryFactory = (
+  sql: Sql,
+) => AuthorizationRepository;
+
 export class PostgresStageRepository implements StageRepository {
   constructor(
     private readonly sql: Sql,
+    private readonly authorizationRepository:
+      StageAuthorizationRepositoryFactory,
     private readonly clock: Clock = new SystemClock(),
   ) {}
 
@@ -271,7 +277,14 @@ export class PostgresStageRepository implements StageRepository {
         // Run the same complete current Project, operation, policy, lineage,
         // definition, and hook pin validation used by final persistence before
         // any secret resolution, provider request, or child spawn.
-        await prepare(tx, operations, auth, orderedHookDeclarations);
+        await prepare(
+          tx,
+          operations,
+          auth,
+          orderedHookDeclarations,
+          undefined,
+          this.authorizationRepository,
+        );
         return ok({
           operations,
           projects,
@@ -309,6 +322,7 @@ export class PostgresStageRepository implements StageRepository {
           auth,
           input.hookDeclarations ?? [],
           input.source,
+          this.authorizationRepository,
         );
         const operationGraphDigest = `sha256:${await canonicalSha256({
           schema: "changeset.operations.v1",
@@ -581,7 +595,16 @@ export class PostgresStageRepository implements StageRepository {
   async inspect(id: string, auth: AuthContext): Promise<Result<StageDto>> {
     try {
       return await this.sql.begin(async (tx) => {
-        if (!await canAccess(tx, id, auth, "changeset.inspect", false)) {
+        if (
+          !await canAccess(
+            tx,
+            id,
+            auth,
+            "changeset.inspect",
+            false,
+            this.authorizationRepository,
+          )
+        ) {
           return err(notFound());
         }
         const value = await load(tx, id);
@@ -596,8 +619,21 @@ export class PostgresStageRepository implements StageRepository {
     try {
       return await this.sql.begin(async (tx) => {
         if (
-          !await canAccess(tx, id, auth, "changeset.inspect", false) &&
-          !await canReviewAny(tx, id, auth, this.clock.now())
+          !await canAccess(
+            tx,
+            id,
+            auth,
+            "changeset.inspect",
+            false,
+            this.authorizationRepository,
+          ) &&
+          !await canReviewAny(
+            tx,
+            id,
+            auth,
+            this.clock.now(),
+            this.authorizationRepository,
+          )
         ) return err(notFound());
         const value = await load(tx, id);
         return value ? ok(value) : err(notFound());
@@ -688,15 +724,14 @@ export class PostgresStageRepository implements StageRepository {
           : boundaryValue.type === "all_projects"
           ? { type: "all_projects" as const }
           : { type: "system" as const };
-        const authority = await new PostgresAuthorizationRepository(
+        const authority = await this.authorizationRepository(
           tx as unknown as Sql,
-        )
-          .authorize({
-            auth,
-            boundary,
-            action: "changeset.approval.decide",
-            resource: "system:changeset-approval",
-          });
+        ).authorize({
+          auth,
+          boundary,
+          action: "changeset.approval.decide",
+          resource: "system:changeset-approval",
+        });
         if (
           !authority.ok ||
           (!authority.value.superAdmin &&
@@ -781,7 +816,16 @@ export class PostgresStageRepository implements StageRepository {
   ): Promise<Result<StageDto>> {
     try {
       return await this.sql.begin(async (tx) => {
-        if (!await canAccess(tx, id, auth, "changeset.cancel", true)) {
+        if (
+          !await canAccess(
+            tx,
+            id,
+            auth,
+            "changeset.cancel",
+            true,
+            this.authorizationRepository,
+          )
+        ) {
           return err(notFound());
         }
         const lifecycle = await query<{ status: string }>(
@@ -950,7 +994,8 @@ async function prepare(
   operations: CanonicalOperation[],
   auth: AuthContext,
   pinnedHookDeclarations: readonly StageHookDeclaration[],
-  source?: StageSource,
+  source: StageSource | undefined,
+  authorizationRepository: StageAuthorizationRepositoryFactory,
 ): Promise<Prepared> {
   const projectIds = [
     ...new Set(operations.map((operation) => operation.project_id)),
@@ -1214,7 +1259,7 @@ async function prepare(
     // Seeds retain their existing semantic authority path. Action sources always
     // carry exact targeted evidence and never authorize a synthetic resource.
     for (const semanticAction of source.authority.actions) {
-      const semanticAuthority = await new PostgresAuthorizationRepository(
+      const semanticAuthority = await authorizationRepository(
         sql as Sql,
       ).authorize({
         auth,
@@ -1373,15 +1418,14 @@ async function prepare(
         rule_evidence: [],
       });
     } else {
-      const authorization = await new PostgresAuthorizationRepository(
+      const authorization = await authorizationRepository(
         sql as Sql,
-      )
-        .authorize({
-          auth,
-          boundary: { type: "project", projectId: operation.project_id },
-          action: effectiveAuthorizationAction,
-          resource: authorizationResource,
-        });
+      ).authorize({
+        auth,
+        boundary: { type: "project", projectId: operation.project_id },
+        action: effectiveAuthorizationAction,
+        resource: authorizationResource,
+      });
       if (!authorization.ok) {
         throw domain(
           authorization.error.code,
@@ -1470,6 +1514,7 @@ async function prepare(
       component.id,
       componentDigest,
       auth,
+      authorizationRepository,
     );
     validateDeclaredFields(operation, definition);
     await validateUniqueness(
@@ -1513,6 +1558,7 @@ async function validateCurrent(
   componentRevisionId: string,
   componentDigest: string,
   auth: AuthContext,
+  authorizationRepository: StageAuthorizationRepositoryFactory,
 ): Promise<void> {
   if (operation.op === "create" || operation.op === "link") {
     if (operation.op === "link") {
@@ -1744,7 +1790,7 @@ async function validateCurrent(
     if (operation.op !== "comment") {
       throw domain("not_found", "Current object was not found", "not_found");
     }
-    const archivedAuthority = await new PostgresAuthorizationRepository(
+    const archivedAuthority = await authorizationRepository(
       sql as Sql,
     ).authorize({
       auth,
@@ -2492,6 +2538,7 @@ async function canReviewAny(
   stageId: string,
   auth: AuthContext,
   now: Date,
+  authorizationRepository: StageAuthorizationRepositoryFactory,
 ): Promise<boolean> {
   const rows =
     (await query<{ requirement_json: unknown; created_principal_id: string }>(
@@ -2522,7 +2569,7 @@ async function canReviewAny(
       : value.type === "all_projects"
       ? { type: "all_projects" as const }
       : { type: "system" as const };
-    const authority = await new PostgresAuthorizationRepository(sql as Sql)
+    const authority = await authorizationRepository(sql as Sql)
       .authorize({
         auth,
         boundary,
@@ -2544,6 +2591,7 @@ async function canAccess(
   auth: AuthContext,
   action: string,
   lock: boolean,
+  authorizationRepository: StageAuthorizationRepositoryFactory,
 ): Promise<boolean> {
   const root = (await query<{
     created_auth_context_id: string;
@@ -2572,7 +2620,7 @@ async function canAccess(
   }
   if (root.created_principal_id === auth.principalId) return true;
   for (const projectId of projects) {
-    const allowed = await new PostgresAuthorizationRepository(sql as Sql)
+    const allowed = await authorizationRepository(sql as Sql)
       .authorize({
         auth,
         boundary: { type: "project", projectId },

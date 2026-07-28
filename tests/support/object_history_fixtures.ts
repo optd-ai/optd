@@ -2,6 +2,7 @@ import type { AuthContext } from "../../src/domain/auth/model.ts";
 import type { CanonicalOperation } from "../../src/domain/changesets/operations.ts";
 import { PostgresCommitRepository } from "../../src/adapters/outbound/postgres/commit_repository.ts";
 import { PostgresStageRepository } from "../../src/adapters/outbound/postgres/stage_repository.ts";
+import { PostgresAuthorizationRepository } from "../../src/adapters/outbound/postgres/authorization_repository.ts";
 import { PostgresHookSecretRepository } from "../../src/adapters/outbound/postgres/hook_secret_repository.ts";
 import { EnvelopeCrypto } from "../../src/adapters/outbound/crypto/envelope.ts";
 import { TrustedStageHookCoordinator } from "../../src/application/services/hooks/trusted_stage_hook_coordinator.ts";
@@ -211,7 +212,10 @@ async function stageAndCommit(
   operations: Record<string, unknown>[],
 ) {
   const stage = await makeStageChangesetService(
-    new PostgresStageRepository(sql),
+    new PostgresStageRepository(
+      sql,
+      (transactionSql) => new PostgresAuthorizationRepository(transactionSql),
+    ),
     new TrustedStageHookCoordinator(
       makeHookSecretResolver(
         new PostgresHookSecretRepository(sql, new EnvelopeCrypto()),
