@@ -749,32 +749,37 @@ async function observePostHookPersistence(
     command,
     providerAttempts,
     deadlineMs,
-    observe: async () => {
-      const result = await query<{ waiting_pid: number | null }>(
-        sql,
-        `select (
-           select pid from pg_stat_activity
-            where pid<>$1
-              and $1=any(pg_blocking_pids(pid))
-              and wait_event_type='Lock'
-              and position('auth_sessions' in query)>0
-            order by pid limit 1
-         )::int waiting_pid`,
-        [blockerPid],
-      );
-      return result.rows[0].waiting_pid;
-    },
-    snapshot: async () =>
-      (await query<ActivitySnapshot>(
-        sql,
-        `select pid,state,wait_event_type,wait_event,
-                $1=any(pg_blocking_pids(pid)) blocked_by_barrier,
-                position('auth_sessions' in query)>0 touches_auth_sessions
-           from pg_stat_activity
-          where pid=$1 or $1=any(pg_blocking_pids(pid))
-          order by pid`,
-        [blockerPid],
-      )).rows,
+    observe: () =>
+      sql.begin(async (tx) => {
+        await query(tx, "set local statement_timeout = '1s'");
+        const result = await query<{ waiting_pid: number | null }>(
+          tx,
+          `select (
+             select pid from pg_stat_activity
+              where pid<>$1
+                and $1=any(pg_blocking_pids(pid))
+                and wait_event_type='Lock'
+                and position('auth_sessions' in query)>0
+              order by pid limit 1
+           )::int waiting_pid`,
+          [blockerPid],
+        );
+        return result.rows[0].waiting_pid;
+      }),
+    snapshot: () =>
+      sql.begin(async (tx) => {
+        await query(tx, "set local statement_timeout = '1s'");
+        return (await query<ActivitySnapshot>(
+          tx,
+          `select pid,state,wait_event_type,wait_event,
+                  $1=any(pg_blocking_pids(pid)) blocked_by_barrier,
+                  position('auth_sessions' in query)>0 touches_auth_sessions
+             from pg_stat_activity
+            where pid=$1 or $1=any(pg_blocking_pids(pid))
+            order by pid`,
+          [blockerPid],
+        )).rows;
+      }),
   });
 }
 
@@ -803,7 +808,9 @@ async function waitForPostHookPersistence(options: {
     () => ({ kind: "failed" as const }),
   );
   let observations = 0;
-  const deadlineFailure = async (): Promise<never> => {
+  const deadlineFailure = async (
+    inFlight?: Promise<unknown>,
+  ): Promise<never> => {
     const commandState = options.command.state();
     let activity: ActivitySnapshot[] | { snapshot_error: string };
     try {
@@ -814,6 +821,7 @@ async function waitForPostHookPersistence(options: {
       };
     } finally {
       await options.command.terminate();
+      await inFlight?.catch(() => undefined);
     }
     throw new Error(
       `post-hook authority observation deadline: ${
@@ -829,22 +837,22 @@ async function waitForPostHookPersistence(options: {
   };
   try {
     while (true) {
-      const outcome = await Promise.race([
-        options.observe().then((waitingPid) => ({
-          kind: "observed" as const,
-          waitingPid,
-        })),
-        completed,
-        deadline,
-      ]);
+      const observation = options.observe().then((waitingPid) => ({
+        kind: "observed" as const,
+        waitingPid,
+      }));
+      const outcome = await Promise.race([observation, completed, deadline]);
       if (outcome.kind === "completed" || outcome.kind === "failed") {
+        await observation.catch(() => undefined);
         throw new Error(
           `action command completed before post-hook authority lock: ${
             JSON.stringify(outcome)
           }`,
         );
       }
-      if (outcome.kind === "deadline") return await deadlineFailure();
+      if (outcome.kind === "deadline") {
+        return await deadlineFailure(observation);
+      }
       observations++;
       if (outcome.waitingPid !== null) return;
       const pause = await boundedPollDelay(
