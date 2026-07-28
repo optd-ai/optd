@@ -48,6 +48,7 @@ Deno.test("query application owns definition-aware projection and sort validatio
     identity: "operant/crm:lead",
   };
   let pageCalls = 0;
+  let cursorFactoryCalls = 0;
   const service = makeQueryObjectsService({
     async execute(_call, work) {
       return await work({
@@ -73,11 +74,15 @@ Deno.test("query application owns definition-aware projection and sort validatio
         },
       });
     },
-  }, {
-    shapeDigest: () => Promise.resolve("shape"),
-    decode: () => Promise.reject(new Error("unused")),
-    encode: () => Promise.reject(new Error("unused")),
+  }, () => {
+    cursorFactoryCalls++;
+    return {
+      shapeDigest: () => Promise.resolve("shape"),
+      decode: () => Promise.reject(new Error("unused")),
+      encode: () => Promise.reject(new Error("unused")),
+    };
   });
+  assertEquals(cursorFactoryCalls, 0);
   const base = {
     project_id: "019b7a2e-7c10-7000-8000-000000000002",
     definition: {
@@ -90,9 +95,11 @@ Deno.test("query application owns definition-aware projection and sort validatio
   const rejected = await service.query({ ...base, fields: ["missing"] }, auth);
   assertEquals(rejected.ok, false);
   assertEquals(pageCalls, 0);
+  assertEquals(cursorFactoryCalls, 0);
   const accepted = await service.query(base, auth);
   assertEquals(accepted.ok, true);
   assertEquals(pageCalls, 1);
+  assertEquals(cursorFactoryCalls, 1);
   if (accepted.ok) {
     assertEquals(accepted.value.resolved_fields, ["name"]);
     assertEquals(accepted.value.resolved_sort, [

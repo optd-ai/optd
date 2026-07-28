@@ -444,6 +444,79 @@ Deno.test({
       );
 
       let expectedAttempts = 0;
+
+      const beforeDeadlineEvidence = await evidenceCounts(harness.server.sql);
+      provider.enqueueUnkeyed({ kind: "hold", token: "observer-deadline" });
+      const deadlineCommand = await harness.startOptctl([
+        "--json",
+        "--project",
+        projectId,
+        "action",
+        "stage",
+        "test/actionproof:generate",
+        "--input",
+        JSON.stringify({ source_id: read.id }),
+      ]);
+      expectedAttempts++;
+      await provider.waitForUnkeyedAttemptsBefore(
+        expectedAttempts,
+        deadlineCommand.result,
+      );
+      const deadlineBarrier = await holdSessionAuthority(
+        harness.server.sql,
+        auth.session_id,
+      );
+      provider.release("observer-deadline");
+      const realWaitingPid = await waitForBlockedAuthorityBackend(
+        harness.server.sql,
+        deadlineBarrier.pid,
+      );
+      try {
+        const observationStarted = Date.now();
+        const deadlineError = await assertRejects(
+          () =>
+            observePostHookPersistence(
+              harness.server.sql,
+              deadlineBarrier.pid,
+              deadlineCommand,
+              () => provider.attempts.length,
+              50,
+              () => false,
+              () =>
+                harness.server.sql.begin(async (tx) => {
+                  await query(tx, "set local statement_timeout = '100ms'");
+                  await query(
+                    tx,
+                    "select id from auth_sessions where id=$1 for update",
+                    [auth.session_id],
+                  );
+                  return null;
+                }),
+            ),
+          Error,
+          `"blocker_pid":${deadlineBarrier.pid}`,
+        );
+        assertStringIncludes(
+          deadlineError.message,
+          '"command_state":"running"',
+        );
+        assertStringIncludes(deadlineError.message, '"provider_attempts":1');
+        assertStringIncludes(deadlineError.message, `"pid":${realWaitingPid}`);
+        assertEquals(deadlineError.message.length < 4_096, true);
+        assertEquals(Date.now() - observationStarted >= 90, true);
+        assertEquals(Date.now() - observationStarted < 2_000, true);
+        assertEquals(deadlineCommand.state(), "settled");
+      } finally {
+        deadlineBarrier.release();
+        await deadlineBarrier.done;
+      }
+      await deadlineCommand.result;
+      await waitForBackendExit(harness.server.sql, realWaitingPid);
+      await waitForEvidenceCounts(harness.server.sql, {
+        stages: String(Number(beforeDeadlineEvidence.stages) + 1),
+        hooks: String(Number(beforeDeadlineEvidence.hooks) + 1),
+      });
+
       const race = async (
         name: string,
         mutate: () => Promise<void>,
@@ -721,6 +794,64 @@ async function holdSessionAuthority(sql: Sql, sessionId: string): Promise<{
   return { pid, release, done };
 }
 
+async function waitForBlockedAuthorityBackend(
+  sql: Sql,
+  blockerPid: number,
+): Promise<number> {
+  const deadline = Date.now() + 5_000;
+  do {
+    const waiting = await sql.begin(async (tx) => {
+      await query(tx, "set local statement_timeout = '1s'");
+      return (await query<{ pid: number }>(
+        tx,
+        `select pid from pg_stat_activity
+          where $1=any(pg_blocking_pids(pid))
+            and wait_event_type='Lock'
+            and position('auth_sessions' in query)>0
+          order by pid limit 1`,
+        [blockerPid],
+      )).rows[0]?.pid;
+    });
+    if (waiting !== undefined) return waiting;
+  } while (Date.now() < deadline);
+  throw new Error(`authority backend did not block behind pid ${blockerPid}`);
+}
+
+async function waitForEvidenceCounts(
+  sql: Sql,
+  expected: { stages: string; hooks: string },
+): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  do {
+    const counts = await evidenceCounts(sql);
+    if (counts.stages === expected.stages && counts.hooks === expected.hooks) {
+      return;
+    }
+  } while (Date.now() < deadline);
+  throw new Error(
+    `deadline action did not settle: ${JSON.stringify(expected)}`,
+  );
+}
+
+async function waitForBackendExit(sql: Sql, backendPid: number): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  do {
+    const active = await sql.begin(async (tx) => {
+      await query(tx, "set local statement_timeout = '1s'");
+      return (await query<{ active: boolean }>(
+        tx,
+        `select exists(
+           select 1 from pg_stat_activity
+            where pid=$1 and (state='active' or wait_event_type='Lock')
+         ) active`,
+        [backendPid],
+      )).rows[0].active;
+    });
+    if (!active) return;
+  } while (Date.now() < deadline);
+  throw new Error(`authority backend ${backendPid} remained active`);
+}
+
 const HOOK_STARTUP_TIMEOUT_MS = 30_000;
 const ACTION_HOOK_TIMEOUT_MS = 5_000;
 const CLI_SETTLEMENT_GRACE_MS = 5_000;
@@ -743,13 +874,15 @@ async function observePostHookPersistence(
   command: ActiveCliCommand,
   providerAttempts: () => number,
   deadlineMs = POST_HOOK_OBSERVATION_DEADLINE_MS,
+  acceptWaitingPid: (pid: number) => boolean = () => true,
+  observeOverride?: () => Promise<number | null>,
 ): Promise<void> {
   await waitForPostHookPersistence({
     blockerPid,
     command,
     providerAttempts,
     deadlineMs,
-    observe: () =>
+    observe: observeOverride ?? (() =>
       sql.begin(async (tx) => {
         await query(tx, "set local statement_timeout = '1s'");
         const result = await query<{ waiting_pid: number | null }>(
@@ -765,7 +898,8 @@ async function observePostHookPersistence(
           [blockerPid],
         );
         return result.rows[0].waiting_pid;
-      }),
+      })),
+    acceptWaitingPid,
     snapshot: () =>
       sql.begin(async (tx) => {
         await query(tx, "set local statement_timeout = '1s'");
@@ -789,6 +923,7 @@ async function waitForPostHookPersistence(options: {
   providerAttempts: () => number;
   deadlineMs: number;
   observe(): Promise<number | null>;
+  acceptWaitingPid?: (pid: number) => boolean;
   snapshot(): Promise<ActivitySnapshot[]>;
 }): Promise<void> {
   const deadlineToken = { kind: "deadline" as const };
@@ -854,7 +989,10 @@ async function waitForPostHookPersistence(options: {
         return await deadlineFailure(observation);
       }
       observations++;
-      if (outcome.waitingPid !== null) return;
+      if (
+        outcome.waitingPid !== null &&
+        (options.acceptWaitingPid?.(outcome.waitingPid) ?? true)
+      ) return;
       const pause = await boundedPollDelay(
         POST_HOOK_POLL_INTERVAL_MS,
         deadline,

@@ -144,11 +144,11 @@ Deno.test("query pushes assigned ABAC before count and page on PostgreSQL", asyn
     const signer = new QueryCursorSigner("integration master key");
     const service = makeQueryObjectsService(
       makePostgresQueryObjectRepository({ sql }),
-      {
+      () => ({
         shapeDigest: canonicalSha256,
         decode: signer.decode.bind(signer),
         encode: signer.encode.bind(signer),
-      },
+      }),
     );
     const result = await service.query({
       project_id: project,

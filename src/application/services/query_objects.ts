@@ -144,8 +144,10 @@ export type QueryReadSessionPort = ReadSessionPort<
 /** Application-owned public query use case over a same-session read port. */
 export function makeQueryObjectsService(
   port: QueryReadSessionPort,
-  cursors: QueryCursorPort,
+  cursorFactory: () => QueryCursorPort,
 ) {
+  let cursorPort: QueryCursorPort | undefined;
+  const queryCursors = () => cursorPort ??= cursorFactory();
   return Object.freeze({
     async query(
       input: unknown,
@@ -189,6 +191,7 @@ export function makeQueryObjectsService(
             ) {
               throw hidden();
             }
+            const cursors = queryCursors();
             const shapeDigest = await cursors.shapeDigest({
               project_id: request.project_id,
               definition: request.definition,

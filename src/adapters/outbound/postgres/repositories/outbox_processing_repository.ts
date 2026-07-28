@@ -276,14 +276,15 @@ export function makeDeliveryHookExecutor(
 }
 
 export function makeOutboxCursorPort(): OutboxCursorPort {
-  const signer = OutboxCursorSigner.fromEnvironment();
+  let signer: OutboxCursorSigner | undefined;
+  const cursors = () => signer ??= OutboxCursorSigner.fromEnvironment();
   return {
-    decode: (cursor, filters) => signer.decode(cursor, filters),
-    encode: (value, filters) => signer.encode(value, filters),
+    decode: (cursor, filters) => cursors().decode(cursor, filters),
+    encode: (value, filters) => cursors().encode(value, filters),
     decodeAttempt: (cursor, deliveryId) =>
-      signer.decodeAttempt(cursor, deliveryId),
+      cursors().decodeAttempt(cursor, deliveryId),
     encodeAttempt: (deliveryId, attempt) =>
-      signer.encodeAttempt(deliveryId, attempt),
+      cursors().encodeAttempt(deliveryId, attempt),
   };
 }
 

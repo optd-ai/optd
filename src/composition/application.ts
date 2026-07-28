@@ -148,11 +148,13 @@ export function makeApplication(
   let historyCursors: HistoryCursorSigner | undefined;
   const authorization = makeAuthorizationService(authorizationRepository);
   const queryRepository = makePostgresQueryObjectRepository({ sql });
-  const queryCursorSigner = QueryCursorSigner.fromEnvironment();
-  const queryCursors = {
-    shapeDigest: canonicalSha256,
-    decode: queryCursorSigner.decode.bind(queryCursorSigner),
-    encode: queryCursorSigner.encode.bind(queryCursorSigner),
+  const queryCursors = () => {
+    const signer = QueryCursorSigner.fromEnvironment();
+    return {
+      shapeDigest: canonicalSha256,
+      decode: signer.decode.bind(signer),
+      encode: signer.encode.bind(signer),
+    };
   };
   return {
     authentication,
