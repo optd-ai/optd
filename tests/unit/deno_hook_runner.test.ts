@@ -67,6 +67,45 @@ Deno.test("runtime hook cache startup removes stale partial directories", async 
   await Deno.remove(cacheDir, { recursive: true });
 });
 
+Deno.test("runtime hook cache recovery erases source and preserves its first removal failure", async () => {
+  for (const retryFails of [false, true]) {
+    const cacheDir = await Deno.makeTempDir();
+    const invocation = `${cacheDir}/invocation_stale`;
+    await Deno.mkdir(invocation, { mode: 0o700 });
+    await Deno.writeTextFile(`${invocation}/hook.ts`, "unique raw source");
+    await Deno.writeTextFile(`${invocation}/entry.ts`, "trusted entry");
+    let removals = 0;
+    let caught: unknown;
+    try {
+      await clearRuntimeHookCache(cacheDir, {
+        remove: async (path, options) => {
+          removals++;
+          if (removals === 1 || retryFails) {
+            throw new Error("injected initial removal failure");
+          }
+          await Deno.remove(path, options);
+        },
+      });
+    } catch (error) {
+      caught = error;
+    }
+    assertEquals(
+      caught instanceof Error ? caught.message : String(caught),
+      "injected initial removal failure",
+    );
+    assertEquals(removals, 2);
+    if (retryFails) {
+      assertEquals(await Deno.readTextFile(`${invocation}/hook.ts`), "");
+      assertEquals(await Deno.readTextFile(`${invocation}/entry.ts`), "");
+      await Deno.remove(invocation, { recursive: true });
+    } else {
+      await assertDirectoryEmpty(cacheDir);
+    }
+    assertEquals((await Deno.stat(cacheDir)).mode! & 0o777, 0o700);
+    await Deno.remove(cacheDir, { recursive: true });
+  }
+});
+
 function hook(
   name: string,
   source: string,

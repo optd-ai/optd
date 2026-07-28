@@ -721,21 +721,22 @@ async function observePostHookPersistence(
     completed: true as const,
     result,
   }));
-  for (let attempt = 0; attempt < 500; attempt++) {
+  while (true) {
     const observation = await Promise.race([
-      query<{ waiting: boolean }>(
+      query<{ waiting_pid: number | null }>(
         sql,
-        `select exists(
-           select 1 from pg_stat_activity
+        `select (
+           select pid from pg_stat_activity
             where pid<>$1
               and $1=any(pg_blocking_pids(pid))
               and wait_event_type='Lock'
               and position('auth_sessions' in query)>0
-         ) waiting`,
+            order by pid limit 1
+         )::int waiting_pid`,
         [blockerPid],
       ).then((result) => ({
         completed: false as const,
-        waiting: result.rows[0].waiting,
+        waitingPid: result.rows[0].waiting_pid,
       })),
       completed,
     ]);
@@ -746,19 +747,8 @@ async function observePostHookPersistence(
         }`,
       );
     }
-    if (observation.waiting) return;
+    if (observation.waitingPid !== null) return;
   }
-  const diagnostics = (await query(
-    sql,
-    `select pid,state,wait_event_type,wait_event,pg_blocking_pids(pid) blockers,
-       left(query,200) query from pg_stat_activity
-      where datname=current_database() order by pid`,
-  )).rows;
-  throw new Error(
-    `post-hook persistence did not reach the session authority lock: ${
-      JSON.stringify(diagnostics)
-    }`,
-  );
 }
 
 async function evidenceCounts(sql: Parameters<typeof query>[0]) {

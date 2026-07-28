@@ -57,6 +57,15 @@ export type HookMaterializationOperations = {
   ) => Promise<void>;
 };
 
+export type HookCacheCleanupOperations = {
+  remove?: (path: string, options: { recursive: true }) => Promise<void>;
+  writeTextFile?: (
+    path: string,
+    data: string,
+    options: { mode: number },
+  ) => Promise<void>;
+};
+
 export type DenoHookRunnerOptions = {
   cacheDir?: string;
   materializationOperations?: HookMaterializationOperations;
@@ -102,7 +111,10 @@ export async function prepareRuntimeHookCache(cacheDir: string): Promise<void> {
 }
 
 /** Removes only ephemeral invocation directories from one owned cache. */
-export async function clearRuntimeHookCache(cacheDir: string): Promise<void> {
+export async function clearRuntimeHookCache(
+  cacheDir: string,
+  operations: HookCacheCleanupOperations = {},
+): Promise<void> {
   let recovered = 0;
   for await (const entry of Deno.readDir(cacheDir)) {
     if (!entry.name.startsWith(INVOCATION_PREFIX)) continue;
@@ -110,7 +122,11 @@ export async function clearRuntimeHookCache(cacheDir: string): Promise<void> {
     if (recovered > MAX_RECOVERED_INVOCATIONS) {
       throw new Error("hook cache contains too many stale invocations");
     }
-    await Deno.remove(`${cacheDir}/${entry.name}`, { recursive: true });
+    const cleanupError = await secureRemoveMaterialization(
+      `${cacheDir}/${entry.name}`,
+      operations,
+    );
+    if (cleanupError !== undefined) throw cleanupError;
   }
 }
 
@@ -466,7 +482,6 @@ export class DenoHookRunner {
     readyFrame: string,
   ): Promise<string> {
     let directory: string | undefined;
-    let hookPath: string | undefined;
     try {
       await Deno.mkdir(this.#cacheDir, { recursive: true, mode: 0o700 });
       directory = await Deno.makeTempDir({
@@ -476,7 +491,7 @@ export class DenoHookRunner {
       const operations = this.#options.materializationOperations;
       await (operations?.chmod ?? Deno.chmod)(directory, 0o700);
       const entryPath = `${directory}/entry.ts`;
-      hookPath = `${directory}/hook.ts`;
+      const hookPath = `${directory}/hook.ts`;
       await (operations?.writeTextFile ?? Deno.writeTextFile)(
         hookPath,
         hook.scriptContent,
@@ -490,7 +505,7 @@ export class DenoHookRunner {
       return entryPath;
     } catch {
       if (directory !== undefined) {
-        await removeMaterialization(directory, hookPath);
+        await removeMaterialization(directory);
       }
       throw new Error("hook materialization failed");
     }
@@ -758,24 +773,36 @@ async function removeEntry(path: string): Promise<void> {
   await removeMaterialization(directory);
 }
 
-async function removeMaterialization(
-  directory: string,
-  sensitivePath?: string,
-): Promise<void> {
-  const removed = await Deno.remove(directory, { recursive: true }).then(
-    () => true,
-    () => false,
-  );
-  if (removed) return;
+async function removeMaterialization(directory: string): Promise<void> {
+  await secureRemoveMaterialization(directory);
+}
 
-  // If recursive cleanup is unavailable, erase raw hook source before one
-  // final best-effort removal. Cleanup diagnostics never include source text.
-  if (sensitivePath !== undefined) {
-    await Deno.writeTextFile(sensitivePath, "", { mode: 0o600 }).catch(
-      () => {},
+/**
+ * Erases fixed sensitive children before one bounded retry. The caller decides
+ * whether the initial removal error is fatal; cleanup never replaces it with a
+ * later truncation or retry error.
+ */
+async function secureRemoveMaterialization(
+  directory: string,
+  operations: HookCacheCleanupOperations = {},
+): Promise<unknown | undefined> {
+  const remove = operations.remove ?? Deno.remove;
+  let initialError: unknown;
+  try {
+    await remove(directory, { recursive: true });
+    return undefined;
+  } catch (error) {
+    initialError = error;
+  }
+
+  const writeTextFile = operations.writeTextFile ?? Deno.writeTextFile;
+  for (const filename of ["hook.ts", "entry.ts"]) {
+    await writeTextFile(`${directory}/${filename}`, "", { mode: 0o600 }).catch(
+      () => undefined,
     );
   }
-  await Deno.remove(directory, { recursive: true }).catch(() => undefined);
+  await remove(directory, { recursive: true }).catch(() => undefined);
+  return initialError;
 }
 
 function curatedEnvelope(value: HookEnvelope): HookEnvelope {
