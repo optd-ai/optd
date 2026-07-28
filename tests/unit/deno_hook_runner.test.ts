@@ -10,6 +10,12 @@ function assertStringIncludes(actual: string, expected: string): void {
     throw new Error(`expected string to include ${expected}`);
   }
 }
+
+async function assertDirectoryEmpty(path: string): Promise<void> {
+  const entries = [];
+  for await (const entry of Deno.readDir(path)) entries.push(entry.name);
+  assertEquals(entries, []);
+}
 import {
   DenoHookRunner,
   type HookDefinition,
@@ -250,6 +256,51 @@ Deno.test("DenoHookRunner ignores user readiness-frame forgeries", async () => {
   assertEquals(result.ok, false);
   assertEquals(result.error?.code, "hook_timeout");
   assertEquals(result.logs.includes("OPERANT_HOOK_READY"), false);
+});
+
+Deno.test("DenoHookRunner removes partial materializations after every population fault", async () => {
+  const cases = ["chmod", "hook_write", "entry_write"] as const;
+  for (const fault of cases) {
+    const cacheDir = await Deno.makeTempDir();
+    let writes = 0;
+    const runner = new DenoHookRunner({
+      cacheDir,
+      materializationOperations: {
+        chmod: async (path, mode) => {
+          if (fault === "chmod") throw new Error("injected chmod failure");
+          await Deno.chmod(path, mode);
+        },
+        writeTextFile: async (path, data, options) => {
+          writes += 1;
+          await Deno.writeTextFile(path, data, options);
+          if (
+            (fault === "hook_write" && writes === 1) ||
+            (fault === "entry_write" && writes === 2)
+          ) {
+            throw new Error("injected post-write failure");
+          }
+        },
+      },
+    });
+    const result = await runner.run(
+      hook(
+        `materialize_${fault}`,
+        `const rawSecret = "must-not-remain";
+         console.log(JSON.stringify({ allow: true, errors: [], warnings: [], required_approvals: [] }));`,
+      ),
+      {
+        hook: `materialize_${fault}`,
+        phase: "changeset.validate",
+        input: {},
+      },
+    );
+    assertEquals(result.ok, false);
+    assertEquals(result.error?.code, "hook_spawn_failed");
+    assertEquals(result.error?.message, "hook runtime could not be prepared");
+    assertEquals(result.logs, "");
+    await assertDirectoryEmpty(cacheDir);
+    await Deno.remove(cacheDir);
+  }
 });
 
 Deno.test("DenoHookRunner injects only declared secret env vars", async () => {

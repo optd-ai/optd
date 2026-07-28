@@ -48,8 +48,18 @@ export type HookRunResult = {
   error?: { code: string; message: string; details: JsonRecord };
 };
 
+export type HookMaterializationOperations = {
+  chmod?: (path: string, mode: number) => Promise<void>;
+  writeTextFile?: (
+    path: string,
+    data: string,
+    options: { mode: number },
+  ) => Promise<void>;
+};
+
 export type DenoHookRunnerOptions = {
   cacheDir?: string;
+  materializationOperations?: HookMaterializationOperations;
   globalPolicy?: Required<
     { net: boolean; read: boolean; write: boolean; env: boolean; run: boolean }
   >;
@@ -124,7 +134,17 @@ export class DenoHookRunner {
     ).sort((a, b) => b.length - a.length);
     const readyToken = crypto.randomUUID();
     const readyFrame = `\u001eOPERANT_HOOK_READY:${readyToken}\u001e\n`;
-    const scriptPath = await this.#materialize(hook, readyFrame);
+    let scriptPath: string;
+    try {
+      scriptPath = await this.#materialize(hook, readyFrame);
+    } catch {
+      return failure(
+        hook,
+        started,
+        "hook_spawn_failed",
+        "hook runtime could not be prepared",
+      );
+    }
     const net = netList(hook.permissions.net);
     const envNames = Object.keys(resolved.env).sort();
     const args = [
@@ -415,19 +435,35 @@ export class DenoHookRunner {
     hook: HookDefinition,
     readyFrame: string,
   ): Promise<string> {
-    await Deno.mkdir(this.#cacheDir, { recursive: true, mode: 0o700 });
-    const directory = await Deno.makeTempDir({
-      dir: this.#cacheDir,
-      prefix: "invocation_",
-    });
-    await Deno.chmod(directory, 0o700);
-    const entryPath = `${directory}/entry.ts`;
-    const hookPath = `${directory}/hook.ts`;
-    await Deno.writeTextFile(hookPath, hook.scriptContent, { mode: 0o600 });
-    await Deno.writeTextFile(entryPath, trustedPrelude(readyFrame), {
-      mode: 0o600,
-    });
-    return entryPath;
+    let directory: string | undefined;
+    let hookPath: string | undefined;
+    try {
+      await Deno.mkdir(this.#cacheDir, { recursive: true, mode: 0o700 });
+      directory = await Deno.makeTempDir({
+        dir: this.#cacheDir,
+        prefix: "invocation_",
+      });
+      const operations = this.#options.materializationOperations;
+      await (operations?.chmod ?? Deno.chmod)(directory, 0o700);
+      const entryPath = `${directory}/entry.ts`;
+      hookPath = `${directory}/hook.ts`;
+      await (operations?.writeTextFile ?? Deno.writeTextFile)(
+        hookPath,
+        hook.scriptContent,
+        { mode: 0o600 },
+      );
+      await (operations?.writeTextFile ?? Deno.writeTextFile)(
+        entryPath,
+        trustedPrelude(readyFrame),
+        { mode: 0o600 },
+      );
+      return entryPath;
+    } catch {
+      if (directory !== undefined) {
+        await removeMaterialization(directory, hookPath);
+      }
+      throw new Error("hook materialization failed");
+    }
   }
 
   #capabilityError(hook: HookDefinition): string | null {
@@ -689,6 +725,26 @@ await import("./hook.ts");
 async function removeEntry(path: string): Promise<void> {
   const separator = path.lastIndexOf("/");
   const directory = separator < 0 ? path : path.slice(0, separator);
+  await removeMaterialization(directory);
+}
+
+async function removeMaterialization(
+  directory: string,
+  sensitivePath?: string,
+): Promise<void> {
+  const removed = await Deno.remove(directory, { recursive: true }).then(
+    () => true,
+    () => false,
+  );
+  if (removed) return;
+
+  // If recursive cleanup is unavailable, erase raw hook source before one
+  // final best-effort removal. Cleanup diagnostics never include source text.
+  if (sensitivePath !== undefined) {
+    await Deno.writeTextFile(sensitivePath, "", { mode: 0o600 }).catch(
+      () => {},
+    );
+  }
   await Deno.remove(directory, { recursive: true }).catch(() => undefined);
 }
 
