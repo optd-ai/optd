@@ -212,7 +212,7 @@ Deno.test({
         body: { allowed: true },
       });
       const finalRace = stageItem(harness, projectId, "final-recheck-denied");
-      await provider.waitForAttempts(2);
+      await provider.waitForAttemptsBefore(2, finalRace);
       await query(
         harness.server.sql,
         "update role_assignments set active=false,disabled_at=now() where id=$1",

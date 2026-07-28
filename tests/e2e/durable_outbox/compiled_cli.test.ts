@@ -202,10 +202,7 @@ for (const logLevel of ["info", "trace"] as const) {
         );
         assert(ambiguousAttempts.length >= 2);
         assertNotEquals(ambiguousAttempts[0].id, ambiguousAttempts[1].id);
-        provider.enqueue(
-          { kind: "retry", retryAfterSeconds: 1 },
-          { kind: "success" },
-        );
+        await installPauseTrigger(harness);
         const delayed = await stageCommit(
           harness,
           pack,
@@ -217,6 +214,12 @@ for (const logLevel of ["info", "trace"] as const) {
           harness,
           delayed.stageId,
         );
+        provider.enqueueForKey(
+          delayedDelivery.id,
+          { kind: "retry", retryAfterSeconds: 60 },
+          { kind: "success" },
+        );
+        await releasePaused(harness, delayedDelivery.id);
         await provider.waitForKeyAttempts(delayedDelivery.id, 1, 10_000);
         const retryWait = await waitStatus(
           harness,
@@ -240,6 +243,11 @@ for (const logLevel of ["info", "trace"] as const) {
         if (Date.now() < new Date(String(retryWait.available_at)).getTime()) {
           assertEquals(provider.attempts.length, beforeCount);
         }
+        await query(
+          harness.server.sql,
+          "update outbox_deliveries set available_at=now() where id=$1 and status='retry_wait'",
+          [delayedDelivery.id],
+        );
         await waitStatus(harness, delayedDelivery.id, "succeeded");
         provider.enqueue({ kind: "permanent_failure" });
         const permanent = await stageCommit(
@@ -645,7 +653,10 @@ for (const logLevel of ["info", "trace"] as const) {
           harness,
           statusRunning.stageId,
         );
-        provider.enqueue({ kind: "hold", token: "status-running" });
+        provider.enqueueForKey(statusRunningDelivery.id, {
+          kind: "hold",
+          token: "status-running",
+        });
         await releasePaused(harness, statusRunningDelivery.id);
         await waitStatus(harness, statusRunningDelivery.id, "running");
         const statusFixtures: Record<string, string> = {

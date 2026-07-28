@@ -1,4 +1,5 @@
 export const MIN_POSTGRES_MAJOR = 17;
+const POSTGRES_STARTUP_TIMEOUT_MS = 30_000;
 
 export type PostgresRuntimeMode = "external" | "app_managed";
 
@@ -216,7 +217,10 @@ export function assertSupportedPostgresUrl(databaseUrl: string): void {
 async function waitReady(psqlBin: string, pg: ManagedPostgres): Promise<void> {
   const started = Date.now();
   let last = "";
-  while (Date.now() - started < 10_000) {
+  // Recovery and checkpoint replay can legitimately exceed ten seconds on a
+  // saturated release host. Keep this inner bound below the server's bounded
+  // startup deadline instead of terminating a healthy postmaster mid-recovery.
+  while (Date.now() - started < POSTGRES_STARTUP_TIMEOUT_MS) {
     const out = await new Deno.Command(psqlBin, {
       args: [
         "-h",

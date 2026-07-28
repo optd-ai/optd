@@ -13,6 +13,7 @@ import {
 import { makePostgresQueryObjectRepository } from "../../src/adapters/outbound/postgres/repositories/query_object_repository.ts";
 import { makeQueryObjectsService } from "../../src/application/services/query_objects.ts";
 import { QueryCursorSigner } from "../../src/domain/queries/cursor.ts";
+import { canonicalSha256 } from "../../src/domain/ids/canonical_json.ts";
 import { uuidV7 } from "../../src/domain/ids/uuid_v7.ts";
 
 Deno.test("query pushes assigned ABAC before count and page on PostgreSQL", async () => {
@@ -140,11 +141,14 @@ Deno.test("query pushes assigned ABAC before count and page on PostgreSQL", asyn
       roles: [],
       createdAt: new Date().toISOString(),
     };
+    const signer = new QueryCursorSigner("integration master key");
     const service = makeQueryObjectsService(
-      makePostgresQueryObjectRepository({
-        sql,
-        cursors: () => new QueryCursorSigner("integration master key"),
-      }),
+      makePostgresQueryObjectRepository({ sql }),
+      {
+        shapeDigest: canonicalSha256,
+        decode: signer.decode.bind(signer),
+        encode: signer.encode.bind(signer),
+      },
     );
     const result = await service.query({
       project_id: project,

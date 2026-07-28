@@ -177,6 +177,12 @@ export async function startLiveHarness(
     `postgres://operant@127.0.0.1:${env.OPERANT_PG_PORT}/postgres`;
   const sql = createPostgresClient(databaseUrl);
   const launchers = new Set<CliLauncher>();
+  let lifecycle = Promise.resolve();
+  const withLifecycle = async <T>(work: () => Promise<T>): Promise<T> => {
+    const next = lifecycle.then(work, work);
+    lifecycle = next.then(() => undefined, () => undefined);
+    return await next;
+  };
   const runBinary = async (
     args: string[],
     stdin?: string,
@@ -315,35 +321,45 @@ export async function startLiveHarness(
       );
     },
     async crash() {
-      if (!serverRunning) return;
-      crashedPostgresPid = await readPostgresPid(dataDir);
-      await crashServer(running);
-      serverRunning = false;
+      await withLifecycle(async () => {
+        if (!serverRunning) return;
+        crashedPostgresPid = await readPostgresPid(dataDir);
+        await crashServer(running);
+        serverRunning = false;
+      });
     },
     async restart(restartOptions = {}) {
-      if (restartOptions.bootstrapToken === null) {
-        delete env.OPERANT_BOOTSTRAP_TOKEN;
-      } else if (restartOptions.bootstrapToken !== undefined) {
-        env.OPERANT_BOOTSTRAP_TOKEN = restartOptions.bootstrapToken;
-      }
-      applyEnvironment(env, restartOptions.environment);
-      if (serverRunning) {
-        await stopServer(running);
-        serverRunning = false;
-      }
-      try {
-        running = await launchServer(rootDir, env);
-        serverRunning = true;
-        harness.baseUrl = running.url;
-      } catch (error) {
-        const startupLog = await Deno.readTextFile(join(rootDir, "server.log"))
-          .catch(() => "");
-        throw new Error(
-          `${
-            error instanceof Error ? error.message : String(error)
-          }\n${startupLog}`,
-        );
-      }
+      await withLifecycle(async () => {
+        if (restartOptions.bootstrapToken === null) {
+          delete env.OPERANT_BOOTSTRAP_TOKEN;
+        } else if (restartOptions.bootstrapToken !== undefined) {
+          env.OPERANT_BOOTSTRAP_TOKEN = restartOptions.bootstrapToken;
+        }
+        applyEnvironment(env, restartOptions.environment);
+        if (serverRunning) {
+          await stopServer(running);
+          serverRunning = false;
+        }
+        if (crashedPostgresPid !== undefined) {
+          await stopCrashedPostgres(crashedPostgresPid, running.log.text());
+          crashedPostgresPid = undefined;
+        }
+        try {
+          running = await launchServer(rootDir, env);
+          serverRunning = true;
+          harness.baseUrl = running.url;
+        } catch (error) {
+          const startupLog = await Deno.readTextFile(
+            join(rootDir, "server.log"),
+          )
+            .catch(() => "");
+          throw new Error(
+            `${
+              error instanceof Error ? error.message : String(error)
+            }\n${startupLog}`,
+          );
+        }
+      });
     },
     async diagnostics() {
       const serverLog = running.log.text();
@@ -355,21 +371,28 @@ export async function startLiveHarness(
       };
     },
     async close(closeOptions = {}) {
-      await Promise.all(
-        [...launchers].map((launcher) =>
-          launcher.close().catch(() => undefined)
-        ),
-      );
-      launchers.clear();
-      await closePostgresClient(sql).catch(() => undefined);
-      if (serverRunning) await stopServer(running);
-      if (crashedPostgresPid !== undefined) {
-        await stopCrashedPostgres(crashedPostgresPid, running.log.text());
-        crashedPostgresPid = undefined;
-      }
-      if (!closeOptions.retain) {
-        await Deno.remove(rootDir, { recursive: true }).catch(() => undefined);
-      }
+      await withLifecycle(async () => {
+        await Promise.all(
+          [...launchers].map((launcher) =>
+            launcher.close().catch(() => undefined)
+          ),
+        );
+        launchers.clear();
+        await closePostgresClient(sql).catch(() => undefined);
+        if (serverRunning) {
+          await stopServer(running);
+          serverRunning = false;
+        }
+        if (crashedPostgresPid !== undefined) {
+          await stopCrashedPostgres(crashedPostgresPid, running.log.text());
+          crashedPostgresPid = undefined;
+        }
+        if (!closeOptions.retain) {
+          await Deno.remove(rootDir, { recursive: true }).catch(() =>
+            undefined
+          );
+        }
+      });
     },
   };
   return harness;
@@ -667,19 +690,17 @@ async function readPostgresPid(dataDir: string): Promise<number | undefined> {
 
 async function stopCrashedPostgres(pid: number, diagnostics: string) {
   try {
-    Deno.kill(pid, "SIGTERM");
+    // The harness SQL observer remains connected after the app is crashed.
+    // PostgreSQL smart shutdown (SIGTERM) would wait forever for that client;
+    // fast shutdown disconnects clients, checkpoints, and remains crash-safe.
+    Deno.kill(pid, "SIGINT");
   } catch (error) {
     if (error instanceof Deno.errors.NotFound) return;
     throw error;
   }
-  const deadline = Date.now() + 10_000;
+  const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
-    try {
-      Deno.kill(pid, "SIGCONT");
-    } catch (error) {
-      if (error instanceof Deno.errors.NotFound) return;
-      throw error;
-    }
+    if (await processExited(pid)) return;
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
   try {
@@ -692,6 +713,18 @@ async function stopCrashedPostgres(pid: number, diagnostics: string) {
     pid,
     diagnostics: diagnostics.slice(-MAX_DIAGNOSTIC_BYTES),
   });
+}
+
+async function processExited(pid: number): Promise<boolean> {
+  try {
+    Deno.kill(pid, "SIGCONT");
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) return true;
+    throw error;
+  }
+  const stat = await Deno.readTextFile(`/proc/${pid}/stat`).catch(() => "");
+  const closing = stat.lastIndexOf(")");
+  return closing >= 0 && stat.slice(closing + 2, closing + 3) === "Z";
 }
 
 async function crashServer(server: RunningServer): Promise<void> {

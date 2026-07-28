@@ -122,7 +122,9 @@ export class DenoHookRunner {
     const redactions = Object.values(resolved.secretEnv).filter((value) =>
       value.length > 0
     ).sort((a, b) => b.length - a.length);
-    const scriptPath = await this.#materialize(hook);
+    const readyToken = crypto.randomUUID();
+    const readyFrame = `\u001eOPERANT_HOOK_READY:${readyToken}\u001e\n`;
+    const scriptPath = await this.#materialize(hook, readyFrame);
     const net = netList(hook.permissions.net);
     const envNames = Object.keys(resolved.env).sort();
     const args = [
@@ -173,49 +175,33 @@ export class DenoHookRunner {
         Math.max(maximum, new TextEncoder().encode(value).length - 1),
       0,
     );
-    const stderrPromise = readBounded(
+    const stderrCapture = readControlledBounded(
       child.stderr,
       stderrLimit + redactionOverlap,
-      true,
+      readyFrame,
     );
+    const stderrPromise = stderrCapture.result;
     const statusPromise = child.status;
     const delivery = startInputDelivery(child, curatedEnvelope(envelope));
     const stdoutOverflow = stdoutPromise.then((value) =>
       value.overflow ? "stdout_overflow" as const : new Promise<never>(() => {})
     );
     let deliveryTimer: ReturnType<typeof setTimeout> | undefined;
-    const deliveryAccepted = await Promise.race([
+    const deliveryOutcome = await Promise.race([
       delivery.writeAccepted,
-      new Promise<false>((resolve) => {
+      new Promise<"delivery_timeout">((resolve) => {
         deliveryTimer = setTimeout(
-          () => resolve(false),
+          () => resolve("delivery_timeout"),
           this.#options.inputDeliveryTimeoutMs ?? 5_000,
         );
       }),
     ]);
     if (deliveryTimer !== undefined) clearTimeout(deliveryTimer);
-    let hardTimer: ReturnType<typeof setTimeout> | undefined;
-    const completed = deliveryAccepted
-      ? await Promise.race([
-        statusPromise,
-        stdoutOverflow,
-        new Promise<"runtime_failure">((resolve) => {
-          hardTimer = setTimeout(
-            () => resolve("runtime_failure"),
-            (this.#options.startupTimeoutMs ?? 30_000) + hook.timeoutMs,
-          );
-        }),
-      ])
-      : "delivery_failure" as const;
-    if (hardTimer !== undefined) clearTimeout(hardTimer);
-    if (completed === "delivery_failure") {
+    if (deliveryOutcome === "delivery_timeout") {
       await killAndReap(child);
-      const [status, stdout, stderr] = await Promise.all([
-        statusPromise.catch(() => ({
-          success: false,
-          code: -1,
-          signal: null,
-        } as Deno.CommandStatus)),
+      await delivery.settled;
+      await removeEntry(scriptPath);
+      const [stdout, stderr] = await Promise.all([
         stdoutPromise.catch(() => ({
           bytes: new Uint8Array(),
           truncated: false,
@@ -224,9 +210,7 @@ export class DenoHookRunner {
           bytes: new Uint8Array(),
           truncated: false,
         })),
-        delivery.settled,
       ]);
-      await removeEntry(scriptPath);
       const retained = retainedLogs(stderr, redactions, stderrLimit);
       const stdoutRedacted = redact(decode(stdout.bytes), redactions);
       return failure(
@@ -237,8 +221,43 @@ export class DenoHookRunner {
         retained.text,
         retained.truncated,
         retained.changed || stdoutRedacted.changed,
-        status.code,
       );
+    }
+    let startupTimer: ReturnType<typeof setTimeout> | undefined;
+    let executionTimer: ReturnType<typeof setTimeout> | undefined;
+    let completed:
+      | Deno.CommandStatus
+      | "stdout_overflow"
+      | "runtime_failure"
+      | "hook_timeout";
+    const startup = await Promise.race([
+      statusPromise,
+      stdoutOverflow,
+      stderrCapture.ready.then((ready) =>
+        ready ? "ready" as const : "runtime_failure" as const
+      ),
+      new Promise<"runtime_failure">((resolve) => {
+        startupTimer = setTimeout(
+          () => resolve("runtime_failure"),
+          this.#options.startupTimeoutMs ?? 30_000,
+        );
+      }),
+    ]);
+    if (startupTimer !== undefined) clearTimeout(startupTimer);
+    if (startup === "ready") {
+      completed = await Promise.race([
+        statusPromise,
+        stdoutOverflow,
+        new Promise<"hook_timeout">((resolve) => {
+          executionTimer = setTimeout(
+            () => resolve("hook_timeout"),
+            hook.timeoutMs,
+          );
+        }),
+      ]);
+      if (executionTimer !== undefined) clearTimeout(executionTimer);
+    } else {
+      completed = startup;
     }
     if (completed === "stdout_overflow") {
       await killAndReap(child);
@@ -254,6 +273,26 @@ export class DenoHookRunner {
         started,
         "hook_stdout_limit",
         "hook stdout exceeded the byte limit",
+        logs.text,
+        logs.truncated,
+        logs.changed,
+      );
+    }
+    if (completed === "hook_timeout") {
+      await killAndReap(child);
+      await delivery.settled;
+      await removeEntry(scriptPath);
+      const stderr = await stderrPromise.catch(() => ({
+        bytes: new Uint8Array(),
+        truncated: false,
+      }));
+      await stdoutPromise.catch(() => undefined);
+      const logs = retainedLogs(stderr, redactions, stderrLimit);
+      return failure(
+        hook,
+        started,
+        "hook_timeout",
+        "hook execution timed out",
         logs.text,
         logs.truncated,
         logs.changed,
@@ -372,7 +411,10 @@ export class DenoHookRunner {
     };
   }
 
-  async #materialize(hook: HookDefinition): Promise<string> {
+  async #materialize(
+    hook: HookDefinition,
+    readyFrame: string,
+  ): Promise<string> {
     await Deno.mkdir(this.#cacheDir, { recursive: true, mode: 0o700 });
     const path = await Deno.makeTempFile({
       dir: this.#cacheDir,
@@ -382,7 +424,7 @@ export class DenoHookRunner {
     await Deno.chmod(path, 0o600);
     await Deno.writeTextFile(
       path,
-      `${trustedPrelude(hook.timeoutMs)}\n${hook.scriptContent}`,
+      `${trustedPrelude(readyFrame)}\n${hook.scriptContent}`,
     );
     return path;
   }
@@ -584,7 +626,7 @@ export async function resolveHookDenoBinary(
   return candidate;
 }
 
-function trustedPrelude(timeoutMs: number): string {
+function trustedPrelude(readyFrame: string): string {
   return `(() => {
   const nativeFetch = globalThis.fetch.bind(globalThis);
   const safeFetch = async function (input, init = undefined) {
@@ -634,13 +676,9 @@ for (const __operantGlobalName of [
     configurable: false,
   });
 }
-(() => {
-  const __operantExit = Deno.exit.bind(Deno);
-  const __operantSetTimeout = globalThis.setTimeout.bind(globalThis);
-  const __operantUnrefTimer = Deno.unrefTimer.bind(Deno);
-  const __operantWatchdog = __operantSetTimeout(() => __operantExit(124), ${timeoutMs});
-  __operantUnrefTimer(__operantWatchdog);
-})();
+Deno.stderr.writeSync(
+  new TextEncoder().encode(${JSON.stringify(readyFrame)}),
+);
 `;
 }
 
@@ -679,6 +717,62 @@ function failure(
     error: { code, message, details: {} },
   };
 }
+function readControlledBounded(
+  stream: ReadableStream<Uint8Array>,
+  limit: number,
+  controlFrame: string,
+): {
+  ready: Promise<boolean>;
+  result: Promise<{ bytes: Uint8Array; truncated: boolean }>;
+} {
+  let resolveReady!: (ready: boolean) => void;
+  let readyResolved = false;
+  const ready = new Promise<boolean>((resolve) => {
+    resolveReady = (value) => {
+      if (readyResolved) return;
+      readyResolved = true;
+      resolve(value);
+    };
+  });
+  const result = (async () => {
+    const chunks: Uint8Array[] = [];
+    let retained = 0;
+    let truncated = false;
+    let probe = "";
+    const decoder = new TextDecoder();
+    const reader = stream.getReader();
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      if (!readyResolved) {
+        probe += decoder.decode(value, { stream: true });
+        if (probe.includes(controlFrame)) resolveReady(true);
+        if (probe.length > controlFrame.length * 2) {
+          probe = probe.slice(-(controlFrame.length - 1));
+        }
+      }
+      if (retained + value.length <= limit) {
+        chunks.push(value);
+        retained += value.length;
+      } else {
+        const remaining = Math.max(0, limit - retained);
+        if (remaining) {
+          chunks.push(value.subarray(0, remaining));
+          retained += remaining;
+        }
+        truncated = true;
+      }
+    }
+    resolveReady(false);
+    const text = decode(concat(chunks, retained)).replace(controlFrame, "");
+    return {
+      bytes: new TextEncoder().encode(text),
+      truncated,
+    };
+  })();
+  return { ready, result };
+}
+
 async function readBounded(
   stream: ReadableStream<Uint8Array>,
   limit: number,

@@ -124,6 +124,7 @@ type QueryPagePort =
   >;
 
 export type QueryReadSession = Readonly<{
+  projectExists: boolean;
   definition(): Promise<QueryDefinition | null>;
   authorize(
     plan: Omit<QueryExecutionPlan, "cursorPosition">,
@@ -169,6 +170,7 @@ export function makeQueryObjectsService(
         const response = await port.execute(
           { input: request, auth },
           async (session) => {
+            if (!session.projectExists) throw hidden();
             const definition = await session.definition();
             if (!definition) throw hidden();
             const fields = resolveFields(request.fields, definition);

@@ -51,6 +51,7 @@ Deno.test("query application owns definition-aware projection and sort validatio
   const service = makeQueryObjectsService({
     async execute(_call, work) {
       return await work({
+        projectExists: true,
         definition: () => Promise.resolve(definition),
         authorize: () =>
           Promise.resolve({

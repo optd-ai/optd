@@ -89,12 +89,14 @@ export function makePostgresQueryObjectRepository(
             "select id from projects where id=$1 for share",
             [call.input.project_id],
           );
-          if (!project.rows.length) throw hidden();
+          const projectExists = project.rows.length > 0;
           let definition: Definition | null | undefined;
           let prepared: PreparedQuery | undefined;
           try {
             return await work(Object.freeze({
+              projectExists,
               async definition(): Promise<QueryDefinition | null> {
+                if (!projectExists) return null;
                 definition ??= await resolveDefinition(tx, call.input);
                 if (!definition) return null;
                 const { table: _table, ...publicDefinition } = definition;
@@ -104,7 +106,7 @@ export function makePostgresQueryObjectRepository(
                 _plan: Omit<QueryExecutionPlan, "cursorPosition">,
               ) {
                 definition ??= await resolveDefinition(tx, call.input);
-                if (!definition) throw hidden();
+                if (!definition) throw new QueryPhysicalError("invalid_data");
                 prepared ??= await prepareQuery(
                   tx,
                   call.input,
@@ -125,7 +127,7 @@ export function makePostgresQueryObjectRepository(
                   plan: QueryExecutionPlan,
                 ): Promise<QueryPhysicalPage> {
                   definition ??= await resolveDefinition(tx, call.input);
-                  if (!definition) throw hidden();
+                  if (!definition) throw new QueryPhysicalError("invalid_data");
                   prepared ??= await prepareQuery(
                     tx,
                     call.input,

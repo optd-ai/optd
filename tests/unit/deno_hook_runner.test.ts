@@ -101,6 +101,27 @@ Deno.test("DenoHookRunner preserves diagnostics after accepted child closes stdi
   assertStringIncludes(result.logs, "startup-diagnostic");
 });
 
+Deno.test("DenoHookRunner bounds delayed stdin delivery separately", async () => {
+  const runner = new DenoHookRunner({
+    cacheDir: await Deno.makeTempDir(),
+    inputDeliveryTimeoutMs: 20,
+  });
+  const result = await runner.run(
+    hook("delayed_input", "", {
+      timeoutMs: 1_000,
+      scriptContent:
+        `await new Promise(resolve => setTimeout(resolve, 250)); await new Response(Deno.stdin.readable).text();`,
+    }),
+    {
+      hook: "delayed_input",
+      phase: "changeset.validate",
+      input: { payload: "x".repeat(16 * 1024 * 1024) },
+    },
+  );
+  assertEquals(result.ok, false);
+  assertEquals(result.error?.code, "hook_spawn_failed");
+});
+
 Deno.test("DenoHookRunner preserves post-accept invalid and nonzero results", async () => {
   const runner = new DenoHookRunner({ cacheDir: await Deno.makeTempDir() });
   const invalid = await runner.run(
@@ -180,6 +201,24 @@ Deno.test("DenoHookRunner reports timeouts", async () => {
   );
   assertEquals(result.ok, false);
   assertEquals(result.error?.code, "hook_timeout");
+});
+
+Deno.test("DenoHookRunner parent watchdog stops synchronous infinite hooks", async () => {
+  const runner = new DenoHookRunner({ cacheDir: await Deno.makeTempDir() });
+  const started = performance.now();
+  const result = await runner.run(
+    hook("sync_timeout", `while (true) { /* block the child event loop */ }`, {
+      timeoutMs: 30,
+    }),
+    { hook: "sync_timeout", phase: "changeset.validate", input: {} },
+  );
+  assertEquals(result.ok, false);
+  assertEquals(result.error?.code, "hook_timeout");
+  if (performance.now() - started > 5_000) {
+    throw new Error(
+      "parent hook watchdog did not terminate the child promptly",
+    );
+  }
 });
 
 Deno.test("DenoHookRunner injects only declared secret env vars", async () => {

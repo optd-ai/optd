@@ -26,6 +26,7 @@ export type HttpProvider = {
   attempts: ProviderAttempt[];
   effects: ProviderAttempt[];
   enqueue(...behaviors: ProviderBehavior[]): void;
+  enqueueForKey(idempotencyKey: string, ...behaviors: ProviderBehavior[]): void;
   release(token: string): void;
   waitForAttempts(
     count: number,
@@ -49,6 +50,7 @@ export function startHttpProvider(
 ): HttpProvider {
   const controller = new AbortController();
   const queue = [...initial];
+  const keyedQueues = new Map<string, ProviderBehavior[]>();
   const attempts: ProviderAttempt[] = [];
   const effects: ProviderAttempt[] = [];
   const effectedKeys = new Set<string>();
@@ -60,8 +62,10 @@ export function startHttpProvider(
     signal: controller.signal,
     onListen() {},
   }, async (request) => {
-    const behavior = queue.shift() ?? { kind: "success" };
     const key = request.headers.get("idempotency-key");
+    const keyed = key === null ? undefined : keyedQueues.get(key);
+    const behavior = keyed?.shift() ?? queue.shift() ?? { kind: "success" };
+    if (key !== null && keyed?.length === 0) keyedQueues.delete(key);
     const duplicate = key !== null && effectedKeys.has(key);
     const attempt: ProviderAttempt = {
       id: attempts.length + 1,
@@ -118,6 +122,11 @@ export function startHttpProvider(
     effects,
     enqueue(...behaviors) {
       queue.push(...behaviors);
+    },
+    enqueueForKey(idempotencyKey, ...behaviors) {
+      const existing = keyedQueues.get(idempotencyKey) ?? [];
+      existing.push(...behaviors);
+      keyedQueues.set(idempotencyKey, existing);
     },
     release(token) {
       const release = holds.get(token);
@@ -179,6 +188,7 @@ export function startHttpProvider(
       controller.abort();
       for (const release of holds.values()) release();
       holds.clear();
+      keyedQueues.clear();
       for (const notify of waiters) notify();
       waiters.clear();
       await server.finished.catch((error) => {
