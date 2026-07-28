@@ -9,16 +9,14 @@ import type {
   PinnedDeliveryHookCatalog,
 } from "../../../../application/ports/outbox_processing.ts";
 import type { OutboxConfig } from "../../../../application/services/process_outbox.ts";
+import type { AuthContext } from "../../../../domain/auth/model.ts";
+import type { DeliveryOutcome } from "../../../../domain/outbox/delivery.ts";
 import {
   DenoHookRunner,
   type DenoHookRunnerOptions,
   type HookDefinition,
 } from "../../deno-hooks/hook_runner.ts";
-import type { PostgresHookSecretRepository } from "../hook_secret_repository.ts";
-import {
-  type ClaimedDelivery,
-  PostgresOutboxRepository,
-} from "../outbox_repository.ts";
+import type { ClaimedDelivery } from "../outbox_repository.ts";
 import { query, type Queryable } from "../client.ts";
 
 export type { OutboxConfig } from "../../../../application/services/process_outbox.ts";
@@ -65,8 +63,64 @@ export function loadOutboxConfig(env = Deno.env.toObject()): OutboxConfig {
   };
 }
 
+type PhysicalOutboxLifecycle = Readonly<{
+  claim(
+    workerId: string,
+    limit: number,
+    leaseMarginMs: number,
+    now: Date,
+  ): Promise<ClaimedDelivery[]>;
+  complete(
+    claim: ClaimedDelivery,
+    outcome: DeliveryOutcome,
+    evidence: Readonly<{
+      duration_ms: number;
+      exit_code: number | null;
+      logs: string;
+      logs_truncated: boolean;
+      secrets_redacted: boolean;
+      grants: unknown[];
+    }>,
+    delayMs: number,
+    now: Date,
+  ): Promise<"succeeded" | "retry_wait" | "dead_letter" | "late">;
+  list(
+    filters: Parameters<OutboxLifecyclePort["list"]>[0]["filters"],
+    limit: number,
+    cursor: Parameters<OutboxLifecyclePort["list"]>[0]["cursor"],
+  ): Promise<unknown[]>;
+  inspect(id: string): Promise<unknown | null>;
+  attempts(
+    deliveryId: string,
+    limit: number,
+    after?: number,
+  ): Promise<unknown[]>;
+  retry(
+    deliveryId: string,
+    request?: Readonly<{
+      authContextId: string;
+      auth?: AuthContext;
+      reason?: string;
+    }>,
+  ): Promise<
+    | "pending"
+    | "authorization_changed"
+    | "delivery_not_found"
+    | "delivery_not_retryable"
+  >;
+  cancel(
+    deliveryId: string,
+    request?: Readonly<{
+      authContextId: string;
+      auth?: AuthContext;
+      reason?: string;
+    }>,
+  ): Promise<string>;
+  auditDrain(authContextId: string, limit: number): Promise<void>;
+}>;
+
 export function makePostgresOutboxLifecyclePort(
-  repository: PostgresOutboxRepository,
+  repository: PhysicalOutboxLifecycle,
 ): OutboxLifecyclePort {
   return {
     claim: (request) =>
@@ -127,8 +181,21 @@ export function makePostgresPinnedDeliveryHookCatalog(
   return { load: (claim) => loadPinned(sql, claim) };
 }
 
+type DeliverySecretStore = Readonly<{
+  resolve(
+    hookRevisionId: string,
+    securityDigest: string,
+    grants: ReturnType<typeof pinnedGrants>,
+  ): Promise<
+    Readonly<{
+      values: Readonly<Record<string, string>>;
+      evidence: readonly unknown[];
+    }>
+  >;
+}>;
+
 export function makePostgresDeliverySecretResolver(
-  secrets: PostgresHookSecretRepository,
+  secrets: DeliverySecretStore,
 ): DeliverySecretResolver {
   return {
     async resolve(claim) {

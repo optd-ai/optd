@@ -31,6 +31,15 @@ export type HttpProvider = {
     count: number,
     timeoutMs?: number,
   ): Promise<ProviderAttempt[]>;
+  waitForKeyAttempts(
+    idempotencyKey: string,
+    count: number,
+    timeoutMs?: number,
+  ): Promise<ProviderAttempt[]>;
+  waitForAttemptsBefore(
+    count: number,
+    completion: Promise<unknown>,
+  ): Promise<ProviderAttempt[]>;
   close(): Promise<void>;
 };
 
@@ -115,30 +124,56 @@ export function startHttpProvider(
       if (!release) throw new Error(`provider hold ${token} is not active`);
       release();
     },
-    async waitForAttempts(count, timeoutMs = 5_000) {
+    waitForAttempts(count, timeoutMs = 5_000) {
+      return waitForMatchingAttempts(
+        attempts,
+        waiters,
+        () => true,
+        count,
+        timeoutMs,
+        "provider",
+      );
+    },
+    waitForKeyAttempts(idempotencyKey, count, timeoutMs = 5_000) {
+      return waitForMatchingAttempts(
+        attempts,
+        waiters,
+        (attempt) => attempt.idempotencyKey === idempotencyKey,
+        count,
+        timeoutMs,
+        `provider key ${idempotencyKey}`,
+      );
+    },
+    async waitForAttemptsBefore(count, completion) {
       if (attempts.length >= count) return attempts.slice(0, count);
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      try {
-        await new Promise<void>((resolve, reject) => {
-          const notify = () => {
-            if (attempts.length < count) return;
-            waiters.delete(notify);
-            resolve();
-          };
-          waiters.add(notify);
-          timer = setTimeout(() => {
+      return await new Promise<ProviderAttempt[]>((resolve, reject) => {
+        let settled = false;
+        const notify = () => {
+          if (settled || attempts.length < count) return;
+          settled = true;
+          waiters.delete(notify);
+          resolve(attempts.slice(0, count));
+        };
+        waiters.add(notify);
+        completion.then(
+          () => {
+            if (settled) return;
+            settled = true;
             waiters.delete(notify);
             reject(
               new Error(
-                `provider received ${attempts.length}/${count} attempts`,
+                `command completed after ${attempts.length}/${count} provider attempts`,
               ),
             );
-          }, timeoutMs);
-        });
-      } finally {
-        if (timer !== undefined) clearTimeout(timer);
-      }
-      return attempts.slice(0, count);
+          },
+          (error) => {
+            if (settled) return;
+            settled = true;
+            waiters.delete(notify);
+            reject(error);
+          },
+        );
+      });
     },
     async close() {
       controller.abort();
@@ -151,6 +186,40 @@ export function startHttpProvider(
       });
     },
   };
+}
+
+async function waitForMatchingAttempts(
+  attempts: readonly ProviderAttempt[],
+  waiters: Set<() => void>,
+  matches: (attempt: ProviderAttempt) => boolean,
+  count: number,
+  timeoutMs: number,
+  label: string,
+): Promise<ProviderAttempt[]> {
+  const selected = () => attempts.filter(matches);
+  if (selected().length >= count) return selected().slice(0, count);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const notify = () => {
+        if (selected().length < count) return;
+        waiters.delete(notify);
+        resolve();
+      };
+      waiters.add(notify);
+      timer = setTimeout(() => {
+        waiters.delete(notify);
+        reject(
+          new Error(
+            `${label} received ${selected().length}/${count} attempts`,
+          ),
+        );
+      }, timeoutMs);
+    });
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+  return selected().slice(0, count);
 }
 
 function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {

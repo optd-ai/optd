@@ -452,7 +452,7 @@ Deno.test({
           JSON.stringify({ source_id: read.id }),
         ]);
         expectedAttempts++;
-        await provider.waitForAttempts(expectedAttempts);
+        await provider.waitForAttemptsBefore(expectedAttempts, pending);
         await mutate();
         provider.release(token);
         const result = await pending;
@@ -588,7 +588,7 @@ Deno.test({
           JSON.stringify({ source_id: read.id }),
         ]);
         expectedAttempts++;
-        await provider.waitForAttempts(expectedAttempts);
+        await provider.waitForAttemptsBefore(expectedAttempts, pending);
         if (unrelated) {
           await query(
             harness.server.sql,

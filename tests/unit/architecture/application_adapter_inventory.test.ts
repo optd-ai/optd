@@ -621,6 +621,39 @@ Deno.test("outbox orchestration stays inward over lifecycle capabilities", async
   assertMatch(composition, /makeDenoDeliveryHookExecutor/);
 });
 
+Deno.test("composition owns concrete outbound adapter construction", async () => {
+  const seed = await Deno.readTextFile(
+    "src/adapters/outbound/postgres/repositories/seed_stage_repository.ts",
+  );
+  const objectRead = await Deno.readTextFile(
+    "src/adapters/outbound/postgres/object_read_boundary.ts",
+  );
+  const outbox = await Deno.readTextFile(
+    "src/adapters/outbound/postgres/repositories/outbox_processing_repository.ts",
+  );
+  const action = await Deno.readTextFile(
+    "src/adapters/outbound/postgres/repositories/action_stage_repository.ts",
+  );
+  const stage = await Deno.readTextFile(
+    "src/adapters/outbound/postgres/stage_repository.ts",
+  );
+  const composition = await Deno.readTextFile("src/composition/application.ts");
+
+  assertEquals(seed.includes("PostgresAuthorizationRepository"), false);
+  assertEquals(objectRead.includes("PostgresObjectReader"), false);
+  assertEquals(objectRead.includes("PostgresAuthorizationRepository"), false);
+  assertEquals(outbox.includes("PostgresOutboxRepository"), false);
+  assertEquals(outbox.includes("PostgresHookSecretRepository"), false);
+  assertEquals(action.includes("query_object_repository.ts"), false);
+  assertEquals(stage.includes("query_object_repository.ts"), false);
+  assertMatch(action, /query_policy_sql\.ts/);
+  assertMatch(stage, /query_policy_sql\.ts/);
+  assertMatch(composition, /new PostgresObjectReader/);
+  assertMatch(composition, /new PostgresOutboxRepository/);
+  assertMatch(composition, /new PostgresHookSecretRepository/);
+  assertMatch(composition, /new PostgresAuthorizationRepository/);
+});
+
 Deno.test("secret and grant orchestration stays inward over frozen lifecycle ports", async () => {
   const secretApplication = await Deno.readTextFile(
     "src/application/services/secrets/manage_secrets.ts",

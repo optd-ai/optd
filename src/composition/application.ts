@@ -8,7 +8,10 @@ import {
   makePostgresPackRepository,
   yamlPackParser,
 } from "../adapters/outbound/postgres/repositories/pack_application_repository.ts";
-import { makePostgresQueryObjectRepository } from "../adapters/outbound/postgres/repositories/query_object_repository.ts";
+import {
+  evaluateObjectPolicy,
+  makePostgresQueryObjectRepository,
+} from "../adapters/outbound/postgres/query_policy_sql.ts";
 import { makePostgresMigrationPersistence } from "../adapters/outbound/postgres/repositories/migration_application_repository.ts";
 import {
   loadOutboxConfig,
@@ -47,6 +50,7 @@ import { makeProjectService } from "../application/services/projects/manage_proj
 import { PostgresAuthorizationRepository } from "../adapters/outbound/postgres/authorization_repository.ts";
 import { makeAuthorizationService } from "../application/services/authorization/manage_assignments.ts";
 import { PostgresObjectReadBoundary } from "../adapters/outbound/postgres/object_read_boundary.ts";
+import { PostgresObjectReader } from "../adapters/outbound/postgres/object_reader.ts";
 import { HistoryCursorSigner } from "../domain/history/cursor.ts";
 import { makePostgresExpressionDefinitionPort } from "../adapters/outbound/postgres/repositories/expression_repository.ts";
 import { err } from "../domain/errors/result.ts";
@@ -148,7 +152,19 @@ export function makeApplication(
       authorization: authorizationRepository,
     }),
     objectReads: makeObjectReadService({
-      boundary: new PostgresObjectReadBoundary(sql),
+      boundary: new PostgresObjectReadBoundary(sql, {
+        reader: (lockedSql) => new PostgresObjectReader(lockedSql),
+        authorization: (lockedSql) =>
+          new PostgresAuthorizationRepository(lockedSql as Sql),
+        policy: (lockedSql) => ({
+          evaluate: (input, auth) =>
+            evaluateObjectPolicy(
+              lockedSql,
+              { ...input, actions: [...input.actions] },
+              auth,
+            ),
+        }),
+      }),
       cursors: () => historyCursors ??= HistoryCursorSigner.fromEnvironment(),
     }),
     packs: makePackServices(
@@ -230,7 +246,7 @@ export function makeApplication(
           ),
       },
     seeds: makeStageSeedsService(
-      makePostgresSeedStageRepository(sql, changesets),
+      makePostgresSeedStageRepository(sql, changesets, authorizationRepository),
     ),
   };
 }

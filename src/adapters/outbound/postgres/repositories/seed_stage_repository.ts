@@ -7,7 +7,7 @@ import type {
   StageSource,
 } from "../../../../application/ports/stage_repository.ts";
 import type { SeedStagePort } from "../../../../application/services/seeds/stage_seeds.ts";
-import { PostgresAuthorizationRepository } from "../authorization_repository.ts";
+import type { AuthorizationRepository } from "../../../../application/ports/authorization.ts";
 
 /** Implements only physical seed catalog, active-row, authority, and persistence capabilities. */
 export function makePostgresSeedStageRepository(
@@ -19,8 +19,8 @@ export function makePostgresSeedStageRepository(
       auth: AuthContext,
     ): Promise<Result<StageDto | null>>;
   },
+  authorization: AuthorizationRepository,
 ): SeedStagePort {
-  const authorization = new PostgresAuthorizationRepository(sql);
   return {
     async loadActiveRevision(publisher, pack) {
       return (await query<{ id: string; normalized: unknown }>(

@@ -2,13 +2,12 @@ import {
   type ObjectPolicyReader,
   ObjectReadAuthorityInvalidError,
   type ObjectReadBoundary,
+  type ObjectReader,
   type ReadAddress,
   type ReadAuthorityAnchor,
 } from "../../../application/ports/object_reader.ts";
+import type { AuthorizationRepository } from "../../../application/ports/authorization.ts";
 import type { AuthContext } from "../../../domain/auth/model.ts";
-import { PostgresAuthorizationRepository } from "./authorization_repository.ts";
-import { PostgresObjectReader } from "./object_reader.ts";
-import { evaluateObjectPolicy } from "./repositories/query_object_repository.ts";
 import { query, type Queryable, type Sql } from "./client.ts";
 
 type LineageRow = {
@@ -21,15 +20,24 @@ type LineageRow = {
   superseded_at: Date | string | null;
 };
 
+export type ObjectReadBoundaryFactories = Readonly<{
+  reader(sql: Queryable): ObjectReader;
+  authorization(sql: Queryable): AuthorizationRepository;
+  policy(sql: Queryable): ObjectPolicyReader;
+}>;
+
 export class PostgresObjectReadBoundary implements ObjectReadBoundary {
-  constructor(private readonly sql: Sql) {}
+  constructor(
+    private readonly sql: Sql,
+    private readonly factories: ObjectReadBoundaryFactories,
+  ) {}
 
   async execute<T>(
     auth: AuthContext,
     address: ReadAddress,
     work: (
-      reader: PostgresObjectReader,
-      authorization: PostgresAuthorizationRepository,
+      reader: ObjectReader,
+      authorization: AuthorizationRepository,
       anchor: ReadAuthorityAnchor,
       policy: ObjectPolicyReader,
     ) => Promise<T>,
@@ -37,17 +45,10 @@ export class PostgresObjectReadBoundary implements ObjectReadBoundary {
     return await this.sql.begin(async (tx) => {
       const anchor = await lockReadAuthority(tx, auth, address.projectId);
       return await work(
-        new PostgresObjectReader(tx),
-        new PostgresAuthorizationRepository(tx as unknown as Sql),
+        this.factories.reader(tx),
+        this.factories.authorization(tx),
         anchor,
-        {
-          evaluate: (input, actor) =>
-            evaluateObjectPolicy(
-              tx,
-              { ...input, actions: [...input.actions] },
-              actor,
-            ),
-        },
+        this.factories.policy(tx),
       );
     }) as T;
   }

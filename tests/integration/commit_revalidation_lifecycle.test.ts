@@ -232,19 +232,21 @@ Deno.test({
           const blocker = matrix.client(),
             decisionClient = matrix.client(),
             commitClient = matrix.client();
+          let release: (() => void) | undefined;
+          let lock: Promise<unknown> | undefined;
           try {
             const stage = await stageApproval(
               matrix,
               `${decision}-${firstKind}`,
             );
-            let release!: () => void, held!: (pid: number) => void;
+            let held!: (pid: number) => void;
             const releasePromise = new Promise<void>((resolve) =>
               release = resolve
             );
             const heldPromise = new Promise<number>((resolve) =>
               held = resolve
             );
-            const lock = blocker.begin(async (tx) => {
+            lock = blocker.begin(async (tx) => {
               const pid = Number(
                 (await tx.unsafe("select pg_backend_pid() pid"))[0].pid,
               );
@@ -279,11 +281,14 @@ Deno.test({
               "staged_changeset_lifecycle",
               2,
             );
+            const secondWaiter = waiters.find((waiter) =>
+              waiter.pid !== firstWaiter[0].pid
+            );
             assertEquals(
-              waiters[1].blockers.includes(firstWaiter[0].pid),
+              secondWaiter?.blockers.includes(firstWaiter[0].pid),
               true,
             );
-            release();
+            release?.();
             await lock;
             const [firstResult, secondResult] = await Promise.all([
               first,
@@ -318,6 +323,8 @@ Deno.test({
               );
             }
           } finally {
+            release?.();
+            await lock?.catch(() => undefined);
             await Promise.all(
               [blocker.end(), decisionClient.end(), commitClient.end()].map((
                 value,

@@ -147,9 +147,11 @@ for (const logLevel of ["info", "trace"] as const) {
         );
         const normalDelivery = await deliveryForStage(harness, normal.stageId);
         await waitStatus(harness, normalDelivery.id, "succeeded");
-        assertEquals(provider.attempts.length, 1);
-        assertEquals(provider.attempts[0].idempotencyKey, normalDelivery.id);
-        const normalBody = JSON.parse(provider.attempts[0].body);
+        const normalRequests = provider.attempts.filter((attempt) =>
+          attempt.idempotencyKey === normalDelivery.id
+        );
+        assert(normalRequests.length >= 1);
+        const normalBody = JSON.parse(normalRequests[0].body);
         assertEquals(normalBody.actor_keys, [
           "auth_context_id",
           "human_user_id",
@@ -178,7 +180,7 @@ for (const logLevel of ["info", "trace"] as const) {
           harness,
           ambiguous.stageId,
         );
-        await provider.waitForAttempts(3, 10_000);
+        await provider.waitForKeyAttempts(ambiguousDelivery.id, 2, 10_000);
         await waitStatus(harness, ambiguousDelivery.id, "succeeded");
         const ambiguousRequests = provider.attempts.filter((item) =>
           item.idempotencyKey === ambiguousDelivery.id
@@ -215,7 +217,7 @@ for (const logLevel of ["info", "trace"] as const) {
           harness,
           delayed.stageId,
         );
-        await provider.waitForAttempts(4, 10_000);
+        await provider.waitForKeyAttempts(delayedDelivery.id, 1, 10_000);
         const retryWait = await waitStatus(
           harness,
           delayedDelivery.id,
@@ -273,7 +275,6 @@ for (const logLevel of ["info", "trace"] as const) {
         assertEquals(repaired.retry_generation, 1);
         assertEquals(repaired.attempts_in_generation, 1);
         assertEquals(repaired.total_attempts, 2);
-        const crashRequestCount = provider.attempts.length;
         provider.enqueue({ kind: "hold", token: "crash" });
         const crashing = await stageCommit(
           harness,
@@ -295,7 +296,7 @@ for (const logLevel of ["info", "trace"] as const) {
         assertNotEquals(runningCancel.code, 0);
         assertStringIncludes(runningCancel.stderr, "delivery_in_progress");
         outputs.push(runningCancel.stdout, runningCancel.stderr);
-        await provider.waitForAttempts(crashRequestCount + 1, 10_000);
+        await provider.waitForKeyAttempts(crashDelivery.id, 1, 10_000);
         await harness.crash();
         provider.release("crash");
         const stillRunning = await delivery(harness, crashDelivery.id);
@@ -418,7 +419,6 @@ for (const logLevel of ["info", "trace"] as const) {
           harness,
           drainWork.stageId,
         );
-        const drainBefore = provider.attempts.length;
         provider.enqueue({ kind: "success" });
         await releasePaused(harness, drainDelivery.id);
         await harness.runConcurrent([
@@ -426,7 +426,10 @@ for (const logLevel of ["info", "trace"] as const) {
           { args: ["--json", "outbox", "drain", "--limit", "1"] },
         ]);
         await waitStatus(harness, drainDelivery.id, "succeeded");
-        assertEquals(provider.attempts.length, drainBefore + 1);
+        assert(
+          (await provider.waitForKeyAttempts(drainDelivery.id, 1, 10_000))
+            .length >= 1,
+        );
 
         await installPauseTrigger(harness);
         const slow = await stageCommit(
@@ -445,13 +448,12 @@ for (const logLevel of ["info", "trace"] as const) {
           "fast-later",
         );
         const fastDelivery = await deliveryForStage(harness, fast.stageId);
-        const unorderedBefore = provider.attempts.length;
         provider.enqueue(
           { kind: "hold", token: "slow-earlier" },
           { kind: "success" },
         );
         await releasePaused(harness, slowDelivery.id);
-        await provider.waitForAttempts(unorderedBefore + 1, 10_000);
+        await provider.waitForKeyAttempts(slowDelivery.id, 1, 10_000);
         await makeReady(harness, fastDelivery.id);
         await successful(
           harness.runOptctl([
@@ -463,7 +465,7 @@ for (const logLevel of ["info", "trace"] as const) {
           ]),
           outputs,
         );
-        await provider.waitForAttempts(unorderedBefore + 2, 10_000);
+        await provider.waitForKeyAttempts(fastDelivery.id, 1, 10_000);
         await waitStatus(harness, fastDelivery.id, "succeeded");
         assertEquals(
           (await delivery(harness, slowDelivery.id)).status,

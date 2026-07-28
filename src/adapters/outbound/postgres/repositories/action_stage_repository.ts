@@ -18,7 +18,7 @@ import {
   evaluateTargetedActionPolicy,
   lockTargetedActionAuthority,
   targetedActionAuthorityFactsDigest,
-} from "./query_object_repository.ts";
+} from "../query_policy_sql.ts";
 import {
   type FieldSpec,
   lowerCelToSql,
