@@ -16,7 +16,12 @@ import {
 } from "./adapters/outbound/postgres/migrations.ts";
 import { assertSecretSubsystemReady } from "./adapters/outbound/postgres/repositories/hook_secret_lifecycle_repository.ts";
 import { EnvelopeCrypto } from "./adapters/outbound/crypto/envelope.ts";
-import { resolveHookDenoBinary } from "./adapters/outbound/deno-hooks/hook_runner.ts";
+import {
+  clearRuntimeHookCache,
+  prepareRuntimeHookCache,
+  resolveHookDenoBinary,
+  runtimeHookCacheDirectory,
+} from "./adapters/outbound/deno-hooks/hook_runner.ts";
 import {
   assertSupportedPostgresVersionNumber,
   type PostgresRuntime,
@@ -33,6 +38,8 @@ export type StartedServer = {
 export async function createFetchHandler(
   options: { hookServerPort?: number; hookServerHosts?: string[] } = {},
 ) {
+  const hookCacheDir = runtimeHookCacheDirectory();
+  await prepareRuntimeHookCache(hookCacheDir);
   const postgresRuntime = await startPostgresRuntime();
   console.log(JSON.stringify({
     event: "runtime_started",
@@ -62,6 +69,7 @@ export async function createFetchHandler(
   } catch (error) {
     await closePostgresClient(sql).catch(() => undefined);
     await postgresRuntime.stop().catch(() => undefined);
+    await clearRuntimeHookCache(hookCacheDir).catch(() => undefined);
     throw error;
   }
   const database = new URL(postgresRuntime.databaseUrl);
@@ -69,6 +77,7 @@ export async function createFetchHandler(
   const application = makeApplication(sql, {
     bootstrapToken: Deno.env.get("OPERANT_BOOTSTRAP_TOKEN"),
     hookRunnerOptions: {
+      cacheDir: hookCacheDir,
       denoBin,
       serverPort: options.hookServerPort ??
         Number(Deno.env.get("OPERANT_SERVER_PORT") ?? "8789"),
@@ -115,14 +124,24 @@ export async function createFetchHandler(
         event: "runtime_stopping",
         mode: postgresRuntime.mode,
       }));
-      await outboxLoop.stop();
-      await application.authentication.close();
-      await closePostgresClient(sql);
-      await postgresRuntime.stop();
+      let firstError: unknown;
+      const settle = async (work: () => Promise<void>) => {
+        try {
+          await work();
+        } catch (error) {
+          firstError ??= error;
+        }
+      };
+      await settle(() => outboxLoop.stop());
+      await settle(() => application.authentication.close());
+      await settle(() => clearRuntimeHookCache(hookCacheDir));
+      await settle(() => closePostgresClient(sql));
+      await settle(() => postgresRuntime.stop());
       console.log(JSON.stringify({
         event: "runtime_stopped",
         mode: postgresRuntime.mode,
       }));
+      if (firstError !== undefined) throw firstError;
     },
   };
 }

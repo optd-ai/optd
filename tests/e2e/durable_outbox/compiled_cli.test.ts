@@ -249,7 +249,7 @@ for (const logLevel of ["info", "trace"] as const) {
           [delayedDelivery.id],
         );
         await waitStatus(harness, delayedDelivery.id, "succeeded");
-        provider.enqueue({ kind: "permanent_failure" });
+        await installPauseTrigger(harness);
         const permanent = await stageCommit(
           harness,
           pack,
@@ -261,6 +261,10 @@ for (const logLevel of ["info", "trace"] as const) {
           harness,
           permanent.stageId,
         );
+        provider.enqueueForKey(permanentDelivery.id, {
+          kind: "permanent_failure",
+        });
+        await releasePaused(harness, permanentDelivery.id);
         await waitStatus(harness, permanentDelivery.id, "dead_letter");
         const permanentHistory = await attemptRows(
           harness,
@@ -272,19 +276,17 @@ for (const logLevel of ["info", "trace"] as const) {
           kind: "hold",
           token: repairedToken,
         });
-        await successful(
-          harness.runOptctl([
-            "--json",
-            "outbox",
-            "retry",
-            permanentDelivery.id,
-            "--reason",
-            "provider destination repaired",
-          ]),
-          outputs,
-        );
+        const retryCommand = harness.runOptctl([
+          "--json",
+          "outbox",
+          "retry",
+          permanentDelivery.id,
+          "--reason",
+          "provider destination repaired",
+        ]);
         await provider.waitForKeyAttempts(permanentDelivery.id, 2);
         provider.release(repairedToken);
+        await successful(retryCommand, outputs);
         await waitStatus(harness, permanentDelivery.id, "succeeded");
         const repaired = await deliveryAggregate(harness, permanentDelivery.id);
         assertEquals(repaired.retry_generation, 1);
@@ -313,11 +315,22 @@ for (const logLevel of ["info", "trace"] as const) {
         outputs.push(runningCancel.stdout, runningCancel.stderr);
         await provider.waitForKeyAttempts(crashDelivery.id, 1, 10_000);
         await harness.crash();
+        const crashedInvocations = await hookInvocationEntries(
+          harness.hookCacheDir,
+        );
+        assertEquals(crashedInvocations.length > 0, true);
         provider.release("crash");
         const stillRunning = await delivery(harness, crashDelivery.id);
         assertEquals(stillRunning.status, "running");
         await harness.restart();
+        const recoveredInvocations = await hookInvocationEntries(
+          harness.hookCacheDir,
+        );
+        for (const stale of crashedInvocations) {
+          assertEquals(recoveredInvocations.includes(stale), false);
+        }
         await waitStatus(harness, crashDelivery.id, "succeeded", 40_000);
+        assertEquals(await hookInvocationEntries(harness.hookCacheDir), []);
         const crashAttempts = await attemptRows(harness, crashDelivery.id);
         assertEquals(
           crashAttempts.some((item) => item.outcome === "lease_expired"),
@@ -1033,11 +1046,7 @@ for (const logLevel of ["info", "trace"] as const) {
           null,
         );
 
-        provider.enqueue(
-          { kind: "success", body: { directive: "retry" } },
-          { kind: "success", body: { directive: "retry" } },
-          { kind: "success" },
-        );
+        await installPauseTrigger(harness);
         const pagedAttemptWork = await stageCommit(
           harness,
           pack,
@@ -1049,6 +1058,13 @@ for (const logLevel of ["info", "trace"] as const) {
           harness,
           pagedAttemptWork.stageId,
         );
+        provider.enqueueForKey(
+          pagedAttemptDelivery.id,
+          { kind: "success", body: { directive: "retry" } },
+          { kind: "success", body: { directive: "retry" } },
+          { kind: "success" },
+        );
+        await releasePaused(harness, pagedAttemptDelivery.id);
         await waitStatus(harness, pagedAttemptDelivery.id, "succeeded");
         const expectedAttemptIds = (await query<{ id: string }>(
           harness.server.sql,
@@ -1779,6 +1795,7 @@ for (const logLevel of ["info", "trace"] as const) {
           }
         }
         await ordinary.close();
+        assertEquals(await hookInvocationEntries(harness.hookCacheDir), []);
 
         const diagnostics = await harness.diagnostics();
         const databaseText = JSON.stringify(
@@ -1818,6 +1835,18 @@ for (const logLevel of ["info", "trace"] as const) {
       }
     },
   });
+}
+
+async function hookInvocationEntries(cacheDir: string): Promise<string[]> {
+  const entries: string[] = [];
+  try {
+    for await (const entry of Deno.readDir(cacheDir)) {
+      if (entry.name.startsWith("invocation_")) entries.push(entry.name);
+    }
+  } catch (error) {
+    if (!(error instanceof Deno.errors.NotFound)) throw error;
+  }
+  return entries.sort();
 }
 
 async function writePack(

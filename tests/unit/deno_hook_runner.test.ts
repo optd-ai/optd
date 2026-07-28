@@ -17,9 +17,55 @@ async function assertDirectoryEmpty(path: string): Promise<void> {
   assertEquals(entries, []);
 }
 import {
+  clearRuntimeHookCache,
   DenoHookRunner,
   type HookDefinition,
+  prepareRuntimeHookCache,
+  runtimeHookCacheDirectory,
 } from "../../src/adapters/outbound/deno-hooks/hook_runner.ts";
+
+Deno.test("runtime hook caches recover only their owned invocation entries", async () => {
+  const root = await Deno.makeTempDir();
+  const first = runtimeHookCacheDirectory(`${root}/first`);
+  const second = runtimeHookCacheDirectory(`${root}/second`);
+  await Promise.all([
+    Deno.mkdir(`${first}/invocation_stale`, { recursive: true }),
+    Deno.mkdir(`${second}/invocation_active`, { recursive: true }),
+  ]);
+  await Deno.writeTextFile(`${first}/invocation_stale/hook.ts`, "sensitive");
+  await Deno.writeTextFile(`${first}/keep`, "owned metadata");
+
+  await prepareRuntimeHookCache(first);
+
+  assertEquals(
+    await Array.fromAsync(Deno.readDir(first)).then((entries) =>
+      entries.map((entry) => entry.name).sort()
+    ),
+    ["keep"],
+  );
+  assertEquals(
+    await Array.fromAsync(Deno.readDir(second)).then((entries) =>
+      entries.map((entry) => entry.name).sort()
+    ),
+    ["invocation_active"],
+  );
+  assertEquals((await Deno.stat(first)).mode! & 0o777, 0o700);
+
+  await clearRuntimeHookCache(second);
+  await assertDirectoryEmpty(second);
+  await Deno.remove(root, { recursive: true });
+});
+
+Deno.test("runtime hook cache startup removes stale partial directories", async () => {
+  const cacheDir = await Deno.makeTempDir();
+  for (const name of ["invocation_hook_partial", "invocation_entry_partial"]) {
+    await Deno.mkdir(`${cacheDir}/${name}`, { mode: 0o700 });
+    await Deno.writeTextFile(`${cacheDir}/${name}/hook.ts`, "raw source");
+  }
+  await prepareRuntimeHookCache(cacheDir);
+  await assertDirectoryEmpty(cacheDir);
+  await Deno.remove(cacheDir, { recursive: true });
+});
 
 function hook(
   name: string,

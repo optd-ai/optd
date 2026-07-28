@@ -53,6 +53,7 @@ export type HarnessDiagnostics = {
 export type LiveHarness = {
   rootDir: string;
   dataDir: string;
+  hookCacheDir: string;
   homeDir: string;
   baseUrl: string;
   databaseUrl: string;
@@ -119,6 +120,7 @@ export async function startLiveHarness(
 
   const rootDir = await Deno.makeTempDir({ prefix: "operant-live-" });
   const dataDir = join(rootDir, "data");
+  const hookCacheDir = join(dataDir, "runtime", "hooks");
   const homeDir = join(rootDir, "home");
   const xdgConfig = join(rootDir, "xdg-config");
   const xdgState = join(rootDir, "xdg-state");
@@ -225,6 +227,7 @@ export async function startLiveHarness(
   const harness: LiveHarness = {
     rootDir,
     dataDir,
+    hookCacheDir,
     homeDir,
     baseUrl: running.url,
     databaseUrl,
@@ -411,6 +414,9 @@ export async function startLiveHarness(
           await stopCrashedPostgres(crashedPostgresPid, running.log.text());
           crashedPostgresPid = undefined;
         }
+        await Deno.remove(hookCacheDir, { recursive: true }).catch((error) => {
+          if (!(error instanceof Deno.errors.NotFound)) throw error;
+        });
         if (!closeOptions.retain) {
           await Deno.remove(rootDir, { recursive: true }).catch(() =>
             undefined

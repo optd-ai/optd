@@ -82,6 +82,37 @@ const RESERVED_ENV = ["OPERANT_", "DENO_", "LD_", "DYLD_"];
 const DEFAULT_STDOUT_LIMIT = 16 * 1024 * 1024;
 const DEFAULT_STDERR_LIMIT = 4 * 1024 * 1024;
 const TRUNCATION_MARKER = "\n[OPERANT_LOG_TRUNCATED]";
+const INVOCATION_PREFIX = "invocation_";
+const MAX_RECOVERED_INVOCATIONS = 10_000;
+
+export function runtimeHookCacheDirectory(
+  dataDir = Deno.env.get("OPERANT_DATA_DIR") ?? ".operant-data",
+): string {
+  return `${dataDir.replace(/[\\/]+$/, "")}/runtime/hooks`;
+}
+
+/**
+ * Claims a runtime-owned cache before the runtime accepts work. Lifecycle
+ * composition guarantees that the previous owner has been fully reaped.
+ */
+export async function prepareRuntimeHookCache(cacheDir: string): Promise<void> {
+  await Deno.mkdir(cacheDir, { recursive: true, mode: 0o700 });
+  await Deno.chmod(cacheDir, 0o700);
+  await clearRuntimeHookCache(cacheDir);
+}
+
+/** Removes only ephemeral invocation directories from one owned cache. */
+export async function clearRuntimeHookCache(cacheDir: string): Promise<void> {
+  let recovered = 0;
+  for await (const entry of Deno.readDir(cacheDir)) {
+    if (!entry.name.startsWith(INVOCATION_PREFIX)) continue;
+    recovered++;
+    if (recovered > MAX_RECOVERED_INVOCATIONS) {
+      throw new Error("hook cache contains too many stale invocations");
+    }
+    await Deno.remove(`${cacheDir}/${entry.name}`, { recursive: true });
+  }
+}
 
 export class DenoHookRunner {
   readonly #options: DenoHookRunnerOptions;
@@ -89,8 +120,7 @@ export class DenoHookRunner {
 
   constructor(options: DenoHookRunnerOptions = {}) {
     this.#options = options;
-    this.#cacheDir = options.cacheDir ??
-      `${Deno.env.get("TMPDIR") ?? "/tmp"}/operant-hook-cache`;
+    this.#cacheDir = options.cacheDir ?? runtimeHookCacheDirectory();
   }
 
   async run(
@@ -441,7 +471,7 @@ export class DenoHookRunner {
       await Deno.mkdir(this.#cacheDir, { recursive: true, mode: 0o700 });
       directory = await Deno.makeTempDir({
         dir: this.#cacheDir,
-        prefix: "invocation_",
+        prefix: INVOCATION_PREFIX,
       });
       const operations = this.#options.materializationOperations;
       await (operations?.chmod ?? Deno.chmod)(directory, 0o700);
