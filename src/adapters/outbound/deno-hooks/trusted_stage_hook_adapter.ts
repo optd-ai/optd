@@ -7,7 +7,6 @@ import type {
   JsonValue,
   ResolvedHookSecrets,
 } from "../../../application/ports/repair/repositories.ts";
-import type { PostgresHookSecretRepository } from "../postgres/hook_secret_repository.ts";
 import {
   DenoHookRunner,
   type DenoHookRunnerOptions,
@@ -97,9 +96,28 @@ export class DenoHookExecutor implements HookExecutor {
   }
 }
 
-/** Concrete database/decryption adapter for application-owned secret sequencing. */
+type HookSecretStore = Readonly<{
+  resolve(
+    revisionId: string,
+    securityDigest: string,
+    declarations: Parameters<HookSecretResolver["resolve"]>[0]["declarations"],
+  ): Promise<
+    Readonly<{
+      values: Readonly<Record<string, string>>;
+      evidence: readonly Readonly<{
+        grant_id: string;
+        secret_id: string;
+        value_version: number;
+        slot: string;
+        env: string;
+      }>[];
+    }>
+  >;
+}>;
+
+/** Concrete decryption adapter for application-owned secret sequencing. */
 export function makeHookSecretResolver(
-  repository: Pick<PostgresHookSecretRepository, "resolve">,
+  repository: HookSecretStore,
 ): HookSecretResolver {
   return {
     async resolve(request): Promise<ResolvedHookSecrets> {

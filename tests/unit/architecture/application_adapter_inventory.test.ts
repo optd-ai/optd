@@ -618,7 +618,9 @@ Deno.test("outbox orchestration stays inward over lifecycle capabilities", async
   assertMatch(composition, /makePostgresOutboxLifecyclePort/);
   assertMatch(composition, /makePostgresPinnedDeliveryHookCatalog/);
   assertMatch(composition, /makePostgresDeliverySecretResolver/);
-  assertMatch(composition, /makeDenoDeliveryHookExecutor/);
+  assertMatch(composition, /makeDeliveryHookExecutor/);
+  assertMatch(composition, /new DenoHookRunner/);
+  assertEquals(adapter.includes("DenoHookRunner"), false);
 });
 
 Deno.test("composition owns concrete outbound adapter construction", async () => {
@@ -634,6 +636,9 @@ Deno.test("composition owns concrete outbound adapter construction", async () =>
   const action = await Deno.readTextFile(
     "src/adapters/outbound/postgres/repositories/action_stage_repository.ts",
   );
+  const hook = await Deno.readTextFile(
+    "src/adapters/outbound/deno-hooks/trusted_stage_hook_adapter.ts",
+  );
   const stage = await Deno.readTextFile(
     "src/adapters/outbound/postgres/stage_repository.ts",
   );
@@ -644,6 +649,8 @@ Deno.test("composition owns concrete outbound adapter construction", async () =>
   assertEquals(objectRead.includes("PostgresAuthorizationRepository"), false);
   assertEquals(outbox.includes("PostgresOutboxRepository"), false);
   assertEquals(outbox.includes("PostgresHookSecretRepository"), false);
+  assertEquals(outbox.includes("DenoHookRunner"), false);
+  assertEquals(hook.includes("PostgresHookSecretRepository"), false);
   assertEquals(action.includes("query_object_repository.ts"), false);
   assertEquals(stage.includes("query_object_repository.ts"), false);
   assertEquals(stage.includes("PostgresAuthorizationRepository"), false);
@@ -699,6 +706,9 @@ Deno.test("query orchestration owns same-session definition-aware decisions", as
   const adapter = await Deno.readTextFile(
     "src/adapters/outbound/postgres/repositories/query_object_repository.ts",
   );
+  const physical = await Deno.readTextFile(
+    "src/adapters/outbound/postgres/query_policy_sql.ts",
+  );
   const composition = await Deno.readTextFile("src/composition/application.ts");
 
   assertMatch(application, /QueryObjectRepository/);
@@ -709,12 +719,22 @@ Deno.test("query orchestration owns same-session definition-aware decisions", as
   assertMatch(application, /QueryRepositoryError/);
   assertMatch(application, /queryRowDto/);
   assertMatch(application, /resolved_fields/);
+  assertMatch(application, /QueryCursorPort/);
+  assertMatch(application, /shapeDigest/);
+  assertMatch(application, /cursors\.decode/);
+  assertMatch(application, /cursors\.encode/);
   assertEquals(application.includes("<T extends object>"), false);
   assertEquals(adapter.includes("validationError"), false);
   assertEquals(adapter.includes("Result<QueryResponse>"), false);
   assertEquals(adapter.includes("resolveFields"), false);
   assertEquals(adapter.includes("resolveSort"), false);
-  assertMatch(composition, /makeQueryObjectsService\(queryRepository\)/);
+  assertEquals(physical.includes("QueryCursorSigner"), false);
+  assertEquals(physical.includes("cursor_invalid"), false);
+  assertMatch(composition, /QueryCursorSigner\.fromEnvironment/);
+  assertMatch(
+    composition,
+    /makeQueryObjectsService\(queryRepository, queryCursors\)/,
+  );
 });
 
 Deno.test("read/query/changeset/pack frozen ports have real consumers and adapters", async () => {

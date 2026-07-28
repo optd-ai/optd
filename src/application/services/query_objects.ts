@@ -38,12 +38,20 @@ export type QueryDefinition = Readonly<{
   identity: string;
 }>;
 
+export type QueryCursorPosition = Readonly<{ values: unknown[]; id: string }>;
+
+export type QueryPolicyFacts = Readonly<{
+  policyDigest: string;
+  normalizedWhere: unknown;
+  visible: boolean;
+  archivedVisible: boolean;
+}>;
+
 export type QueryPhysicalPage = Readonly<{
   rows: readonly Readonly<Record<string, unknown>>[];
-  nextCursor: string | null;
+  nextPosition: QueryCursorPosition | null;
   hasMore: boolean;
   total: number | null;
-  policyDigest: string;
 }>;
 
 export type QueryExecutionPlan = Readonly<{
@@ -52,7 +60,23 @@ export type QueryExecutionPlan = Readonly<{
   definition: QueryDefinition;
   fields: readonly string[];
   sort: readonly ResolvedSort[];
+  cursorPosition: QueryCursorPosition | null;
 }>;
+
+export interface QueryCursorPort {
+  shapeDigest(value: unknown): Promise<string>;
+  decode(
+    cursor: string,
+    shapeDigest: string,
+    policyDigest: string,
+    specs: readonly FieldSpec[],
+  ): Promise<QueryCursorPosition>;
+  encode(
+    shapeDigest: string,
+    policyDigest: string,
+    position: QueryCursorPosition,
+  ): Promise<string>;
+}
 
 export type QueryPhysicalFailureKind =
   | "hidden"
@@ -101,6 +125,9 @@ type QueryPagePort =
 
 export type QueryReadSession = Readonly<{
   definition(): Promise<QueryDefinition | null>;
+  authorize(
+    plan: Omit<QueryExecutionPlan, "cursorPosition">,
+  ): Promise<QueryPolicyFacts>;
   page: QueryPagePort;
 }>;
 
@@ -114,7 +141,10 @@ export type QueryReadSessionPort = ReadSessionPort<
 >;
 
 /** Application-owned public query use case over a same-session read port. */
-export function makeQueryObjectsService(port: QueryReadSessionPort) {
+export function makeQueryObjectsService(
+  port: QueryReadSessionPort,
+  cursors: QueryCursorPort,
+) {
   return Object.freeze({
     async query(
       input: unknown,
@@ -143,23 +173,69 @@ export function makeQueryObjectsService(port: QueryReadSessionPort) {
             if (!definition) throw hidden();
             const fields = resolveFields(request.fields, definition);
             const sort = resolveSort(request.sort, definition);
-            const page = await session.page.query({
+            const policy = await session.authorize({
               request,
               auth,
               definition,
               fields,
               sort,
             });
+            if (
+              !request.cursor &&
+              (!policy.visible ||
+                (request.include_archived && !policy.archivedVisible))
+            ) {
+              throw hidden();
+            }
+            const shapeDigest = await cursors.shapeDigest({
+              project_id: request.project_id,
+              definition: request.definition,
+              revision_id: definition.revisionId,
+              where: policy.normalizedWhere,
+              fields,
+              sort,
+              limit: request.limit ?? 50,
+              include_archived: request.include_archived ?? false,
+              include_total: request.include_total ?? false,
+            });
+            let cursorPosition: QueryCursorPosition | null = null;
+            if (request.cursor) {
+              try {
+                cursorPosition = await cursors.decode(
+                  request.cursor,
+                  shapeDigest,
+                  policy.policyDigest,
+                  sort.map((item) => definition.fields[item.field]),
+                );
+              } catch {
+                throw new QueryPhysicalError("cursor_invalid");
+              }
+            }
+            const page = await session.page.query({
+              request,
+              auth,
+              definition,
+              fields,
+              sort,
+              cursorPosition,
+            });
+            const nextCursor = page.nextPosition
+              ? await cursors.encode(
+                shapeDigest,
+                policy.policyDigest,
+                page.nextPosition,
+              )
+              : null;
             return {
               items: page.rows.map((row) =>
                 queryRowDto(row, request, definition, fields)
               ),
               resolved_fields: fields,
               resolved_sort: sort,
-              next_cursor: page.nextCursor,
+              next_cursor: nextCursor,
               has_more: page.hasMore,
               total: page.total,
-              policy_context_digest: page.policyDigest,
+              policy_context_digest: policy.policyDigest,
             };
           },
         );

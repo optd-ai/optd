@@ -11,11 +11,6 @@ import type {
 import type { OutboxConfig } from "../../../../application/services/process_outbox.ts";
 import type { AuthContext } from "../../../../domain/auth/model.ts";
 import type { DeliveryOutcome } from "../../../../domain/outbox/delivery.ts";
-import {
-  DenoHookRunner,
-  type DenoHookRunnerOptions,
-  type HookDefinition,
-} from "../../deno-hooks/hook_runner.ts";
 import type { ClaimedDelivery } from "../outbox_repository.ts";
 import { query, type Queryable } from "../client.ts";
 
@@ -212,12 +207,39 @@ export function makePostgresDeliverySecretResolver(
   };
 }
 
-export function makeDenoDeliveryHookExecutor(
-  options: DenoHookRunnerOptions | undefined,
-  runnerFactory: (
-    options: DenoHookRunnerOptions,
-  ) => Pick<DenoHookRunner, "run"> = (runnerOptions) =>
-    new DenoHookRunner(runnerOptions),
+export type RawDeliveryHook = Readonly<{
+  namespace: string;
+  name: string;
+  revision: string;
+  scriptPath: string;
+  scriptDigest: string;
+  securityDigest: string;
+  scriptContent: string;
+  outputSchema: string;
+  timeoutMs: number;
+  permissions: Record<string, unknown>;
+  secrets?: Array<{ name: string; env: string; slot: string }>;
+}>;
+
+export type RawDeliveryHookResult = Readonly<{
+  ok: boolean;
+  output?: Record<string, unknown>;
+  durationMs: number;
+  exitCode: number | null;
+  logs: string;
+  logsTruncated?: boolean;
+  secretsRedacted?: boolean;
+  error?: Readonly<{ code: string; message: string; details?: unknown }>;
+}>;
+
+export type RawDeliveryHookRunnerFactory = (
+  secretValues: Readonly<Record<string, string>>,
+) => Readonly<{
+  run(hook: RawDeliveryHook, input: unknown): Promise<RawDeliveryHookResult>;
+}>;
+
+export function makeDeliveryHookExecutor(
+  runnerFactory: RawDeliveryHookRunnerFactory,
 ): DeliveryHookExecutor {
   return {
     async run(request) {
@@ -233,23 +255,20 @@ export function makeDenoDeliveryHookExecutor(
         env: slot.env,
         slot: slot.slot,
       }));
-      const result = await runnerFactory({
-        ...options,
-        secretValues: { ...request.secretValues },
-      }).run(hook, request.envelope as never);
+      const result = await runnerFactory({ ...request.secretValues }).run(
+        hook,
+        request.envelope,
+      );
       return {
         ok: result.ok,
         output: result.output ?? null,
         durationMs: result.durationMs,
         exitCode: result.exitCode,
         logs: result.logs,
-        logsTruncated: result.logsTruncated,
-        secretsRedacted: result.secretsRedacted,
+        logsTruncated: result.logsTruncated ?? false,
+        secretsRedacted: result.secretsRedacted ?? false,
         ...(result.error === undefined ? {} : {
-          error: {
-            code: result.error.code,
-            message: result.error.message,
-          },
+          error: { code: result.error.code, message: result.error.message },
         }),
       };
     },
@@ -325,7 +344,9 @@ function hookDefinition(
   claim: OutboxClaim,
   config: Record<string, unknown>,
   source: string,
-): HookDefinition {
+): RawDeliveryHook & {
+  secrets?: Array<{ name: string; env: string; slot: string }>;
+} {
   const nestedSpec = record(config.spec);
   const spec = Object.keys(nestedSpec).length > 0 ? nestedSpec : config;
   return {
@@ -339,7 +360,7 @@ function hookDefinition(
     outputSchema: "delivery.v1",
     timeoutMs: claim.timeout_ms,
     permissions: record(spec.permissions),
-  } as HookDefinition;
+  };
 }
 
 function pinnedGrants(value: unknown): Array<{

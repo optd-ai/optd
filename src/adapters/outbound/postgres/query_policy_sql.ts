@@ -6,7 +6,6 @@ import {
 } from "../../../domain/expressions/cel.ts";
 import { canonicalJson } from "../../../domain/ids/canonical_json.ts";
 import { uuidV7 } from "../../../domain/ids/uuid_v7.ts";
-import { QueryCursorSigner } from "../../../domain/queries/cursor.ts";
 import {
   type QueryRequest,
   type ResolvedSort,
@@ -68,11 +67,15 @@ export type TargetedActionPolicyTarget = Readonly<{
 
 type QueryFailure = QueryPhysicalError;
 const QueryFailure = QueryPhysicalError;
+class ApplicationQueryCallbackError extends Error {
+  constructor(readonly applicationError: unknown) {
+    super("application query callback failed");
+  }
+}
 
 export function makePostgresQueryObjectRepository(
-  deps: { sql: Sql; cursors?: () => QueryCursorSigner },
+  deps: { sql: Sql },
 ): QueryReadSessionPort {
-  let cursor: QueryCursorSigner | undefined;
   return Object.freeze({
     async execute<T>(
       call: Readonly<{ input: QueryRequest; auth: AuthContext }>,
@@ -88,34 +91,66 @@ export function makePostgresQueryObjectRepository(
           );
           if (!project.rows.length) throw hidden();
           let definition: Definition | null | undefined;
-          return await work(Object.freeze({
-            async definition(): Promise<QueryDefinition | null> {
-              definition ??= await resolveDefinition(tx, call.input);
-              if (!definition) return null;
-              const { table: _table, ...publicDefinition } = definition;
-              return publicDefinition;
-            },
-            page: Object.freeze({
-              async query(
-                plan: QueryExecutionPlan,
-              ): Promise<QueryPhysicalPage> {
+          let prepared: PreparedQuery | undefined;
+          try {
+            return await work(Object.freeze({
+              async definition(): Promise<QueryDefinition | null> {
+                definition ??= await resolveDefinition(tx, call.input);
+                if (!definition) return null;
+                const { table: _table, ...publicDefinition } = definition;
+                return publicDefinition;
+              },
+              async authorize(
+                _plan: Omit<QueryExecutionPlan, "cursorPosition">,
+              ) {
                 definition ??= await resolveDefinition(tx, call.input);
                 if (!definition) throw hidden();
-                return await executePage(
+                prepared ??= await prepareQuery(
                   tx,
                   call.input,
                   call.auth,
                   definition,
-                  [...plan.fields],
-                  [...plan.sort],
-                  deps.cursors?.() ??
-                    (cursor ??= QueryCursorSigner.fromEnvironment()),
                 );
+                return {
+                  policyDigest: prepared.policy.digest,
+                  normalizedWhere: prepared.user.normalized,
+                  visible: prepared.policy.superAdmin ||
+                    (prepared.policy.rules.read?.length ?? 0) > 0,
+                  archivedVisible: prepared.policy.superAdmin ||
+                    (prepared.policy.rules.read_archived?.length ?? 0) > 0,
+                };
               },
-            }),
-          })) as T;
+              page: Object.freeze({
+                async query(
+                  plan: QueryExecutionPlan,
+                ): Promise<QueryPhysicalPage> {
+                  definition ??= await resolveDefinition(tx, call.input);
+                  if (!definition) throw hidden();
+                  prepared ??= await prepareQuery(
+                    tx,
+                    call.input,
+                    call.auth,
+                    definition,
+                  );
+                  return await executePage(
+                    tx,
+                    call.input,
+                    definition,
+                    [...plan.sort],
+                    plan.cursorPosition,
+                    prepared,
+                  );
+                },
+              }),
+            })) as T;
+          } catch (error) {
+            throw new ApplicationQueryCallbackError(error);
+          }
         }) as T;
       } catch (error) {
+        if (error instanceof ApplicationQueryCallbackError) {
+          throw error.applicationError;
+        }
         if (error instanceof QueryPhysicalError) throw error;
         if (error instanceof ExpressionError) {
           throw new QueryPhysicalError("invalid_expression", {
@@ -136,15 +171,18 @@ export function makePostgresQueryObjectRepository(
   });
 }
 
-async function executePage(
+type PreparedQuery = Readonly<{
+  params: unknown[];
+  user: ReturnType<typeof lowerExpression>;
+  policy: PolicyAuthorization;
+}>;
+
+async function prepareQuery(
   sql: Queryable,
   request: QueryRequest,
   auth: AuthContext,
   definition: Definition,
-  fields: string[],
-  sort: ResolvedSort[],
-  cursors: QueryCursorSigner,
-): Promise<QueryPhysicalPage> {
+): Promise<PreparedQuery> {
   const params: unknown[] = [request.project_id];
   const user = lowerExpression(request.where ?? "true", {
     fields: definition.fields,
@@ -152,56 +190,31 @@ async function executePage(
     parameterOffset: params.length,
   });
   params.push(...user.params);
-  const actions = request.include_archived
-    ? ["read", "read_archived"]
-    : ["read"];
   const policy = await resolvePolicyAuthorization(
     sql,
     request.project_id,
     definition,
     auth,
-    actions,
+    request.include_archived ? ["read", "read_archived"] : ["read"],
     params,
   );
-  if (!policy.superAdmin && !policy.rules.read.length && !request.cursor) {
-    throw hidden();
-  }
-  if (
-    request.include_archived && !policy.superAdmin &&
-    !policy.rules.read_archived.length && !request.cursor
-  ) throw hidden();
+  return { params, user, policy };
+}
+
+async function executePage(
+  sql: Queryable,
+  request: QueryRequest,
+  definition: Definition,
+  sort: ResolvedSort[],
+  position: Readonly<{ values: unknown[]; id: string }> | null,
+  prepared: PreparedQuery,
+): Promise<QueryPhysicalPage> {
+  const params = [...prepared.params];
+  const { user, policy } = prepared;
   const readPredicate = policy.predicates.read;
   const archivePredicate = request.include_archived
     ? policy.predicates.read_archived
     : `q."archived_at" is null`;
-  const policyDigest = policy.digest;
-  const shapeDigest = await digest({
-    project_id: request.project_id,
-    definition: request.definition,
-    revision_id: definition.revisionId,
-    where: user.normalized,
-    fields,
-    sort,
-    limit: request.limit ?? 50,
-    include_archived: request.include_archived ?? false,
-    include_total: request.include_total ?? false,
-  });
-  let position: { values: unknown[]; id: string } | null = null;
-  if (request.cursor) {
-    try {
-      position = await cursors.decode(
-        request.cursor,
-        shapeDigest,
-        policyDigest,
-        sort.map((item) => definition.fields[item.field]),
-      );
-    } catch {
-      throw new QueryFailure("cursor_invalid");
-    }
-    if (position.values.length !== sort.length) {
-      throw new QueryFailure("cursor_invalid");
-    }
-  }
   const keyset = position
     ? keysetSql(sort, position.values, params, request.definition.kind)
     : "true";
@@ -238,26 +251,23 @@ async function executePage(
   const limit = request.limit ?? 50;
   const hasMore = rows.length > limit;
   const page = rows.slice(0, limit);
-  let next: string | null = null;
-  if (hasMore) {
-    const last = page[page.length - 1];
-    next = await cursors.encode(shapeDigest, policyDigest, {
-      values: sort.map((s) =>
-        typedValue(
-          last,
-          column(s.field, request.definition.kind),
-          definition.fields[s.field],
-        )
-      ),
-      id: String(last.id),
-    });
-  }
+  const last = hasMore ? page[page.length - 1] : null;
   return {
     rows: page,
-    nextCursor: next,
+    nextPosition: last
+      ? {
+        values: sort.map((item) =>
+          typedValue(
+            last,
+            column(item.field, request.definition.kind),
+            definition.fields[item.field],
+          )
+        ),
+        id: String(last.id),
+      }
+      : null,
     hasMore,
     total: request.include_total ? Number(result.rows[0]?.total ?? 0) : null,
-    policyDigest,
   };
 }
 

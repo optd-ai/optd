@@ -15,14 +15,19 @@ import {
 import { makePostgresMigrationPersistence } from "../adapters/outbound/postgres/repositories/migration_application_repository.ts";
 import {
   loadOutboxConfig,
-  makeDenoDeliveryHookExecutor,
+  makeDeliveryHookExecutor,
   makeOutboxCursorPort,
   makePostgresDeliverySecretResolver,
   makePostgresOutboxLifecyclePort,
   makePostgresPinnedDeliveryHookCatalog,
 } from "../adapters/outbound/postgres/repositories/outbox_processing_repository.ts";
 import { PostgresOutboxRepository } from "../adapters/outbound/postgres/outbox_repository.ts";
-import type { DenoHookRunnerOptions } from "../adapters/outbound/deno-hooks/hook_runner.ts";
+import {
+  DenoHookRunner,
+  type DenoHookRunnerOptions,
+  type HookDefinition,
+  type HookEnvelope,
+} from "../adapters/outbound/deno-hooks/hook_runner.ts";
 import { makePostgresSecretLifecyclePersistence } from "../adapters/outbound/postgres/repositories/hook_secret_lifecycle_repository.ts";
 import { makePostgresHookSecretGrantPersistence } from "../adapters/outbound/postgres/repositories/hook_secret_grant_repository.ts";
 import {
@@ -52,6 +57,8 @@ import { makeAuthorizationService } from "../application/services/authorization/
 import { PostgresObjectReadBoundary } from "../adapters/outbound/postgres/object_read_boundary.ts";
 import { PostgresObjectReader } from "../adapters/outbound/postgres/object_reader.ts";
 import { HistoryCursorSigner } from "../domain/history/cursor.ts";
+import { QueryCursorSigner } from "../domain/queries/cursor.ts";
+import { canonicalSha256 } from "../domain/ids/canonical_json.ts";
 import { makePostgresExpressionDefinitionPort } from "../adapters/outbound/postgres/repositories/expression_repository.ts";
 import { err } from "../domain/errors/result.ts";
 import { uuidV7 } from "../domain/ids/uuid_v7.ts";
@@ -141,6 +148,12 @@ export function makeApplication(
   let historyCursors: HistoryCursorSigner | undefined;
   const authorization = makeAuthorizationService(authorizationRepository);
   const queryRepository = makePostgresQueryObjectRepository({ sql });
+  const queryCursorSigner = QueryCursorSigner.fromEnvironment();
+  const queryCursors = {
+    shapeDigest: canonicalSha256,
+    decode: queryCursorSigner.decode.bind(queryCursorSigner),
+    encode: queryCursorSigner.encode.bind(queryCursorSigner),
+  };
   return {
     authentication,
     bootstrap: makeBootstrapService(authentication, passwordPolicy),
@@ -200,7 +213,7 @@ export function makeApplication(
     }),
 
     hookSecretGrants,
-    queries: makeQueryObjectsService(queryRepository),
+    queries: makeQueryObjectsService(queryRepository, queryCursors),
     expressions: makeExpressionService(
       makePostgresExpressionDefinitionPort(sql as Queryable),
     ),
@@ -221,7 +234,16 @@ export function makeApplication(
       authorization: authorizationRepository,
       catalog: makePostgresPinnedDeliveryHookCatalog(sql as Queryable),
       secrets: makePostgresDeliverySecretResolver(hookSecretRepository),
-      hooks: makeDenoDeliveryHookExecutor(options.hookRunnerOptions),
+      hooks: makeDeliveryHookExecutor((secretValues) => {
+        const runner = new DenoHookRunner({
+          ...options.hookRunnerOptions,
+          secretValues: { ...secretValues },
+        });
+        return {
+          run: (hook, input) =>
+            runner.run(hook as HookDefinition, input as HookEnvelope),
+        };
+      }),
       cursors: makeOutboxCursorPort(),
       config: loadOutboxConfig(Deno.env.toObject()),
       random: Math.random,

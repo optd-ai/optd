@@ -52,20 +52,30 @@ Deno.test("query application owns definition-aware projection and sort validatio
     async execute(_call, work) {
       return await work({
         definition: () => Promise.resolve(definition),
+        authorize: () =>
+          Promise.resolve({
+            policyDigest: "digest",
+            normalizedWhere: true,
+            visible: true,
+            archivedVisible: true,
+          }),
         page: {
           query: (_plan) => {
             pageCalls++;
             return Promise.resolve({
               rows: [],
-              nextCursor: null,
+              nextPosition: null,
               hasMore: false,
               total: null,
-              policyDigest: "digest",
             });
           },
         },
       });
     },
+  }, {
+    shapeDigest: () => Promise.resolve("shape"),
+    decode: () => Promise.reject(new Error("unused")),
+    encode: () => Promise.reject(new Error("unused")),
   });
   const base = {
     project_id: "019b7a2e-7c10-7000-8000-000000000002",
