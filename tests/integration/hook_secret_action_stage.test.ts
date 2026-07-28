@@ -1,5 +1,10 @@
 // deno-lint-ignore-file no-import-prefix
-import { assertEquals, assertStringIncludes } from "jsr:@std/assert@1";
+import {
+  assertEquals,
+  assertRejects,
+  assertStringIncludes,
+} from "jsr:@std/assert@1";
+import type { ActiveCliCommand } from "../support/live_harness.ts";
 import {
   query,
   type Sql,
@@ -448,7 +453,7 @@ Deno.test({
         const token = `race-${name}`;
         provider.enqueueUnkeyed({ kind: "hold", token });
         const beforeStages = await evidenceCounts(harness.server.sql);
-        const pending = harness.runOptctl([
+        const activeCommand = await harness.startOptctl([
           "--json",
           "--project",
           projectId,
@@ -458,6 +463,7 @@ Deno.test({
           "--input",
           JSON.stringify({ source_id: read.id }),
         ]);
+        const pending = activeCommand.result;
         expectedAttempts++;
         await provider.waitForUnkeyedAttemptsBefore(expectedAttempts, pending);
         const persistenceBarrier = await holdSessionAuthority(
@@ -469,7 +475,8 @@ Deno.test({
           await observePostHookPersistence(
             harness.server.sql,
             persistenceBarrier.pid,
-            pending,
+            activeCommand,
+            () => provider.attempts.length,
           );
           await mutate();
         } finally {
@@ -605,7 +612,7 @@ Deno.test({
         provider.enqueueUnkeyed(
           unrelated ? { kind: "hold", token } : { kind: "success" },
         );
-        const pending = harness.runOptctl([
+        const activeCommand = await harness.startOptctl([
           "--json",
           "--project",
           projectId,
@@ -615,6 +622,7 @@ Deno.test({
           "--input",
           JSON.stringify({ source_id: read.id }),
         ]);
+        const pending = activeCommand.result;
         expectedAttempts++;
         if (unrelated) {
           await provider.waitForUnkeyedAttemptsBefore(
@@ -630,7 +638,8 @@ Deno.test({
             await observePostHookPersistence(
               harness.server.sql,
               persistenceBarrier.pid,
-              pending,
+              activeCommand,
+              () => provider.attempts.length,
             );
             await query(
               harness.server.sql,
@@ -712,18 +721,36 @@ async function holdSessionAuthority(sql: Sql, sessionId: string): Promise<{
   return { pid, release, done };
 }
 
+const HOOK_STARTUP_TIMEOUT_MS = 30_000;
+const ACTION_HOOK_TIMEOUT_MS = 5_000;
+const CLI_SETTLEMENT_GRACE_MS = 5_000;
+const POST_HOOK_OBSERVATION_DEADLINE_MS = HOOK_STARTUP_TIMEOUT_MS +
+  ACTION_HOOK_TIMEOUT_MS + CLI_SETTLEMENT_GRACE_MS;
+const POST_HOOK_POLL_INTERVAL_MS = 10;
+
+type ActivitySnapshot = {
+  pid: number;
+  state: string | null;
+  wait_event_type: string | null;
+  wait_event: string | null;
+  blocked_by_barrier: boolean;
+  touches_auth_sessions: boolean;
+};
+
 async function observePostHookPersistence(
   sql: Sql,
   blockerPid: number,
-  command: Promise<{ code: number; stdout: string; stderr: string }>,
+  command: ActiveCliCommand,
+  providerAttempts: () => number,
+  deadlineMs = POST_HOOK_OBSERVATION_DEADLINE_MS,
 ): Promise<void> {
-  const completed = command.then((result) => ({
-    completed: true as const,
-    result,
-  }));
-  while (true) {
-    const observation = await Promise.race([
-      query<{ waiting_pid: number | null }>(
+  await waitForPostHookPersistence({
+    blockerPid,
+    command,
+    providerAttempts,
+    deadlineMs,
+    observe: async () => {
+      const result = await query<{ waiting_pid: number | null }>(
         sql,
         `select (
            select pid from pg_stat_activity
@@ -734,22 +761,164 @@ async function observePostHookPersistence(
             order by pid limit 1
          )::int waiting_pid`,
         [blockerPid],
-      ).then((result) => ({
-        completed: false as const,
-        waitingPid: result.rows[0].waiting_pid,
-      })),
-      completed,
-    ]);
-    if (observation.completed) {
-      throw new Error(
-        `action command completed before post-hook authority lock: ${
-          JSON.stringify(observation.result)
-        }`,
       );
+      return result.rows[0].waiting_pid;
+    },
+    snapshot: async () =>
+      (await query<ActivitySnapshot>(
+        sql,
+        `select pid,state,wait_event_type,wait_event,
+                $1=any(pg_blocking_pids(pid)) blocked_by_barrier,
+                position('auth_sessions' in query)>0 touches_auth_sessions
+           from pg_stat_activity
+          where pid=$1 or $1=any(pg_blocking_pids(pid))
+          order by pid`,
+        [blockerPid],
+      )).rows,
+  });
+}
+
+async function waitForPostHookPersistence(options: {
+  blockerPid: number;
+  command: ActiveCliCommand;
+  providerAttempts: () => number;
+  deadlineMs: number;
+  observe(): Promise<number | null>;
+  snapshot(): Promise<ActivitySnapshot[]>;
+}): Promise<void> {
+  const deadlineToken = { kind: "deadline" as const };
+  let deadlineHandle: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<typeof deadlineToken>((resolve) => {
+    deadlineHandle = setTimeout(
+      () => resolve(deadlineToken),
+      options.deadlineMs,
+    );
+  });
+  const completed = options.command.result.then(
+    (result) => ({
+      kind: "completed" as const,
+      code: result.code,
+      signal: result.signal,
+    }),
+    () => ({ kind: "failed" as const }),
+  );
+  let observations = 0;
+  const deadlineFailure = async (): Promise<never> => {
+    const commandState = options.command.state();
+    let activity: ActivitySnapshot[] | { snapshot_error: string };
+    try {
+      activity = await options.snapshot();
+    } catch (error) {
+      activity = {
+        snapshot_error: error instanceof Error ? error.message : String(error),
+      };
+    } finally {
+      await options.command.terminate();
     }
-    if (observation.waitingPid !== null) return;
+    throw new Error(
+      `post-hook authority observation deadline: ${
+        JSON.stringify({
+          blocker_pid: options.blockerPid,
+          command_state: commandState,
+          provider_attempts: options.providerAttempts(),
+          observations,
+          activity,
+        })
+      }`,
+    );
+  };
+  try {
+    while (true) {
+      const outcome = await Promise.race([
+        options.observe().then((waitingPid) => ({
+          kind: "observed" as const,
+          waitingPid,
+        })),
+        completed,
+        deadline,
+      ]);
+      if (outcome.kind === "completed" || outcome.kind === "failed") {
+        throw new Error(
+          `action command completed before post-hook authority lock: ${
+            JSON.stringify(outcome)
+          }`,
+        );
+      }
+      if (outcome.kind === "deadline") return await deadlineFailure();
+      observations++;
+      if (outcome.waitingPid !== null) return;
+      const pause = await boundedPollDelay(
+        POST_HOOK_POLL_INTERVAL_MS,
+        deadline,
+      );
+      if (pause.kind === "deadline") return await deadlineFailure();
+    }
+  } finally {
+    if (deadlineHandle !== undefined) clearTimeout(deadlineHandle);
   }
 }
+
+async function boundedPollDelay(
+  milliseconds: number,
+  deadline: Promise<{ kind: "deadline" }>,
+): Promise<{ kind: "poll" } | { kind: "deadline" }> {
+  let handle: ReturnType<typeof setTimeout> | undefined;
+  const poll = new Promise<{ kind: "poll" }>((resolve) => {
+    handle = setTimeout(() => resolve({ kind: "poll" }), milliseconds);
+  });
+  try {
+    return await Promise.race([poll, deadline]);
+  } finally {
+    if (handle !== undefined) clearTimeout(handle);
+  }
+}
+
+Deno.test("post-hook persistence observation bounds a stalled command", async () => {
+  let terminated = false;
+  let state: "running" | "settled" = "running";
+  let observations = 0;
+  const command: ActiveCliCommand = {
+    result: new Promise(() => undefined),
+    state: () => state,
+    terminate() {
+      terminated = true;
+      state = "settled";
+      return Promise.resolve();
+    },
+  };
+  const started = Date.now();
+  const error = await assertRejects(
+    () =>
+      waitForPostHookPersistence({
+        blockerPid: 41,
+        command,
+        providerAttempts: () => 3,
+        deadlineMs: 25,
+        observe() {
+          observations++;
+          return Promise.resolve(null);
+        },
+        snapshot: () =>
+          Promise.resolve([{
+            pid: 41,
+            state: "idle in transaction",
+            wait_event_type: "Client",
+            wait_event: "ClientRead",
+            blocked_by_barrier: false,
+            touches_auth_sessions: true,
+          }]),
+      }),
+    Error,
+    '"blocker_pid":41',
+  );
+  assertStringIncludes(error.message, '"command_state":"running"');
+  assertStringIncludes(error.message, '"provider_attempts":3');
+  assertStringIncludes(error.message, '"observations":');
+  assertEquals(terminated, true);
+  assertEquals(state, "settled");
+  assertEquals(observations > 0, true);
+  assertEquals(Date.now() - started < 1_000, true);
+});
 
 async function evidenceCounts(sql: Parameters<typeof query>[0]) {
   return (await query<{ stages: string; hooks: string }>(

@@ -40,6 +40,11 @@ export type ConcurrentCliRequest = {
   stdin?: string;
   launcher?: CliLauncher;
 };
+export type ActiveCliCommand = {
+  result: Promise<CliResult>;
+  state(): "running" | "settled";
+  terminate(): Promise<void>;
+};
 export type ProcessLaunchResult = {
   result: CliResult;
   launcher: CliLauncher;
@@ -62,6 +67,7 @@ export type LiveHarness = {
   /** Test-support SQL is only for focused setup/assertions, never acceptance actions. */
   server: { sql: Sql };
   runOptctl(args: string[], stdin?: string): Promise<CliResult>;
+  startOptctl(args: string[], stdin?: string): Promise<ActiveCliCommand>;
   bootstrap(input: BootstrapInput): Promise<CliResult>;
   login(input: LoginInput): Promise<CliResult>;
   bootstrapProcess(input: BootstrapInput): Promise<ProcessLaunchResult>;
@@ -187,43 +193,85 @@ export async function startLiveHarness(
   };
   const activeCommands = new Set<Deno.ChildProcess>();
   const commandSettlements = new Set<Promise<void>>();
-  const runBinaryInner = async (
+  const startBinary = async (
     args: string[],
     stdin?: string,
-  ): Promise<CliResult> => {
+  ): Promise<ActiveCliCommand> => {
     const argv = ["--server", running.url, ...args];
     const startedAt = Date.now();
     await legacyAuthBridge.before(Deno.pid);
-    const child = new Deno.Command(binaryPath, {
-      args: argv,
-      env,
-      stdin: stdin === undefined ? "null" : "piped",
-      stdout: "piped",
-      stderr: "piped",
-    }).spawn();
-    activeCommands.add(child);
+    let child: Deno.ChildProcess;
     try {
-      if (stdin !== undefined) {
-        const writer = child.stdin.getWriter();
-        await writer.write(new TextEncoder().encode(stdin));
-        await writer.close();
-      }
-      return cliResult(argv, startedAt, await child.output());
-    } finally {
-      activeCommands.delete(child);
+      child = new Deno.Command(binaryPath, {
+        args: argv,
+        env,
+        stdin: stdin === undefined ? "null" : "piped",
+        stdout: "piped",
+        stderr: "piped",
+      }).spawn();
+    } catch (error) {
       await legacyAuthBridge.after(Deno.pid);
+      throw error;
     }
-  };
-  const runBinary = (
-    args: string[],
-    stdin?: string,
-  ): Promise<CliResult> => {
-    const task = runBinaryInner(args, stdin);
-    const settled = task.then(() => undefined, () => undefined);
+    activeCommands.add(child);
+    let state: "running" | "settled" = "running";
+    const result = (async () => {
+      try {
+        if (stdin !== undefined) {
+          const writer = child.stdin.getWriter();
+          await writer.write(new TextEncoder().encode(stdin));
+          await writer.close();
+        }
+        return cliResult(argv, startedAt, await child.output());
+      } finally {
+        state = "settled";
+        activeCommands.delete(child);
+        await legacyAuthBridge.after(Deno.pid);
+      }
+    })();
+    const settled = result.then(() => undefined, () => undefined);
     commandSettlements.add(settled);
     settled.finally(() => commandSettlements.delete(settled));
-    return task;
+    return {
+      result,
+      state: () => state,
+      async terminate() {
+        if (state === "running") {
+          try {
+            child.kill("SIGTERM");
+          } catch {
+            // The command may have exited between the state check and signal.
+          }
+        }
+        let escalationHandle: ReturnType<typeof setTimeout> | undefined;
+        const escalation = new Promise<"escalate">((resolve) => {
+          escalationHandle = setTimeout(() => resolve("escalate"), 2_000);
+        });
+        try {
+          if (
+            await Promise.race([
+                settled.then(() => "settled" as const),
+                escalation,
+              ]) ===
+              "escalate" && state === "running"
+          ) {
+            try {
+              child.kill("SIGKILL");
+            } catch {
+              // The command may have exited before escalation.
+            }
+          }
+          await settled;
+        } finally {
+          if (escalationHandle !== undefined) clearTimeout(escalationHandle);
+        }
+      },
+    };
   };
+  const runBinary = async (
+    args: string[],
+    stdin?: string,
+  ): Promise<CliResult> => (await startBinary(args, stdin)).result;
   const harness: LiveHarness = {
     rootDir,
     dataDir,
@@ -235,6 +283,7 @@ export async function startLiveHarness(
     binarySourceDigest,
     server: { sql },
     runOptctl: runBinary,
+    startOptctl: startBinary,
     async bootstrap(input) {
       return await runBinary([
         "bootstrap",
