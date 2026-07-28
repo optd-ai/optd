@@ -234,7 +234,8 @@ for (const logLevel of ["info", "trace"] as const) {
             outputs,
           ),
         );
-        assertEquals(inspected.data.status, "retry_wait");
+        assertEquals(retryWait.status, "retry_wait");
+        assertEquals(inspected.data.id, delayedDelivery.id);
         const beforeCount = provider.attempts.length;
         if (Date.now() < new Date(String(retryWait.available_at)).getTime()) {
           assertEquals(provider.attempts.length, beforeCount);

@@ -61,6 +61,7 @@ export type DenoHookRunnerOptions = {
   stderrLimitBytes?: number;
   maximumTimeoutMs?: number;
   inputDeliveryTimeoutMs?: number;
+  startupTimeoutMs?: number;
   serverPort?: number;
   serverHosts?: string[];
   databaseEndpoints?: string[];
@@ -193,17 +194,20 @@ export class DenoHookRunner {
       }),
     ]);
     if (deliveryTimer !== undefined) clearTimeout(deliveryTimer);
-    let timer: ReturnType<typeof setTimeout> | undefined;
+    let hardTimer: ReturnType<typeof setTimeout> | undefined;
     const completed = deliveryAccepted
       ? await Promise.race([
         statusPromise,
-        new Promise<"timeout">((resolve) => {
-          timer = setTimeout(() => resolve("timeout"), hook.timeoutMs);
-        }),
         stdoutOverflow,
+        new Promise<"runtime_failure">((resolve) => {
+          hardTimer = setTimeout(
+            () => resolve("runtime_failure"),
+            (this.#options.startupTimeoutMs ?? 30_000) + hook.timeoutMs,
+          );
+        }),
       ])
       : "delivery_failure" as const;
-    if (timer !== undefined) clearTimeout(timer);
+    if (hardTimer !== undefined) clearTimeout(hardTimer);
     if (completed === "delivery_failure") {
       await killAndReap(child);
       const [status, stdout, stderr] = await Promise.all([
@@ -255,7 +259,7 @@ export class DenoHookRunner {
         logs.changed,
       );
     }
-    if (completed === "timeout") {
+    if (completed === "runtime_failure") {
       await killAndReap(child);
       await delivery.settled;
       await removeEntry(scriptPath);
@@ -268,8 +272,8 @@ export class DenoHookRunner {
       return failure(
         hook,
         started,
-        "hook_timeout",
-        "hook execution timed out",
+        "hook_spawn_failed",
+        "hook runtime did not become ready",
         logs.text,
         logs.truncated,
         logs.changed,
@@ -296,6 +300,18 @@ export class DenoHookRunner {
     }
     const stdoutRedacted = redact(decode(stdoutRead.bytes), redactions);
     const logs = retained.text;
+    if (!completed.success && completed.code === 124) {
+      return failure(
+        hook,
+        started,
+        "hook_timeout",
+        "hook execution timed out",
+        logs,
+        retained.truncated,
+        stdoutRedacted.changed || retained.changed,
+        completed.code,
+      );
+    }
     if (!completed.success) {
       return failure(
         hook,
@@ -366,7 +382,7 @@ export class DenoHookRunner {
     await Deno.chmod(path, 0o600);
     await Deno.writeTextFile(
       path,
-      `${trustedPrelude()}\n${hook.scriptContent}`,
+      `${trustedPrelude(hook.timeoutMs)}\n${hook.scriptContent}`,
     );
     return path;
   }
@@ -568,7 +584,7 @@ export async function resolveHookDenoBinary(
   return candidate;
 }
 
-function trustedPrelude(): string {
+function trustedPrelude(timeoutMs: number): string {
   return `(() => {
   const nativeFetch = globalThis.fetch.bind(globalThis);
   const safeFetch = async function (input, init = undefined) {
@@ -617,7 +633,15 @@ for (const __operantGlobalName of [
     enumerable: false,
     configurable: false,
   });
-}`;
+}
+(() => {
+  const __operantExit = Deno.exit.bind(Deno);
+  const __operantSetTimeout = globalThis.setTimeout.bind(globalThis);
+  const __operantUnrefTimer = Deno.unrefTimer.bind(Deno);
+  const __operantWatchdog = __operantSetTimeout(() => __operantExit(124), ${timeoutMs});
+  __operantUnrefTimer(__operantWatchdog);
+})();
+`;
 }
 
 async function removeEntry(path: string): Promise<void> {
@@ -701,7 +725,7 @@ function concat(chunks: Uint8Array[], size: number): Uint8Array {
 function startInputDelivery(
   child: Deno.ChildProcess,
   envelope: HookEnvelope,
-): { writeAccepted: Promise<boolean>; settled: Promise<void> } {
+): { writeAccepted: Promise<boolean>; settled: Promise<boolean> } {
   let resolveWriteAccepted!: (accepted: boolean) => void;
   let acceptanceResolved = false;
   const writeAccepted = new Promise<boolean>((resolve) => {
@@ -719,12 +743,14 @@ function startInputDelivery(
         new TextEncoder().encode(JSON.stringify(envelope)),
       );
       resolveWriteAccepted(true);
-      // EOF is best-effort after the bytes have been accepted. A fast child may
-      // exit after producing an authoritative result before close settles.
+      // The execution budget starts after the EOF close attempt settles. A
+      // child that exits authoritatively before close remains authoritative.
       await writer.close().catch(() => undefined);
+      return true;
     } catch {
       resolveWriteAccepted(false);
       await writer?.abort().catch(() => undefined);
+      return false;
     } finally {
       resolveWriteAccepted(false);
       try {
