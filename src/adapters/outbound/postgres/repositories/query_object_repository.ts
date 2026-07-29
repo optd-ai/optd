@@ -1,6 +1,7 @@
 export {
   evaluateObjectPolicy,
   evaluateTargetedActionPolicy,
+  lockExactTargetAuthorityDependencies,
   lockTargetedActionAuthority,
   makePostgresQueryObjectRepository,
   targetedActionAuthorityFactsDigest,

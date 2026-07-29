@@ -42,22 +42,38 @@ type PolicyRow = {
   role_id: string;
   capability: string;
   resource: string;
+  condition_kind: "unconditional" | "abac" | "rebac";
   predicate: string | null;
   relation_relationship: string | null;
   relation_object_side: "from" | "to" | null;
   relation_subject_side: "from" | "to" | null;
   relation_subject: "actor.id" | "actor.human_user_id" | null;
+  evaluation_order: number;
   policy_id: string;
   policy_version_id: string;
   policy_version: number;
+  policy_version_active: boolean;
+  policy_candidate_revision_id: string | null;
+  policy_definition_name: string | null;
+  policy_candidate_active: boolean;
   assignment_id: string;
   assignment_version: number;
+  assignment_boundary_type: "system" | "all_projects" | "project";
+  assignment_project_id: string | null;
+  assignment_active: boolean;
 };
 type EffectiveRole = {
   assignment_id: string;
+  assignment_owner_id: string;
+  assignment_active: boolean;
+  assignment_version: number | null;
   role_id: string;
+  system_role_active: boolean;
   version_id: string;
   version: number;
+  role_version_active: boolean;
+  role_candidate_revision_id: string | null;
+  role_definition_name: string | null;
   boundary_type: "system" | "all_projects" | "project";
   project_id: string | null;
 };
@@ -425,11 +441,25 @@ export async function targetedActionAuthorityFactsDigest(
     }=$1 and (boundary_type in ('system','all_projects') or project_id=$2) order by id`,
     [auth.authorizationId ?? auth.principalId, projectId],
   )).rows.map((row) => row.fact);
+  const roles = (await query<Record<string, unknown>>(
+    sql,
+    `select to_jsonb(sr) role,to_jsonb(rv) role_version
+       from system_roles sr join role_definition_versions rv on rv.role_id=sr.id
+      where sr.id in (select role_id from ${qi(assignmentTable)} where ${
+      qi(assignmentColumn)
+    }=$1) order by sr.id,rv.id`,
+    [auth.authorizationId ?? auth.principalId],
+  )).rows;
   const policies = (await query<Record<string, unknown>>(
     sql,
-    `select to_jsonb(pa) fact from policy_assignments pa where boundary_type in ('system','all_projects') or project_id=$1 order by id`,
+    `select to_jsonb(pa) assignment,to_jsonb(pd) policy_version,to_jsonb(pr) rule
+       from policy_assignments pa
+       join policy_definition_versions pd on pd.id=pa.policy_definition_version_id
+       join policy_rules pr on pr.policy_definition_version_id=pd.id
+      where pa.boundary_type in ('system','all_projects') or pa.project_id=$1
+      order by pa.id,pd.id,pr.id`,
     [projectId],
-  )).rows.map((row) => row.fact);
+  )).rows;
   const relationships: unknown[] = [];
   const packs = [
     ...new Set(
@@ -456,7 +486,7 @@ export async function targetedActionAuthorityFactsDigest(
       relationships.push({ table: row.table_name, facts });
     }
   }
-  return await digest({ assignments, policies, relationships });
+  return await digest({ assignments, roles, policies, relationships });
 }
 
 export async function lockTargetedActionAuthority(
@@ -488,55 +518,69 @@ export async function lockExactTargetAuthorityDependencies(
   sql: Queryable,
   dependencies: readonly Readonly<Record<string, unknown>>[],
 ): Promise<void> {
-  const ordered = [...dependencies].sort((left, right) =>
-    canonicalJson(left).localeCompare(canonicalJson(right))
+  const locks: Array<{ table: string; id: string }> = [];
+  const relationships = dependencies.filter((dependency) =>
+    dependency.target_dependency === "relationship"
+  ).sort((left, right) =>
+    String(left.resource_identity).localeCompare(
+      String(right.resource_identity),
+    ) ||
+    String(left.object_id).localeCompare(String(right.object_id))
   );
-  for (const dependency of ordered) {
-    if (dependency.target_dependency === "role_assignment") {
-      const table = dependency.assignment_table === "agent_authorization_roles"
-        ? "agent_authorization_roles"
-        : "role_assignments";
-      await query(sql, `select id from ${table} where id=$1 for share`, [
-        dependency.assignment_id,
-      ]);
-      await query(
-        sql,
-        `select id from role_definition_versions where id=$1 for share`,
-        [dependency.role_version_id],
-      );
-    } else if (dependency.target_dependency === "policy_rule") {
-      await query(
-        sql,
-        `select id from policy_assignments where id=$1 for share`,
-        [dependency.policy_assignment_id],
-      );
-      await query(
-        sql,
-        `select id from policy_definition_versions where id=$1 for share`,
-        [dependency.policy_version_id],
-      );
-      await query(sql, `select id from policy_rules where id=$1 for share`, [
-        dependency.rule_id,
-      ]);
-    } else if (dependency.target_dependency === "relationship") {
-      const parsed = parseResource(String(dependency.resource_identity));
-      if (!parsed) continue;
-      const runtime = (await query<{ table_name: string }>(
-        sql,
-        `select table_name from pack_runtime_tables where publisher=$1 and pack_name=$2
-          and definition_kind='relationship' and definition_name=$3 for share`,
-        parsed,
-      )).rows[0];
-      if (runtime) {
-        await query(
-          sql,
-          `select id from ${
-            qi(runtime.table_name)
-          } where project_id=$1 and id=$2 for share`,
-          [dependency.project_id, dependency.object_id],
-        );
-      }
+  for (const dependency of relationships) {
+    const parsed = parseResource(String(dependency.resource_identity));
+    if (!parsed) continue;
+    const runtime = (await query<{ table_name: string }>(
+      sql,
+      `select table_name from pack_runtime_tables where publisher=$1 and pack_name=$2
+        and definition_kind='relationship' and definition_name=$3 for share`,
+      parsed,
+    )).rows[0];
+    if (runtime) {
+      locks.push({
+        table: runtime.table_name,
+        id: String(dependency.object_id),
+      });
     }
+  }
+  for (const dependency of dependencies) {
+    if (dependency.target_dependency === "role_assignment") {
+      locks.push({
+        table: dependency.assignment_table === "agent_authorization_roles"
+          ? "agent_authorization_roles"
+          : "role_assignments",
+        id: String(dependency.assignment_id),
+      }, {
+        table: "system_roles",
+        id: String(dependency.system_role_id),
+      }, {
+        table: "role_definition_versions",
+        id: String(dependency.role_version_id),
+      });
+    } else if (dependency.target_dependency === "policy_rule") {
+      locks.push({
+        table: "policy_assignments",
+        id: String(dependency.policy_assignment_id),
+      }, {
+        table: "policy_definition_versions",
+        id: String(dependency.policy_version_id),
+      }, {
+        table: "policy_rules",
+        id: String(dependency.rule_id),
+      });
+    }
+  }
+  const ordered = [...new Map(
+    locks.map((lock) => [`${lock.table}:${lock.id}`, lock]),
+  ).values()].sort((left, right) =>
+    left.table.localeCompare(right.table) || left.id.localeCompare(right.id)
+  );
+  for (const lock of ordered) {
+    await query(
+      sql,
+      `select id from ${qi(lock.table)} where id=$1 for share`,
+      [lock.id],
+    );
   }
 }
 
@@ -636,7 +680,11 @@ export async function evaluateExactTargetedActionAuthority(
             project_id: input.projectId,
             resource_identity: rule.relation_relationship,
             object_id: relationship.id,
-            expected_version_id: relationship.version_id,
+            expected_version_id: relationship.current_object_version_id,
+            relationship_project_id: relationship.project_id,
+            from_object_id: relationship.from_object_id,
+            to_object_id: relationship.to_object_id,
+            archived_at: relationship.archived_at,
           });
         }
       }
@@ -666,16 +714,27 @@ export async function evaluateExactTargetedActionAuthority(
         (role) => ({
           kind: "assignment",
           target_dependency: "role_assignment",
-          assignment_id: role.assignment_id,
+          project_id: input.projectId,
           assignment_table: auth.authorizationId
             ? "agent_authorization_roles"
             : "role_assignments",
-          role_id: role.role_id,
-          role_version_id: role.version_id,
-          role_version: Number(role.version),
-          boundary_type: role.boundary_type,
+          assignment_id: role.assignment_id,
+          assignment_owner_id: role.assignment_owner_id,
+          assignment_role_id: role.role_id,
+          assignment_boundary_type: role.boundary_type,
           assignment_project_id: role.project_id,
-          project_id: input.projectId,
+          assignment_active: role.assignment_active,
+          assignment_version: role.assignment_version === null
+            ? null
+            : Number(role.assignment_version),
+          system_role_id: role.role_id,
+          system_role_active: role.system_role_active,
+          role_version_id: role.version_id,
+          role_version_role_id: role.role_id,
+          role_version: Number(role.version),
+          role_version_active: role.role_version_active,
+          role_candidate_revision_id: role.role_candidate_revision_id,
+          role_definition_name: role.role_definition_name,
         }),
       ),
       ...matched.map((rule) => ({
@@ -683,20 +742,33 @@ export async function evaluateExactTargetedActionAuthority(
         target_dependency: "policy_rule",
         project_id: input.projectId,
         policy_assignment_id: rule.assignment_id,
+        policy_assignment_policy_version_id: rule.policy_version_id,
+        policy_assignment_boundary_type: rule.assignment_boundary_type,
+        policy_assignment_project_id: rule.assignment_project_id,
+        policy_assignment_active: rule.assignment_active,
         policy_assignment_version: Number(rule.assignment_version),
         policy: rule.policy_id,
         policy_version_id: rule.policy_version_id,
         policy_version: Number(rule.policy_version),
+        policy_version_active: rule.policy_version_active,
+        policy_candidate_revision_id: rule.policy_candidate_revision_id,
+        policy_definition_name: rule.policy_definition_name,
+        policy_candidate_active: rule.policy_candidate_active,
         rule_id: rule.id,
+        rule_policy_version_id: rule.policy_version_id,
         rule: rule.rule_name ?? rule.id,
         rule_name: rule.rule_name,
-        capability: rule.capability,
-        resource: rule.resource,
-        predicate: rule.predicate,
-        relation_relationship: rule.relation_relationship,
-        relation_object_side: rule.relation_object_side,
-        relation_subject_side: rule.relation_subject_side,
-        relation_subject: rule.relation_subject,
+        rule_role_id: rule.role_id,
+        rule_action: rule.capability,
+        rule_resource: rule.resource,
+        rule_condition_kind: rule.condition_kind,
+        rule_effect: "allow",
+        rule_evaluation_order: Number(rule.evaluation_order),
+        rule_predicate: rule.predicate,
+        rule_relation_relationship: rule.relation_relationship,
+        rule_relation_object_side: rule.relation_object_side,
+        rule_relation_subject_side: rule.relation_subject_side,
+        rule_relation_subject: rule.relation_subject,
       })),
     ];
     dependencies.push(...targetDependencies);
@@ -745,7 +817,16 @@ async function directRelationshipEvidence(
   auth: AuthContext,
   projectId: string,
   objectId: string,
-): Promise<readonly { id: string; version_id: string }[]> {
+): Promise<
+  readonly {
+    id: string;
+    project_id: string;
+    from_object_id: string;
+    to_object_id: string;
+    current_object_version_id: string;
+    archived_at: string | null;
+  }[]
+> {
   if (
     !rule.relation_relationship || !rule.relation_object_side ||
     !rule.relation_subject_side || !rule.relation_subject ||
@@ -781,9 +862,18 @@ async function directRelationshipEvidence(
   const subjectColumn = rule.relation_subject_side === "from"
     ? "from_object_id"
     : "to_object_id";
-  return (await query<{ id: string; version_id: string }>(
+  return (await query<{
+    id: string;
+    project_id: string;
+    from_object_id: string;
+    to_object_id: string;
+    current_object_version_id: string;
+    archived_at: string | null;
+  }>(
     sql,
-    `select id,current_object_version_id version_id from ${qi(found.table_name)}
+    `select id,project_id,from_object_id,to_object_id,current_object_version_id,
+            archived_at::text archived_at
+       from ${qi(found.table_name)}
       where project_id=$1 and ${qi(objectColumn)}=$2 and ${qi(subjectColumn)}=$3
         and archived_at is null order by id`,
     [projectId, objectId, subjectId],
@@ -999,8 +1089,28 @@ async function effectiveRoles(
   return (await query<EffectiveRole>(
     sql,
     auth.authorizationId
-      ? `select ar.role_id,rv.id version_id,rv.version,ar.boundary_type,ar.project_id,ar.id assignment_id from agent_authorization_roles ar join role_definition_versions rv on rv.role_id=ar.role_id and rv.active where ar.authorization_id=$1 and (ar.boundary_type='all_projects' or ar.project_id=$2 or (ar.role_id='system:super_admin' and ar.boundary_type='system')) order by ar.role_id,ar.id`
-      : `select ra.role_id,rv.id version_id,rv.version,ra.boundary_type,ra.project_id,ra.id assignment_id from role_assignments ra join role_definition_versions rv on rv.role_id=ra.role_id and rv.active where ra.principal_id=$1 and ra.active and (ra.boundary_type='all_projects' or ra.project_id=$2 or (ra.role_id='system:super_admin' and ra.boundary_type='system')) order by ra.role_id,ra.id`,
+      ? `select ar.id assignment_id,ar.authorization_id assignment_owner_id,
+          true assignment_active,null::bigint assignment_version,
+          ar.role_id,sr.active system_role_active,rv.id version_id,rv.version,
+          rv.active role_version_active,rv.candidate_revision_id role_candidate_revision_id,
+          rv.definition_name role_definition_name,ar.boundary_type,ar.project_id
+         from agent_authorization_roles ar
+         join system_roles sr on sr.id=ar.role_id and sr.active
+         join role_definition_versions rv on rv.role_id=ar.role_id and rv.active
+        where ar.authorization_id=$1 and
+          (ar.boundary_type in ('system','all_projects') or ar.project_id=$2)
+        order by ar.role_id,ar.id,rv.id`
+      : `select ra.id assignment_id,ra.principal_id assignment_owner_id,
+          ra.active assignment_active,ra.version assignment_version,
+          ra.role_id,sr.active system_role_active,rv.id version_id,rv.version,
+          rv.active role_version_active,rv.candidate_revision_id role_candidate_revision_id,
+          rv.definition_name role_definition_name,ra.boundary_type,ra.project_id
+         from role_assignments ra
+         join system_roles sr on sr.id=ra.role_id and sr.active
+         join role_definition_versions rv on rv.role_id=ra.role_id and rv.active
+        where ra.principal_id=$1 and ra.active and
+          (ra.boundary_type in ('system','all_projects') or ra.project_id=$2)
+        order by ra.role_id,ra.id,rv.id`,
     [auth.authorizationId ?? auth.principalId, project],
   )).rows;
 }
@@ -1015,15 +1125,25 @@ async function policyRows(
   if (!roles.length) return [];
   return (await query<PolicyRow>(
     sql,
-    `select pr.id,pr.rule_name,pr.role_id,pr.capability,pr.resource,pr.predicate,pr.relation_relationship,pr.relation_object_side,pr.relation_subject_side,pr.relation_subject,
- pd.policy_id,pd.id policy_version_id,pd.version policy_version,pa.id assignment_id,pa.version assignment_version
+    `select pr.id,pr.rule_name,pr.role_id,pr.capability,pr.resource,
+      pr.condition_kind,pr.predicate,pr.relation_relationship,
+      pr.relation_object_side,pr.relation_subject_side,pr.relation_subject,
+      (row_number() over(order by pd.policy_id,pr.rule_name,pr.id,pa.id)-1)::int evaluation_order,
+      pd.policy_id,pd.id policy_version_id,pd.version policy_version,
+      pd.active policy_version_active,pd.candidate_revision_id policy_candidate_revision_id,
+      pd.definition_name policy_definition_name,
+      (pd.candidate_revision_id is null or ar.candidate_revision_id is not null) policy_candidate_active,
+      pa.id assignment_id,pa.version assignment_version,
+      pa.boundary_type assignment_boundary_type,pa.project_id assignment_project_id,
+      pa.active assignment_active
  from policy_rules pr join policy_definition_versions pd on pd.id=pr.policy_definition_version_id and pd.active
  join policy_assignments pa on pa.policy_definition_version_id=pd.id and pa.active
  left join pack_active_revisions ar on ar.candidate_revision_id=pd.candidate_revision_id
  where pr.role_id=any($1::text[]) and pr.capability=$2
  and (pr.resource=$3 or (not $5::boolean and pr.resource='*'))
- and (pa.boundary_type='all_projects' or pa.project_id=$4)
- and (pd.candidate_revision_id is null or ar.candidate_revision_id is not null) order by pd.policy_id,pr.rule_name,pr.id`,
+ and (pa.boundary_type in ('system','all_projects') or pa.project_id=$4)
+ and (pd.candidate_revision_id is null or ar.candidate_revision_id is not null)
+ order by pd.policy_id,pr.rule_name,pr.id,pa.id`,
     [roles, action, resource, project, exactResource],
   )).rows;
 }

@@ -879,7 +879,6 @@ async function provisionOrdinary(
     ? [["changeset.approval.decide", "system:changeset-approval"]]
     : [
       ["action:test/actionproof:generate", "test/actionproof:source"],
-      ["action:test/actionproof:generate", "test/actionproof:target"],
       ...seedNames.map((
         name,
       ) => [`seed:test/actionproof:${name}`, `seed:test/actionproof:${name}`]),

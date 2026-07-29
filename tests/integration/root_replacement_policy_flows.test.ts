@@ -194,7 +194,7 @@ Deno.test({
         { lock_timeout: "2s" },
       );
       assertEquals(substituted.status, 403, JSON.stringify(substituted.body));
-      assertEquals(substituted.body.error.code, "authorization_changed");
+      assertEquals(substituted.body.error.code, "policy_changed");
       await assertNoCommitFacts(matrix, substitutionStageId);
       assertEquals(
         (await query<{ count: number }>(

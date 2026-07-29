@@ -21,7 +21,10 @@ import {
   lockActiveAuthorizationLineage,
   lockActiveAuthorizationLineages,
 } from "./authorization_lineage.ts";
-import { evaluateExactTargetedActionAuthority } from "./query_policy_sql.ts";
+import {
+  evaluateExactTargetedActionAuthority,
+  lockExactTargetAuthorityDependencies,
+} from "./query_policy_sql.ts";
 import { canonicalTargetDigestInput } from "../../../application/ports/repair/targeted_action.ts";
 
 type Runtime = {
@@ -767,6 +770,7 @@ async function revalidateTargetedActionAuthority(
   ).sort((left, right) =>
     canonicalRecord(left).localeCompare(canonicalRecord(right))
   );
+  await lockExactTargetAuthorityDependencies(tx, exact);
   for (const dependency of exact) {
     if (dependency.target_dependency === "relationship") {
       const parsed = parseIdentity(String(dependency.resource_identity));
@@ -779,18 +783,26 @@ async function revalidateTargetedActionAuthority(
       const relationship = runtime
         ? (await query<{
           id: string;
+          project_id: string;
+          from_object_id: string;
+          to_object_id: string;
           current_object_version_id: string | null;
           archived_at: string | null;
         }>(
           tx,
-          `select id,current_object_version_id,archived_at from ${
-            quoteIdentifier(runtime.table_name)
-          } where project_id=$1 and id=$2 for share`,
+          `select id,project_id,from_object_id,to_object_id,
+                  current_object_version_id,archived_at::text archived_at
+             from ${quoteIdentifier(runtime.table_name)}
+            where project_id=$1 and id=$2`,
           [dependency.project_id, dependency.object_id],
         )).rows[0]
         : undefined;
       if (
-        !relationship || relationship.archived_at !== null ||
+        !relationship ||
+        relationship.project_id !== dependency.relationship_project_id ||
+        relationship.from_object_id !== dependency.from_object_id ||
+        relationship.to_object_id !== dependency.to_object_id ||
+        relationship.archived_at !== dependency.archived_at ||
         relationship.current_object_version_id !==
           (dependency.expected_version_id ?? null)
       ) throw new CommitFailure("authorization_changed", "authorization");
@@ -800,78 +812,156 @@ async function revalidateTargetedActionAuthority(
         : "role_assignments";
       const assignment = (await query<{
         id: string;
+        assignment_owner_id: string;
         role_id: string;
         boundary_type: string;
         project_id: string | null;
-        active?: boolean;
+        active: boolean;
+        version: number | null;
       }>(
         tx,
-        `select id,role_id,boundary_type,project_id${
-          table === "role_assignments" ? ",active" : ""
-        }
-           from ${table} where id=$1 for share`,
+        table === "role_assignments"
+          ? `select id,principal_id assignment_owner_id,role_id,boundary_type,
+                project_id,active,version from role_assignments where id=$1`
+          : `select id,authorization_id assignment_owner_id,role_id,boundary_type,
+                project_id,true active,null::bigint version
+               from agent_authorization_roles where id=$1`,
         [dependency.assignment_id],
       )).rows[0];
-      const roleVersion = (await query<{ id: string; version: number }>(
+      const systemRole = (await query<{ id: string; active: boolean }>(
         tx,
-        `select id,version from role_definition_versions
-          where id=$1 and role_id=$2 and active for share`,
-        [dependency.role_version_id, dependency.role_id],
+        "select id,active from system_roles where id=$1",
+        [dependency.system_role_id],
+      )).rows[0];
+      const roleVersion = (await query<{
+        id: string;
+        role_id: string;
+        version: number;
+        active: boolean;
+        candidate_revision_id: string | null;
+        definition_name: string | null;
+      }>(
+        tx,
+        `select id,role_id,version,active,candidate_revision_id,definition_name
+           from role_definition_versions where id=$1`,
+        [dependency.role_version_id],
       )).rows[0];
       if (
-        !assignment || assignment.role_id !== dependency.role_id ||
-        assignment.boundary_type !== dependency.boundary_type ||
+        !assignment ||
+        assignment.assignment_owner_id !== dependency.assignment_owner_id ||
+        assignment.role_id !== dependency.assignment_role_id ||
+        assignment.boundary_type !== dependency.assignment_boundary_type ||
         assignment.project_id !== dependency.assignment_project_id ||
-        assignment.active === false || !roleVersion ||
-        Number(roleVersion.version) !== Number(dependency.role_version)
+        assignment.active !== dependency.assignment_active ||
+        (assignment.version === null ? null : Number(assignment.version)) !==
+          dependency.assignment_version ||
+        !systemRole || systemRole.id !== dependency.system_role_id ||
+        systemRole.active !== dependency.system_role_active ||
+        !roleVersion ||
+        roleVersion.role_id !== dependency.role_version_role_id ||
+        Number(roleVersion.version) !== Number(dependency.role_version) ||
+        roleVersion.active !== dependency.role_version_active ||
+        roleVersion.candidate_revision_id !==
+          dependency.role_candidate_revision_id ||
+        roleVersion.definition_name !== dependency.role_definition_name
       ) throw new CommitFailure("authorization_changed", "authorization");
     } else {
       const row = (await query<{
         assignment_id: string;
+        assignment_policy_version_id: string;
+        assignment_boundary_type: string;
+        assignment_project_id: string | null;
+        assignment_active: boolean;
         assignment_version: number;
+        policy_id: string;
         policy_version_id: string;
         policy_version: number;
+        policy_version_active: boolean;
+        policy_candidate_revision_id: string | null;
+        policy_definition_name: string | null;
+        policy_candidate_active: boolean;
         rule_id: string;
+        rule_policy_version_id: string;
         rule_name: string | null;
-        capability: string;
-        resource: string;
-        predicate: string | null;
-        relation_relationship: string | null;
-        relation_object_side: string | null;
-        relation_subject_side: string | null;
-        relation_subject: string | null;
+        rule_role_id: string;
+        rule_action: string;
+        rule_resource: string;
+        rule_condition_kind: string;
+        rule_predicate: string | null;
+        rule_relation_relationship: string | null;
+        rule_relation_object_side: string | null;
+        rule_relation_subject_side: string | null;
+        rule_relation_subject: string | null;
       }>(
         tx,
-        `select pa.id assignment_id,pa.version assignment_version,
+        `select pa.id assignment_id,
+                pa.policy_definition_version_id assignment_policy_version_id,
+                pa.boundary_type assignment_boundary_type,
+                pa.project_id assignment_project_id,pa.active assignment_active,
+                pa.version assignment_version,pd.policy_id,
                 pd.id policy_version_id,pd.version policy_version,
-                pr.id rule_id,pr.rule_name,pr.capability,pr.resource,
-                pr.predicate,pr.relation_relationship,pr.relation_object_side,
-                pr.relation_subject_side,pr.relation_subject
+                pd.active policy_version_active,
+                pd.candidate_revision_id policy_candidate_revision_id,
+                pd.definition_name policy_definition_name,
+                (pd.candidate_revision_id is null or ar.candidate_revision_id is not null)
+                  policy_candidate_active,
+                pr.id rule_id,
+                pr.policy_definition_version_id rule_policy_version_id,
+                pr.rule_name,pr.role_id rule_role_id,
+                pr.capability rule_action,pr.resource rule_resource,
+                pr.condition_kind rule_condition_kind,
+                pr.predicate rule_predicate,
+                pr.relation_relationship rule_relation_relationship,
+                pr.relation_object_side rule_relation_object_side,
+                pr.relation_subject_side rule_relation_subject_side,
+                pr.relation_subject rule_relation_subject
            from policy_assignments pa
            join policy_definition_versions pd on pd.id=pa.policy_definition_version_id
            join policy_rules pr on pr.policy_definition_version_id=pd.id
-          where pa.id=$1 and pd.id=$2 and pr.id=$3 and pa.active and pd.active
-          for share of pa,pd,pr`,
+           left join pack_active_revisions ar
+             on ar.candidate_revision_id=pd.candidate_revision_id
+          where pa.id=$1 and pd.id=$2 and pr.id=$3`,
         [
           dependency.policy_assignment_id,
           dependency.policy_version_id,
           dependency.rule_id,
         ],
       )).rows[0];
+      if (!row) {
+        throw new CommitFailure("authorization_changed", "authorization");
+      }
       if (
-        !row || row.capability !== dependency.capability ||
-        row.resource !== dependency.resource
-      ) throw new CommitFailure("authorization_changed", "authorization");
-      if (
+        row.assignment_policy_version_id !==
+          dependency.policy_assignment_policy_version_id ||
+        row.assignment_boundary_type !==
+          dependency.policy_assignment_boundary_type ||
+        row.assignment_project_id !== dependency.policy_assignment_project_id ||
+        row.assignment_active !== dependency.policy_assignment_active ||
         Number(row.assignment_version) !==
           Number(dependency.policy_assignment_version) ||
+        row.policy_id !== dependency.policy ||
+        row.policy_version_id !== dependency.policy_version_id ||
         Number(row.policy_version) !== Number(dependency.policy_version) ||
+        row.policy_version_active !== dependency.policy_version_active ||
+        row.policy_candidate_revision_id !==
+          dependency.policy_candidate_revision_id ||
+        row.policy_definition_name !== dependency.policy_definition_name ||
+        row.policy_candidate_active !== dependency.policy_candidate_active ||
+        row.rule_policy_version_id !== dependency.rule_policy_version_id ||
         row.rule_name !== dependency.rule_name ||
-        row.predicate !== dependency.predicate ||
-        row.relation_relationship !== dependency.relation_relationship ||
-        row.relation_object_side !== dependency.relation_object_side ||
-        row.relation_subject_side !== dependency.relation_subject_side ||
-        row.relation_subject !== dependency.relation_subject
+        row.rule_role_id !== dependency.rule_role_id ||
+        row.rule_action !== dependency.rule_action ||
+        row.rule_resource !== dependency.rule_resource ||
+        row.rule_condition_kind !== dependency.rule_condition_kind ||
+        dependency.rule_effect !== "allow" ||
+        row.rule_predicate !== dependency.rule_predicate ||
+        row.rule_relation_relationship !==
+          dependency.rule_relation_relationship ||
+        row.rule_relation_object_side !==
+          dependency.rule_relation_object_side ||
+        row.rule_relation_subject_side !==
+          dependency.rule_relation_subject_side ||
+        row.rule_relation_subject !== dependency.rule_relation_subject
       ) throw new CommitFailure("policy_changed", "authorization");
     }
   }

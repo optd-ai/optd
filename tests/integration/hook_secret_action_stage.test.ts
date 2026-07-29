@@ -405,14 +405,25 @@ Deno.test({
         "select id from role_assignments where principal_id=$1 and role_id='system:super_admin' and active",
         [auth.principal_id],
       )).rows[0].id;
-      const policy =
-        (await query<{ assignment_id: string; version_id: string }>(
-          harness.server.sql,
-          `select pa.id assignment_id,pdv.id version_id
+      const policy = (await query<{
+        assignment_id: string;
+        version_id: string;
+        rule_id: string;
+      }>(
+        harness.server.sql,
+        `select pa.id assignment_id,pdv.id version_id,pr.id rule_id
            from policy_assignments pa join policy_definition_versions pdv
              on pdv.id=pa.policy_definition_version_id
+           join policy_rules pr on pr.policy_definition_version_id=pdv.id
+             and pr.capability='action:test/actionproof:generate'
+             and pr.resource='test/actionproof:source'
           where pdv.policy_id='test/actionproof:action_access' and pa.active`,
-        )).rows[0];
+      )).rows[0];
+      const roleVersionId = (await query<{ id: string }>(
+        harness.server.sql,
+        `select id from role_definition_versions
+          where role_id='test/actionproof:operator' and active`,
+      )).rows[0].id;
       const relationshipTable = (await query<{ table_name: string }>(
         harness.server.sql,
         `select table_name from pack_runtime_tables where publisher='test'
@@ -455,6 +466,33 @@ Deno.test({
          where capability='action:test/actionproof:generate'
            and resource='test/actionproof:source'`,
       );
+
+      const beforeInactiveRole = await evidenceCounts(harness.server.sql);
+      await query(
+        harness.server.sql,
+        "update system_roles set active=false where id='test/actionproof:operator'",
+      );
+      const inactiveRole = await harness.runOptctl([
+        "--json",
+        "--project",
+        projectId,
+        "action",
+        "stage",
+        "test/actionproof:generate",
+        "--input",
+        JSON.stringify({ source_id: read.id }),
+      ]);
+      await query(
+        harness.server.sql,
+        "update system_roles set active=true where id='test/actionproof:operator'",
+      );
+      assertEquals(inactiveRole.code, 1, inactiveRole.stderr);
+      assertEquals(JSON.parse(inactiveRole.stderr).error.code, "policy_denied");
+      assertEquals(
+        await evidenceCounts(harness.server.sql),
+        beforeInactiveRole,
+      );
+      assertEquals(provider.attempts.length, 0);
 
       let expectedAttempts = 0;
 
@@ -610,6 +648,52 @@ Deno.test({
         "policy_denied",
       );
       await race(
+        "system-role-disable",
+        () =>
+          query(
+            harness.server.sql,
+            "update system_roles set active=false where id='test/actionproof:operator'",
+          ).then(() => undefined),
+        () =>
+          query(
+            harness.server.sql,
+            "update system_roles set active=true where id='test/actionproof:operator'",
+          ).then(() => undefined),
+        "policy_denied",
+      );
+      await race(
+        "role-assignment-version",
+        () =>
+          query(
+            harness.server.sql,
+            "update role_assignments set version=version+1 where id=$1",
+            [roleAssignment],
+          ).then(() => undefined),
+        () =>
+          query(
+            harness.server.sql,
+            "update role_assignments set version=version-1 where id=$1",
+            [roleAssignment],
+          ).then(() => undefined),
+        "project_conflict",
+      );
+      await race(
+        "role-definition-version",
+        () =>
+          query(
+            harness.server.sql,
+            "update role_definition_versions set version=version+1 where id=$1",
+            [roleVersionId],
+          ).then(() => undefined),
+        () =>
+          query(
+            harness.server.sql,
+            "update role_definition_versions set version=version-1 where id=$1",
+            [roleVersionId],
+          ).then(() => undefined),
+        "project_conflict",
+      );
+      await race(
         "policy-assignment-disable",
         () =>
           query(
@@ -640,6 +724,38 @@ Deno.test({
             [policy.version_id],
           ).then(() => undefined),
         "policy_denied",
+      );
+      await race(
+        "policy-assignment-boundary-project",
+        () =>
+          query(
+            harness.server.sql,
+            "update policy_assignments set boundary_type='project',project_id=$2 where id=$1",
+            [policy.assignment_id, projectId],
+          ).then(() => undefined),
+        () =>
+          query(
+            harness.server.sql,
+            "update policy_assignments set boundary_type='all_projects',project_id=null where id=$1",
+            [policy.assignment_id],
+          ).then(() => undefined),
+        "project_conflict",
+      );
+      await race(
+        "policy-rule-condition",
+        () =>
+          query(
+            harness.server.sql,
+            "update policy_rules set condition_kind='unconditional' where id=$1",
+            [policy.rule_id],
+          ).then(() => undefined),
+        () =>
+          query(
+            harness.server.sql,
+            "update policy_rules set condition_kind='rebac' where id=$1",
+            [policy.rule_id],
+          ).then(() => undefined),
+        "project_conflict",
       );
       await race(
         "rebac-archive",
@@ -767,6 +883,42 @@ Deno.test({
         /^sha256:[0-9a-f]{64}$/.test(evidence.authority_facts_digest),
         true,
       );
+      const roleFact = unchanged.dependencies.find((dependency: {
+        target_dependency?: string;
+      }) => dependency.target_dependency === "role_assignment");
+      assertEquals(roleFact.assignment_owner_id, auth.principal_id);
+      assertEquals(roleFact.assignment_role_id, "test/actionproof:operator");
+      assertEquals(roleFact.assignment_boundary_type, "all_projects");
+      assertEquals(roleFact.assignment_project_id, null);
+      assertEquals(roleFact.assignment_active, true);
+      assertEquals(roleFact.assignment_version, 1);
+      assertEquals(roleFact.system_role_active, true);
+      assertEquals(roleFact.role_version_active, true);
+      assertEquals(roleFact.role_version, 1);
+      const policyFact = unchanged.dependencies.find((dependency: {
+        target_dependency?: string;
+      }) => dependency.target_dependency === "policy_rule");
+      assertEquals(policyFact.policy_assignment_boundary_type, "all_projects");
+      assertEquals(policyFact.policy_assignment_project_id, null);
+      assertEquals(policyFact.policy_assignment_active, true);
+      assertEquals(policyFact.policy_assignment_version, 1);
+      assertEquals(policyFact.policy_version_active, true);
+      assertEquals(policyFact.rule_role_id, "test/actionproof:operator");
+      assertEquals(
+        policyFact.rule_action,
+        "action:test/actionproof:generate",
+      );
+      assertEquals(policyFact.rule_resource, "test/actionproof:source");
+      assertEquals(policyFact.rule_condition_kind, "rebac");
+      assertEquals(policyFact.rule_effect, "allow");
+      assertEquals(typeof policyFact.rule_evaluation_order, "number");
+      const relationshipFact = unchanged.dependencies.find((dependency: {
+        target_dependency?: string;
+      }) => dependency.target_dependency === "relationship");
+      assertEquals(relationshipFact.relationship_project_id, projectId);
+      assertEquals(relationshipFact.from_object_id, read.id);
+      assertEquals(relationshipFact.to_object_id, auth.principal_id);
+      assertEquals(relationshipFact.archived_at, null);
       const unrelated = await control(true);
       assertEquals(
         unrelated.source.identity.authority_evidence.canonical_target_digest,
@@ -775,6 +927,152 @@ Deno.test({
       assertEquals(
         unrelated.source.identity.authority_evidence.authority_facts_digest,
         evidence.authority_facts_digest,
+      );
+
+      const commitBarrier = async (
+        name: string,
+        mutate: () => Promise<void>,
+        restore: () => Promise<void>,
+        expectedCode: "authorization_changed" | "policy_changed",
+      ) => {
+        const staged = await control();
+        const stageId = String(staged.id);
+        await mutate();
+        try {
+          const committed = await harness.runOptctl([
+            "--json",
+            "changeset",
+            "commit",
+            stageId,
+          ]);
+          assertEquals(committed.code, 1, `${name}: ${committed.stderr}`);
+          assertEquals(JSON.parse(committed.stderr).error.code, expectedCode);
+          assertEquals(
+            (await query<{ commits: number; hooks: number }>(
+              harness.server.sql,
+              `select
+                 (select count(*)::int from changeset_commits where stage_id=$1) commits,
+                 (select count(*)::int from staged_hook_executions where stage_id=$1) hooks`,
+              [stageId],
+            )).rows[0],
+            { commits: 0, hooks: 1 },
+            name,
+          );
+        } finally {
+          await restore();
+        }
+      };
+      await commitBarrier(
+        "commit-role-assignment-version",
+        () =>
+          query(
+            harness.server.sql,
+            "update role_assignments set version=version+1 where id=$1",
+            [roleAssignment],
+          ).then(() => undefined),
+        () =>
+          query(
+            harness.server.sql,
+            "update role_assignments set version=version-1 where id=$1",
+            [roleAssignment],
+          ).then(() => undefined),
+        "authorization_changed",
+      );
+      await commitBarrier(
+        "commit-policy-assignment-boundary-project",
+        () =>
+          query(
+            harness.server.sql,
+            "update policy_assignments set boundary_type='project',project_id=$2 where id=$1",
+            [policy.assignment_id, projectId],
+          ).then(() => undefined),
+        () =>
+          query(
+            harness.server.sql,
+            "update policy_assignments set boundary_type='all_projects',project_id=null where id=$1",
+            [policy.assignment_id],
+          ).then(() => undefined),
+        "policy_changed",
+      );
+      await commitBarrier(
+        "commit-inactive-system-role",
+        () =>
+          query(
+            harness.server.sql,
+            "update system_roles set active=false where id='test/actionproof:operator'",
+          ).then(() => undefined),
+        () =>
+          query(
+            harness.server.sql,
+            "update system_roles set active=true where id='test/actionproof:operator'",
+          ).then(() => undefined),
+        "authorization_changed",
+      );
+      await commitBarrier(
+        "commit-role-definition-version",
+        () =>
+          query(
+            harness.server.sql,
+            "update role_definition_versions set version=version+1 where id=$1",
+            [roleVersionId],
+          ).then(() => undefined),
+        () =>
+          query(
+            harness.server.sql,
+            "update role_definition_versions set version=version-1 where id=$1",
+            [roleVersionId],
+          ).then(() => undefined),
+        "authorization_changed",
+      );
+      await commitBarrier(
+        "commit-policy-rule-condition",
+        () =>
+          query(
+            harness.server.sql,
+            "update policy_rules set condition_kind='unconditional' where id=$1",
+            [policy.rule_id],
+          ).then(() => undefined),
+        () =>
+          query(
+            harness.server.sql,
+            "update policy_rules set condition_kind='rebac' where id=$1",
+            [policy.rule_id],
+          ).then(() => undefined),
+        "policy_changed",
+      );
+      const alternateRuleId = uuidV7();
+      await commitBarrier(
+        "commit-exact-rebac-endpoints-with-alternate-allow",
+        async () => {
+          await query(
+            harness.server.sql,
+            `insert into policy_rules(
+               id,policy_definition_version_id,role_id,capability,resource,
+               condition_kind,rule_name)
+             select $1,policy_definition_version_id,role_id,capability,resource,
+               'unconditional','alternate_current_allow'
+               from policy_rules where id=$2`,
+            [alternateRuleId, policy.rule_id],
+          );
+          await query(
+            harness.server.sql,
+            `update "${relationshipTable}" set from_object_id=$2 where id=$1`,
+            [relationshipId, uuidV7()],
+          );
+        },
+        async () => {
+          await query(
+            harness.server.sql,
+            `update "${relationshipTable}" set from_object_id=$2 where id=$1`,
+            [relationshipId, read.id],
+          );
+          await query(
+            harness.server.sql,
+            "delete from policy_rules where id=$1",
+            [alternateRuleId],
+          );
+        },
+        "authorization_changed",
       );
     } finally {
       await harness.close();
