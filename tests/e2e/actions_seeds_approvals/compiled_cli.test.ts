@@ -501,37 +501,48 @@ for (const trace of [false, true]) {
             concurrentData[1].operations[0].object_id,
           false,
         );
-        const concurrentCommits = await Promise.all(
-          concurrentData.map((stage) =>
-            actor!.runOptctl([
-              "--json",
-              "changeset",
-              "commit",
-              stage.id,
-            ])
-          ),
+        const winnerStage = concurrentData[0];
+        const loserStage = concurrentData[1];
+        const loserLifecycle = holdRow(
+          harness.server.sql,
+          "select stage_id from staged_changeset_lifecycle where stage_id=$1 for update",
+          [loserStage.id],
         );
+        await loserLifecycle.locked;
+        const blockedLoserCommit = actor!.runOptctl([
+          "--json",
+          "changeset",
+          "commit",
+          loserStage.id,
+          "--timeout",
+          "30s",
+        ]);
+        await observeBlockedCommit(harness.server.sql);
+        const winnerCommit = await harness.runOptctl([
+          "--json",
+          "changeset",
+          "commit",
+          winnerStage.id,
+        ]);
+        assertEquals(winnerCommit.code, 0, winnerCommit.stderr);
+        loserLifecycle.release();
+        await loserLifecycle.done;
+        const rejectedCommit = await blockedLoserCommit;
+        assertEquals(rejectedCommit.code, 1);
+        const rejectedError = JSON.parse(rejectedCommit.stderr).error;
         assertEquals(
-          concurrentCommits.map((result) => result.code).sort(),
-          [0, 1],
-        );
-        const loserIndex = concurrentCommits.findIndex((result) =>
-          result.code !== 0
-        );
-        const rejectedCommit = concurrentCommits[loserIndex];
-        assertEquals(
-          JSON.parse(rejectedCommit.stderr).error.code,
+          rejectedError.code,
           "active_seed_key_conflict",
+          rejectedCommit.stderr,
         );
-        assertEquals(
-          JSON.parse(rejectedCommit.stderr).error.details,
-          { constraint: "actionproof_target_active_name" },
-        );
+        assertEquals(rejectedError.details, {
+          constraint: "actionproof_target_active_name",
+        });
         await assertNoAppliedFacts(
           harness.server.sql,
           targetTable,
-          concurrentData[loserIndex].id,
-          concurrentData[loserIndex].operations[0].object_id,
+          loserStage.id,
+          loserStage.operations[0].object_id,
         );
 
         for (const seedWins of [true, false]) {
