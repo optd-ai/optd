@@ -19,6 +19,7 @@ import {
   DenoHookExecutor,
   makeHookSecretResolver,
 } from "../../src/adapters/outbound/deno-hooks/trusted_stage_hook_adapter.ts";
+import { opaqueToken, tokenDigest } from "../../src/domain/auth/token.ts";
 import { uuidV7 } from "../../src/domain/ids/uuid_v7.ts";
 import { startAuthenticatedHarness } from "../support/authenticated_harness.ts";
 import { startHttpProvider } from "../support/http_provider.ts";
@@ -353,6 +354,240 @@ Deno.test({
 
 Deno.test({
   name:
+    "Project semantic actions reject ordinary system boundaries for humans, agents, and policies",
+  sanitizeOps: false,
+  sanitizeResources: false,
+  async fn() {
+    const provider = startHttpProvider();
+    const harness = await startAuthenticatedHarness();
+    const pack = await Deno.makeTempDir({ prefix: "operant-action-boundary-" });
+    try {
+      await writePack(pack, provider.url);
+      const apply = await harness.runOptctl([
+        "--json",
+        "pack",
+        "apply",
+        pack,
+        "--safe",
+      ]);
+      assertEquals(apply.code, 0, apply.stderr);
+      const project = await harness.runOptctl([
+        "--json",
+        "project",
+        "create",
+        "action-boundaries",
+        "--display-name",
+        "Action Boundaries",
+      ]);
+      assertEquals(project.code, 0, project.stderr);
+      const projectId = JSON.parse(project.stdout).data.id as string;
+      const read = await seedRead(harness, projectId);
+      const human = (await query<{
+        id: string;
+        principal_id: string;
+        human_user_id: string;
+      }>(
+        harness.server.sql,
+        "select id,principal_id,human_user_id from auth_contexts order by created_at desc limit 1",
+      )).rows[0];
+      const humanRoleAssignment = (await query<{ id: string }>(
+        harness.server.sql,
+        `select id from role_assignments
+          where principal_id=$1 and role_id='system:super_admin' and active`,
+        [human.principal_id],
+      )).rows[0].id;
+      const policyAssignment = (await query<{ id: string }>(
+        harness.server.sql,
+        `select pa.id from policy_assignments pa
+          join policy_definition_versions pdv
+            on pdv.id=pa.policy_definition_version_id
+         where pdv.policy_id='test/actionproof:action_access' and pa.active`,
+      )).rows[0].id;
+
+      const humanStage = () =>
+        harness.runOptctl([
+          "--json",
+          "--project",
+          projectId,
+          "action",
+          "stage",
+          "test/actionproof:generate",
+          "--input",
+          JSON.stringify({ source_id: read.id }),
+        ]);
+      const assertAttempt = async (
+        name: string,
+        operation: () => Promise<{
+          code: number;
+          stdout: string;
+          stderr: string;
+        }>,
+        allowed: boolean,
+      ) => {
+        const before = await evidenceCounts(harness.server.sql);
+        const beforeAttempts = provider.attempts.length;
+        const result = await operation();
+        if (!allowed) {
+          assertEquals(result.code, 1, `${name}: ${result.stderr}`);
+          assertEquals(
+            JSON.parse(result.stderr).error.code,
+            "policy_denied",
+            name,
+          );
+          assertEquals(await evidenceCounts(harness.server.sql), before, name);
+          assertEquals(provider.attempts.length, beforeAttempts, name);
+          return result;
+        }
+        assertEquals(result.code, 0, `${name}: ${result.stderr}`);
+        assertEquals(await evidenceCounts(harness.server.sql), {
+          stages: String(Number(before.stages) + 1),
+          hooks: String(Number(before.hooks) + 1),
+        }, name);
+        assertEquals(provider.attempts.length, beforeAttempts + 1, name);
+        return result;
+      };
+
+      await query(
+        harness.server.sql,
+        `update role_assignments set role_id='test/actionproof:operator',
+          boundary_type='system',project_id=null where id=$1`,
+        [humanRoleAssignment],
+      );
+      await assertAttempt("human-system", humanStage, false);
+      await query(
+        harness.server.sql,
+        `update role_assignments set boundary_type='project',project_id=$2
+          where id=$1`,
+        [humanRoleAssignment, projectId],
+      );
+      await assertAttempt("human-exact-project", humanStage, true);
+      await query(
+        harness.server.sql,
+        `update role_assignments set boundary_type='all_projects',project_id=null
+          where id=$1`,
+        [humanRoleAssignment],
+      );
+      await assertAttempt("human-all-projects", humanStage, true);
+
+      await query(
+        harness.server.sql,
+        `update policy_assignments set boundary_type='system',project_id=null
+          where id=$1`,
+        [policyAssignment],
+      );
+      await assertAttempt("policy-system", humanStage, false);
+      await query(
+        harness.server.sql,
+        `update policy_assignments set boundary_type='project',project_id=$2
+          where id=$1`,
+        [policyAssignment, projectId],
+      );
+      await assertAttempt("policy-exact-project", humanStage, true);
+      await query(
+        harness.server.sql,
+        `update policy_assignments set boundary_type='all_projects',project_id=null
+          where id=$1`,
+        [policyAssignment],
+      );
+      await assertAttempt("policy-all-projects", humanStage, true);
+
+      const agent = await createActionAgent(
+        harness.server.sql,
+        human.id,
+        human.human_user_id,
+      );
+      const agentStage = () =>
+        stageActionWithToken(
+          harness.baseUrl,
+          agent.token,
+          projectId,
+          read.id,
+        );
+      await assertAttempt("agent-system", agentStage, false);
+      await query(
+        harness.server.sql,
+        `update agent_authorization_roles
+          set boundary_type='project',project_id=$2 where id=$1`,
+        [agent.roleAssignmentId, projectId],
+      );
+      await assertAttempt("agent-exact-project", agentStage, true);
+      await query(
+        harness.server.sql,
+        `update agent_authorization_roles
+          set boundary_type='all_projects',project_id=null where id=$1`,
+        [agent.roleAssignmentId],
+      );
+      const stagedAgent = await assertAttempt(
+        "agent-all-projects",
+        agentStage,
+        true,
+      );
+
+      const postHookToken = "agent-system-post-hook";
+      provider.enqueueUnkeyed({ kind: "hold", token: postHookToken });
+      const beforePostHook = await evidenceCounts(harness.server.sql);
+      const beforePostHookAttempts = provider.attempts.length;
+      const pendingPostHook = agentStage();
+      await provider.waitForUnkeyedAttemptsBefore(
+        beforePostHookAttempts + 1,
+        pendingPostHook,
+      );
+      await query(
+        harness.server.sql,
+        `update agent_authorization_roles
+          set boundary_type='system',project_id=null where id=$1`,
+        [agent.roleAssignmentId],
+      );
+      provider.release(postHookToken);
+      const postHook = await pendingPostHook;
+      assertEquals(postHook.code, 1, postHook.stderr);
+      assertEquals(JSON.parse(postHook.stderr).error.code, "policy_denied");
+      assertEquals(await evidenceCounts(harness.server.sql), beforePostHook);
+      assertEquals(provider.attempts.length, beforePostHookAttempts + 1);
+      await query(
+        harness.server.sql,
+        `update agent_authorization_roles
+          set boundary_type='all_projects',project_id=null where id=$1`,
+        [agent.roleAssignmentId],
+      );
+
+      const agentStageId = String(JSON.parse(stagedAgent.stdout).data.id);
+      await query(
+        harness.server.sql,
+        `update agent_authorization_roles
+          set boundary_type='system',project_id=null where id=$1`,
+        [agent.roleAssignmentId],
+      );
+      const commit = await commitActionWithToken(
+        harness.baseUrl,
+        agent.token,
+        agentStageId,
+      );
+      assertEquals(commit.code, 1, commit.stderr);
+      assertEquals(
+        JSON.parse(commit.stderr).error.code,
+        "authorization_changed",
+      );
+      assertEquals(
+        (await query<{ commits: number; hooks: number }>(
+          harness.server.sql,
+          `select
+             (select count(*)::int from changeset_commits where stage_id=$1) commits,
+             (select count(*)::int from staged_hook_executions where stage_id=$1) hooks`,
+          [agentStageId],
+        )).rows[0],
+        { commits: 0, hooks: 1 },
+      );
+    } finally {
+      await harness.close();
+      await provider.close();
+      await Deno.remove(pack, { recursive: true }).catch(() => undefined);
+    }
+  },
+});
+
+Deno.test({
+  name:
     "targeted action hook persistence deterministically rejects stale authority and read races",
   sanitizeOps: false,
   sanitizeResources: false,
@@ -678,6 +913,24 @@ Deno.test({
         "project_conflict",
       );
       await race(
+        "role-assignment-system-boundary",
+        () =>
+          query(
+            harness.server.sql,
+            `update role_assignments set boundary_type='system',project_id=null
+              where id=$1`,
+            [roleAssignment],
+          ).then(() => undefined),
+        () =>
+          query(
+            harness.server.sql,
+            `update role_assignments set boundary_type='all_projects',project_id=null
+              where id=$1`,
+            [roleAssignment],
+          ).then(() => undefined),
+        "policy_denied",
+      );
+      await race(
         "role-definition-version",
         () =>
           query(
@@ -740,6 +993,24 @@ Deno.test({
             [policy.assignment_id],
           ).then(() => undefined),
         "project_conflict",
+      );
+      await race(
+        "policy-assignment-system-boundary",
+        () =>
+          query(
+            harness.server.sql,
+            `update policy_assignments set boundary_type='system',project_id=null
+              where id=$1`,
+            [policy.assignment_id],
+          ).then(() => undefined),
+        () =>
+          query(
+            harness.server.sql,
+            `update policy_assignments set boundary_type='all_projects',project_id=null
+              where id=$1`,
+            [policy.assignment_id],
+          ).then(() => undefined),
+        "policy_denied",
       );
       await race(
         "policy-rule-condition",
@@ -979,6 +1250,24 @@ Deno.test({
         "authorization_changed",
       );
       await commitBarrier(
+        "commit-role-assignment-system-boundary",
+        () =>
+          query(
+            harness.server.sql,
+            `update role_assignments set boundary_type='system',project_id=null
+              where id=$1`,
+            [roleAssignment],
+          ).then(() => undefined),
+        () =>
+          query(
+            harness.server.sql,
+            `update role_assignments set boundary_type='all_projects',project_id=null
+              where id=$1`,
+            [roleAssignment],
+          ).then(() => undefined),
+        "authorization_changed",
+      );
+      await commitBarrier(
         "commit-policy-assignment-boundary-project",
         () =>
           query(
@@ -990,6 +1279,24 @@ Deno.test({
           query(
             harness.server.sql,
             "update policy_assignments set boundary_type='all_projects',project_id=null where id=$1",
+            [policy.assignment_id],
+          ).then(() => undefined),
+        "policy_changed",
+      );
+      await commitBarrier(
+        "commit-policy-assignment-system-boundary",
+        () =>
+          query(
+            harness.server.sql,
+            `update policy_assignments set boundary_type='system',project_id=null
+              where id=$1`,
+            [policy.assignment_id],
+          ).then(() => undefined),
+        () =>
+          query(
+            harness.server.sql,
+            `update policy_assignments set boundary_type='all_projects',project_id=null
+              where id=$1`,
             [policy.assignment_id],
           ).then(() => undefined),
         "policy_changed",
@@ -1384,6 +1691,108 @@ Deno.test("post-hook persistence observation bounds a stalled command", async ()
   assertEquals(observations > 0, true);
   assertEquals(Date.now() - started < 1_000, true);
 });
+
+async function createActionAgent(
+  sql: Sql,
+  approvedByAuthContextId: string,
+  humanUserId: string,
+): Promise<{ token: string; roleAssignmentId: string }> {
+  const principalId = uuidV7();
+  const agentUserId = uuidV7();
+  const authorizationId = uuidV7();
+  const sessionId = uuidV7();
+  const roleAssignmentId = uuidV7();
+  const token = opaqueToken();
+  await query(
+    sql,
+    "insert into principals(id,type,active) values($1,'agent_user',true)",
+    [principalId],
+  );
+  await query(
+    sql,
+    `insert into agent_users(id,principal_id,human_user_id,name)
+     values($1,$2,$3,'Action boundary agent')`,
+    [agentUserId, principalId, humanUserId],
+  );
+  await query(
+    sql,
+    `insert into agent_authorizations(
+       id,agent_user_id,human_user_id,root_authorization_id,
+       approved_by_auth_context_id)
+     values($1,$2,$3,$1,$4)`,
+    [authorizationId, agentUserId, humanUserId, approvedByAuthContextId],
+  );
+  await query(
+    sql,
+    `insert into agent_authorization_roles(
+       id,authorization_id,role_id,boundary_type)
+     values($1,$2,'test/actionproof:operator','system')`,
+    [roleAssignmentId, authorizationId],
+  );
+  await query(
+    sql,
+    `insert into auth_sessions(
+       id,principal_id,human_user_id,credential_kind,token_digest,
+       authorization_id)
+     values($1,$2,$3,'agent_authorization',$4,$5)`,
+    [
+      sessionId,
+      principalId,
+      humanUserId,
+      await tokenDigest(token),
+      authorizationId,
+    ],
+  );
+  return { token, roleAssignmentId };
+}
+
+async function stageActionWithToken(
+  baseUrl: string,
+  token: string,
+  projectId: string,
+  sourceId: string,
+): Promise<{ code: number; stdout: string; stderr: string }> {
+  const response = await fetch(
+    `${baseUrl}/api/v1/actions/test/actionproof/generate/stage`,
+    {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        project_id: projectId,
+        input: { source_id: sourceId },
+      }),
+    },
+  );
+  const body = await response.text();
+  return response.ok
+    ? { code: 0, stdout: body, stderr: "" }
+    : { code: 1, stdout: "", stderr: body };
+}
+
+async function commitActionWithToken(
+  baseUrl: string,
+  token: string,
+  stageId: string,
+): Promise<{ code: number; stdout: string; stderr: string }> {
+  const response = await fetch(
+    `${baseUrl}/api/v1/changesets/${stageId}/commit`,
+    {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+      },
+      body: "{}",
+    },
+  );
+  const body = await response.text();
+  return response.ok
+    ? { code: 0, stdout: body, stderr: "" }
+    : { code: 1, stdout: "", stderr: body };
+}
 
 async function evidenceCounts(sql: Parameters<typeof query>[0]) {
   return (await query<{ stages: string; hooks: string }>(

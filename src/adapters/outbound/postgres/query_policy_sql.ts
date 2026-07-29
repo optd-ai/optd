@@ -438,7 +438,9 @@ export async function targetedActionAuthorityFactsDigest(
     sql,
     `select to_jsonb(a) fact from ${qi(assignmentTable)} a where ${
       qi(assignmentColumn)
-    }=$1 and (boundary_type in ('system','all_projects') or project_id=$2) order by id`,
+    }=$1 and (boundary_type='all_projects' or
+      (boundary_type='project' and project_id=$2) or
+      (role_id='system:super_admin' and boundary_type='system')) order by id`,
     [auth.authorizationId ?? auth.principalId, projectId],
   )).rows.map((row) => row.fact);
   const roles = (await query<Record<string, unknown>>(
@@ -456,7 +458,8 @@ export async function targetedActionAuthorityFactsDigest(
        from policy_assignments pa
        join policy_definition_versions pd on pd.id=pa.policy_definition_version_id
        join policy_rules pr on pr.policy_definition_version_id=pd.id
-      where pa.boundary_type in ('system','all_projects') or pa.project_id=$1
+      where pa.boundary_type='all_projects' or
+        (pa.boundary_type='project' and pa.project_id=$1)
       order by pa.id,pd.id,pr.id`,
     [projectId],
   )).rows;
@@ -1098,7 +1101,9 @@ async function effectiveRoles(
          join system_roles sr on sr.id=ar.role_id and sr.active
          join role_definition_versions rv on rv.role_id=ar.role_id and rv.active
         where ar.authorization_id=$1 and
-          (ar.boundary_type in ('system','all_projects') or ar.project_id=$2)
+          (ar.boundary_type='all_projects' or
+            (ar.boundary_type='project' and ar.project_id=$2) or
+            (ar.role_id='system:super_admin' and ar.boundary_type='system'))
         order by ar.role_id,ar.id,rv.id`
       : `select ra.id assignment_id,ra.principal_id assignment_owner_id,
           ra.active assignment_active,ra.version assignment_version,
@@ -1109,7 +1114,9 @@ async function effectiveRoles(
          join system_roles sr on sr.id=ra.role_id and sr.active
          join role_definition_versions rv on rv.role_id=ra.role_id and rv.active
         where ra.principal_id=$1 and ra.active and
-          (ra.boundary_type in ('system','all_projects') or ra.project_id=$2)
+          (ra.boundary_type='all_projects' or
+            (ra.boundary_type='project' and ra.project_id=$2) or
+            (ra.role_id='system:super_admin' and ra.boundary_type='system'))
         order by ra.role_id,ra.id,rv.id`,
     [auth.authorizationId ?? auth.principalId, project],
   )).rows;
@@ -1141,7 +1148,8 @@ async function policyRows(
  left join pack_active_revisions ar on ar.candidate_revision_id=pd.candidate_revision_id
  where pr.role_id=any($1::text[]) and pr.capability=$2
  and (pr.resource=$3 or (not $5::boolean and pr.resource='*'))
- and (pa.boundary_type in ('system','all_projects') or pa.project_id=$4)
+ and (pa.boundary_type='all_projects' or
+      (pa.boundary_type='project' and pa.project_id=$4))
  and (pd.candidate_revision_id is null or ar.candidate_revision_id is not null)
  order by pd.policy_id,pr.rule_name,pr.id,pa.id`,
     [roles, action, resource, project, exactResource],

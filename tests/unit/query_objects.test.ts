@@ -241,7 +241,10 @@ function policySql(options: {
           }]
           : [];
       }
-      if (text.includes("from role_assignments ra")) {
+      if (
+        text.includes("from role_assignments ra") ||
+        text.includes("from agent_authorization_roles ar")
+      ) {
         return [{
           assignment_id: "role-assignment",
           assignment_owner_id: auth.principalId,
@@ -335,6 +338,82 @@ Deno.test("targeted semantic policy allows the exact task object", async () => {
     true,
   ]);
   assertEquals(policyQuery.text.includes("pr.resource='*'"), true);
+});
+
+Deno.test("Project policy SQL keeps system boundaries isolated", async () => {
+  const humanSql = policySql({ resource: "operant/projects:task" });
+  await evaluateTargetedActionPolicy(
+    humanSql,
+    { projectId, action, targets: [taskTarget] },
+    auth,
+  );
+  const humanRoles =
+    humanSql.statements.find((item) =>
+      item.text.includes("from role_assignments ra")
+    )!.text;
+  assertEquals(humanRoles.includes("ra.boundary_type='all_projects'"), true);
+  assertEquals(
+    humanRoles.includes(
+      "ra.boundary_type='project' and ra.project_id=$2",
+    ),
+    true,
+  );
+  assertEquals(
+    humanRoles.includes(
+      "ra.role_id='system:super_admin' and ra.boundary_type='system'",
+    ),
+    true,
+  );
+  assertEquals(
+    humanRoles.includes("ra.boundary_type in ('system','all_projects')"),
+    false,
+  );
+
+  const agentSql = policySql({ resource: "operant/projects:task" });
+  await evaluateTargetedActionPolicy(
+    agentSql,
+    { projectId, action, targets: [taskTarget] },
+    {
+      ...auth,
+      principalType: "agent_user",
+      credentialKind: "agent_authorization",
+      authorizationId: "authorization",
+    },
+  ).catch(() => undefined);
+  const agentRoles =
+    agentSql.statements.find((item) =>
+      item.text.includes("from agent_authorization_roles ar")
+    )!.text;
+  assertEquals(agentRoles.includes("ar.boundary_type='all_projects'"), true);
+  assertEquals(
+    agentRoles.includes(
+      "ar.boundary_type='project' and ar.project_id=$2",
+    ),
+    true,
+  );
+  assertEquals(
+    agentRoles.includes(
+      "ar.role_id='system:super_admin' and ar.boundary_type='system'",
+    ),
+    true,
+  );
+  assertEquals(
+    agentRoles.includes("ar.boundary_type in ('system','all_projects')"),
+    false,
+  );
+
+  const policy =
+    humanSql.statements.find((item) =>
+      item.text.includes("from policy_rules pr join")
+    )!.text;
+  assertEquals(policy.includes("pa.boundary_type='all_projects'"), true);
+  assertEquals(
+    policy.includes(
+      "pa.boundary_type='project' and pa.project_id=$4",
+    ),
+    true,
+  );
+  assertEquals(policy.includes("pa.boundary_type='system'"), false);
 });
 
 Deno.test("targeted semantic policy rejects wrong resources and ABAC false", async () => {
