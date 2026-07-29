@@ -37,6 +37,9 @@ Deno.test({
     const pack = await Deno.makeTempDir({
       prefix: "operant-action-stage-pack-",
     });
+    const actionCacheDir = await Deno.makeTempDir({
+      prefix: "operant-action-child-",
+    });
     try {
       await writePack(pack, provider.url);
       const apply = await harness.runOptctl([
@@ -73,9 +76,7 @@ Deno.test({
             new EnvelopeCrypto(null),
           ),
         ),
-        new DenoHookExecutor({
-          cacheDir: await Deno.makeTempDir({ prefix: "operant-action-child-" }),
-        }),
+        new DenoHookExecutor({ cacheDir: actionCacheDir }),
       );
       const authority = {
         principal_id: auth.principal_id,
@@ -343,6 +344,9 @@ Deno.test({
       await harness.close();
       await provider.close();
       await Deno.remove(pack, { recursive: true }).catch(() => undefined);
+      await Deno.remove(actionCacheDir, { recursive: true }).catch(() =>
+        undefined
+      );
     }
   },
 });

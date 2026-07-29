@@ -16,6 +16,11 @@ import { uuidV7 } from "../../../domain/ids/uuid_v7.ts";
 import { lowerAfterCommitCondition } from "../../../domain/outbox/condition.ts";
 import { err, ok, type Result } from "../../../domain/errors/result.ts";
 import { query, type Queryable, quoteIdentifier, type Sql } from "./client.ts";
+import {
+  type ExpectedAuthorizationLineage,
+  lockActiveAuthorizationLineage,
+  lockActiveAuthorizationLineages,
+} from "./authorization_lineage.ts";
 
 type Runtime = {
   publisher: string;
@@ -318,30 +323,16 @@ async function authorizeExistingCommit(
   stageId: string,
   auth: AuthContext,
 ): Promise<boolean> {
+  if (!await lockCurrentAuthorizationLineage(tx, auth)) return false;
   const row = (await query<{ allowed: boolean }>(
     tx,
-    `with recursive lineage as (
-       select a.id,a.parent_authorization_id,a.root_authorization_id,a.human_user_id,
-              u.principal_id,a.revoked_at,a.superseded_at
-         from agent_authorizations a join agent_users u on u.id=a.agent_user_id
-        where a.id=$4::uuid
-       union all
-       select a.id,a.parent_authorization_id,a.root_authorization_id,a.human_user_id,
-              u.principal_id,a.revoked_at,a.superseded_at
-         from agent_authorizations a join agent_users u on u.id=a.agent_user_id
-         join lineage child on child.parent_authorization_id=a.id
-     ), actor as (
+    `with actor as (
        select s.principal_id,s.human_user_id,s.authorization_id
        from auth_sessions s join principals p on p.id=s.principal_id and p.active
        join human_users h on h.id=s.human_user_id and h.status='active'
-       where s.id=$1 and s.principal_id=$2 and s.human_user_id=$3 and s.revoked_at is null
-     ), lineage_valid as (
-       select $4::uuid is null or (
-         exists(select 1 from lineage where id=$4 and principal_id=$2) and
-         not exists(select 1 from lineage where revoked_at is not null or superseded_at is not null or human_user_id<>$3) and
-         (select count(*) from lineage where parent_authorization_id is null)=1 and
-         not exists(select 1 from lineage where root_authorization_id<>(select id from lineage where parent_authorization_id is null))
-       ) value
+       where s.id=$1 and s.principal_id=$2 and s.human_user_id=$3
+         and s.authorization_id is not distinct from $4::uuid
+         and s.revoked_at is null
      ), affected_projects as (
        select distinct o.project_id from staged_changeset_operations o where o.stage_id=$5
      ), roles as (
@@ -371,7 +362,7 @@ async function authorizeExistingCommit(
            )
          ) value
      )
-     select exists(select 1 from actor) and (select value from lineage_valid)
+     select exists(select 1 from actor)
        and (select value from visible) and (select value from other_allowed) allowed`,
     [
       auth.sessionId,
@@ -708,6 +699,82 @@ async function lockAndValidateDependencies(
   }
 }
 
+type ApprovalAgentSession = {
+  session_id: string;
+  principal_id: string;
+  human_user_id: string;
+  authorization_id: string;
+};
+
+async function lockCurrentAuthorizationLineage(
+  tx: Queryable,
+  auth: AuthContext,
+): Promise<boolean> {
+  const expected = expectedCurrentAuthorizationLineage(auth);
+  if (expected === false) return false;
+  if (expected === null) return true;
+  return (await lockActiveAuthorizationLineage(tx, expected)).ok;
+}
+
+async function lockCommitAuthorizationLineages(
+  tx: Queryable,
+  stageId: string,
+  auth: AuthContext,
+): Promise<string[]> {
+  const caller = expectedCurrentAuthorizationLineage(auth);
+  if (caller === false) {
+    throw new CommitFailure("authorization_changed", "authorization");
+  }
+  const approvalSessions = (await query<ApprovalAgentSession>(
+    tx,
+    `select distinct ds.id session_id,dc.principal_id,ds.human_user_id,
+            ds.authorization_id
+       from staged_approval_decisions d
+       join auth_contexts dc on dc.id=d.decided_auth_context_id
+       join auth_sessions ds on ds.id=dc.session_id
+      where d.stage_id=$1 and ds.authorization_id is not null
+      order by ds.id,dc.principal_id,ds.human_user_id,ds.authorization_id`,
+    [stageId],
+  )).rows;
+  const expected: ExpectedAuthorizationLineage[] = [
+    ...(caller ? [caller] : []),
+    ...approvalSessions.map((session) => ({
+      authorizationId: session.authorization_id,
+      principalId: session.principal_id,
+      humanUserId: session.human_user_id,
+    })),
+  ];
+  const validations = await lockActiveAuthorizationLineages(tx, expected);
+  const approvalOffset = caller ? 1 : 0;
+  if (caller && !validations[0].ok) {
+    throw new CommitFailure(
+      "authorization_ancestor_invalid",
+      "authorization",
+    );
+  }
+  return approvalSessions.flatMap((session, index) =>
+    validations[approvalOffset + index]?.ok ? [session.session_id] : []
+  );
+}
+
+function expectedCurrentAuthorizationLineage(
+  auth: AuthContext,
+): ExpectedAuthorizationLineage | null | false {
+  if (auth.credentialKind === "agent_authorization") {
+    if (!auth.authorizationId || auth.principalType !== "agent_user") {
+      return false;
+    }
+    return {
+      authorizationId: auth.authorizationId,
+      principalId: auth.principalId,
+      humanUserId: auth.humanUserId,
+    };
+  }
+  return auth.authorizationId || auth.principalType !== "human_user"
+    ? false
+    : null;
+}
+
 type CutoffRule = {
   id: string;
   capability: string;
@@ -727,6 +794,7 @@ async function buildCutoffStatement(
   operations: CanonicalOperation[],
   operationRows: OperationRow[],
   runtimes: Runtime[],
+  validAgentApprovalSessionIds: readonly string[],
 ): Promise<{ sql: string; params: unknown[] }> {
   const actor = policyActorFromAuthContext(auth);
   const decisions = (await query<{
@@ -756,6 +824,7 @@ async function buildCutoffStatement(
     auth.authorizationId ?? null,
     stageId,
     stage.created_principal_id,
+    validAgentApprovalSessionIds,
   ];
   const requestedRows: string[] = [];
   const proposed: Array<{
@@ -869,29 +938,12 @@ async function buildCutoffStatement(
     ? `case ${conditionCases.join(" ")} else false end`
     : "false";
   const sql = `
-with recursive caller_lineage as (
-  select a.id,a.parent_authorization_id,a.root_authorization_id,a.human_user_id,
-         u.principal_id,a.revoked_at,a.superseded_at
-    from agent_authorizations a join agent_users u on u.id=a.agent_user_id
-   where a.id=$4::uuid
-  union all
-  select a.id,a.parent_authorization_id,a.root_authorization_id,a.human_user_id,
-         u.principal_id,a.revoked_at,a.superseded_at
-    from agent_authorizations a join agent_users u on u.id=a.agent_user_id
-    join caller_lineage child on child.parent_authorization_id=a.id
-), actor as (
+with actor as (
   select s.principal_id,s.human_user_id,s.authorization_id
     from auth_sessions s join principals p on p.id=s.principal_id and p.active
     join human_users h on h.id=s.human_user_id and h.status='active'
    where s.id=$1 and s.principal_id=$2 and s.human_user_id=$3
      and s.authorization_id is not distinct from $4::uuid and s.revoked_at is null
-), caller_lineage_valid as (
-  select $4::uuid is null or (
-    exists(select 1 from caller_lineage where id=$4 and principal_id=$2) and
-    not exists(select 1 from caller_lineage where revoked_at is not null or superseded_at is not null or human_user_id<>$3) and
-    (select count(*) from caller_lineage where parent_authorization_id is null)=1 and
-    not exists(select 1 from caller_lineage where root_authorization_id<>(select id from caller_lineage where parent_authorization_id is null))
-  ) value
 ), requested(ordinal,project_id,action,resource,proposed) as (
   values ${requestedRows.join(",")}
 ), roles as (
@@ -919,21 +971,6 @@ with recursive caller_lineage as (
   select req.ordinal,(select value from superadmin) or exists(
     select 1 from applicable a where a.ordinal=req.ordinal and a.condition_allowed
   ) allowed from requested req
-), approval_sessions as (
-  select distinct ds.authorization_id leaf_id from staged_approval_decisions d
-    join auth_contexts dc on dc.id=d.decided_auth_context_id
-    join auth_sessions ds on ds.id=dc.session_id
-   where d.stage_id=$5 and ds.authorization_id is not null
-), approval_lineage(leaf_id,id,parent_authorization_id,root_authorization_id,human_user_id,principal_id,revoked_at,superseded_at) as (
-  select s.leaf_id,a.id,a.parent_authorization_id,a.root_authorization_id,a.human_user_id,
-         u.principal_id,a.revoked_at,a.superseded_at
-    from approval_sessions s join agent_authorizations a on a.id=s.leaf_id
-    join agent_users u on u.id=a.agent_user_id
-  union all
-  select child.leaf_id,a.id,a.parent_authorization_id,a.root_authorization_id,a.human_user_id,
-         u.principal_id,a.revoked_at,a.superseded_at
-    from approval_lineage child join agent_authorizations a on a.id=child.parent_authorization_id
-    join agent_users u on u.id=a.agent_user_id
 ), valid_approvals as (
   select d.requirement_id,d.principal_id,d.decision
     from staged_approval_decisions d
@@ -944,12 +981,7 @@ with recursive caller_lineage as (
     join human_users human on human.id=ds.human_user_id and human.status='active'
    where (req.requirement_json->'principal_types') ? principal.type
      and ((req.requirement_json->>'allow_initiator')::boolean or d.principal_id<>$6::uuid)
-     and (ds.authorization_id is null or (
-       exists(select 1 from approval_lineage l where l.leaf_id=ds.authorization_id and l.id=ds.authorization_id and l.principal_id=d.principal_id) and
-       not exists(select 1 from approval_lineage l where l.leaf_id=ds.authorization_id and (l.revoked_at is not null or l.superseded_at is not null or l.human_user_id<>ds.human_user_id)) and
-       (select count(*) from approval_lineage l where l.leaf_id=ds.authorization_id and l.parent_authorization_id is null)=1 and
-       not exists(select 1 from approval_lineage l where l.leaf_id=ds.authorization_id and l.root_authorization_id<>(select root.id from approval_lineage root where root.leaf_id=ds.authorization_id and root.parent_authorization_id is null))
-     ))
+     and (ds.authorization_id is null or ds.id=any($7::uuid[]))
      and (exists(select 1 from role_assignments ra join system_roles sr on sr.id=ra.role_id and sr.active
            join role_definition_versions rv on rv.role_id=sr.id and rv.active
            where ds.authorization_id is null and ra.principal_id=d.principal_id and ra.active
@@ -989,7 +1021,6 @@ with recursive caller_lineage as (
   ) value
 )
 select statement_timestamp()::text cutoff,exists(select 1 from actor) actor_valid,
-  (select value from caller_lineage_valid) ancestry_valid,
   (select value from commit_other) commit_other,
   coalesce((select bool_and(allowed) from operation_authority),false) operations_allowed,
   (select value from approvals_valid) approvals_valid`;
@@ -1109,6 +1140,11 @@ async function authorizationCutoff(
   operationRows: OperationRow[],
   runtimes: Runtime[],
 ): Promise<string> {
+  const validAgentApprovalSessionIds = await lockCommitAuthorizationLineages(
+    tx,
+    stageId,
+    auth,
+  );
   const generated = await buildCutoffStatement(
     tx,
     stageId,
@@ -1117,20 +1153,17 @@ async function authorizationCutoff(
     operations,
     operationRows,
     runtimes,
+    validAgentApprovalSessionIds,
   );
   const row = (await query<{
     cutoff: string;
     actor_valid: boolean;
-    ancestry_valid: boolean;
     commit_other: boolean;
     operations_allowed: boolean;
     approvals_valid: boolean;
   }>(tx, generated.sql, generated.params)).rows[0];
   if (!row?.actor_valid) {
     throw new CommitFailure("authorization_changed", "authorization");
-  }
-  if (!row.ancestry_valid) {
-    throw new CommitFailure("authorization_ancestor_invalid", "authorization");
   }
   if (!row.commit_other || !row.operations_allowed) {
     throw new CommitFailure("authorization_changed", "authorization");

@@ -9,16 +9,7 @@ import {
 import type { AuthorizationRepository } from "../../../application/ports/authorization.ts";
 import type { AuthContext } from "../../../domain/auth/model.ts";
 import { query, type Queryable, type Sql } from "./client.ts";
-
-type LineageRow = {
-  id: string;
-  parent_authorization_id: string | null;
-  root_authorization_id: string | null;
-  human_user_id: string;
-  principal_id: string;
-  revoked_at: Date | string | null;
-  superseded_at: Date | string | null;
-};
+import { lockActiveAuthorizationLineage } from "./authorization_lineage.ts";
 
 export type ObjectReadBoundaryFactories = Readonly<{
   reader(sql: Queryable): ObjectReader;
@@ -77,21 +68,13 @@ export async function lockReadAuthority(
 
   let authorizationRootId = auth.principalId;
   if (auth.authorizationId) {
-    const discovered = await lineage(sql, auth.authorizationId);
-    const root = validateLineage(discovered, auth);
-    await query(
-      sql,
-      "select id from agent_authorizations where id=any($1::uuid[]) order by id for share",
-      [discovered.map((row) => row.id).sort()],
-    );
-    const anchored = await lineage(sql, auth.authorizationId);
-    const anchoredRoot = validateLineage(anchored, auth);
-    if (
-      anchoredRoot !== root ||
-      anchored.map((row) => row.id).sort().join(",") !==
-        discovered.map((row) => row.id).sort().join(",")
-    ) throw new ObjectReadAuthorityInvalidError();
-    authorizationRootId = root;
+    const lineage = await lockActiveAuthorizationLineage(sql, {
+      authorizationId: auth.authorizationId,
+      principalId: auth.principalId,
+      humanUserId: auth.humanUserId,
+    });
+    if (!lineage.ok) throw new ObjectReadAuthorityInvalidError();
+    authorizationRootId = lineage.value.rootAuthorizationId;
     await query(
       sql,
       `select id from agent_authorization_roles where authorization_id=$1
@@ -148,47 +131,6 @@ export async function lockReadAuthority(
     [projectId],
   );
   return { authorizationRootId };
-}
-
-async function lineage(sql: Queryable, leaf: string): Promise<LineageRow[]> {
-  return (await query<LineageRow>(
-    sql,
-    `with recursive lineage(id) as (
-       select $1::uuid
-       union
-       select a.parent_authorization_id from agent_authorizations a
-       join lineage child on child.id=a.id where a.parent_authorization_id is not null
-     )
-     select a.id,a.parent_authorization_id,a.root_authorization_id,a.human_user_id,
-            u.principal_id,a.revoked_at,a.superseded_at
-       from lineage l join agent_authorizations a on a.id=l.id
-       join agent_users u on u.id=a.agent_user_id
-      order by a.id`,
-    [leaf],
-  )).rows;
-}
-
-function validateLineage(rows: LineageRow[], auth: AuthContext): string {
-  if (!auth.authorizationId || !rows.length) {
-    throw new ObjectReadAuthorityInvalidError();
-  }
-  const ids = new Set(rows.map((row) => row.id));
-  const leaf = rows.find((row) => row.id === auth.authorizationId);
-  const roots = rows.filter((row) => row.parent_authorization_id === null);
-  if (
-    !leaf || leaf.principal_id !== auth.principalId ||
-    rows.some((row) =>
-      row.revoked_at !== null || row.superseded_at !== null ||
-      row.human_user_id !== auth.humanUserId ||
-      (row.parent_authorization_id !== null &&
-        !ids.has(row.parent_authorization_id))
-    ) || roots.length !== 1
-  ) throw new ObjectReadAuthorityInvalidError();
-  const root = roots[0].id;
-  if (rows.some((row) => row.root_authorization_id !== root)) {
-    throw new ObjectReadAuthorityInvalidError();
-  }
-  return root;
 }
 
 async function requireOne(

@@ -20,14 +20,88 @@ type AuthorizationLineageRow = {
   agent_principal_active: boolean | null;
 };
 
+export type ExpectedAuthorizationLineage = Readonly<{
+  authorizationId: string;
+  principalId: string;
+  humanUserId: string;
+}>;
+
 export async function loadActiveAuthorizationLineage(
   sql: Queryable,
-  expected: Readonly<{
-    authorizationId: string;
-    principalId: string;
-    humanUserId: string;
-  }>,
+  expected: ExpectedAuthorizationLineage,
 ): Promise<AuthorizationLineageValidation> {
+  return validateExpectedLineage(
+    expected,
+    await loadAuthorizationLineageFacts(sql, expected.authorizationId),
+  );
+}
+
+export async function lockActiveAuthorizationLineage(
+  sql: Queryable,
+  expected: ExpectedAuthorizationLineage,
+): Promise<AuthorizationLineageValidation> {
+  return (await lockActiveAuthorizationLineages(sql, [expected]))[0];
+}
+
+export async function lockActiveAuthorizationLineages(
+  sql: Queryable,
+  expected: readonly ExpectedAuthorizationLineage[],
+): Promise<AuthorizationLineageValidation[]> {
+  const ordered = [...expected].map((item, index) => ({ item, index })).sort(
+    (left, right) =>
+      left.item.authorizationId.localeCompare(right.item.authorizationId) ||
+      left.item.principalId.localeCompare(right.item.principalId) ||
+      left.item.humanUserId.localeCompare(right.item.humanUserId) ||
+      left.index - right.index,
+  );
+  const discovered: AuthorizationLineageFact[][] = [];
+  for (const { item } of ordered) {
+    discovered.push(
+      await loadAuthorizationLineageFacts(sql, item.authorizationId),
+    );
+  }
+  const ids = [
+    ...new Set(
+      discovered.flatMap((facts) => facts.map((fact) => fact.authorizationId)),
+    ),
+  ].sort();
+  if (ids.length) {
+    const locked = await query<{ id: string }>(
+      sql,
+      `select id from agent_authorizations
+        where id=any($1::uuid[]) order by id for share`,
+      [ids],
+    );
+    if (locked.rows.length !== ids.length) {
+      return expected.map(() => ({ ok: false, reason: "missing_fact" }));
+    }
+  }
+  const anchored: AuthorizationLineageFact[][] = [];
+  for (const { item } of ordered) {
+    anchored.push(
+      await loadAuthorizationLineageFacts(sql, item.authorizationId),
+    );
+  }
+  const results: AuthorizationLineageValidation[] = expected.map(() => ({
+    ok: false,
+    reason: "missing_fact",
+  }));
+  for (let position = 0; position < ordered.length; position++) {
+    const before = discovered[position].map((fact) => fact.authorizationId)
+      .sort();
+    const after = anchored[position].map((fact) => fact.authorizationId).sort();
+    const { item, index } = ordered[position];
+    results[index] = before.join(",") === after.join(",")
+      ? validateExpectedLineage(item, anchored[position])
+      : { ok: false, reason: "malformed_chain" };
+  }
+  return results;
+}
+
+async function loadAuthorizationLineageFacts(
+  sql: Queryable,
+  authorizationId: string,
+): Promise<AuthorizationLineageFact[]> {
   const rows = (await query<AuthorizationLineageRow>(
     sql,
     `with recursive ancestry as (
@@ -64,13 +138,20 @@ export async function loadActiveAuthorizationLineage(
        from lineage_facts f
        left join agent_users au on au.id=f.agent_user_id
        left join principals p on p.id=au.principal_id`,
-    [expected.authorizationId],
+    [authorizationId],
   )).rows;
+  return rows.map(lineageFact);
+}
+
+function validateExpectedLineage(
+  expected: ExpectedAuthorizationLineage,
+  facts: readonly AuthorizationLineageFact[],
+): AuthorizationLineageValidation {
   return validateActiveAuthorizationLineage({
     currentAuthorizationId: expected.authorizationId,
     expectedPrincipalId: expected.principalId,
     expectedHumanUserId: expected.humanUserId,
-    facts: rows.map(lineageFact),
+    facts,
   });
 }
 
