@@ -1058,21 +1058,91 @@ for (const logLevel of ["info", "trace"] as const) {
           harness,
           pagedAttemptWork.stageId,
         );
-        provider.enqueueForKey(
-          pagedAttemptDelivery.id,
-          { kind: "success", body: { directive: "retry" } },
-          { kind: "success", body: { directive: "retry" } },
-          { kind: "success" },
-        );
-        await releasePaused(harness, pagedAttemptDelivery.id);
-        await waitStatus(harness, pagedAttemptDelivery.id, "succeeded");
-        const expectedAttemptIds = (await query<{ id: string }>(
+        const pagedAttemptHolds = new Set<string>();
+        const runPagedAttempt = async (
+          retryGeneration: number,
+          status: number,
+        ) => {
+          const token = `${pagedAttemptDelivery.id}-${retryGeneration}`;
+          pagedAttemptHolds.add(token);
+          provider.enqueueForKey(pagedAttemptDelivery.id, {
+            kind: "hold",
+            token,
+            status,
+          });
+          if (retryGeneration === 0) {
+            await releasePaused(harness, pagedAttemptDelivery.id);
+          } else {
+            const retryResult = json(
+              await successful(
+                harness.runOptctl([
+                  "--json",
+                  "outbox",
+                  "retry",
+                  pagedAttemptDelivery.id,
+                  "--reason",
+                  `attempt pagination generation ${retryGeneration}`,
+                ]),
+                outputs,
+              ),
+            );
+            assertEquals(retryResult.data.status, "pending");
+            assertEquals(
+              retryResult.data.retry_generation,
+              retryGeneration,
+            );
+          }
+          const expectedCount = retryGeneration + 1;
+          await provider.waitForKeyAttempts(
+            pagedAttemptDelivery.id,
+            expectedCount,
+            10_000,
+          );
+          await assertRunningAttempt(
+            harness,
+            pagedAttemptDelivery.id,
+            retryGeneration,
+          );
+          provider.release(token);
+          pagedAttemptHolds.delete(token);
+          await waitStatus(
+            harness,
+            pagedAttemptDelivery.id,
+            status >= 400 ? "dead_letter" : "succeeded",
+            10_000,
+            {
+              provider,
+              retryGeneration,
+              providerHolds: pagedAttemptHolds,
+            },
+          );
+        };
+        await runPagedAttempt(0, 422);
+        await runPagedAttempt(1, 422);
+        await runPagedAttempt(2, 200);
+        const expectedAttemptRows = (await query<{
+          id: string;
+          retry_generation: number;
+          attempt_number: number;
+        }>(
           harness.server.sql,
-          `select id from outbox_attempts where delivery_id=$1
-           order by total_attempt_number,id`,
+          `select id,retry_generation,attempt_number from outbox_attempts
+           where delivery_id=$1 order by total_attempt_number,id`,
           [pagedAttemptDelivery.id],
-        )).rows.map((row) => row.id);
-        assert(expectedAttemptIds.length >= 3);
+        )).rows;
+        assertEquals(
+          expectedAttemptRows.map((row) => ({
+            retry_generation: row.retry_generation,
+            attempt_number: row.attempt_number,
+          })),
+          [
+            { retry_generation: 0, attempt_number: 1 },
+            { retry_generation: 1, attempt_number: 1 },
+            { retry_generation: 2, attempt_number: 1 },
+          ],
+        );
+        await assertNoRunningLease(harness, pagedAttemptDelivery.id);
+        const expectedAttemptIds = expectedAttemptRows.map((row) => row.id);
         const jsonAttemptPages = await collectAttemptPages(
           harness,
           true,
@@ -1101,6 +1171,18 @@ for (const logLevel of ["info", "trace"] as const) {
             item.total_attempt_number
           ),
           [1, 2, 3],
+        );
+        assertEquals(
+          jsonAttemptPages.items.map((item: Record<string, unknown>) =>
+            item.retry_generation
+          ),
+          [0, 1, 2],
+        );
+        assertEquals(
+          jsonAttemptPages.items.map((item: Record<string, unknown>) =>
+            item.attempt_number
+          ),
+          [1, 1, 1],
         );
 
         const firstAttempts = json(
@@ -2191,11 +2273,17 @@ async function delivery(
     [id],
   );
 }
+type WaitStatusDiagnostics = {
+  provider: ReturnType<typeof startHttpProvider>;
+  retryGeneration: number;
+  providerHolds: ReadonlySet<string>;
+};
 async function waitStatus(
   harness: LiveHarness,
   id: string,
   status: string,
   timeoutMs = 10_000,
+  diagnostics?: WaitStatusDiagnostics,
 ) {
   const deadline = Date.now() + timeoutMs;
   let last: Record<string, unknown> | undefined;
@@ -2208,9 +2296,119 @@ async function waitStatus(
     if (last?.status === status) return last;
     await Promise.resolve();
   }
+  const detail = diagnostics === undefined
+    ? last
+    : await deliveryWaitDiagnostics(harness, id, diagnostics);
   throw new Error(
-    `delivery ${id} did not reach ${status}: ${JSON.stringify(last)}`,
+    `delivery ${id} did not reach ${status}: ${JSON.stringify(detail)}`,
   );
+}
+async function deliveryWaitDiagnostics(
+  harness: LiveHarness,
+  id: string,
+  expected: WaitStatusDiagnostics,
+) {
+  const [deliveryRows, attempts, activity, diagnostics, hookProcesses] =
+    await Promise.all([
+      query<Record<string, unknown>>(
+        harness.server.sql,
+        `select id,status,available_at::text,lease_owner,
+         lease_attempt_id,lease_expires_at::text,retry_generation,
+         attempts_in_generation,total_attempts,last_error_code
+         from outbox_deliveries where id=$1`,
+        [id],
+      ).then((result) => result.rows),
+      query<Record<string, unknown>>(
+        harness.server.sql,
+        `select id,retry_generation,attempt_number,total_attempt_number,
+         worker_instance_id,outcome,started_at::text,lease_expires_at::text,
+         completed_at::text,error_code from outbox_attempts
+         where delivery_id=$1 order by total_attempt_number,id`,
+        [id],
+      ).then((result) => result.rows),
+      query<Record<string, unknown>>(
+        harness.server.sql,
+        `select pid,state,wait_event_type,wait_event,left(query,240) query
+         from pg_stat_activity where datname=current_database()
+         order by pid`,
+      ).then((result) => result.rows),
+      harness.diagnostics(),
+      hookProcessState(harness.hookCacheDir),
+    ]);
+  return {
+    expected_retry_generation: expected.retryGeneration,
+    delivery: deliveryRows[0],
+    attempts,
+    provider_keyed_attempts: expected.provider.attempts.filter((attempt) =>
+      attempt.idempotencyKey === id
+    ).map((attempt) => ({
+      id: attempt.id,
+      received_at: attempt.receivedAt,
+      duplicate: attempt.duplicate,
+    })),
+    provider_holds: [...expected.providerHolds].sort(),
+    worker_activity: activity,
+    worker_logs: diagnostics.server.split("\n").filter((line) =>
+      /outbox|delivery|attempt|worker/i.test(line)
+    ).slice(-100),
+    hook_diagnostics: diagnostics.hooks.slice(-16_384),
+    hook_processes: hookProcesses,
+    hook_cache_entries: await hookInvocationEntries(harness.hookCacheDir),
+  };
+}
+async function hookProcessState(cacheDir: string): Promise<string[]> {
+  const output = await new Deno.Command("/bin/ps", {
+    args: ["-eo", "pid,ppid,stat,etime,args"],
+    stdout: "piped",
+    stderr: "null",
+  }).output();
+  if (!output.success) return ["ps failed"];
+  return new TextDecoder().decode(output.stdout).split("\n").filter((line) =>
+    line.includes(cacheDir)
+  );
+}
+async function assertRunningAttempt(
+  harness: LiveHarness,
+  deliveryId: string,
+  retryGeneration: number,
+) {
+  const row = (await query<Record<string, unknown>>(
+    harness.server.sql,
+    `select d.status,d.retry_generation,d.attempts_in_generation,
+     d.lease_owner,d.lease_attempt_id,d.lease_expires_at::text,
+     a.id attempt_id,a.outcome,a.retry_generation attempt_retry_generation,
+     a.attempt_number
+     from outbox_deliveries d join outbox_attempts a
+       on a.id=d.lease_attempt_id where d.id=$1`,
+    [deliveryId],
+  )).rows[0];
+  assertEquals(row?.status, "running");
+  assertEquals(row?.retry_generation, retryGeneration);
+  assertEquals(row?.attempts_in_generation, 1);
+  assertEquals(row?.lease_attempt_id, row?.attempt_id);
+  assertEquals(row?.outcome, "running");
+  assertEquals(row?.attempt_retry_generation, retryGeneration);
+  assertEquals(row?.attempt_number, 1);
+  assertEquals(typeof row?.lease_owner, "string");
+  assertEquals(typeof row?.lease_expires_at, "string");
+}
+async function assertNoRunningLease(harness: LiveHarness, deliveryId: string) {
+  const row = (await query<Record<string, unknown>>(
+    harness.server.sql,
+    `select status,lease_owner,lease_attempt_id,lease_expires_at::text,
+     retry_generation,attempts_in_generation,total_attempts
+     from outbox_deliveries where id=$1`,
+    [deliveryId],
+  )).rows[0];
+  assertEquals(row, {
+    status: "succeeded",
+    lease_owner: null,
+    lease_attempt_id: null,
+    lease_expires_at: null,
+    retry_generation: 2,
+    attempts_in_generation: 1,
+    total_attempts: 3,
+  });
 }
 async function waitRow<T extends Record<string, unknown>>(
   harness: LiveHarness,
