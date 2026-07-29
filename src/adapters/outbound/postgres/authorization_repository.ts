@@ -17,6 +17,7 @@ import { err, ok, type Result } from "../../../domain/errors/result.ts";
 import { uuidV7 } from "../../../domain/ids/uuid_v7.ts";
 import { query, type Queryable, type Sql } from "./client.ts";
 import { authorizationBoundaryPredicate } from "./authorization_boundary_sql.ts";
+import { loadActiveAuthorizationLineage } from "./authorization_lineage.ts";
 
 type AuthorityRow = {
   role_id: string | null;
@@ -508,6 +509,15 @@ async function currentAuthority(
   includeSecurity = false,
 ): Promise<Result<BoundaryAuthority>> {
   const actor = policyActorFromAuthContext(auth);
+  if (auth.credentialKind === "agent_authorization") {
+    if (!auth.authorizationId) return inactiveCredential(auth);
+    const lineage = await loadActiveAuthorizationLineage(sql, {
+      authorizationId: auth.authorizationId,
+      principalId: actor.id,
+      humanUserId: actor.human_user_id,
+    });
+    if (!lineage.ok) return inactiveCredential(auth);
+  }
   const [type, projectId] = boundaryParams(boundary);
   const rows = await query<AuthorityRow>(
     sql,
@@ -546,14 +556,7 @@ async function currentAuthority(
     order by er.role_id,a.policy_id,a.rule_id`,
     [auth.sessionId, actor.id, actor.human_user_id, type, projectId],
   );
-  if (!rows.rows.length) {
-    return err({
-      code: "credential_invalid",
-      message: "authenticated principal is no longer active",
-      severity: "authentication",
-      details: { auth_context_id: auth.id },
-    });
-  }
+  if (!rows.rows.length) return inactiveCredential(auth);
   const effectiveRoles = [
     ...new Set(rows.rows.flatMap((row) => row.role_id ? [row.role_id] : [])),
   ].sort();
@@ -598,6 +601,15 @@ async function currentAuthority(
     ),
   };
   return ok(value);
+}
+
+function inactiveCredential(auth: AuthContext): Result<never> {
+  return err({
+    code: "credential_invalid",
+    message: "authenticated principal is no longer active",
+    severity: "authentication",
+    details: { auth_context_id: auth.id },
+  });
 }
 
 function hasCapability(authority: BoundaryAuthority, action: string): boolean {

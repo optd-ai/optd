@@ -84,7 +84,7 @@ Deno.test("authorization decisions serialize approve, deny, cancel, and duplicat
   }
 });
 
-Deno.test("concurrent replacement preserves parent/root and upstream role filtering uses current authority", async () => {
+Deno.test("concurrent replacement invalidates stale ancestry and its new session is current", async () => {
   const harness = await startLiveHarness();
   try {
     await bootstrap(harness, "lineage-race");
@@ -193,29 +193,35 @@ Deno.test("concurrent replacement preserves parent/root and upstream role filter
       { redemption_nonce: replacementNonce },
     );
     assertEquals(replacementRedeemed.status, 200);
-    await replacementRedeemed.body?.cancel();
+    const replacementToken = (await replacementRedeemed.json()).data
+      .token as string;
 
-    await expectAndCancel(
-      get(harness, childToken, "/api/v1/projects"),
-      200,
-    );
-    await query(
+    const contextsBefore = (await query<{ count: number }>(
       harness.server.sql,
-      `delete from agent_authorization_roles where authorization_id=$1 and role_id='system:super_admin'`,
-      [replacementId],
-    );
-    const filtered = await get(harness, childToken, "/api/v1/projects");
-    assertEquals(filtered.status, 403);
-    assertEquals(
-      (await filtered.json()).error.code,
-      "authorization_insufficient",
-    );
-    const latestContext = (await query<{ roles: string[] }>(
-      harness.server.sql,
-      `select roles from auth_contexts where session_id=(select id from auth_sessions where token_digest=$1) order by created_at desc limit 1`,
+      `select count(*)::int count from auth_contexts where session_id=(select id from auth_sessions where token_digest=$1)`,
       [await tokenDigest(childToken)],
-    )).rows[0]!;
-    assertEquals(latestContext.roles.includes("system:super_admin"), false);
+    )).rows[0]!.count;
+    const staleChild = await get(harness, childToken, "/api/v1/projects");
+    assertEquals(staleChild.status, 401);
+    assertEquals((await staleChild.json()).error.code, "credential_invalid");
+    const contextsAfter = (await query<{ count: number }>(
+      harness.server.sql,
+      `select count(*)::int count from auth_contexts where session_id=(select id from auth_sessions where token_digest=$1)`,
+      [await tokenDigest(childToken)],
+    )).rows[0]!.count;
+    assertEquals(contextsAfter, contextsBefore);
+
+    const currentReplacement = await bearerGet(
+      harness,
+      replacementToken,
+      "/api/v1/auth/me",
+    );
+    assertEquals(currentReplacement.status, 200);
+    const replacementIdentity = (await currentReplacement.json()).data;
+    assertEquals(replacementIdentity.agent.authorization_id, replacementId);
+    assertEquals(replacementIdentity.agent.authorization_ancestry_ids, [
+      replacementId,
+    ]);
   } finally {
     await harness.close();
   }

@@ -42,6 +42,7 @@ import {
 import type { Queryable, Sql } from "./client.ts";
 import { query } from "./client.ts";
 import { authorizationBoundaryPredicate } from "./authorization_boundary_sql.ts";
+import { loadActiveAuthorizationLineage } from "./authorization_lineage.ts";
 
 export class PostgresAuthRepository implements AuthRepository {
   private readonly hashes: ImmediateSemaphore;
@@ -219,7 +220,7 @@ export class PostgresAuthRepository implements AuthRepository {
         select a.id,a.parent_authorization_id,a.revoked_at,a.superseded_at
           from auth_sessions seed join agent_authorizations a on a.id=seed.authorization_id
          where seed.token_digest=$1
-        union all
+        union
         select parent.id,parent.parent_authorization_id,parent.revoked_at,parent.superseded_at
           from agent_authorizations parent join lineage child on child.parent_authorization_id=parent.id
       )
@@ -266,6 +267,21 @@ export class PostgresAuthRepository implements AuthRepository {
           "authentication",
         ),
       );
+    }
+    if (row.credential_kind === "agent_authorization") {
+      if (!row.authorization_id || row.principal_type !== "agent_user") {
+        return credentialInvalid();
+      }
+      const lineage = await loadActiveAuthorizationLineage(this.sql, {
+        authorizationId: row.authorization_id,
+        principalId: row.principal_id,
+        humanUserId: row.human_user_id,
+      });
+      if (!lineage.ok) return credentialInvalid();
+    } else if (
+      row.authorization_id !== null || row.principal_type !== "human_user"
+    ) {
+      return credentialInvalid();
     }
     const context = immutableAuthContext({
       id: uuidV7(),
@@ -497,51 +513,25 @@ export class PostgresAuthRepository implements AuthRepository {
       if (!auth.authorizationId || auth.principalType !== "agent_user") {
         return credentialInvalid();
       }
-      const lineage = (await query<{
-        id: string;
-        agent_user_id: string;
-        agent_principal_id: string;
-        agent_name: string | null;
-        parent_authorization_id: string | null;
-        root_authorization_id: string;
-        depth: number;
-        revoked_at: Date | null;
-        superseded_at: Date | null;
-      }>(
-        this.sql,
-        `with recursive lineage as (
-           select a.id,a.agent_user_id,a.parent_authorization_id,
-                  a.root_authorization_id,a.revoked_at,a.superseded_at,0 depth
-             from agent_authorizations a where a.id=$1
-           union
-           select parent.id,parent.agent_user_id,parent.parent_authorization_id,
-                  parent.root_authorization_id,parent.revoked_at,
-                  parent.superseded_at,child.depth+1
-             from agent_authorizations parent
-             join lineage child on child.parent_authorization_id=parent.id
-         )
-         select l.*,au.principal_id agent_principal_id,au.name agent_name
-           from lineage l join agent_users au on au.id=l.agent_user_id
-          order by l.depth`,
-        [auth.authorizationId],
-      )).rows;
-      const leaf = lineage[0];
-      if (
-        !leaf || leaf.agent_principal_id !== auth.principalId ||
-        lineage.some((entry) => entry.revoked_at !== null) ||
-        leaf.superseded_at !== null ||
-        lineage.at(-1)?.id !== leaf.root_authorization_id
-      ) return credentialInvalid();
+      const lineage = await loadActiveAuthorizationLineage(this.sql, {
+        authorizationId: auth.authorizationId,
+        principalId: auth.principalId,
+        humanUserId: auth.humanUserId,
+      });
+      if (!lineage.ok) return credentialInvalid();
+      const current = lineage.value.current;
       agent = {
-        id: leaf.agent_user_id,
-        principalId: leaf.agent_principal_id,
-        name: leaf.agent_name ?? "agent",
-        authorizationId: leaf.id,
-        ...(leaf.parent_authorization_id
-          ? { parentAuthorizationId: leaf.parent_authorization_id }
+        id: current.agentUserId,
+        principalId: current.agentPrincipalId,
+        name: current.agentName ?? "agent",
+        authorizationId: current.authorizationId,
+        ...(current.parentAuthorizationId
+          ? { parentAuthorizationId: current.parentAuthorizationId }
           : {}),
-        rootAuthorizationId: leaf.root_authorization_id,
-        authorizationAncestryIds: lineage.map((entry) => entry.id),
+        rootAuthorizationId: lineage.value.rootAuthorizationId,
+        authorizationAncestryIds: lineage.value.ancestry.map((entry) =>
+          entry.authorizationId
+        ),
       };
       const rows = (await query<{
         role_id: string;
@@ -1972,13 +1962,6 @@ export class PostgresAuthRepository implements AuthRepository {
             ],
           );
         }
-        if (prior) {
-          await query(
-            tx,
-            `update agent_authorizations set superseded_at=now() where id=$1`,
-            [prior.id],
-          );
-        }
       }
       const snapshot = {
         schema: "auth.authorization_decision.v1",
@@ -2240,6 +2223,30 @@ export class PostgresAuthRepository implements AuthRepository {
             "conflict",
           ));
         }
+      }
+      if (row.requester_authorization_id) {
+        const replaced = (await query<{
+          revoked_at: Date | null;
+          superseded_at: Date | null;
+        }>(
+          tx,
+          `select revoked_at,superseded_at from agent_authorizations where id=$1 for update`,
+          [row.requester_authorization_id],
+        )).rows[0];
+        if (!replaced || replaced.revoked_at || replaced.superseded_at) {
+          return err(
+            authError(
+              "request_invalidated",
+              "authorization request was invalidated",
+              "conflict",
+            ),
+          );
+        }
+        await query(
+          tx,
+          `update agent_authorizations set superseded_at=now() where id=$1`,
+          [row.requester_authorization_id],
+        );
       }
       await query(
         tx,
