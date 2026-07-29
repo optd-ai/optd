@@ -334,10 +334,15 @@ Deno.test({
         update(alpha, facts.actor, 53),
       );
       assertEquals(agentAllowed.code, 0, agentAllowed.stderr);
-      await expectStageDenied(
+      const anchoredHumanAllowed = await stage(
         harness,
         agent.launcher,
         update(alpha, facts.human, 53),
+      );
+      assertEquals(
+        anchoredHumanAllowed.code,
+        0,
+        anchoredHumanAllowed.stderr,
       );
       await mutateAfterAuthority(
         harness,
@@ -360,7 +365,7 @@ Deno.test({
       assertEquals(invalidAncestor.code, 1, invalidAncestor.stderr);
       assertEquals(
         JSON.parse(invalidAncestor.stderr).error.code,
-        "authorization_insufficient",
+        "credential_invalid",
       );
       assert(
         !/agent_authorizations|select |superseded/i.test(
