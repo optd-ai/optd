@@ -929,13 +929,15 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       root_authorization_id: string;
     }>(
       harness.server.sql,
-      `select au.principal_id,hu.id human_user_id,aa.parent_authorization_id,
+      `select au.principal_id,aa.human_user_id,aa.parent_authorization_id,
       aa.root_authorization_id from agent_authorizations aa
-      join agent_users au on au.id=aa.agent_user_id
-      left join human_users hu on hu.principal_id=au.principal_id where aa.id=$1`,
+      join agent_users au on au.id=aa.agent_user_id where aa.id=$1`,
       [rootAuthorizationId],
     )).rows[0];
-    assertEquals(rootIdentity.human_user_id, null);
+    assertEquals(
+      rootIdentity.human_user_id,
+      ordinaryIdentity.human_user_id,
+    );
     assertEquals(rootIdentity.parent_authorization_id, null);
     assertEquals(rootIdentity.root_authorization_id, rootAuthorizationId);
     await query(
@@ -963,15 +965,9 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
     assertEquals(
       (agentVisible.data.items as Array<{ id: string }>).map((item) => item.id)
         .sort(),
-      [ids.object],
+      [ids.object, matrixRows[1].id].sort(),
     );
-    assertEquals(agentVisible.meta.total, 1);
-    assert(
-      !(agentVisible.data.items as Array<{ id: string }>).some((item) =>
-        item.id === matrixRows[1].id
-      ),
-      "human-only poisoned edge must not match an agent with null human_user_id",
-    );
+    assertEquals(agentVisible.meta.total, 2);
     await query(
       harness.server.sql,
       "update policy_assignments set active=false where id=any($1::uuid[])",

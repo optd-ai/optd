@@ -1,4 +1,5 @@
 import type { AuthContext } from "../../../domain/auth/model.ts";
+import { policyActorFromAuthContext } from "../../../domain/auth/policy_actor.ts";
 import { err, ok, type Result } from "../../../domain/errors/result.ts";
 import { isUuidV7 } from "../../../domain/ids/uuid_v7.ts";
 import type { CanonicalOperation } from "../../../domain/changesets/operations.ts";
@@ -227,6 +228,7 @@ export function makeStageActionService(port: ActionStageCapabilities) {
     ): Promise<Result<StageActionResult>> {
       if (!validRequest(raw)) return invalid("action stage request is invalid");
       try {
+        const actor = policyActorFromAuthContext(auth);
         const identity = { publisher, pack, name };
         const definition = await port.definition(identity);
         if (!definition) {
@@ -354,13 +356,13 @@ export function makeStageActionService(port: ActionStageCapabilities) {
         const hookResult = await port.executeHooks({
           action: `${publisher}/${pack}:${name}`,
           project_id: raw.project_id,
-          actor: { id: auth.principalId, principal_type: auth.principalType },
+          actor: { id: actor.id, principal_type: actor.principal_type },
           input: raw.input,
           reads,
           read_dependencies: readDependencies,
           declarations,
           authority_snapshot: {
-            principal_id: auth.principalId,
+            principal_id: actor.id,
             auth_context_id: auth.id,
             assignment_digest: authority.policyDigest,
             policy_digest: authority.policyDigest,
@@ -396,8 +398,9 @@ export function makeStageActionService(port: ActionStageCapabilities) {
           policy_digest: authority.policyDigest,
           cutoff: {
             auth_context_id: auth.id,
-            principal_id: auth.principalId,
-            human_user_id: auth.humanUserId,
+            principal_id: actor.id,
+            principal_type: actor.principal_type,
+            human_user_id: actor.human_user_id,
             session_id: auth.sessionId,
             authorization_id: auth.authorizationId ?? null,
             authorization_root_id: authority.authorizationRootId,
@@ -586,6 +589,7 @@ function policyDenied(
   projectId: string,
   auth: AuthContext,
 ): Result<never> {
+  const actor = policyActorFromAuthContext(auth);
   return err({
     code: "policy_denied",
     message:
@@ -593,7 +597,8 @@ function policyDenied(
     severity: "authorization",
     details: {
       auth_context_id: auth.id,
-      principal_id: auth.principalId,
+      principal_id: actor.id,
+      actor,
       boundary: { type: "project", project_id: projectId },
       action,
     },

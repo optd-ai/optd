@@ -7,6 +7,7 @@ import type {
   StageSource,
 } from "../../../application/ports/stage_repository.ts";
 import type { AuthContext } from "../../../domain/auth/model.ts";
+import { policyActorFromAuthContext } from "../../../domain/auth/policy_actor.ts";
 import type { CanonicalOperation } from "../../../domain/changesets/operations.ts";
 import {
   ApprovalContractError,
@@ -315,6 +316,7 @@ export class PostgresStageRepository implements StageRepository {
     auth: AuthContext,
   ): Promise<Result<StageDto>> {
     try {
+      const actor = policyActorFromAuthContext(auth);
       return await this.sql.begin(async (tx) => {
         const prepared = await prepare(
           tx,
@@ -437,10 +439,11 @@ export class PostgresStageRepository implements StageRepository {
             input.source?.kind ?? "direct",
             input.source?.identity ?? {},
             auth.id,
-            auth.principalId,
+            actor.id,
             {
-              principal_id: auth.principalId,
-              human_user_id: auth.humanUserId,
+              principal_id: actor.id,
+              principal_type: actor.principal_type,
+              human_user_id: actor.human_user_id,
               session_id: auth.sessionId,
               authorization_id: auth.authorizationId ?? null,
               authorization_lineage_ids: lineage,
@@ -879,11 +882,13 @@ async function revalidateTargetedAuthority(
   authorizationRootId: string | undefined,
   dependencies: Record<string, unknown>[],
 ): Promise<void> {
+  const actor = policyActorFromAuthContext(auth);
   const { facts_digest: _factsDigest, ...evidenceIdentity } = evidence.cutoff;
   const currentIdentity = {
     auth_context_id: auth.id,
-    principal_id: auth.principalId,
-    human_user_id: auth.humanUserId,
+    principal_id: actor.id,
+    principal_type: actor.principal_type,
+    human_user_id: actor.human_user_id,
     session_id: auth.sessionId,
     authorization_id: auth.authorizationId ?? null,
     authorization_root_id: authorizationRootId,
@@ -1560,6 +1565,7 @@ async function validateCurrent(
   auth: AuthContext,
   authorizationRepository: StageAuthorizationRepositoryFactory,
 ): Promise<void> {
+  const actor = policyActorFromAuthContext(auth);
   if (operation.op === "create" || operation.op === "link") {
     if (operation.op === "link") {
       const relationship = record(
@@ -1930,12 +1936,10 @@ async function validateCurrent(
       const lowered = lowerCelToSql(String(edge.condition), {
         fields: fieldSpecs,
         actor: {
-          id: { type: "string", value: auth.principalId },
+          id: { type: "string", value: actor.id },
           human_user_id: {
             type: "string",
-            value: auth.principalType === "agent_user"
-              ? null
-              : auth.humanUserId,
+            value: actor.human_user_id,
           },
         },
         alias: "proposed",
@@ -2107,6 +2111,7 @@ async function evaluateStagePolicy(
       }];
     }),
   );
+  const actor = policyActorFromAuthContext(auth);
   const matched: string[] = [];
   const evidence: Record<string, unknown>[] = [];
   for (const rule of rows) {
@@ -2122,12 +2127,10 @@ async function evaluateStagePolicy(
       const lowered = lowerCelToSql(rule.predicate, {
         fields,
         actor: {
-          id: { type: "string", value: auth.principalId },
+          id: { type: "string", value: actor.id },
           human_user_id: {
             type: "string",
-            value: auth.principalType === "agent_user"
-              ? null
-              : auth.humanUserId,
+            value: actor.human_user_id,
           },
         },
         alias: "proposed",
@@ -2301,11 +2304,10 @@ async function evaluateDirectRelation(
   const objectId = operation.op === "link" || operation.op === "unlink"
     ? operation.relationship_id
     : operation.object_id;
+  const actor = policyActorFromAuthContext(auth);
   const subjectId = rule.relation_subject === "actor.id"
-    ? auth.principalId
-    : auth.principalType === "agent_user"
-    ? null
-    : auth.humanUserId;
+    ? actor.id
+    : actor.human_user_id;
   return Boolean(
     (await query<{ allowed: boolean }>(
       sql,
@@ -2897,6 +2899,7 @@ async function captureHookAuthoritySnapshot(
   auth: AuthContext,
   projectIds: string[],
 ): Promise<StageHookInput["authority_snapshot"]> {
+  const actor = policyActorFromAuthContext(auth);
   const assignments = (await query<{ kind: string; id: string }>(
     sql,
     `with recursive lineage(id) as (
@@ -2951,7 +2954,7 @@ async function captureHookAuthoritySnapshot(
     [projectIds],
   )).rows;
   return {
-    principal_id: auth.principalId,
+    principal_id: actor.id,
     auth_context_id: auth.id,
     assignment_digest: `sha256:${await canonicalSha256(assignments)}`,
     policy_digest: `sha256:${await canonicalSha256(policies)}`,

@@ -1,6 +1,7 @@
 import type { Sql } from "../client.ts";
 import { query, quoteIdentifier } from "../client.ts";
 import type { AuthContext } from "../../../../domain/auth/model.ts";
+import { policyActorFromAuthContext } from "../../../../domain/auth/policy_actor.ts";
 import type { Result } from "../../../../domain/errors/result.ts";
 import type {
   StageDto,
@@ -107,6 +108,7 @@ export function makePostgresActionStageRepository(
     },
 
     async availabilityCondition(request): Promise<boolean> {
+      const actor = policyActorFromAuthContext(request.auth);
       const table = await runtimeTable(sql, request.target);
       if (!table) return false;
       const fields = Object.fromEntries(
@@ -124,12 +126,10 @@ export function makePostgresActionStageRepository(
       const lowered = lowerCelToSql(request.expression, {
         fields,
         actor: {
-          id: { type: "string", value: request.auth.principalId },
+          id: { type: "string", value: actor.id },
           human_user_id: {
             type: "string",
-            value: request.auth.principalType === "agent_user"
-              ? null
-              : request.auth.humanUserId,
+            value: actor.human_user_id,
           },
         },
         alias: "candidate",
@@ -194,13 +194,16 @@ export function makePostgresActionStageRepository(
     },
 
     async record(request) {
+      const actor = policyActorFromAuthContext(request.auth);
       const persisted = request.source.authority?.targeted?.cutoff;
       if (
         !persisted ||
         persisted.authorization_root_id !==
           request.cutoff.authorizationRootId ||
         persisted.facts_digest !== request.cutoff.factsDigest ||
-        persisted.principal_id !== request.auth.principalId ||
+        persisted.principal_id !== actor.id ||
+        persisted.principal_type !== actor.principal_type ||
+        persisted.human_user_id !== actor.human_user_id ||
         persisted.auth_context_id !== request.auth.id
       ) {
         throw Object.assign(

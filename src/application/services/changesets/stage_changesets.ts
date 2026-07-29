@@ -4,6 +4,7 @@ import type {
   StageSource,
 } from "../../ports/stage_repository.ts";
 import type { AuthContext } from "../../../domain/auth/model.ts";
+import { policyActorFromAuthContext } from "../../../domain/auth/policy_actor.ts";
 import {
   canonicalizeResolvedOperations,
   normalizeOperations,
@@ -111,7 +112,7 @@ export function makeStageChangesetService(
                 pack_revisions: [],
                 hook_declarations: [],
                 authority_snapshot: {
-                  principal_id: auth.principalId,
+                  principal_id: policyActorFromAuthContext(auth).id,
                   auth_context_id: auth.id,
                   assignment_digest: `sha256:${"0".repeat(64)}`,
                   policy_digest: `sha256:${"0".repeat(64)}`,

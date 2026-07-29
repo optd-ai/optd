@@ -1,5 +1,6 @@
 import type { CommitRepository } from "../../../application/ports/commit_repository.ts";
 import type { AuthContext } from "../../../domain/auth/model.ts";
+import { policyActorFromAuthContext } from "../../../domain/auth/policy_actor.ts";
 import type {
   CommitChangesetDto,
   CommitOptions,
@@ -727,6 +728,7 @@ async function buildCutoffStatement(
   operationRows: OperationRow[],
   runtimes: Runtime[],
 ): Promise<{ sql: string; params: unknown[] }> {
+  const actor = policyActorFromAuthContext(auth);
   const decisions = (await query<{
     operation_key: string;
     action: string;
@@ -749,8 +751,8 @@ async function buildCutoffStatement(
   )).rows;
   const params: unknown[] = [
     auth.sessionId,
-    auth.principalId,
-    auth.humanUserId,
+    actor.id,
+    actor.human_user_id,
     auth.authorizationId ?? null,
     stageId,
     stage.created_principal_id,
@@ -811,12 +813,10 @@ async function buildCutoffStatement(
         const lowered = lowerCelToSql(rule.predicate, {
           fields: request.fields,
           actor: {
-            id: { type: "string", value: auth.principalId },
+            id: { type: "string", value: actor.id },
             human_user_id: {
               type: "string",
-              value: auth.principalType === "agent_user"
-                ? null
-                : auth.humanUserId,
+              value: actor.human_user_id,
             },
           },
           alias: "proposed",
@@ -850,7 +850,7 @@ async function buildCutoffStatement(
             : "to_object_id";
           const subject = rule.relation_subject === "actor.id"
             ? "$2::uuid"
-            : "case when $4::uuid is null then $3::uuid else null::uuid end";
+            : "$3::uuid";
           const relation = `exists(select 1 from ${
             quoteIdentifier(runtime.table_name)
           } relation

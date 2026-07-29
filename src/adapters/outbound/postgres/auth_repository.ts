@@ -535,7 +535,7 @@ export class PostgresAuthRepository implements AuthRepository {
       agent = {
         id: leaf.agent_user_id,
         principalId: leaf.agent_principal_id,
-        name: leaf.agent_name ?? "",
+        name: leaf.agent_name ?? "agent",
         authorizationId: leaf.id,
         ...(leaf.parent_authorization_id
           ? { parentAuthorizationId: leaf.parent_authorization_id }

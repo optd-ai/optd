@@ -1,6 +1,7 @@
 import type { Context, Next } from "npm:hono";
 import type { RequestAuthenticator } from "../../../application/ports/authentication.ts";
 import type { AuthContext } from "../../../domain/auth/model.ts";
+import { policyActorFromAuthContext } from "../../../domain/auth/policy_actor.ts";
 import { errorEnvelope } from "../../../schemas/api/contracts.ts";
 import { toHttpStatus } from "../../../domain/errors/result.ts";
 
@@ -104,14 +105,13 @@ export async function requireBearer(
 }
 
 export function serverActor(auth: AuthContext) {
+  const actor = policyActorFromAuthContext(auth);
   return {
-    id: auth.principalId,
+    ...actor,
     roles: auth.roles.map((role) =>
       role === "system:super_admin" ? "super_admin" : role
     ),
     auth_context_id: auth.id,
-    principal_type: auth.principalType,
-    human_user_id: auth.humanUserId,
   };
 }
 

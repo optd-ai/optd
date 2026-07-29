@@ -3,6 +3,7 @@ import type {
   AuthContext,
   AuthorizationBoundary,
 } from "../../../domain/auth/model.ts";
+import { policyActorFromAuthContext } from "../../../domain/auth/policy_actor.ts";
 import { boundaryDto } from "../../../domain/authorization/boundary.ts";
 import type {
   BoundaryAuthority,
@@ -506,6 +507,7 @@ async function currentAuthority(
   boundary: AuthorizationBoundary,
   includeSecurity = false,
 ): Promise<Result<BoundaryAuthority>> {
+  const actor = policyActorFromAuthContext(auth);
   const [type, projectId] = boundaryParams(boundary);
   const rows = await query<AuthorityRow>(
     sql,
@@ -542,7 +544,7 @@ async function currentAuthority(
     select er.role_id,sa.value super_admin,a.policy_id,a.policy_revision_id,a.rule_id,a.action,a.resource,a.condition_kind,a.summary,a.predicate
     from valid_actor va cross join super_admin sa left join effective_roles er on true left join applicable a on true
     order by er.role_id,a.policy_id,a.rule_id`,
-    [auth.sessionId, auth.principalId, auth.humanUserId, type, projectId],
+    [auth.sessionId, actor.id, actor.human_user_id, type, projectId],
   );
   if (!rows.rows.length) {
     return err({
@@ -576,9 +578,9 @@ async function currentAuthority(
   const value = {
     authContextId: auth.id,
     principal: {
-      id: auth.principalId,
-      type: auth.principalType,
-      humanUserId: auth.humanUserId,
+      id: actor.id,
+      type: actor.principal_type,
+      humanUserId: actor.human_user_id,
     },
     boundary,
     effectiveRoles,
@@ -586,7 +588,8 @@ async function currentAuthority(
     capabilities,
     digest: await tokenDigest(
       JSON.stringify({
-        principal_id: auth.principalId,
+        principal_id: actor.id,
+        human_user_id: actor.human_user_id,
         boundary: boundaryDto(boundary),
         effective_roles: effectiveRoles,
         super_admin: rows.rows[0].super_admin,
@@ -616,13 +619,15 @@ function policyDenied(
   resource: string,
   authority: BoundaryAuthority,
 ) {
+  const actor = policyActorFromAuthContext(auth);
   return {
     code: "policy_denied",
     message: `current authority does not allow ${action} on ${resource}`,
     severity: "authorization" as const,
     details: {
       auth_context_id: auth.id,
-      principal_id: auth.principalId,
+      principal_id: actor.id,
+      actor,
       boundary: boundaryDto(boundary),
       resource,
       action,
@@ -679,6 +684,7 @@ async function authorizationDecisionAudit(
   resource: string,
   authority: BoundaryAuthority,
 ) {
+  const actor = policyActorFromAuthContext(auth);
   await query(
     sql,
     "insert into authorization_audit_events(id,auth_context_id,event_type,details) values($1,$2,$3,$4::jsonb)",
@@ -687,7 +693,8 @@ async function authorizationDecisionAudit(
       auth.id,
       eventType,
       JSON.stringify({
-        principal_id: auth.principalId,
+        principal_id: actor.id,
+        actor,
         boundary: boundaryDto(boundary),
         action,
         resource,

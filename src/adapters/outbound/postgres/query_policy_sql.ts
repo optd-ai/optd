@@ -1,4 +1,5 @@
 import type { AuthContext } from "../../../domain/auth/model.ts";
+import { policyActorFromAuthContext } from "../../../domain/auth/policy_actor.ts";
 import {
   ExpressionError,
   type FieldSpec,
@@ -573,6 +574,7 @@ async function auditTargetedActionDecision(
   eventType: "policy.allowed" | "policy.denied" | "policy.bypassed",
   policies: string[],
 ): Promise<void> {
+  const actor = policyActorFromAuthContext(auth);
   await query(
     sql,
     "insert into authorization_audit_events(id,auth_context_id,event_type,details) values($1,$2,$3,$4::jsonb)",
@@ -581,7 +583,8 @@ async function auditTargetedActionDecision(
       auth.id,
       eventType,
       JSON.stringify({
-        principal_id: auth.principalId,
+        principal_id: actor.id,
+        actor,
         boundary: { type: "project", project_id: projectId },
         action,
         resource:
@@ -711,6 +714,7 @@ async function compilePolicy(
   project: string,
   params: unknown[],
 ): Promise<string> {
+  const actor = policyActorFromAuthContext(auth);
   const candidates: string[] = [];
   for (const rule of rules) {
     const parts: string[] = [];
@@ -722,13 +726,14 @@ async function compilePolicy(
           alias: "q",
           parameterOffset: params.length,
           actor: {
-            id: { type: "string", value: auth.principalId },
-            principal_type: { type: "string", value: auth.principalType },
+            id: { type: "string", value: actor.id },
+            principal_type: {
+              type: "string",
+              value: actor.principal_type,
+            },
             human_user_id: {
               type: "string",
-              value: auth.principalType === "agent_user"
-                ? null
-                : auth.humanUserId,
+              value: actor.human_user_id,
             },
           },
         });
@@ -782,14 +787,12 @@ async function relationSql(
     objectEndpoint !== definition.identity ||
     subjectEndpoint !== "system:principal"
   ) throw hidden();
-  const actor = rule.relation_subject === "actor.id"
-    ? auth.principalId
-    : auth.principalType === "agent_user"
-    ? null
-    : auth.humanUserId;
-  if (!actor) return "false";
+  const actor = policyActorFromAuthContext(auth);
+  const subjectId = rule.relation_subject === "actor.id"
+    ? actor.id
+    : actor.human_user_id;
   const projectParam = params.push(project);
-  const subjectParam = params.push(actor);
+  const subjectParam = params.push(subjectId);
   const objectCol = rule.relation_object_side === "from"
       ? "from_object_id"
       : "to_object_id",

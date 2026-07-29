@@ -31,6 +31,7 @@ export type StageSource = Readonly<{
       cutoff: Readonly<{
         auth_context_id: string;
         principal_id: string;
+        principal_type: "human_user" | "agent_user";
         human_user_id: string;
         session_id: string;
         authorization_id: string | null;

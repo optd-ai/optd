@@ -283,6 +283,13 @@ Deno.test("compiled sibling human trees retain exact independent credentials", a
         "whoami",
       ])).stdout,
     ).data;
+    const firstStatus = JSON.parse(
+      (await firstHuman.launcher.runOptctl([
+        "--json",
+        "auth",
+        "status",
+      ])).stdout,
+    ).data;
     const secondPassword = `sibling-${crypto.randomUUID()}`;
     const created = await firstHuman.launcher.runOptctl([
       "--json",
@@ -307,8 +314,19 @@ Deno.test("compiled sibling human trees retain exact independent credentials", a
           "whoami",
         ])).stdout,
       ).data;
-      assertEquals(second.username, "second-process-human");
-      assert(second.binding.anchor_pid !== firstBefore.binding.anchor_pid);
+      assertEquals(
+        second.human_user.username,
+        "second-process-human",
+      );
+      assertEquals("binding" in second, false);
+      const secondStatus = JSON.parse(
+        (await secondHuman.launcher.runOptctl([
+          "--json",
+          "auth",
+          "status",
+        ])).stdout,
+      ).data;
+      assert(secondStatus.anchor_pid !== firstStatus.anchor_pid);
 
       // The compatibility projection is shared test state, not a credential
       // selector. Touching it must not replace an existing tree binding.
@@ -327,10 +345,18 @@ Deno.test("compiled sibling human trees retain exact independent credentials", a
           "whoami",
         ])).stdout,
       ).data;
-      assertEquals(firstAfter.id, firstBefore.id);
+      assertEquals(firstAfter.principal.id, firstBefore.principal.id);
+      assertEquals("binding" in firstAfter, false);
+      const firstStatusAfter = JSON.parse(
+        (await firstHuman.launcher.runOptctl([
+          "--json",
+          "auth",
+          "status",
+        ])).stdout,
+      ).data;
       assertEquals(
-        firstAfter.binding.anchor_start_ticks,
-        firstBefore.binding.anchor_start_ticks,
+        firstStatusAfter.anchor_start_ticks,
+        firstStatus.anchor_start_ticks,
       );
     } finally {
       await secondHuman.launcher.close();

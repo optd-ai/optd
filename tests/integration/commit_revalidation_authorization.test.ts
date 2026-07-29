@@ -1,7 +1,10 @@
 // deno-lint-ignore-file no-import-prefix no-unversioned-import
 import { assertEquals } from "jsr:@std/assert";
 import type { AuthContext } from "../../src/domain/auth/model.ts";
-import { query } from "../../src/adapters/outbound/postgres/client.ts";
+import {
+  query,
+  quoteIdentifier,
+} from "../../src/adapters/outbound/postgres/client.ts";
 import { uuidV7 } from "../../src/domain/ids/uuid_v7.ts";
 import {
   assertNoIdleClients,
@@ -572,6 +575,124 @@ Deno.test({
         [stillAllowed.id],
       )).rows;
       assertEquals(cutoffs.length, 1);
+      await assertNoIdleClients(matrix.harness.server.sql);
+    } finally {
+      await matrix.close();
+    }
+  },
+});
+
+Deno.test({
+  name:
+    "agent commit ABAC and direct ReBAC preserve the authenticated human anchor",
+  sanitizeOps: false,
+  sanitizeResources: false,
+  async fn() {
+    const matrix = await startCommitMatrix();
+    try {
+      const agent = await createAgent(matrix);
+      const policy = await grantWriter(matrix, agent.auth.principalId);
+      await matrix.harness.server.sql.begin(async (tx) => {
+        await query(
+          tx,
+          "delete from role_assignments where id=$1",
+          [policy.roleAssignment],
+        );
+        await query(
+          tx,
+          "delete from agent_authorization_roles where authorization_id=$1",
+          [agent.leaf],
+        );
+        await query(
+          tx,
+          `insert into agent_authorization_roles(id,authorization_id,role_id,boundary_type,project_id)
+           values($1,$2,$3,'project',$4)`,
+          [uuidV7(), agent.leaf, policy.role, matrix.projectId],
+        );
+        await query(
+          tx,
+          `update policy_rules
+             set predicate=$2
+           where id=$1`,
+          [
+            policy.abacRule,
+            `actor.human_user_id == "${agent.auth.humanUserId}" && note == "allow"`,
+          ],
+        );
+        await query(
+          tx,
+          `update policy_rules
+             set relation_subject='actor.human_user_id'
+           where policy_definition_version_id=$1 and capability='update'`,
+          [policy.policyDefinition],
+        );
+      });
+
+      const abac = await matrix.stage([{
+        op: "create",
+        project_id: matrix.projectId,
+        resource: "test/commitmatrix:alpha",
+        fields: { key: "agent-anchor-abac", status: "ready", note: "allow" },
+      }], agent.auth);
+      assertEquals((await matrix.commit(abac.id, agent.auth)).ok, true);
+
+      const owned = await matrix.stage([{
+        op: "create",
+        key: "agent-owned",
+        project_id: matrix.projectId,
+        resource: "test/commitmatrix:alpha",
+        fields: { key: "agent-anchor-rebac", status: "ready" },
+      }]);
+      assertEquals((await matrix.commit(owned.id)).ok, true);
+      const objectId = String(owned.operations[0].object_id);
+      const relationshipId = uuidV7();
+      const relationshipTable = (await query<{ table_name: string }>(
+        matrix.harness.server.sql,
+        `select table_name from pack_runtime_tables
+          where publisher='test' and pack_name='commitmatrix'
+            and definition_kind='relationship'
+            and definition_name='alpha_owner'`,
+      )).rows[0].table_name;
+      await query(
+        matrix.harness.server.sql,
+        `insert into ${quoteIdentifier(relationshipTable)}
+          (id,project_id,from_object_id,to_object_id,created_by,updated_by)
+         values($1,$2,$3,$4,$5,$5)`,
+        [
+          relationshipId,
+          matrix.projectId,
+          objectId,
+          agent.auth.humanUserId,
+          matrix.auth.id,
+        ],
+      );
+      const rebac = await matrix.stage([{
+        op: "update",
+        project_id: matrix.projectId,
+        resource: "test/commitmatrix:alpha",
+        object_id: objectId,
+        set: { note: "anchored agent update" },
+      }], agent.auth);
+
+      const result = await commitAfterObservedLifecycleBarrier(
+        matrix,
+        rebac.id,
+        async () => {
+          await query(
+            matrix.harness.server.sql,
+            `update ${quoteIdentifier(relationshipTable)} set archived_at=now()
+              where id=$1 and project_id=$2`,
+            [relationshipId, matrix.projectId],
+          );
+        },
+        agent.auth,
+      );
+      await assertAuthFailure(
+        matrix,
+        rebac.id,
+        result,
+        "authorization_changed",
+      );
       await assertNoIdleClients(matrix.harness.server.sql);
     } finally {
       await matrix.close();

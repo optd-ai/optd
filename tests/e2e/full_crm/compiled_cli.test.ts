@@ -205,12 +205,23 @@ for (const logLevel of logLevels) {
           await ok(human.runOptctl(["--json", "auth", "whoami"]), output),
         );
         assertEquals(humanWhoami.data.credential_kind, "human_full");
-        assertEquals(humanWhoami.data.principal_type, "human_user");
-        assertEquals(humanWhoami.data.id, humanUserId);
-        assertEquals(humanWhoami.data.status, "active");
-        assertEquals("human_user" in humanWhoami.data, false);
+        assertEquals(humanWhoami.data.principal.type, "human_user");
+        assertEquals(humanWhoami.data.human_user.id, humanUserId);
+        assertEquals(humanWhoami.data.human_user.status, "active");
+        assertEquals(
+          humanWhoami.data.principal.id,
+          humanWhoami.data.human_user.principal_id,
+        );
+        assertEquals("id" in humanWhoami.data, false);
+        assertEquals("principal_id" in humanWhoami.data, false);
+        assertEquals("principal_type" in humanWhoami.data, false);
         assertEquals("agent" in humanWhoami.data, false);
-        assertEquals("token" in humanWhoami.data, false);
+        assertEquals(
+          /token|password|binding|anchor_pid|server_origin/i.test(
+            JSON.stringify(humanWhoami.data),
+          ),
+          false,
+        );
 
         const firstSeed = json(
           await ok(
@@ -314,8 +325,16 @@ for (const logLevel of logLevels) {
           200,
           JSON.stringify(directWhoami),
         );
-        assertEquals(directWhoami.data.principal_type, "agent_user");
+        assertEquals(directWhoami.data.principal.type, "agent_user");
         assertEquals(directWhoami.data.credential_kind, "agent_authorization");
+        assertEquals(
+          directWhoami.data.principal.id,
+          directWhoami.data.agent.principal_id,
+        );
+        assert(
+          directWhoami.data.principal.id !==
+            directWhoami.data.human_user.principal_id,
+        );
         assertEquals(
           directWhoami.data.agent.authorization_id,
           redeemed.data.authorization.id,
@@ -338,12 +357,30 @@ for (const logLevel of logLevels) {
         const whoami = json(
           await ok(agent.runOptctl(["--json", "auth", "whoami"]), output),
         );
-        assertEquals(whoami.data.principal_type, "agent_user");
+        assertEquals(whoami.data.principal.type, "agent_user");
+        const { auth_context_id: directContext, ...directIdentity } =
+          directWhoami.data;
+        const { auth_context_id: cliContext, ...cliIdentity } = whoami.data;
+        assert(isUuidV7(String(directContext)));
+        assert(isUuidV7(String(cliContext)));
+        assertEquals(cliIdentity, directIdentity);
         assertEquals(
-          whoami.data.server_origin,
-          new URL(harness.baseUrl).origin,
+          /token|password|binding|anchor_pid|server_origin|request_credential/i
+            .test(JSON.stringify(whoami.data)),
+          false,
         );
-        assertExists(whoami.data.binding);
+        const toonWhoami = await ok(
+          agent.runOptctl(["auth", "whoami"]),
+          output,
+        );
+        assertEquals(
+          /token|password|binding|anchor_pid|server_origin|request_credential/i
+            .test(toonWhoami.stdout),
+          false,
+        );
+        for (const field of Object.keys(whoami.data)) {
+          assert(toonWhoami.stdout.includes(field));
+        }
 
         await ok(
           human.runOptctl([
@@ -886,7 +923,7 @@ for (const logLevel of logLevels) {
             output,
           ),
         );
-        assertEquals(relationshipAuthor.data.id, humanUserId);
+        assertEquals(relationshipAuthor.data.human_user.id, humanUserId);
         const relationshipAuthority = await query<{ count: number }>(
           harness.server.sql,
           `select count(*)::int count
@@ -901,7 +938,7 @@ for (const logLevel of logLevels) {
               and pr.capability='link' and pr.resource=$4
               and pa.boundary_type='all_projects'`,
           [
-            relationshipAuthor.data.principal_id,
+            relationshipAuthor.data.principal.id,
             `${CRM}:crm_admin`,
             projectId,
             `${CRM}:opportunity_viewer`,
@@ -943,7 +980,7 @@ for (const logLevel of logLevels) {
           ),
         );
         assertEquals(
-          exactViewerIdentity.data.principal_id,
+          exactViewerIdentity.data.principal.id,
           viewerCredentials[0].principalId,
         );
         const viewerTable = (await query<{ table_name: string }>(

@@ -233,11 +233,18 @@ for (const logLevel of logLevels) {
         const whoami = json(
           await ok(agent.runOptctl(["--json", "auth", "whoami"]), output),
         );
-        const anchoringHumanPrincipalId = String(whoami.data.principal_id);
+        const anchoringHumanPrincipalId = String(
+          whoami.data.human_user?.principal_id,
+        );
         const nestedAgentId = String(whoami.data.agent?.id);
-        const principalId = String(whoami.data.agent?.principal_id);
+        const principalId = String(whoami.data.principal?.id);
         assert(isUuidV7(principalId));
-        assertEquals(String(whoami.data.id), humanId);
+        assertEquals(whoami.data.principal?.type, "agent_user");
+        assertEquals(String(whoami.data.human_user?.id), humanId);
+        assertEquals(whoami.data.agent?.principal_id, principalId);
+        assertEquals("id" in whoami.data, false);
+        assertEquals("principal_id" in whoami.data, false);
+        assertEquals("principal_type" in whoami.data, false);
         assertEquals(redeemedAgentUserId, nestedAgentId);
         assert(principalId !== humanId);
         assert(principalId !== anchoringHumanPrincipalId);

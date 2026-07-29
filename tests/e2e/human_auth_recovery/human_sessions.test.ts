@@ -98,7 +98,10 @@ Deno.test("compiled optctl logs in, lists sessions, logs out, and survives resta
     await harness.restart();
     const current = await harness.runOptctl(["--json", "auth", "whoami"]);
     assertEquals(current.code, 0, current.stderr);
-    assertEquals(JSON.parse(current.stdout).data.username, "human-admin");
+    assertEquals(
+      JSON.parse(current.stdout).data.human_user.username,
+      "human-admin",
+    );
   } finally {
     await harness.close();
   }
@@ -719,7 +722,10 @@ Deno.test("compiled optctl completes non-enumerating approved password reset", a
     assertEquals(completed.code, 0, completed.stderr);
     assertFalse(completed.stdout.includes('"token"'));
     const current = await harness.runOptctl(["--json", "auth", "whoami"]);
-    assertEquals(JSON.parse(current.stdout).data.username, "reset-user");
+    assertEquals(
+      JSON.parse(current.stdout).data.human_user.username,
+      "reset-user",
+    );
   } finally {
     await harness.close();
   }

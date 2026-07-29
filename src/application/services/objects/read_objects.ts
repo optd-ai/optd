@@ -4,6 +4,7 @@ import {
   type ReadAddress,
 } from "../../ports/object_reader.ts";
 import type { AuthContext } from "../../../domain/auth/model.ts";
+import { policyActorFromAuthContext } from "../../../domain/auth/policy_actor.ts";
 import { assertReadAddress } from "../../../domain/objects/read.ts";
 import { HistoryCursorSigner } from "../../../domain/history/cursor.ts";
 import {
@@ -174,12 +175,13 @@ function binding(
   authorizationRootId: string,
   limit: number,
 ) {
+  const actor = policyActorFromAuthContext(auth);
   return {
     v: 1,
     project_id: address.projectId,
     definition: address.definition,
     object_id: address.objectId,
-    principal_id: auth.principalId,
+    principal_id: actor.id,
     authorization_id: auth.authorizationId ?? null,
     authorization_root_id: authorizationRootId,
     policy_digest: policyDigest,

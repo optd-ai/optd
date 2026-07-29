@@ -1198,23 +1198,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
     } else if (cmd === "auth" && sub === "status") {
       result = await localAuthStatus(parsed.server);
     } else if (cmd === "auth" && sub === "whoami") {
-      const identity = await getJson(`${parsed.server}/api/v1/auth/me`);
-      const local = envelopeData(await localAuthStatus(parsed.server));
-      result = {
-        ...(identity as Record<string, unknown>),
-        data: {
-          ...envelopeData(identity),
-          server_origin: local.server_origin,
-          binding: {
-            anchor_pid: local.anchor_pid,
-            anchor_start_ticks: local.anchor_start_ticks,
-            anchor_uid: local.anchor_uid,
-            anchor_boot_id: local.anchor_boot_id,
-            selection: local.selection,
-          },
-          request_credential_available: local.request_credential_available,
-        },
-      };
+      result = await getJson(`${parsed.server}/api/v1/auth/me`);
     } else if (cmd === "auth" && sub === "session-pid") {
       return { stdout: `${Deno.ppid}\n`, stderr: "", code: 0 };
     } else if (cmd === "auth" && sub === "doctor") {
@@ -2382,7 +2366,8 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
         "unknown command; run optctl --help or optctl <group> --help",
       );
     }
-    const output = parsed.verbose
+    const canonicalWhoami = cmd === "auth" && sub === "whoami";
+    const output = parsed.verbose && !canonicalWhoami
       ? {
         command: parsed.positional.join(" "),
         server: parsed.server,
