@@ -183,7 +183,7 @@ Deno.test("compiled pack preview persists inactive reusable candidates and disti
         "pack.yaml": strictRoot(),
         "resources/lead.yaml": strictResource().replace(
           "name: {type: string, required: true}",
-          "name: {type: string, required: true, unique: true}\n    amount: {type: decimal, required: true}",
+          "name: {type: string, required: true}\n    amount: {type: decimal, required: true}\n  constraints:\n    - {name: strict_lead_active_name, kind: unique, fields: [name], where: 'active()'}",
         ),
         "seeds/leads.yaml":
           `kind: Seed\napiVersion: operant.dev/v1\nmetadata: {name: leads}\nspec: {resource: lead, key: name, mode: changeset, rows: [{name: first, amount: 1.25}], axi: {}}\n`,

@@ -4,6 +4,7 @@ import { canonicalJson } from "../../../domain/ids/canonical_json.ts";
 import { isUuidV7 } from "../../../domain/ids/uuid_v7.ts";
 import type { StageDto, StageSource } from "../../ports/stage_repository.ts";
 import type {
+  ActiveUniqueConstraint,
   SeedCatalog,
   SeedReconciliationRepository,
 } from "../../ports/repair/seeds.ts";
@@ -109,10 +110,10 @@ export function makeStageSeedsService(port: SeedStagePort) {
             ? resource
             : `${publisher}/${pack}:${resource}`;
           const resourceName = resource.split(":").at(-1) ?? resource;
-          const fieldDescriptors = record(
-            record(record(resources[resourceName]).spec).fields,
-          );
-          if (!Array.isArray(spec.rows)) {
+          const resourceSpec = record(record(resources[resourceName]).spec);
+          const fieldDescriptors = record(resourceSpec.fields);
+          const activeUniqueness = activeSeedConstraint(resourceSpec, key);
+          if (!activeUniqueness || !Array.isArray(spec.rows)) {
             return invalid("seed resource is unavailable");
           }
           const ordered = spec.rows.filter(isRecord).sort((a, b) =>
@@ -142,6 +143,10 @@ export function makeStageSeedsService(port: SeedStagePort) {
               definition: identity,
               key,
               value: row[key],
+              constraint_name: activeUniqueness.name,
+              constraint_fields: activeUniqueness.fields,
+              constraint_predicate: activeUniqueness.predicate,
+              project_scoped: activeUniqueness.projectScoped,
               present: Boolean(current),
               ...(current
                 ? {
@@ -329,6 +334,25 @@ function timestampValue(value: unknown): string | null {
   return Number.isNaN(date.valueOf())
     ? null
     : date.toISOString().replace(/\.000Z$/, "Z");
+}
+function activeSeedConstraint(
+  resourceSpec: Record<string, unknown>,
+  key: string,
+): ActiveUniqueConstraint | null {
+  const matches = Array.isArray(resourceSpec.constraints)
+    ? resourceSpec.constraints.map(record).filter((constraint) =>
+      constraint.kind === "unique" && constraint.where === "active()" &&
+      canonicalJson(constraint.fields) === canonicalJson([key]) &&
+      typeof constraint.name === "string"
+    )
+    : [];
+  if (matches.length !== 1) return null;
+  return Object.freeze({
+    name: String(matches[0].name),
+    projectScoped: true as const,
+    fields: Object.freeze([key]),
+    predicate: "active()" as const,
+  });
 }
 function invalid(message: string): Result<never> {
   return err({

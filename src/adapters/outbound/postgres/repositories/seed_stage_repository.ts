@@ -46,13 +46,17 @@ export function makePostgresSeedStageRepository(
         [input.publisher, input.pack, input.resourceName],
       )).rows[0]?.table_name;
       if (!table) throw new Error("seed resource is unavailable");
-      return (await query<Record<string, unknown>>(
+      const rows = (await query<Record<string, unknown>>(
         sql,
         `select * from ${quoteIdentifier(table)} where project_id=$1 and ${
           quoteIdentifier(input.key)
-        }=$2 and archived_at is null for share`,
+        }=$2 and archived_at is null order by id for share`,
         [input.projectId, input.value],
-      )).rows[0];
+      )).rows;
+      if (rows.length > 1) {
+        throw new Error("active-only seed uniqueness is violated");
+      }
+      return rows[0];
     },
     stageSource: common.stageSource,
   };

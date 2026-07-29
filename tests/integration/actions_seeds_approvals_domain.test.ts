@@ -32,6 +32,69 @@ Deno.test("seed stage rejects names alias and unknown DTO fields before persiste
   }
 });
 
+Deno.test("seed stage freezes declared active uniqueness and exact absence", async () => {
+  let capturedSource: Record<string, unknown> | undefined;
+  const service = makeStageSeedsService({
+    loadActiveRevision: () =>
+      Promise.resolve({
+        id: object,
+        normalized: {
+          resources: {
+            status: {
+              spec: {
+                fields: { code: { type: "string", required: true } },
+                constraints: [{
+                  name: "status_active_code",
+                  kind: "unique",
+                  fields: ["code"],
+                  where: "active()",
+                }],
+              },
+            },
+          },
+          seeds: {
+            statuses: {
+              spec: {
+                resource: "status",
+                key: "code",
+                rows: [{ code: "ready" }],
+              },
+            },
+          },
+        },
+      }),
+    authorize: () => Promise.resolve({ ok: true as const, value: undefined }),
+    findActiveRow: () => Promise.resolve(undefined),
+    stageSource: (_input: unknown, source: unknown) => {
+      capturedSource = source as Record<string, unknown>;
+      return Promise.resolve({ ok: true as const, value: null });
+    },
+  });
+  const result = await service.stage(
+    "test",
+    "demo",
+    { project_id: project, all: false, seed_names: ["statuses"] },
+    {} as never,
+  );
+  assertEquals(result.ok, true);
+  const dependency = (capturedSource!.dependencies as Record<
+    string,
+    unknown
+  >[])[0];
+  assertEquals(dependency, {
+    kind: "uniqueness",
+    project_id: project,
+    definition: "test/demo:status",
+    key: "code",
+    value: "ready",
+    constraint_name: "status_active_code",
+    constraint_fields: ["code"],
+    constraint_predicate: "active()",
+    project_scoped: true,
+    present: false,
+  });
+});
+
 Deno.test("seed selection requires strict all xor unique names", () => {
   assertEquals(validateSeedSelection(true, []), null);
   assertEquals(validateSeedSelection(false, ["a", "b"]), null);

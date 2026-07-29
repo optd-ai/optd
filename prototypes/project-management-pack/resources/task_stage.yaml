@@ -7,7 +7,6 @@ spec:
     name:
       type: string
       required: true
-      unique: true
     state:
       type: string
       required: true
@@ -21,6 +20,11 @@ spec:
       required: true
     folded:
       type: boolean
+  constraints:
+    - name: task_stage_active_name
+      kind: unique
+      fields: [name]
+      where: active()
   axi:
     purpose: task stage guidance for the operant/projects pack.
     whenToUse:

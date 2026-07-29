@@ -102,6 +102,7 @@ export async function compileMigrationPreview(
   const steps: MigrationSqlStep[] = [];
   const resourceSteps: string[] = [];
   const relationshipSteps: string[] = [];
+  const stepChanges = new Map<string, MigrationChange[]>();
 
   const addStep = (kind: string, changeIds: string[], sql: string[]) => {
     const indexes = sql.map((statement) => {
@@ -120,6 +121,11 @@ export async function compileMigrationPreview(
       statement_indexes: indexes,
     };
     steps.push(step);
+    stepChanges.set(
+      step.id,
+      changeIds.map((id) => plan.changes.find((change) => change.id === id)!)
+        .filter(Boolean),
+    );
     return step.id;
   };
 
@@ -240,6 +246,38 @@ export async function compileMigrationPreview(
       ];
       const id = addStep(change.kind, [change.id], fieldSql);
       resourceSteps.push(id);
+    } else if (
+      [
+        "add_resource_constraint",
+        "remove_resource_constraint",
+        "change_resource_constraint",
+      ].includes(change.kind) && resourceName && change.target.constraint
+    ) {
+      const table = await physicalTableName(
+        "res",
+        candidate.publisher,
+        candidate.name,
+        resourceName,
+      );
+      const definition = candidate.resources[resourceName];
+      const constraints = Array.isArray(definition?.spec.constraints)
+        ? definition.spec.constraints.map(record)
+        : [];
+      const constraint = constraints.find((item) =>
+        item.name === change.target.constraint
+      );
+      const dropSql = [
+        `alter table ${qi(table)} drop constraint if exists ${
+          qi(change.target.constraint)
+        }`,
+        `drop index if exists ${qi(change.target.constraint)}`,
+      ];
+      const sql = change.kind === "remove_resource_constraint" ? dropSql : [
+        ...(change.kind === "change_resource_constraint" ? dropSql : []),
+        compileResourceUniqueConstraint(table, constraint),
+      ];
+      const id = addStep(change.kind, [change.id], sql);
+      resourceSteps.push(id);
     } else if (change.kind === "add_relationship" && relationshipName) {
       const object = objectByKey.get(`relationship_table:${relationshipName}`);
       if (!object) {
@@ -314,6 +352,30 @@ export async function compileMigrationPreview(
       reason: "global activation follows all physical schema changes",
     });
   }
+  for (const fromStep of resourceSteps) {
+    const added = stepChanges.get(fromStep)?.find((change) =>
+      change.kind === "add_resource_constraint"
+    );
+    if (!added) continue;
+    const fields = Array.isArray(added.facts.fields)
+      ? added.facts.fields.map(String)
+      : [];
+    for (const toStep of resourceSteps) {
+      const changedField = stepChanges.get(toStep)?.find((change) =>
+        change.kind === "change_field" &&
+        change.target.resource === added.target.resource &&
+        fields.includes(change.target.field)
+      );
+      if (changedField) {
+        edges.push({
+          from_step_id: fromStep,
+          to_step_id: toStep,
+          reason:
+            "replacement active unique index is created before the legacy field constraint is removed",
+        });
+      }
+    }
+  }
   return {
     statements,
     steps,
@@ -354,6 +416,15 @@ function compileResourceTable(
   tableName: string,
 ): string {
   const fields = record(definition.spec.fields);
+  const constraints = Array.isArray(definition.spec.constraints)
+    ? definition.spec.constraints.map(record)
+    : [];
+  const fullUniqueConstraints = constraints.filter((constraint) =>
+    constraint.kind === "unique" && constraint.where === undefined
+  );
+  const partialUniqueConstraints = constraints.filter((constraint) =>
+    constraint.kind === "unique" && constraint.where === "active()"
+  );
   const columns = [
     `${qi("id")} uuid primary key`,
     `${qi("project_id")} uuid not null references ${qi("projects")}(${
@@ -386,8 +457,44 @@ function compileResourceTable(
         qi("project_id")
       }, ${qi(field)})`
     ),
+    ...fullUniqueConstraints.map((constraint) =>
+      `constraint ${qi(String(constraint.name))} unique (${
+        ["project_id", ...arrayStrings(constraint.fields)].map(qi).join(", ")
+      })`
+    ),
   ];
-  return createTableSql(tableName, columns);
+  const create = createTableSql(tableName, columns);
+  return [
+    create,
+    ...partialUniqueConstraints.map((constraint) =>
+      compileResourceUniqueConstraint(tableName, constraint)
+    ),
+  ].join("; ");
+}
+
+function compileResourceUniqueConstraint(
+  tableName: string,
+  constraint: Record<string, unknown> | undefined,
+): string {
+  if (!constraint || constraint.kind !== "unique") {
+    throw new Error("migration references an unavailable unique constraint");
+  }
+  const fields = ["project_id", ...arrayStrings(constraint.fields)];
+  if (constraint.where === "active()") {
+    return `create unique index ${qi(String(constraint.name))} on ${
+      qi(tableName)
+    } (${fields.map(qi).join(", ")}) where ${qi("archived_at")} is null`;
+  }
+  if (constraint.where !== undefined) {
+    throw new Error("unsupported resource unique predicate");
+  }
+  return `alter table ${qi(tableName)} add constraint ${
+    qi(String(constraint.name))
+  } unique (${fields.map(qi).join(", ")})`;
+}
+
+function arrayStrings(value: unknown): string[] {
+  return Array.isArray(value) ? value.map(String) : [];
 }
 
 function compileRelationshipTable(
@@ -602,9 +709,16 @@ function runtimeTableDelete(
   } and definition_name=${literal(name)}`;
 }
 function migrationChangeRank(change: MigrationChange): number {
-  if (change.target.resource) return 0;
-  if (change.target.relationship) return 1;
-  return 2;
+  if (change.target.resource) {
+    if (change.kind === "add_resource" || change.kind === "add_field") return 0;
+    if (change.kind === "add_resource_constraint") return 1;
+    if (change.kind === "change_resource_constraint") return 2;
+    if (change.kind === "change_field") return 3;
+    if (change.kind === "remove_resource_constraint") return 4;
+    return 5;
+  }
+  if (change.target.relationship) return 10;
+  return 20;
 }
 function localName(value: string | undefined): string | null {
   return value?.split(":").pop() ?? null;

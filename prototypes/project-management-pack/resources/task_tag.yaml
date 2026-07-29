@@ -7,9 +7,13 @@ spec:
     name:
       type: string
       required: true
-      unique: true
     color:
       type: string
+  constraints:
+    - name: task_tag_active_name
+      kind: unique
+      fields: [name]
+      where: active()
   axi:
     purpose: task tag guidance for the operant/projects pack.
     whenToUse:

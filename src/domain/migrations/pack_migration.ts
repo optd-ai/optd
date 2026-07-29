@@ -213,6 +213,52 @@ export async function buildMigrationPlan(input: {
         });
       }
     }
+    const beforeConstraints = uniqueConstraints(current);
+    const afterConstraints = uniqueConstraints(document);
+    for (
+      const constraintName of new Set([
+        ...Object.keys(beforeConstraints),
+        ...Object.keys(afterConstraints),
+      ])
+    ) {
+      const prior = beforeConstraints[constraintName];
+      const desired = afterConstraints[constraintName];
+      if (
+        prior && desired && canonicalJson(prior) === canonicalJson(desired)
+      ) continue;
+      const kind = !prior
+        ? "add_resource_constraint"
+        : !desired
+        ? "remove_resource_constraint"
+        : "change_resource_constraint";
+      const constraint = desired ?? prior;
+      add({
+        kind,
+        class: "risky",
+        status: "ready",
+        target: {
+          resource: identity(input.candidate, name),
+          constraint: constraintName,
+        },
+        reason: `resource uniqueness constraint ${
+          !prior ? "added" : !desired ? "removed" : "changed"
+        } in desired revision`,
+        facts: {
+          fields: Array.isArray(constraint.fields)
+            ? constraint.fields.map(String)
+            : [],
+          predicate: constraint.where ?? null,
+          previous: prior ?? null,
+          desired: desired ?? null,
+        },
+        hazard_codes: !desired
+          ? ["API_BREAK"]
+          : ["VALIDATION_SCAN", "EXCLUSIVE_LOCK"],
+        intermediate_revision_guidance: null,
+        cleanup_required: null,
+        destructive_action: null,
+      });
+    }
   }
   for (const name of Object.keys(activeResources).sort()) {
     if (!candidateResources[name]) {
@@ -389,6 +435,17 @@ function definitions(
 }
 function fields(document: Record<string, unknown>): Record<string, unknown> {
   return record(record(document).spec).fields as Record<string, unknown> ?? {};
+}
+function uniqueConstraints(
+  document: Record<string, unknown>,
+): Record<string, Record<string, unknown>> {
+  const raw = record(record(document).spec).constraints;
+  if (!Array.isArray(raw)) return {};
+  return Object.fromEntries(
+    raw.map(record).filter((constraint) => constraint.kind === "unique").map(
+      (constraint) => [String(constraint.name), constraint],
+    ),
+  );
 }
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)

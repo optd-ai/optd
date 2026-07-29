@@ -7,7 +7,6 @@ spec:
     name:
       type: string
       required: true
-      unique: true
     label:
       type: string
     leader_id:
@@ -16,6 +15,11 @@ spec:
       type: string
     monthly_target:
       type: decimal
+  constraints:
+    - name: sales_team_active_name
+      kind: unique
+      fields: [name]
+      where: active()
   axi:
     purpose: sales team guidance for the operant/crm pack.
     whenToUse:

@@ -128,6 +128,78 @@ Deno.test("relationship replacements are destructive reviewed DDL with activatio
   assertEquals(compiled.dependency_graph.edges.length, 1);
 });
 
+Deno.test("full seed uniqueness converts to a named active index before activation", async () => {
+  const candidateResource = resource.replace(
+    "  axi:\n",
+    "  constraints:\n    - { name: lead_active_name, kind: unique, fields: [name], where: 'active()' }\n  axi:\n",
+  );
+  const candidate = await loadPackFromFiles([
+    { path: "pack.yaml", text: root },
+    { path: "resources/lead.yaml", text: candidateResource },
+  ]);
+  const activeDocument = structuredClone(
+    candidate.resources.lead.document,
+  ) as Record<string, unknown>;
+  const activeSpec = activeDocument.spec as Record<string, unknown>;
+  delete activeSpec.constraints;
+  ((activeSpec.fields as Record<string, unknown>).name as Record<
+    string,
+    unknown
+  >).unique = true;
+  const { plan } = await buildMigrationPlan({
+    id: uuidV7(),
+    candidateRevisionId: uuidV7(),
+    authContextId: uuidV7(),
+    active: {
+      revisionId: uuidV7(),
+      normalized: { resources: { lead: activeDocument } },
+    },
+    candidate,
+    liveFacts: {
+      resourceRows: { lead: 4 },
+      fieldPresentValues: { "lead.name": 4 },
+    },
+  });
+  assertEquals(
+    plan.changes.map((change) => change.kind),
+    ["add_resource_constraint", "change_field"],
+  );
+  const constraintChange = plan.changes[0];
+  assertEquals(constraintChange.facts.fields, ["name"]);
+  assertEquals(constraintChange.facts.predicate, "active()");
+  assertEquals(constraintChange.hazard_codes, [
+    "VALIDATION_SCAN",
+    "EXCLUSIVE_LOCK",
+  ]);
+  const compiled = await compileMigrationPreview(candidate, plan);
+  assertMatch(
+    compiled.statements[0],
+    /^create unique index "lead_active_name" on "res_.*" \("project_id", "name"\) where "archived_at" is null$/,
+  );
+  assertMatch(compiled.statements[1], /alter column "name" set not null/);
+  assertMatch(compiled.statements[3], /drop constraint if exists "uq_/);
+  assertMatch(
+    compiled.statements.at(-1)!,
+    /^insert into pack_active_revisions/,
+  );
+  const indexStep = compiled.steps.find((step) =>
+    step.kind === "add_resource_constraint"
+  )!;
+  const fieldStep = compiled.steps.find((step) =>
+    step.kind === "change_field"
+  )!;
+  assertEquals(
+    compiled.dependency_graph.edges.some((edge) =>
+      edge.from_step_id === indexStep.id && edge.to_step_id === fieldStep.id
+    ),
+    true,
+  );
+  assertEquals(
+    compiled.dependency_graph.topological_order.at(-1),
+    compiled.steps.find((step) => step.kind === "activate_pack_revision")?.id,
+  );
+});
+
 Deno.test("migration plans block destructive field removal against refreshed facts", async () => {
   const candidate = await loadPackFromFiles([
     { path: "pack.yaml", text: root },

@@ -246,6 +246,162 @@ for (const trace of [false, true]) {
         assertEquals(toon.code, 0, toon.stderr);
         assertEquals(toon.stdout.includes("status: staged"), true);
 
+        const archivedVersionBefore = (await query<{
+          current_object_version_id: string;
+        }>(
+          harness.server.sql,
+          `select current_object_version_id from "${targetTable}" where id=$1`,
+          [seedObjectId],
+        )).rows[0].current_object_version_id;
+        const archiveStage = await harness.runJson(
+          ["--json", "changeset", "stage"],
+          {
+            project_id: projectId,
+            operations: [{
+              op: "archive",
+              project_id: projectId,
+              resource: "test/actionproof:target",
+              object_id: seedObjectId,
+              expected_version: 1,
+            }],
+          },
+        );
+        assertEquals(archiveStage.code, 0, archiveStage.stderr);
+        const archiveStageId = JSON.parse(archiveStage.stdout).data.id;
+        const archiveCommit = await harness.runOptctl([
+          "--json",
+          "changeset",
+          "commit",
+          archiveStageId,
+        ]);
+        assertEquals(archiveCommit.code, 0, archiveCommit.stderr);
+        const replacement = await actor!.runOptctl([
+          "--json",
+          "--project",
+          projectId,
+          "seed",
+          "stage",
+          "test/actionproof",
+          "--seed",
+          "targets",
+        ]);
+        assertEquals(replacement.code, 0, replacement.stderr);
+        const replacementStage = JSON.parse(replacement.stdout).data.stage;
+        assertEquals(replacementStage.operations[0].op, "create");
+        const replacementId = replacementStage.operations[0].object_id;
+        assertEquals(replacementId === seedObjectId, false);
+        const replacementCommit = await actor!.runOptctl([
+          "--json",
+          "changeset",
+          "commit",
+          replacementStage.id,
+        ]);
+        assertEquals(replacementCommit.code, 0, replacementCommit.stderr);
+        const replacementRepeat = await actor!.runOptctl([
+          "--json",
+          "--project",
+          projectId,
+          "seed",
+          "stage",
+          "test/actionproof",
+          "--seed",
+          "targets",
+        ]);
+        assertEquals(replacementRepeat.code, 0, replacementRepeat.stderr);
+        assertEquals(JSON.parse(replacementRepeat.stdout).data.stage, null);
+        const secondArchiveStage = await harness.runJson(
+          ["--json", "changeset", "stage"],
+          {
+            project_id: projectId,
+            operations: [{
+              op: "archive",
+              project_id: projectId,
+              resource: "test/actionproof:target",
+              object_id: replacementId,
+              expected_version: 1,
+            }],
+          },
+        );
+        assertEquals(secondArchiveStage.code, 0, secondArchiveStage.stderr);
+        const secondArchiveCommit = await harness.runOptctl([
+          "--json",
+          "changeset",
+          "commit",
+          JSON.parse(secondArchiveStage.stdout).data.id,
+        ]);
+        assertEquals(secondArchiveCommit.code, 0, secondArchiveCommit.stderr);
+        const secondReplacement = await actor!.runOptctl([
+          "--json",
+          "--project",
+          projectId,
+          "seed",
+          "stage",
+          "test/actionproof",
+          "--seed",
+          "targets",
+        ]);
+        assertEquals(secondReplacement.code, 0, secondReplacement.stderr);
+        const secondReplacementStage = JSON.parse(secondReplacement.stdout).data
+          .stage;
+        const secondReplacementId = secondReplacementStage.operations[0]
+          .object_id;
+        assertEquals(secondReplacementId === replacementId, false);
+        assertEquals(secondReplacementId === seedObjectId, false);
+        const secondReplacementCommit = await actor!.runOptctl([
+          "--json",
+          "changeset",
+          "commit",
+          secondReplacementStage.id,
+        ]);
+        assertEquals(
+          secondReplacementCommit.code,
+          0,
+          secondReplacementCommit.stderr,
+        );
+        const secondReplacementRepeat = await actor!.runOptctl([
+          "--json",
+          "--project",
+          projectId,
+          "seed",
+          "stage",
+          "test/actionproof",
+          "--seed",
+          "targets",
+        ]);
+        assertEquals(secondReplacementRepeat.code, 0);
+        assertEquals(
+          JSON.parse(secondReplacementRepeat.stdout).data.stage,
+          null,
+        );
+        const generations = (await query<{
+          id: string;
+          version: number;
+          archived_at: Date | null;
+          current_object_version_id: string;
+        }>(
+          harness.server.sql,
+          `select id,version::int version,archived_at,current_object_version_id from "${targetTable}" where project_id=$1 and name='Seeded Target' order by created_at,id`,
+          [projectId],
+        )).rows;
+        assertEquals(generations.length, 3);
+        assertEquals(generations[0].id, seedObjectId);
+        assertEquals(generations[0].version, 2);
+        assertEquals(generations[0].archived_at instanceof Date, true);
+        assertEquals(generations[1].id, replacementId);
+        assertEquals(generations[1].version, 2);
+        assertEquals(generations[1].archived_at instanceof Date, true);
+        assertEquals(generations[2].id, secondReplacementId);
+        assertEquals(generations[2].version, 1);
+        assertEquals(generations[2].archived_at, null);
+        assertEquals(
+          (await query<{ count: number }>(
+            harness.server.sql,
+            `select count(*)::int count from object_versions where object_id=$1 and id=$2`,
+            [seedObjectId, archivedVersionBefore],
+          )).rows[0].count,
+          1,
+        );
+
         const concurrentProject = await harness.runOptctl([
           "--json",
           "project",
@@ -299,7 +455,7 @@ for (const trace of [false, true]) {
         )!;
         assertEquals(
           JSON.parse(rejectedCommit.stderr).error.code,
-          "constraint_conflict",
+          "active_seed_key_conflict",
         );
 
         const sameStageProject = await harness.runOptctl([

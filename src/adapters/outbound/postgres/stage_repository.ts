@@ -1169,18 +1169,32 @@ async function prepare(
         `select table_name from pack_runtime_tables where publisher=$1 and pack_name=$2 and definition_kind='resource' and definition_name=$3`,
         [parsed.publisher, parsed.pack, parsed.name],
       )).rows[0]?.table_name;
-      const current = table
+      const currentRows = table
         ? (await query<{ id: string; current_object_version_id: string }>(
           sql,
           `select id,current_object_version_id from ${
             quoteIdentifier(table)
           } where project_id=$1 and ${
             quoteIdentifier(String(dependency.key))
-          }=$2 for share`,
+          }=$2 and archived_at is null order by id for share`,
           [dependency.project_id, dependency.value],
-        )).rows[0]
-        : undefined;
+        )).rows
+        : [];
+      if (currentRows.length > 1) {
+        throw domain(
+          "project_conflict",
+          "Active seed uniqueness is violated",
+          "conflict",
+        );
+      }
+      const current = currentRows[0];
       if (
+        dependency.constraint_predicate !== "active()" ||
+        dependency.project_scoped !== true ||
+        !Array.isArray(dependency.constraint_fields) ||
+        canonicalJson(dependency.constraint_fields) !==
+          canonicalJson([dependency.key]) ||
+        typeof dependency.constraint_name !== "string" ||
         Boolean(current) !== Boolean(dependency.present) ||
         (current && dependency.object_id &&
           (current.id !== dependency.object_id ||
@@ -2399,10 +2413,19 @@ async function validateUniqueness(
   const uniqueSets = [
     ...Object.entries(fieldDefinitions).filter(([, field]) =>
       record(field).unique === true
-    ).map(([field]) => [field]),
+    ).map(([field]) => ({
+      fields: [field],
+      name: null,
+      predicate: null,
+    })),
     ...constraints.filter((constraint) =>
-      constraint.kind === "unique" && !constraint.where
-    ).map((constraint) => (constraint.fields as unknown[]).map(String)),
+      constraint.kind === "unique" &&
+      (constraint.where === undefined || constraint.where === "active()")
+    ).map((constraint) => ({
+      fields: (constraint.fields as unknown[]).map(String),
+      name: String(constraint.name),
+      predicate: constraint.where === "active()" ? "active()" : null,
+    })),
   ];
   const runtime = (await query<{ table_name: string }>(
     sql,
@@ -2526,7 +2549,8 @@ async function validateUniqueness(
       foreign_key_constraint: constraint.name,
     });
   }
-  for (const fields of uniqueSets) {
+  for (const uniqueSet of uniqueSets) {
+    const { fields } = uniqueSet;
     if (
       fields.some((field) =>
         proposed[field] === undefined || proposed[field] === null
@@ -2555,9 +2579,9 @@ async function validateUniqueness(
       sql,
       `select id from ${
         quoteIdentifier(runtime.table_name)
-      } where project_id=$1 and id<>$2 and archived_at is null and ${
-        predicates.join(" and ")
-      } limit 1 for share`,
+      } where project_id=$1 and id<>$2${
+        uniqueSet.predicate === "active()" ? " and archived_at is null" : ""
+      } and ${predicates.join(" and ")} order by id limit 2 for share`,
       params,
     )).rows[0];
     dependencies.push({
@@ -2568,6 +2592,9 @@ async function validateUniqueness(
       component_digest: componentDigest,
       fields,
       values: fields.map((field) => proposed[field]),
+      constraint_name: uniqueSet.name,
+      constraint_predicate: uniqueSet.predicate,
+      project_scoped: true,
       existing_id: duplicate?.id ?? null,
     });
     if (duplicate) {

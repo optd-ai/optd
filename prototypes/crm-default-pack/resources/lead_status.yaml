@@ -7,7 +7,6 @@ spec:
     name:
       type: string
       required: true
-      unique: true
     label:
       type: string
       required: true
@@ -16,6 +15,11 @@ spec:
       required: true
     terminal:
       type: boolean
+  constraints:
+    - name: lead_status_active_name
+      kind: unique
+      fields: [name]
+      where: active()
   axi:
     purpose: lead status guidance for the operant/crm pack.
     whenToUse:

@@ -1972,7 +1972,13 @@ export async function writePack(
   for (const name of ["source", "target"]) {
     await Deno.writeTextFile(
       `${root}/resources/${name}.yaml`,
-      `kind: Resource\napiVersion: operant.dev/v1\nmetadata: { name: ${name} }\nspec:\n  fields:\n    name: { type: string, required: true, unique: true }\n    status: { type: string, required: true }\n    note: { type: string }\n  axi: {}\n`,
+      `kind: Resource\napiVersion: operant.dev/v1\nmetadata: { name: ${name} }\nspec:\n  fields:\n    name: { type: string, required: true${
+        name === "source" ? ", unique: true" : ""
+      } }\n    status: { type: string, required: true }\n    note: { type: string }\n${
+        name === "target"
+          ? "  constraints:\n    - { name: actionproof_target_active_name, kind: unique, fields: [name], where: 'active()' }\n"
+          : ""
+      }  axi: {}\n`,
     );
   }
   await Deno.writeTextFile(

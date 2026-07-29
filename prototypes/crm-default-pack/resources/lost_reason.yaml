@@ -7,12 +7,16 @@ spec:
     name:
       type: string
       required: true
-      unique: true
     label:
       type: string
       required: true
     active:
       type: boolean
+  constraints:
+    - name: lost_reason_active_name
+      kind: unique
+      fields: [name]
+      where: active()
   axi:
     purpose: lost reason guidance for the operant/crm pack.
     whenToUse:

@@ -622,10 +622,46 @@ function validateReferences(pack: LoadedPack) {
     "updated_by",
   ]);
   for (const def of Object.values(pack.resources)) {
+    const resourceFields = asRecord(
+      def.spec.fields,
+      `${def.path}.spec.fields`,
+    );
+    const constraints = asArray(
+      def.spec.constraints ?? [],
+      `${def.path}.spec.constraints`,
+    ).map((constraint) => asRecord(constraint, "constraint"));
+    assertUniqueNames(
+      constraints.map((constraint) => String(constraint.name)),
+      `${def.path}.spec.constraints`,
+      "constraint",
+    );
+    for (const constraint of constraints) {
+      for (
+        const field of asArray(constraint.fields ?? [], "constraint fields")
+      ) {
+        if (
+          typeof field !== "string" || !Object.hasOwn(resourceFields, field)
+        ) {
+          throw new Error(
+            `${def.path}.spec.constraints.${
+              String(constraint.name)
+            }: undeclared field ${String(field)}`,
+          );
+        }
+      }
+      if (
+        constraint.kind === "unique" && constraint.where !== undefined &&
+        constraint.where !== "active()"
+      ) {
+        throw new Error(
+          `${def.path}.spec.constraints.${
+            String(constraint.name)
+          }: unsupported unique predicate`,
+        );
+      }
+    }
     for (
-      const [name, field] of Object.entries(
-        asRecord(def.spec.fields, `${def.path}.spec.fields`),
-      )
+      const [name, field] of Object.entries(resourceFields)
     ) {
       if (reservedFields.has(name)) {
         throw new Error(
@@ -882,10 +918,22 @@ function validateReferences(pack: LoadedPack) {
     const resource =
       pack.resources[String(def.spec.resource).split(":").pop()!];
     const fields = asRecord(resource.spec.fields, "fields");
-    const key = asRecord(fields[String(def.spec.key)], "seed key");
-    if (key.required !== true || key.unique !== true) {
+    const keyName = String(def.spec.key);
+    const key = asRecord(fields[keyName], "seed key");
+    const constraints = asArray(
+      resource.spec.constraints ?? [],
+      "resource constraints",
+    ).map((constraint) => asRecord(constraint, "constraint"));
+    const activeKeyConstraints = constraints.filter((constraint) =>
+      constraint.kind === "unique" && constraint.where === "active()" &&
+      canonicalJson(constraint.fields) === canonicalJson([keyName])
+    );
+    if (
+      key.required !== true || key.unique === true ||
+      activeKeyConstraints.length !== 1
+    ) {
       throw new Error(
-        `${def.path}: seed key must be a required unique resource field`,
+        `${def.path}: seed key must be a required scalar field covered by exactly one named unique [key] constraint where active()`,
       );
     }
     const seen = new Set<string>();

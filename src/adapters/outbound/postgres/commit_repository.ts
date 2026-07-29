@@ -7,7 +7,10 @@ import type {
 } from "../../../domain/changesets/commit.ts";
 import type { CanonicalOperation } from "../../../domain/changesets/operations.ts";
 import { stageDigest } from "../../../domain/changesets/stage.ts";
-import { canonicalSha256 } from "../../../domain/ids/canonical_json.ts";
+import {
+  canonicalJson,
+  canonicalSha256,
+} from "../../../domain/ids/canonical_json.ts";
 import {
   type FieldSpec,
   lowerCelToSql,
@@ -26,6 +29,7 @@ import {
   lockExactTargetAuthorityDependencies,
 } from "./query_policy_sql.ts";
 import { canonicalTargetDigestInput } from "../../../application/ports/repair/targeted_action.ts";
+import { ACTIVE_SEED_KEY_CONFLICT } from "../../../application/ports/repair/seeds.ts";
 
 type Runtime = {
   publisher: string;
@@ -124,6 +128,20 @@ export class PostgresCommitRepository implements CommitRepository {
           );
         }
         if (["23505", "23503", "23514", "23P01"].includes(state ?? "")) {
+          const constraint = sqlConstraintName(error);
+          if (
+            state === "23505" && constraint &&
+            await isDeclaredActiveSeedConstraint(this.sql, stageId, constraint)
+          ) {
+            return err(
+              failure(
+                ACTIVE_SEED_KEY_CONFLICT,
+                "an active row already uses the declared seed key",
+                "conflict",
+                { constraint },
+              ),
+            );
+          }
           return err(
             failure(
               "constraint_conflict",
@@ -699,6 +717,15 @@ async function lockAndValidateDependencies(
       }=$2 and archived_at is null for share`,
       [dep.project_id, dep.value],
     );
+    if (
+      dep.constraint_predicate !== "active()" ||
+      dep.project_scoped !== true ||
+      !Array.isArray(dep.constraint_fields) ||
+      canonicalJson(dep.constraint_fields) !== canonicalJson([dep.key]) ||
+      typeof dep.constraint_name !== "string" || rows.rows.length > 1
+    ) {
+      throw new CommitFailure("constraint_conflict", "conflict");
+    }
     const current = rows.rows[0];
     if (
       Boolean(current) !== Boolean(dep.present) ||
@@ -706,6 +733,11 @@ async function lockAndValidateDependencies(
         (current.id !== dep.object_id ||
           current.current_object_version_id !== dep.expected_version_id))
     ) {
+      if (!dep.present && current) {
+        throw new CommitFailure(ACTIVE_SEED_KEY_CONFLICT, "conflict", {
+          constraint: dep.constraint_name,
+        });
+      }
       throw new CommitFailure("constraint_conflict", "conflict");
     }
   }
@@ -2233,6 +2265,32 @@ function sqlState(error: unknown): string | undefined {
     ? String((error as { code: unknown }).code)
     : undefined;
 }
+function sqlConstraintName(error: unknown): string | undefined {
+  return error !== null && typeof error === "object" &&
+      "constraint_name" in error &&
+      typeof (error as { constraint_name?: unknown }).constraint_name ===
+        "string"
+    ? (error as { constraint_name: string }).constraint_name
+    : undefined;
+}
+async function isDeclaredActiveSeedConstraint(
+  sql: Queryable,
+  stageId: string,
+  constraint: string,
+): Promise<boolean> {
+  const result = await query<{ matched: boolean }>(
+    sql,
+    `select exists(
+       select 1 from staged_changeset_dependencies
+       where stage_id=$1 and dependency_json->>'constraint_name'=$2
+         and dependency_json->>'constraint_predicate'='active()'
+         and dependency_json->>'project_scoped'='true'
+         and dependency_json ? 'present'
+     ) matched`,
+    [stageId, constraint],
+  );
+  return result.rows[0]?.matched === true;
+}
 function boundedInt(
   value: string | undefined,
   fallback: number,
@@ -2257,6 +2315,8 @@ function safeMessage(code: string) {
     authorization_changed: "current authority no longer permits commit",
     authorization_ancestor_invalid:
       "agent authorization ancestry is no longer valid",
+    active_seed_key_conflict:
+      "an active row already uses the declared seed key",
     not_found: "changeset was not found",
     internal_error: "unexpected server error",
   } as Record<string, string>)[code] ?? "changeset commit failed";

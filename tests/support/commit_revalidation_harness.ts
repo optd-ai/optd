@@ -226,7 +226,13 @@ export async function writePack(root: string, providerUrl?: string) {
   for (const name of ["alpha", "beta", "gamma"]) {
     await Deno.writeTextFile(
       `${root}/resources/${name}.yaml`,
-      `kind: Resource\napiVersion: operant.dev/v1\nmetadata: { name: ${name} }\nspec:\n  fields:\n    key: { type: string, required: true, unique: true }\n    status: { type: string, required: true }\n    note: { type: string }\n    parent_key: { type: string }\n    beta_id: { type: string, ref: 'test/commitmatrix:beta' }\n  constraints:\n    - { name: ${name}_beta_fk, kind: foreign_key, fields: [beta_id], target: { resource: 'test/commitmatrix:beta', fields: [id] }, onDelete: restrict }\n  axi: {}\n`,
+      `kind: Resource\napiVersion: operant.dev/v1\nmetadata: { name: ${name} }\nspec:\n  fields:\n    key: { type: string, required: true${
+        name === "alpha" ? "" : ", unique: true"
+      } }\n    status: { type: string, required: true }\n    note: { type: string }\n    parent_key: { type: string }\n    beta_id: { type: string, ref: 'test/commitmatrix:beta' }\n  constraints:\n    - { name: ${name}_beta_fk, kind: foreign_key, fields: [beta_id], target: { resource: 'test/commitmatrix:beta', fields: [id] }, onDelete: restrict }\n${
+        name === "alpha"
+          ? "    - { name: commitmatrix_alpha_active_key, kind: unique, fields: [key], where: 'active()' }\n"
+          : ""
+      }  axi: {}\n`,
     );
   }
   await Deno.writeTextFile(

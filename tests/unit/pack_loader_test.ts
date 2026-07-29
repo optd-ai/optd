@@ -8,6 +8,7 @@ import {
   type PackKind,
   validatePackDocument,
 } from "../../src/schemas/packs/pack_schemas.ts";
+import { compilePackDdl } from "../../src/adapters/outbound/postgres/resource_ddl.ts";
 
 const root = `kind: Pack
 apiVersion: operant.dev/v1
@@ -119,7 +120,7 @@ Deno.test("strict pack loader rejects paths, filenames, YAML tags and documents"
 Deno.test("strict pack loader rejects numeric decimal seed values", async () => {
   const decimalResource = resource.replace(
     "name: { type: string, required: true }",
-    "name: { type: string, required: true, unique: true }\n    amount: { type: decimal, required: true }",
+    "name: { type: string, required: true }\n    amount: { type: decimal, required: true }\n  constraints:\n    - { name: lead_active_name, kind: unique, fields: [name], where: 'active()' }",
   );
   const seed =
     `kind: Seed\napiVersion: operant.dev/v1\nmetadata: {name: leads}\nspec:\n  resource: lead\n  key: name\n  mode: changeset\n  rows: [{name: first, amount: 1.25}]\n  axi: {}\n`;
@@ -133,6 +134,80 @@ Deno.test("strict pack loader rejects numeric decimal seed values", async () => 
     Error,
     "only JSON safe integers",
   );
+});
+
+Deno.test("seed keys require exactly one named active-only uniqueness constraint", async () => {
+  const seed =
+    `kind: Seed\napiVersion: operant.dev/v1\nmetadata: {name: leads}\nspec:\n  resource: lead\n  key: name\n  mode: changeset\n  rows: [{name: first}]\n  axi: {}\n`;
+  const withConstraint = (
+    constraint: string,
+    field = "name: { type: string, required: true }",
+  ) =>
+    resource.replace(
+      "name: { type: string, required: true }",
+      `${field}\n  constraints:\n${constraint}`,
+    );
+  const valid = withConstraint(
+    "    - { name: lead_active_name, kind: unique, fields: [name], where: 'active()' }",
+  );
+  const loaded = await loadPackFromFiles([
+    { path: "pack.yaml", text: root },
+    { path: "resources/lead.yaml", text: valid },
+    { path: "seeds/leads.yaml", text: seed },
+  ]);
+  const ddl =
+    (await compilePackDdl(loaded)).find((item) => item.name === "lead")!.ddl;
+  assert(ddl.includes('create unique index "lead_active_name"'));
+  assert(ddl.includes('("project_id", "name")'));
+  assert(ddl.includes('where "archived_at" is null'));
+
+  const invalid = [
+    resource,
+    withConstraint(
+      "    - { name: lead_full_name, kind: unique, fields: [name] }",
+    ),
+    withConstraint(
+      "    - { name: lead_active_other, kind: unique, fields: [other], where: 'active()' }",
+    ).replace(
+      "name: { type: string, required: true }",
+      "name: { type: string, required: true }\n    other: { type: string }",
+    ),
+    withConstraint(
+      "    - { name: lead_active_composite, kind: unique, fields: [name, other], where: 'active()' }",
+    ).replace(
+      "name: { type: string, required: true }",
+      "name: { type: string, required: true }\n    other: { type: string }",
+    ),
+    withConstraint(
+      "    - { name: lead_wrong_predicate, kind: unique, fields: [name], where: 'archived_at == null' }",
+    ),
+    withConstraint(
+      "    - { kind: unique, fields: [name], where: 'active()' }",
+    ),
+    withConstraint(
+      "    - { name: lead_active_one, kind: unique, fields: [name], where: 'active()' }\n    - { name: lead_active_two, kind: unique, fields: [name], where: 'active()' }",
+    ),
+    withConstraint(
+      "    - { name: duplicate_name, kind: unique, fields: [name], where: 'active()' }\n    - { name: duplicate_name, kind: check, expression: 'true' }",
+    ),
+    withConstraint(
+      "    - { name: lead_active_name, kind: unique, fields: [name], where: 'active()' }",
+      "name: { type: string, required: true, unique: true }",
+    ),
+    withConstraint(
+      "    - { name: lead_active_name, kind: unique, fields: [name], where: 'active()' }",
+      "name: { type: string }",
+    ),
+  ];
+  for (const invalidResource of invalid) {
+    await assertRejects(() =>
+      loadPackFromFiles([
+        { path: "pack.yaml", text: root },
+        { path: "resources/lead.yaml", text: invalidResource },
+        { path: "seeds/leads.yaml", text: seed },
+      ])
+    );
+  }
 });
 
 Deno.test("strict pack loader broadly rejects superseded schema and unsafe source forms", async () => {
@@ -837,5 +912,26 @@ Deno.test("strict pack loader accepts both publisher-qualified proof packs", asy
         definition.identity.startsWith(`${expected}:`)
       ),
     );
+    const ddl = await compilePackDdl(pack);
+    const activeSeedIndexes = ddl.filter((object) =>
+      object.ddl.includes('where "archived_at" is null') &&
+      object.ddl.includes("_active_name")
+    );
+    assertEquals(activeSeedIndexes.length, expected === "operant/crm" ? 5 : 2);
+    if (expected === "operant/projects") {
+      const member = ddl.find((object) => object.name === "project_member")!;
+      assert(
+        member.ddl.includes(
+          'constraint "project_principal_membership" unique ("project_id", "work_project_id", "principal_id")',
+        ),
+      );
+      assertEquals(
+        member.ddl.includes(
+          '"project_principal_membership"',
+        ) &&
+          member.ddl.includes('where "archived_at" is null'),
+        false,
+      );
+    }
   }
 });
