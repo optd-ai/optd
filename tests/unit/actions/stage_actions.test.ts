@@ -59,17 +59,10 @@ Deno.test("action policy targets require every resolved read", () => {
   );
 });
 
-Deno.test("absent optional reads do not grant and zero-read actions use exact effects", () => {
+Deno.test("absent optional reads and zero-read actions never derive authority from effects", () => {
   assertEquals(
     resolveActionPolicyTargets([], [{ resource: "operant/projects:task" }]),
-    [{
-      definition: {
-        kind: "resource",
-        publisher: "operant",
-        pack: "projects",
-        name: "task",
-      },
-    }],
+    null,
   );
   assertEquals(resolveActionPolicyTargets([], []), null);
   assertEquals(
@@ -78,29 +71,12 @@ Deno.test("absent optional reads do not grant and zero-read actions use exact ef
   );
 });
 
-Deno.test("zero-read effect manifests cannot escape an unauthorized target", () => {
+Deno.test("effect manifests cannot substitute reviewed authorization targets", () => {
   assertEquals(
     resolveActionPolicyTargets([], [
       { resource: "operant/projects:task" },
       { resource: "operant/projects:timesheet" },
     ]),
-    [
-      {
-        definition: {
-          kind: "resource",
-          publisher: "operant",
-          pack: "projects",
-          name: "task",
-        },
-      },
-      {
-        definition: {
-          kind: "resource",
-          publisher: "operant",
-          pack: "projects",
-          name: "timesheet",
-        },
-      },
-    ],
+    null,
   );
 });

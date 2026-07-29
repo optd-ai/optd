@@ -162,6 +162,61 @@ Deno.test({
         actionCommit.body.data.id,
       );
 
+      const substitution = await stageAction(
+        matrix,
+        token,
+        staleRebacObject,
+      );
+      assertEquals(substitution.status, 201, JSON.stringify(substitution.body));
+      const substitutionStageId = String(substitution.body.data.id);
+      const effectRuleId = uuidV7();
+      await query(
+        matrix.harness.server.sql,
+        `insert into policy_rules(
+           id,policy_definition_version_id,role_id,capability,resource,
+           condition_kind,predicate,rule_name,relation_relationship,
+           relation_object_side,relation_subject_side,relation_subject)
+         select $1,policy_definition_version_id,role_id,capability,
+           'test/commitmatrix:gamma','unconditional',null,'substitution_effect_only',
+           null,null,null,null
+         from policy_rules where rule_name='action_rebac'`,
+        [effectRuleId],
+      );
+      await query(
+        matrix.harness.server.sql,
+        `update policy_rules set capability='read'
+          where rule_name='action_rebac'`,
+      );
+      const substituted = await api(
+        matrix,
+        token,
+        `/api/v1/changesets/${substitutionStageId}/commit`,
+        { lock_timeout: "2s" },
+      );
+      assertEquals(substituted.status, 403, JSON.stringify(substituted.body));
+      assertEquals(substituted.body.error.code, "authorization_changed");
+      await assertNoCommitFacts(matrix, substitutionStageId);
+      assertEquals(
+        (await query<{ count: number }>(
+          matrix.harness.server.sql,
+          `select count(*)::int count from staged_hook_executions
+            where stage_id=$1`,
+          [substitutionStageId],
+        )).rows[0].count,
+        1,
+      );
+      await query(
+        matrix.harness.server.sql,
+        `update policy_rules
+          set capability='action:test/commitmatrix:generate'
+          where rule_name='action_rebac'`,
+      );
+      await query(
+        matrix.harness.server.sql,
+        "delete from policy_rules where id=$1",
+        [effectRuleId],
+      );
+
       const staleRelation = await api(
         matrix,
         token,
@@ -431,15 +486,6 @@ async function installReplacementPolicies(
       null,
       "test/commitmatrix:alpha_owner",
       "actor.id",
-    ],
-    [
-      "action_effect",
-      "action:test/commitmatrix:generate",
-      "test/commitmatrix:gamma",
-      "unconditional",
-      null,
-      null,
-      null,
     ],
     [
       "create_effect",

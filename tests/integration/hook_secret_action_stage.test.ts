@@ -446,6 +446,15 @@ Deno.test({
         "update role_assignments set role_id='test/actionproof:operator',boundary_type='all_projects' where id=$1",
         [roleAssignment],
       );
+      await query(
+        harness.server.sql,
+        `update policy_rules set condition_kind='rebac',
+           relation_relationship='test/actionproof:source_actor',
+           relation_object_side='from',relation_subject_side='to',
+           relation_subject='actor.id'
+         where capability='action:test/actionproof:generate'
+           and resource='test/actionproof:source'`,
+      );
 
       let expectedAttempts = 0;
 
@@ -598,7 +607,7 @@ Deno.test({
             "update role_assignments set active=true where id=$1",
             [roleAssignment],
           ).then(() => undefined),
-        "project_conflict",
+        "policy_denied",
       );
       await race(
         "policy-assignment-disable",
@@ -614,7 +623,7 @@ Deno.test({
             "update policy_assignments set active=true where id=$1",
             [policy.assignment_id],
           ).then(() => undefined),
-        "project_conflict",
+        "policy_denied",
       );
       await race(
         "policy-version-disable",
@@ -646,7 +655,7 @@ Deno.test({
             `update "${relationshipTable}" set archived_at=null where id=$1`,
             [relationshipId],
           ).then(() => undefined),
-        "project_conflict",
+        "policy_denied",
       );
 
       const originalVersion = read.object_version_id;
@@ -740,24 +749,32 @@ Deno.test({
       const unchanged = await control();
       const evidence = unchanged.source.identity.authority_evidence;
       assertEquals(evidence.action, "action:test/actionproof:generate");
-      assertEquals(evidence.targets, [{
-        resource: "test/actionproof:source",
-        object_id: read.id,
-        object_version_id: originalVersion,
-      }]);
-      assertEquals(/^sha256:[0-9a-f]{64}$/.test(evidence.policy_digest), true);
+      assertEquals(evidence.targets.length, 1);
+      assertEquals(evidence.targets[0].project_id, projectId);
       assertEquals(
-        /^sha256:[0-9a-f]{64}$/.test(evidence.cutoff.facts_digest),
+        evidence.targets[0].resource,
+        "test/actionproof:source",
+      );
+      assertEquals(evidence.targets[0].object_id, read.id);
+      assertEquals(evidence.targets[0].object_version_id, originalVersion);
+      assertEquals(evidence.targets[0].matched_rules.length, 1);
+      assertEquals(evidence.targets[0].relationship_ids, [relationshipId]);
+      assertEquals(
+        /^sha256:[0-9a-f]{64}$/.test(evidence.canonical_target_digest),
+        true,
+      );
+      assertEquals(
+        /^sha256:[0-9a-f]{64}$/.test(evidence.authority_facts_digest),
         true,
       );
       const unrelated = await control(true);
       assertEquals(
-        unrelated.source.identity.authority_evidence.policy_digest,
-        evidence.policy_digest,
+        unrelated.source.identity.authority_evidence.canonical_target_digest,
+        evidence.canonical_target_digest,
       );
       assertEquals(
-        unrelated.source.identity.authority_evidence.cutoff.facts_digest,
-        evidence.cutoff.facts_digest,
+        unrelated.source.identity.authority_evidence.authority_facts_digest,
+        evidence.authority_facts_digest,
       );
     } finally {
       await harness.close();
@@ -1261,7 +1278,7 @@ export async function writePack(
   );
   await Deno.writeTextFile(
     `${root}/policies/action_access.yaml`,
-    `kind: Policy\napiVersion: operant.dev/v1\nmetadata: { name: action_access }\nspec:\n  default_assignment: all_projects\n  rules:\n    - name: action_operator\n      effect: allow\n      roles: [test/actionproof:operator]\n      actions: [read, create, update, action:test/actionproof:generate]\n      resources: [test/actionproof:source, test/actionproof:target]\n      axi: { summary: Action operators may exercise the targeted action fixture. }\n    - name: relationship_operator\n      effect: allow\n      roles: [test/actionproof:operator]\n      actions: [link, unlink]\n      resources: [test/actionproof:source_actor]\n      axi: { summary: Action operators may manage fixture relationships. }\n  axi: {}\n`,
+    `kind: Policy\napiVersion: operant.dev/v1\nmetadata: { name: action_access }\nspec:\n  default_assignment: all_projects\n  rules:\n    - name: action_operator\n      effect: allow\n      roles: [test/actionproof:operator]\n      actions: [read, action:test/actionproof:generate]\n      resources: [test/actionproof:source]\n      axi: { summary: Action operators may exercise the exact reviewed source. }\n    - name: effect_operator\n      effect: allow\n      roles: [test/actionproof:operator]\n      actions: [create, update]\n      resources: [test/actionproof:target]\n      axi: { summary: Direct changes may mutate fixture targets. }\n    - name: relationship_operator\n      effect: allow\n      roles: [test/actionproof:operator]\n      actions: [link, unlink]\n      resources: [test/actionproof:source_actor]\n      axi: { summary: Action operators may manage fixture relationships. }\n  axi: {}\n`,
   );
   await Deno.writeTextFile(
     `${root}/lifecycles/source_status.yaml`,

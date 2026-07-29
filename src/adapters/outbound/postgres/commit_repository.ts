@@ -21,6 +21,8 @@ import {
   lockActiveAuthorizationLineage,
   lockActiveAuthorizationLineages,
 } from "./authorization_lineage.ts";
+import { evaluateExactTargetedActionAuthority } from "./query_policy_sql.ts";
+import { canonicalTargetDigestInput } from "../../../application/ports/repair/targeted_action.ts";
 
 type Runtime = {
   publisher: string;
@@ -242,6 +244,12 @@ async function attemptCommit(
   await validateRuntimeMetadata(tx, runtimes);
   await validateProjects(tx, array(stage.projects_json));
   await lockAndValidateDependencies(tx, dependencies, operations, runtimes);
+  const targetedAction = await revalidateTargetedActionAuthority(
+    tx,
+    stage,
+    auth,
+    dependencies,
+  );
   const cutoff = await authorizationCutoff(
     tx,
     stageId,
@@ -250,6 +258,7 @@ async function attemptCommit(
     operations,
     operationRows,
     runtimes,
+    targetedAction,
   );
 
   const commitId = uuidV7();
@@ -699,6 +708,220 @@ async function lockAndValidateDependencies(
   }
 }
 
+async function revalidateTargetedActionAuthority(
+  tx: Queryable,
+  stage: Stage,
+  auth: AuthContext,
+  dependencies: Record<string, unknown>[],
+): Promise<boolean> {
+  if (stage.source_kind !== "action") return false;
+  const authority = dependencies.find((dependency) =>
+    dependency.target_dependency === "targeted_action_authority"
+  );
+  if (!authority) throw new CommitFailure("internal_error", "internal");
+  const cutoff = record(authority.cutoff);
+  const cutoffActor = record(cutoff.actor);
+  const actor = policyActorFromAuthContext(auth);
+  if (
+    cutoffActor.id !== actor.id ||
+    cutoffActor.principal_type !== actor.principal_type ||
+    cutoffActor.human_user_id !== actor.human_user_id ||
+    cutoff.session_id !== auth.sessionId ||
+    cutoff.authorization_id !== (auth.authorizationId ?? null)
+  ) throw new CommitFailure("authorization_changed", "authorization");
+  const expectedLineage = array(cutoff.authorization_lineage_ids).map(String);
+  if (auth.authorizationId) {
+    const lineage = await lockActiveAuthorizationLineage(tx, {
+      authorizationId: auth.authorizationId,
+      principalId: actor.id,
+      humanUserId: actor.human_user_id,
+    });
+    if (!lineage.ok) {
+      throw new CommitFailure(
+        "authorization_ancestor_invalid",
+        "authorization",
+      );
+    }
+    const actualLineage = lineage.value.ancestry.map((fact) =>
+      fact.authorizationId
+    );
+    if (
+      lineage.value.rootAuthorizationId !== cutoff.authorization_root_id ||
+      JSON.stringify(actualLineage) !== JSON.stringify(expectedLineage)
+    ) {
+      throw new CommitFailure(
+        "authorization_ancestor_invalid",
+        "authorization",
+      );
+    }
+  } else if (
+    expectedLineage.length || cutoff.authorization_root_id !== actor.id
+  ) {
+    throw new CommitFailure("authorization_changed", "authorization");
+  }
+
+  const exact = dependencies.filter((dependency) =>
+    ["relationship", "role_assignment", "policy_rule"].includes(
+      String(dependency.target_dependency),
+    )
+  ).sort((left, right) =>
+    canonicalRecord(left).localeCompare(canonicalRecord(right))
+  );
+  for (const dependency of exact) {
+    if (dependency.target_dependency === "relationship") {
+      const parsed = parseIdentity(String(dependency.resource_identity));
+      const runtime = (await query<{ table_name: string }>(
+        tx,
+        `select table_name from pack_runtime_tables where publisher=$1 and pack_name=$2
+          and definition_kind='relationship' and definition_name=$3 for share`,
+        [parsed.publisher, parsed.pack, parsed.name],
+      )).rows[0];
+      const relationship = runtime
+        ? (await query<{
+          id: string;
+          current_object_version_id: string | null;
+          archived_at: string | null;
+        }>(
+          tx,
+          `select id,current_object_version_id,archived_at from ${
+            quoteIdentifier(runtime.table_name)
+          } where project_id=$1 and id=$2 for share`,
+          [dependency.project_id, dependency.object_id],
+        )).rows[0]
+        : undefined;
+      if (
+        !relationship || relationship.archived_at !== null ||
+        relationship.current_object_version_id !==
+          (dependency.expected_version_id ?? null)
+      ) throw new CommitFailure("authorization_changed", "authorization");
+    } else if (dependency.target_dependency === "role_assignment") {
+      const table = dependency.assignment_table === "agent_authorization_roles"
+        ? "agent_authorization_roles"
+        : "role_assignments";
+      const assignment = (await query<{
+        id: string;
+        role_id: string;
+        boundary_type: string;
+        project_id: string | null;
+        active?: boolean;
+      }>(
+        tx,
+        `select id,role_id,boundary_type,project_id${
+          table === "role_assignments" ? ",active" : ""
+        }
+           from ${table} where id=$1 for share`,
+        [dependency.assignment_id],
+      )).rows[0];
+      const roleVersion = (await query<{ id: string; version: number }>(
+        tx,
+        `select id,version from role_definition_versions
+          where id=$1 and role_id=$2 and active for share`,
+        [dependency.role_version_id, dependency.role_id],
+      )).rows[0];
+      if (
+        !assignment || assignment.role_id !== dependency.role_id ||
+        assignment.boundary_type !== dependency.boundary_type ||
+        assignment.project_id !== dependency.assignment_project_id ||
+        assignment.active === false || !roleVersion ||
+        Number(roleVersion.version) !== Number(dependency.role_version)
+      ) throw new CommitFailure("authorization_changed", "authorization");
+    } else {
+      const row = (await query<{
+        assignment_id: string;
+        assignment_version: number;
+        policy_version_id: string;
+        policy_version: number;
+        rule_id: string;
+        rule_name: string | null;
+        capability: string;
+        resource: string;
+        predicate: string | null;
+        relation_relationship: string | null;
+        relation_object_side: string | null;
+        relation_subject_side: string | null;
+        relation_subject: string | null;
+      }>(
+        tx,
+        `select pa.id assignment_id,pa.version assignment_version,
+                pd.id policy_version_id,pd.version policy_version,
+                pr.id rule_id,pr.rule_name,pr.capability,pr.resource,
+                pr.predicate,pr.relation_relationship,pr.relation_object_side,
+                pr.relation_subject_side,pr.relation_subject
+           from policy_assignments pa
+           join policy_definition_versions pd on pd.id=pa.policy_definition_version_id
+           join policy_rules pr on pr.policy_definition_version_id=pd.id
+          where pa.id=$1 and pd.id=$2 and pr.id=$3 and pa.active and pd.active
+          for share of pa,pd,pr`,
+        [
+          dependency.policy_assignment_id,
+          dependency.policy_version_id,
+          dependency.rule_id,
+        ],
+      )).rows[0];
+      if (
+        !row || row.capability !== dependency.capability ||
+        row.resource !== dependency.resource
+      ) throw new CommitFailure("authorization_changed", "authorization");
+      if (
+        Number(row.assignment_version) !==
+          Number(dependency.policy_assignment_version) ||
+        Number(row.policy_version) !== Number(dependency.policy_version) ||
+        row.rule_name !== dependency.rule_name ||
+        row.predicate !== dependency.predicate ||
+        row.relation_relationship !== dependency.relation_relationship ||
+        row.relation_object_side !== dependency.relation_object_side ||
+        row.relation_subject_side !== dependency.relation_subject_side ||
+        row.relation_subject !== dependency.relation_subject
+      ) throw new CommitFailure("policy_changed", "authorization");
+    }
+  }
+
+  const targets = array(authority.targets).map((raw) => {
+    const target = record(raw);
+    return {
+      projectId: String(target.project_id),
+      resource: String(target.resource),
+      ...(target.object_id && target.object_version_id
+        ? {
+          object: {
+            id: String(target.object_id),
+            versionId: String(target.object_version_id),
+          },
+        }
+        : {}),
+    };
+  });
+  const current = await evaluateExactTargetedActionAuthority(tx, {
+    projectId: String(authority.project_id),
+    action: String(authority.action),
+    targets,
+  }, auth);
+  if (!current.allowed) {
+    throw new CommitFailure("authorization_changed", "authorization");
+  }
+  const authorization = {
+    actor,
+    authorizationRootId: String(cutoff.authorization_root_id),
+    authorizationLineageIds: array(cutoff.authorization_lineage_ids).map(
+      String,
+    ),
+    targets: current.targets,
+  };
+  const targetDigest = `sha256:${await canonicalSha256(
+    canonicalTargetDigestInput(authorization),
+  )}`;
+  const factsDigest = `sha256:${await canonicalSha256(current.dependencies)}`;
+  if (
+    targetDigest !== authority.canonical_target_digest ||
+    factsDigest !== authority.authority_facts_digest
+  ) throw new CommitFailure("policy_changed", "authorization");
+  return true;
+}
+
+function canonicalRecord(value: Record<string, unknown>): string {
+  return JSON.stringify(value, Object.keys(value).sort());
+}
+
 type ApprovalAgentSession = {
   session_id: string;
   principal_id: string;
@@ -795,6 +1018,7 @@ async function buildCutoffStatement(
   operationRows: OperationRow[],
   runtimes: Runtime[],
   validAgentApprovalSessionIds: readonly string[],
+  targetedAction: boolean,
 ): Promise<{ sql: string; params: unknown[] }> {
   const actor = policyActorFromAuthContext(auth);
   const decisions = (await query<{
@@ -833,7 +1057,14 @@ async function buildCutoffStatement(
   }> = [];
   for (let index = 0; index < operations.length; index++) {
     const operation = operations[index];
-    const decision = decisionByKey.get(String(operation.key));
+    const decision = decisionByKey.get(String(operation.key)) ??
+      (targetedAction
+        ? {
+          operation_key: String(operation.key),
+          action: "effect.constraint",
+          resource_identity: identity(operation),
+        }
+        : undefined);
     if (!decision) throw new CommitFailure("internal_error", "internal");
     const prepared = await policyProposedState(
       tx,
@@ -862,6 +1093,7 @@ async function buildCutoffStatement(
   const conditionCases: string[] = [];
   for (let index = 0; index < proposed.length; index++) {
     const request = proposed[index];
+    if (targetedAction) continue;
     for (const rule of rules) {
       const decision = decisionByKey.get(String(request.operation.key))!;
       if (
@@ -968,9 +1200,11 @@ with actor as (
     join policy_assignments pa on pa.policy_definition_version_id=pd.id and pa.active
       and (pa.boundary_type in ('system','all_projects') or pa.project_id=req.project_id)
 ), operation_authority as (
-  select req.ordinal,(select value from superadmin) or exists(
-    select 1 from applicable a where a.ordinal=req.ordinal and a.condition_allowed
-  ) allowed from requested req
+  select req.ordinal,${
+    targetedAction
+      ? "true"
+      : "(select value from superadmin) or exists(\n    select 1 from applicable a where a.ordinal=req.ordinal and a.condition_allowed\n  )"
+  } allowed from requested req
 ), valid_approvals as (
   select d.requirement_id,d.principal_id,d.decision
     from staged_approval_decisions d
@@ -1139,6 +1373,7 @@ async function authorizationCutoff(
   operations: CanonicalOperation[],
   operationRows: OperationRow[],
   runtimes: Runtime[],
+  targetedAction: boolean,
 ): Promise<string> {
   const validAgentApprovalSessionIds = await lockCommitAuthorizationLineages(
     tx,
@@ -1154,6 +1389,7 @@ async function authorizationCutoff(
     operationRows,
     runtimes,
     validAgentApprovalSessionIds,
+    targetedAction,
   );
   const row = (await query<{
     cutoff: string;

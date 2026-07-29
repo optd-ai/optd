@@ -22,21 +22,33 @@ export type StageSource = Readonly<{
     targeted?: Readonly<{
       action: string;
       targets: readonly Readonly<{
+        project_id: string;
         resource: string;
         object_id?: string;
         object_version_id?: string;
-        absent_effect?: true;
+        policy_digest: string;
+        matched_rules: readonly Readonly<{
+          policy: string;
+          policy_version_id: string;
+          policy_version: number;
+          rule: string;
+        }>[];
+        role_assignment_ids: readonly string[];
+        relationship_ids: readonly string[];
       }>[];
-      policy_digest: string;
+      canonical_target_digest: string;
+      authority_facts_digest: string;
       cutoff: Readonly<{
+        actor: Readonly<{
+          id: string;
+          principal_type: "human_user" | "agent_user" | "system";
+          human_user_id: string | null;
+        }>;
         auth_context_id: string;
-        principal_id: string;
-        principal_type: "human_user" | "agent_user";
-        human_user_id: string;
         session_id: string;
         authorization_id: string | null;
         authorization_root_id: string;
-        facts_digest: string;
+        authorization_lineage_ids: readonly string[];
       }>;
     }>;
   }>;

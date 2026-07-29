@@ -93,13 +93,23 @@ for (const trace of [false, true]) {
           actionData.source.identity.action,
           "test/actionproof:generate",
         );
+        const authority = actionData.source.identity.authority_evidence;
+        assertEquals(authority.targets.length, 1);
+        assertEquals(authority.targets[0].project_id, projectId);
         assertEquals(
-          actionData.source.identity.authority_evidence.targets,
-          [{
-            resource: "test/actionproof:source",
-            object_id: read.id,
-            object_version_id: read.object_version_id,
-          }],
+          authority.targets[0].resource,
+          "test/actionproof:source",
+        );
+        assertEquals(authority.targets[0].object_id, read.id);
+        assertEquals(
+          authority.targets[0].object_version_id,
+          read.object_version_id,
+        );
+        assertEquals(authority.targets[0].matched_rules.length, 1);
+        assertEquals(authority.targets[0].role_assignment_ids.length, 1);
+        assertEquals(
+          /^sha256:[0-9a-f]{64}$/.test(authority.canonical_target_digest),
+          true,
         );
         assertEquals(
           actionData.hook_executions.filter((item: { phase: string }) =>

@@ -14,17 +14,23 @@ import type {
   ActionReadResult,
   ActionStageCapabilities,
 } from "../../../../application/services/actions/stage_actions.ts";
-import type { PinnedHookProgram } from "../../../../application/ports/repair/repositories.ts";
 import {
-  evaluateTargetedActionPolicy,
+  assertActionStageAuthorityCutoff,
+  createActionStageAuthorityCutoff,
+  type PinnedHookProgram,
+} from "../../../../application/ports/repair/repositories.ts";
+import {
+  evaluateExactTargetedActionAuthority,
+  lockExactTargetAuthorityDependencies,
   lockTargetedActionAuthority,
-  targetedActionAuthorityFactsDigest,
 } from "../query_policy_sql.ts";
 import {
   type FieldSpec,
   lowerCelToSql,
 } from "../../../../domain/queries/expression_lowerer.ts";
 import { lockReadAuthority } from "../object_read_boundary.ts";
+import { lockActiveAuthorizationLineage } from "../authorization_lineage.ts";
+import { canonicalSha256 } from "../../../../domain/ids/canonical_json.ts";
 
 export function makePostgresActionStageRepository(
   sql: Sql,
@@ -170,40 +176,77 @@ export function makePostgresActionStageRepository(
           request.auth,
           request.projectId,
         );
-        await lockTargetedActionAuthority(tx, request.targets);
-        const evaluation = await evaluateTargetedActionPolicy(tx, {
+        const physicalTargets = request.targets.map((target) => {
+          const parsed = parseTarget(target.resource);
+          return {
+            definition: { kind: "resource" as const, ...parsed },
+            ...(target.object ? { objectId: target.object.id } : {}),
+          };
+        });
+        await lockTargetedActionAuthority(tx, physicalTargets);
+        let evaluation = await evaluateExactTargetedActionAuthority(tx, {
           projectId: request.projectId,
           action: request.action,
           targets: request.targets,
         }, request.auth);
-        return {
-          ...evaluation,
-          authorizationRootId: anchor.authorizationRootId,
-          factsDigest: await targetedActionAuthorityFactsDigest(
-            tx,
-            request.projectId,
-            request.targets,
-            request.auth,
-          ),
-        };
+        if (!evaluation.allowed) return null;
+        await lockExactTargetAuthorityDependencies(
+          tx,
+          evaluation.dependencies,
+        );
+        evaluation = await evaluateExactTargetedActionAuthority(tx, {
+          projectId: request.projectId,
+          action: request.action,
+          targets: request.targets,
+        }, request.auth);
+        if (!evaluation.allowed) return null;
+        const actor = policyActorFromAuthContext(request.auth);
+        let lineageIds: string[] = [];
+        if (request.auth.authorizationId) {
+          const lineage = await lockActiveAuthorizationLineage(tx, {
+            authorizationId: request.auth.authorizationId,
+            principalId: actor.id,
+            humanUserId: actor.human_user_id,
+          });
+          if (!lineage.ok) return null;
+          lineageIds = lineage.value.ancestry.map((fact) =>
+            fact.authorizationId
+          );
+        }
+        return await createActionStageAuthorityCutoff({
+          authorization: {
+            actor,
+            authorizationRootId: anchor.authorizationRootId,
+            authorizationLineageIds: lineageIds,
+            targets: evaluation.targets,
+          },
+          authorityFactsDigest: `sha256:${await canonicalSha256(
+            evaluation.dependencies,
+          )}`,
+        }, async (input) => `sha256:${await canonicalSha256(input)}`);
       });
     },
 
-    assertAllowed(decision) {
-      return Promise.resolve(decision);
-    },
-
     async record(request) {
+      assertActionStageAuthorityCutoff(request.cutoff);
       const actor = policyActorFromAuthContext(request.auth);
-      const persisted = request.source.authority?.targeted?.cutoff;
+      const targeted = request.source.authority?.targeted;
+      const persisted = targeted?.cutoff;
       if (
-        !persisted ||
+        !targeted || !persisted ||
+        targeted.canonical_target_digest !==
+          request.cutoff.canonicalTargetDigest ||
+        targeted.authority_facts_digest !==
+          request.cutoff.authorityFactsDigest ||
         persisted.authorization_root_id !==
-          request.cutoff.authorizationRootId ||
-        persisted.facts_digest !== request.cutoff.factsDigest ||
-        persisted.principal_id !== actor.id ||
-        persisted.principal_type !== actor.principal_type ||
-        persisted.human_user_id !== actor.human_user_id ||
+          request.cutoff.authorization.authorizationRootId ||
+        JSON.stringify(persisted.authorization_lineage_ids) !==
+          JSON.stringify(
+            request.cutoff.authorization.authorizationLineageIds,
+          ) ||
+        persisted.actor.id !== actor.id ||
+        persisted.actor.principal_type !== actor.principal_type ||
+        persisted.actor.human_user_id !== actor.human_user_id ||
         persisted.auth_context_id !== request.auth.id
       ) {
         throw Object.assign(
@@ -218,6 +261,18 @@ export function makePostgresActionStageRepository(
       );
     },
   };
+}
+
+function parseTarget(resource: string): {
+  publisher: string;
+  pack: string;
+  name: string;
+} {
+  const match =
+    /^([a-z][a-z0-9-]{0,62})\/([a-z][a-z0-9_]{0,62}):([a-z][a-z0-9_]{0,62})$/
+      .exec(resource);
+  if (!match) throw new Error("invalid reviewed target resource");
+  return { publisher: match[1], pack: match[2], name: match[3] };
 }
 
 async function runtimeTable(

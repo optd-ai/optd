@@ -10,6 +10,8 @@ import type {
 import type { StageDto, StageSource } from "../../ports/stage_repository.ts";
 import type {
   ActionCatalog,
+  ActionStageAuthorityCutoff,
+  ActionStageAuthorityPort,
   ActionTargetReader,
   HookExecutionEvidenceRepository,
   PinnedActionHookCatalog,
@@ -18,10 +20,7 @@ import type {
 import { StageHookError } from "../../ports/hook_executor.ts";
 import { validateFieldMap } from "../../../schemas/changesets/field_values.ts";
 import type { TargetedActionPolicyTarget } from "../query_objects.ts";
-import type {
-  TargetedAuthorityCutoff,
-  TargetedPolicyEvaluator,
-} from "../../ports/repair/targeted_action.ts";
+import type { ReviewedTarget } from "../../ports/repair/targeted_action.ts";
 
 export function validateActionInput(
   input: Record<string, unknown>,
@@ -32,18 +31,11 @@ export function validateActionInput(
 
 export function resolveActionPolicyTargets(
   reads: TargetedActionPolicyTarget[],
-  effects: Array<{ resource: string }>,
+  _effects: Array<{ resource: string }>,
 ): TargetedActionPolicyTarget[] | null {
-  if (reads.length) return reads;
-  const targets: TargetedActionPolicyTarget[] = [];
-  for (
-    const resource of [...new Set(effects.map((effect) => effect.resource))]
-  ) {
-    const definition = parseResourceIdentity(resource);
-    if (!definition) return null;
-    targets.push({ definition });
-  }
-  return targets.length ? targets : null;
+  // Reviewed reads are the authority boundary. Emitted effects constrain hook
+  // output only and can never manufacture or substitute a permission target.
+  return reads.length ? reads : null;
 }
 
 export function parseResourceIdentity(value: string): {
@@ -87,12 +79,6 @@ export type ActionReadRequest = Readonly<{
 export type ActionReadResult = Readonly<{
   values: Record<string, unknown>;
   objectVersionId: string;
-}>;
-export type ActionAuthorityResult = Readonly<{
-  allowed: boolean;
-  policyDigest: string;
-  authorizationRootId: string;
-  factsDigest: string;
 }>;
 export type ActionStageHookDeclaration = Readonly<{
   attachment_id: string;
@@ -176,22 +162,21 @@ export interface ActionStageCapabilities
     ActionCatalog<ActionIdentity, ActionDefinition>,
     ActionTargetReader<ActionReadRequest, ActionReadResult>,
     PinnedActionHookCatalog<ActionIdentity & { revisionId: string }>,
-    TargetedPolicyEvaluator<
+    ActionStageAuthorityPort<
       Readonly<{
         projectId: string;
         action: string;
-        targets: TargetedActionPolicyTarget[];
+        targets: readonly ReviewedTarget[];
         auth: AuthContext;
       }>,
-      ActionAuthorityResult
+      ActionStageAuthorityCutoff | null
     >,
-    TargetedAuthorityCutoff<ActionAuthorityResult, ActionAuthorityResult>,
     HookExecutionEvidenceRepository<
       Readonly<{
         input: unknown;
         source: StageSource;
         auth: AuthContext;
-        cutoff: ActionAuthorityResult;
+        cutoff: ActionStageAuthorityCutoff;
       }>,
       Result<StageDto | null>
     > {
@@ -305,6 +290,43 @@ export function makeStageActionService(port: ActionStageCapabilities) {
           });
         }
 
+        if (!policyTargets.length) {
+          for (const [field, value] of Object.entries(raw.input).sort()) {
+            if (
+              field === "project_id" || !field.endsWith("_id") ||
+              typeof value !== "string" || !isUuidV7(value)
+            ) continue;
+            const declared = field === "object_id" &&
+                typeof raw.input.resource === "string"
+              ? raw.input.resource
+              : field.slice(0, -3);
+            const qualified = declared.includes(":")
+              ? declared
+              : `${publisher}/${pack}:${declared}`;
+            const target = parseResourceIdentity(qualified);
+            if (!target) {
+              return invalid("action input target resource is unavailable");
+            }
+            const result = await port.current({
+              projectId: raw.project_id,
+              target,
+              objectId: value,
+              fields: [],
+            });
+            if (!result) {
+              return invalid(`action input target ${field} was not found`);
+            }
+            policyTargets.push({ definition: target, objectId: value });
+            readDependencies.push({
+              name: `$action.input.${field}`,
+              project_id: raw.project_id,
+              resource_identity: qualified,
+              object_id: value,
+              object_version_id: result.objectVersionId,
+            });
+          }
+        }
+
         const availabilityIssue = await checkAvailability(
           port,
           definition,
@@ -336,22 +358,43 @@ export function makeStageActionService(port: ActionStageCapabilities) {
             resource: String(effect.resource),
             ops: array(effect.ops).map(String),
           }));
-        const targets = resolveActionPolicyTargets(policyTargets, effects);
-        if (!targets) {
-          return invalid("action effects have no exact authorization target");
-        }
-
-        const authority = await port.assertAllowed(
-          await port.lockAndEvaluate({
-            projectId: raw.project_id,
-            action: semantic,
-            targets,
-            auth,
-          }),
+        const policyBoundary = resolveActionPolicyTargets(
+          policyTargets,
+          effects,
         );
-        if (!authority.allowed) {
-          return policyDenied(semantic, raw.project_id, auth);
+        if (!policyBoundary) {
+          return invalid("action has no exact reviewed authorization target");
         }
+        const reviewedTargets: ReviewedTarget[] = policyBoundary.map(
+          (target) => {
+            const resource =
+              `${target.definition.publisher}/${target.definition.pack}:${target.definition.name}`;
+            const dependency = readDependencies.find((candidate) =>
+              candidate.resource_identity === resource &&
+              candidate.object_id === target.objectId
+            );
+            if (!target.objectId || !dependency) {
+              throw new Error(
+                "reviewed action target lacks immutable object evidence",
+              );
+            }
+            return {
+              projectId: raw.project_id,
+              resource,
+              object: {
+                id: target.objectId,
+                versionId: dependency.object_version_id,
+              },
+            };
+          },
+        );
+        const authority = await port.lockAndEvaluate({
+          projectId: raw.project_id,
+          action: semantic,
+          targets: reviewedTargets,
+          auth,
+        });
+        if (!authority) return policyDenied(semantic, raw.project_id, auth);
 
         const hookResult = await port.executeHooks({
           action: `${publisher}/${pack}:${name}`,
@@ -359,13 +402,15 @@ export function makeStageActionService(port: ActionStageCapabilities) {
           actor: { id: actor.id, principal_type: actor.principal_type },
           input: raw.input,
           reads,
-          read_dependencies: readDependencies,
+          read_dependencies: readDependencies.filter((dependency) =>
+            !dependency.name.startsWith("$action.input.")
+          ),
           declarations,
           authority_snapshot: {
             principal_id: actor.id,
             auth_context_id: auth.id,
-            assignment_digest: authority.policyDigest,
-            policy_digest: authority.policyDigest,
+            assignment_digest: authority.authorityFactsDigest,
+            policy_digest: authority.canonicalTargetDigest,
           },
         });
         if (!hookResult.added_operations.length) {
@@ -374,37 +419,35 @@ export function makeStageActionService(port: ActionStageCapabilities) {
 
         const targetedEvidence = {
           action: semantic,
-          targets: targets.map((target) => {
-            const resource =
-              `${target.definition.publisher}/${target.definition.pack}:${target.definition.name}`;
-            if (!target.objectId) {
-              return { resource, absent_effect: true as const };
-            }
-            const dependency = readDependencies.find((candidate) =>
-              candidate.resource_identity === resource &&
-              candidate.object_id === target.objectId
-            );
-            if (!dependency) {
-              throw new Error(
-                "targeted action object lacks immutable version evidence",
-              );
-            }
-            return {
-              resource,
-              object_id: target.objectId,
-              object_version_id: dependency.object_version_id,
-            };
-          }),
-          policy_digest: authority.policyDigest,
+          targets: authority.authorization.targets.map((evidence) => ({
+            project_id: evidence.target.projectId,
+            resource: evidence.target.resource,
+            ...(evidence.target.object
+              ? {
+                object_id: evidence.target.object.id,
+                object_version_id: evidence.target.object.versionId,
+              }
+              : {}),
+            policy_digest: evidence.policyDigest,
+            matched_rules: evidence.matchedRules.map((rule) => ({
+              policy: rule.policy,
+              policy_version_id: rule.policyVersionId,
+              policy_version: rule.policyVersion,
+              rule: rule.rule,
+            })),
+            role_assignment_ids: evidence.roleAssignmentIds,
+            relationship_ids: evidence.relationshipIds,
+          })),
+          canonical_target_digest: authority.canonicalTargetDigest,
+          authority_facts_digest: authority.authorityFactsDigest,
           cutoff: {
+            actor: authority.authorization.actor,
             auth_context_id: auth.id,
-            principal_id: actor.id,
-            principal_type: actor.principal_type,
-            human_user_id: actor.human_user_id,
             session_id: auth.sessionId,
             authorization_id: auth.authorizationId ?? null,
-            authorization_root_id: authority.authorizationRootId,
-            facts_digest: authority.factsDigest,
+            authorization_root_id: authority.authorization.authorizationRootId,
+            authorization_lineage_ids:
+              authority.authorization.authorizationLineageIds,
           },
         };
         const source: StageSource = {
