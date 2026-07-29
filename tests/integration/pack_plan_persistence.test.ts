@@ -1,3 +1,4 @@
+// deno-lint-ignore-file no-explicit-any no-import-prefix no-unversioned-import
 import {
   assert,
   assertEquals,
@@ -135,10 +136,14 @@ Deno.test("immutable candidates are reused while every preview persists a distin
             }
           }
           const tables = await query<
-            { definition_kind: string; table_name: string }
+            {
+              definition_kind: string;
+              definition_name: string;
+              table_name: string;
+            }
           >(
             tx,
-            "select definition_kind,table_name from pack_runtime_tables where publisher='operant' and pack_name='crm' order by definition_kind,definition_name",
+            "select definition_kind,definition_name,table_name from pack_runtime_tables where publisher='operant' and pack_name='crm' order by definition_kind,definition_name",
           );
           assert(tables.rows.some((row) => row.definition_kind === "resource"));
           assert(
@@ -157,11 +162,80 @@ Deno.test("immutable candidates are reused while every preview persists a distin
               true,
             );
           }
-          const constraints = await query<{ count: string }>(
-            tx,
-            "select count(*)::text as count from pg_constraint where connamespace='public'::regnamespace and (conname like 'ck_%' or conname like 'uq_%')",
+          const resourceTables = new Map(
+            tables.rows.filter((row) => row.definition_kind === "resource")
+              .map((row) => [row.definition_name, row.table_name]),
           );
-          assert(Number(constraints.rows[0].count) > 0);
+          const declaredActiveIndexes = [
+            ["activity_type", "activity_type_active_name", "name"],
+            ["lead_status", "lead_status_active_name", "name"],
+            ["lost_reason", "lost_reason_active_name", "name"],
+            [
+              "opportunity_stage",
+              "opportunity_stage_active_name",
+              "name",
+            ],
+            ["sales_team", "sales_team_active_name", "name"],
+          ] as const;
+          const indexes = await query<{
+            indexname: string;
+            tablename: string;
+            indexdef: string;
+          }>(
+            tx,
+            `select indexname,tablename,indexdef from pg_indexes
+             where schemaname='public' and indexname=any($1::text[])
+             order by indexname`,
+            [declaredActiveIndexes.map(([, name]) => name)],
+          );
+          assertEquals(
+            indexes.rows,
+            declaredActiveIndexes.map(([resource, indexname, field]) => {
+              const tablename = resourceTables.get(resource)!;
+              return {
+                indexname,
+                tablename,
+                indexdef:
+                  `CREATE UNIQUE INDEX ${indexname} ON public.${tablename} USING btree (project_id, ${field}) WHERE (archived_at IS NULL)`,
+              };
+            }).sort((left, right) =>
+              left.indexname.localeCompare(right.indexname)
+            ),
+          );
+
+          const declaredFullConstraints = Object.entries(candidate.resources)
+            .flatMap(([resource, definition]) => {
+              const constraints = Array.isArray(definition.spec.constraints)
+                ? definition.spec.constraints as Array<
+                  Record<string, unknown>
+                >
+                : [];
+              return constraints.filter((constraint) =>
+                constraint.kind === "unique" && constraint.where === undefined
+              ).map((constraint) => ({
+                definition_name: resource,
+                conname: String(constraint.name),
+                definition: `UNIQUE (project_id, ${
+                  (constraint.fields as unknown[]).map(String).join(", ")
+                })`,
+              }));
+            }).sort((left, right) => left.conname.localeCompare(right.conname));
+          const fullConstraints = await query<{
+            definition_name: string;
+            conname: string;
+            definition: string;
+          }>(
+            tx,
+            `select t.definition_name,c.conname,pg_get_constraintdef(c.oid) definition
+             from pg_constraint c
+             join pack_runtime_tables t on c.conrelid=t.table_name::regclass
+             where t.publisher='operant' and t.pack_name='crm'
+               and t.definition_kind='resource'
+               and c.conname=any($1::text[])
+             order by c.conname`,
+            [declaredFullConstraints.map((constraint) => constraint.conname)],
+          );
+          assertEquals(fullConstraints.rows, declaredFullConstraints);
           throw new ExpectedRollback("rollback executable preview");
         }),
       ExpectedRollback,

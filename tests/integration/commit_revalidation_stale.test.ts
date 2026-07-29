@@ -188,7 +188,7 @@ Deno.test({
       ]);
       assertEquals(seed.code, 0, seed.stderr);
       const seedStage = JSON.parse(seed.stdout).data.stage.id as string;
-      await assertObservedOutcome(matrix, seedStage, async () => {
+      await assertObservedActiveSeedConflict(matrix, seedStage, async () => {
         const winner = await matrix.harness.runOptctl([
           "--json",
           "--project",
@@ -204,7 +204,7 @@ Deno.test({
           JSON.parse(winner.stdout).data.stage.id,
         );
         assertEquals(committed.ok, true);
-      }, "constraint_conflict");
+      }, "commitmatrix_alpha_active_key");
 
       const revision = await matrix.stage([{
         op: "create",
@@ -432,12 +432,10 @@ function updateBeta(projectId: string, objectId: string, note: string) {
     set: { note },
   };
 }
-async function assertObservedOutcome(
+async function observedFailure(
   matrix: Awaited<ReturnType<typeof startCommitMatrix>>,
   stageId: string,
   mutate: () => Promise<void>,
-  code: string,
-  reason?: string,
 ) {
   const result = await commitAfterObservedLifecycleBarrier(
     matrix,
@@ -446,13 +444,6 @@ async function assertObservedOutcome(
   );
   assertEquals(result.ok, false);
   if (result.ok) throw new Error("expected observed commit failure");
-  assertEquals(result.error.code, code);
-  if (reason) {
-    assertEquals(
-      (result.error.details as Record<string, unknown>).reason,
-      reason,
-    );
-  }
   assertEquals(
     (await query<{ count: string }>(
       matrix.harness.server.sql,
@@ -461,6 +452,35 @@ async function assertObservedOutcome(
     )).rows[0].count,
     "0",
   );
+  return result.error;
+}
+
+async function assertObservedOutcome(
+  matrix: Awaited<ReturnType<typeof startCommitMatrix>>,
+  stageId: string,
+  mutate: () => Promise<void>,
+  code: string,
+  reason?: string,
+) {
+  const error = await observedFailure(matrix, stageId, mutate);
+  assertEquals(error.code, code);
+  if (reason) {
+    assertEquals(
+      (error.details as Record<string, unknown>).reason,
+      reason,
+    );
+  }
+}
+
+async function assertObservedActiveSeedConflict(
+  matrix: Awaited<ReturnType<typeof startCommitMatrix>>,
+  stageId: string,
+  mutate: () => Promise<void>,
+  constraint: string,
+) {
+  const error = await observedFailure(matrix, stageId, mutate);
+  assertEquals(error.code, "active_seed_key_conflict");
+  assertEquals(error.details, { constraint });
 }
 
 async function assertStale(

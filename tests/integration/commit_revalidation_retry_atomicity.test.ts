@@ -252,7 +252,8 @@ Deno.test({
         matrix.harness.server.sql,
         `create or replace function matrix_state_failure() returns trigger
         language plpgsql as $$ begin perform nextval('matrix_state_attempts');
-        raise exception 'matrix domain' using errcode='23505'; end $$`,
+        raise exception 'matrix domain' using errcode='23505',
+          constraint='matrix_unrelated_unique'; end $$`,
       );
       const domainStage = await matrix.stage([{
         op: "create",
@@ -441,7 +442,10 @@ Deno.test({
       assertEquals(results.filter((result) => result.ok).length, 1);
       const loser = results.find((result) => !result.ok);
       if (!loser || loser.ok) throw new Error("missing losing seed commit");
-      assertEquals(loser.error.code, "constraint_conflict");
+      assertEquals(loser.error.code, "active_seed_key_conflict");
+      assertEquals(loser.error.details, {
+        constraint: "commitmatrix_alpha_active_key",
+      });
       assertEquals(
         (await query<{ count: string }>(
           matrix.harness.server.sql,
