@@ -890,6 +890,337 @@ Deno.test("atomic pack apply activates globally, is idempotent, and rolls back i
   }
 });
 
+Deno.test("PG18.4 migrates legacy full seed uniqueness atomically to exact active uniqueness", async () => {
+  if (Deno.env.get("OPERANT_DATABASE_URL") || !await findPostgresBins()) {
+    throw new Error("PostgreSQL 18.4 app-managed binaries are required");
+  }
+  const root = await Deno.makeTempDir({ prefix: "op-seed-mig-" });
+  const previous = Deno.env.get("OPERANT_DATA_DIR");
+  Deno.env.set("OPERANT_DATA_DIR", root);
+  let runtime: Awaited<ReturnType<typeof startPostgresRuntime>> | undefined;
+  let sql: ReturnType<typeof createPostgresClient> | undefined;
+  try {
+    runtime = await startPostgresRuntime();
+    sql = createPostgresClient(runtime.databaseUrl);
+    await sql.begin((tx) => applyPlatformMigrations(tx));
+    const principal = uuidV7();
+    const human = uuidV7();
+    const session = uuidV7();
+    const auth = uuidV7();
+    await query(
+      sql,
+      "insert into principals(id,type,active) values($1,'human_user',true)",
+      [principal],
+    );
+    await query(
+      sql,
+      "insert into human_users(id,principal_id,username,display_name,status) values($1,$2,'seed-migration','Seed Migration','active')",
+      [human, principal],
+    );
+    await query(
+      sql,
+      "insert into auth_sessions(id,principal_id,human_user_id,credential_kind,token_digest) values($1,$2,$3,'human_full','seed-migration')",
+      [session, principal, human],
+    );
+    await query(
+      sql,
+      "insert into auth_contexts(id,principal_id,human_user_id,session_id,credential_kind,roles,created_at) values($1,$2,$3,$4,'human_full','{system:super_admin}',now())",
+      [auth, principal, human, session],
+    );
+
+    const v1 = await loadPackFromFiles(legacySeedMigrationPack("1.0.0", false));
+    const initial = await createPackMigrationPlan(sql, v1, auth);
+    await sql.begin((tx) => validateMigrationPlan(tx, initial.plan.id, auth));
+    await sql.begin((tx) =>
+      applyMigrationPlan(
+        tx,
+        initial.plan.id,
+        { acknowledgement: "safe" },
+        auth,
+      )
+    );
+    const table = (await query<{ table_name: string }>(
+      sql,
+      `select table_name from pack_runtime_tables where publisher='test' and pack_name='legacyseed' and definition_kind='resource' and definition_name='status'`,
+    )).rows[0].table_name;
+    const oldConstraint = (await query<{ conname: string; definition: string }>(
+      sql,
+      `select c.conname,pg_get_constraintdef(c.oid) definition
+       from pg_constraint c where c.conrelid=$1::regclass and c.contype='u'`,
+      [table],
+    )).rows;
+    assertEquals(oldConstraint.length, 1);
+    assertEquals(oldConstraint[0].definition, "UNIQUE (project_id, name)");
+    assert(oldConstraint[0].conname.startsWith(`uq_${table}_name_`));
+    const oldConstraintName = oldConstraint[0].conname;
+    const initialActivation = (await query<{
+      id: string;
+      activated_at: Date;
+    }>(
+      sql,
+      `select candidate_revision_id id,activated_at from pack_active_revisions where publisher='test' and pack_name='legacyseed'`,
+    )).rows[0];
+
+    const plannedCandidate = await loadPackFromFiles(
+      legacySeedMigrationPack("2.0.0", true),
+    );
+    const planned = await createPackMigrationPlan(sql, plannedCandidate, auth);
+    const addConstraint = planned.plan.changes.find((change) =>
+      change.kind === "add_resource_constraint" &&
+      change.target.constraint === "legacyseed_status_active_name"
+    );
+    const changeField = planned.plan.changes.find((change) =>
+      change.kind === "change_field" && change.target.field === "name"
+    );
+    assert(addConstraint);
+    assert(changeField);
+    assertEquals(addConstraint.facts, {
+      fields: ["name"],
+      predicate: "active()",
+      previous: null,
+      desired: {
+        name: "legacyseed_status_active_name",
+        kind: "unique",
+        fields: ["name"],
+        where: "active()",
+      },
+    });
+    const addStep = planned.plan.steps.find((step) =>
+      step.change_ids.includes(addConstraint.id)
+    )!;
+    const fieldStep = planned.plan.steps.find((step) =>
+      step.change_ids.includes(changeField.id)
+    )!;
+    const activationStep = planned.plan.steps.find((step) =>
+      step.kind === "activate_pack_revision"
+    )!;
+    assert(
+      planned.plan.dependency_graph.edges.some((edge) =>
+        edge.from_step_id === addStep.id &&
+        edge.to_step_id === fieldStep.id &&
+        edge.reason ===
+          "replacement active unique index is created before the legacy field constraint is removed"
+      ),
+    );
+    assertEquals(
+      planned.plan.dependency_graph.topological_order.at(-1),
+      activationStep.id,
+    );
+    assert(
+      planned.plan.dependency_graph.topological_order.indexOf(addStep.id) <
+        planned.plan.dependency_graph.topological_order.indexOf(fieldStep.id),
+    );
+    const persisted = (await query<{
+      plan_json: typeof planned.plan | string;
+      sql_preview: string[] | string;
+    }>(
+      sql,
+      "select plan_json,sql_preview from pack_migration_plans_v1 where id=$1",
+      [planned.plan.id],
+    )).rows[0];
+    const persistedPlan: typeof planned.plan =
+      typeof persisted.plan_json === "string"
+        ? JSON.parse(persisted.plan_json)
+        : persisted.plan_json;
+    const statements = typeof persisted.sql_preview === "string"
+      ? JSON.parse(persisted.sql_preview) as string[]
+      : persisted.sql_preview;
+    assertEquals(
+      persistedPlan.dependency_graph,
+      planned.plan.dependency_graph,
+    );
+    assertEquals(
+      persistedPlan.changes.map((change) => ({
+        id: change.id,
+        kind: change.kind,
+        target: change.target,
+      })),
+      planned.plan.changes.map((change) => ({
+        id: change.id,
+        kind: change.kind,
+        target: change.target,
+      })),
+    );
+    const createIndexSql =
+      `create unique index "legacyseed_status_active_name" on "${table}" ("project_id", "name") where "archived_at" is null`;
+    const dropConstraintSql =
+      `alter table "${table}" drop constraint if exists "${oldConstraintName}"`;
+    const createIndexPosition = statements.indexOf(createIndexSql);
+    const dropConstraintPosition = statements.indexOf(dropConstraintSql);
+    assert(createIndexPosition >= 0);
+    assert(dropConstraintPosition > createIndexPosition);
+    assertEquals(
+      statements.at(-1)?.startsWith("insert into pack_active_revisions"),
+      true,
+    );
+    assertEquals(
+      statements[activationStep.statement_indexes[0]],
+      statements.at(-1),
+    );
+
+    for (
+      const [fault, version] of [
+        ["after_sql", "2.0.1"],
+        ["after_application", "2.0.2"],
+      ] as const
+    ) {
+      const candidate = await loadPackFromFiles(
+        legacySeedMigrationPack(version, true),
+      );
+      const migration = await createPackMigrationPlan(sql, candidate, auth);
+      await sql.begin((tx) =>
+        validateMigrationPlan(tx, migration.plan.id, auth)
+      );
+      const result = await migrationServices(sql, async () => {}, fault).apply(
+        migration.plan.id,
+        { acknowledgement: "reviewed" },
+        authContext(auth, principal, human, session),
+      );
+      assertEquals(result.ok, false);
+      if (!result.ok) {
+        assertEquals(result.error.code, "migration_apply_failed");
+      }
+      const activation = (await query<{ id: string; activated_at: Date }>(
+        sql,
+        `select candidate_revision_id id,activated_at from pack_active_revisions where publisher='test' and pack_name='legacyseed'`,
+      )).rows[0];
+      assertEquals(activation, initialActivation);
+      assertEquals(
+        (await query<{ count: number }>(
+          sql,
+          `select count(*)::int count from pg_constraint where conrelid=$1::regclass and conname=$2`,
+          [table, oldConstraintName],
+        )).rows[0].count,
+        1,
+      );
+      assertEquals(
+        (await query<{ count: number }>(
+          sql,
+          `select count(*)::int count from pg_indexes where schemaname='public' and tablename=$1 and indexname='legacyseed_status_active_name'`,
+          [table],
+        )).rows[0].count,
+        0,
+      );
+      assertEquals(
+        (await query<{ count: number }>(
+          sql,
+          "select count(*)::int count from pack_migration_applications where plan_id=$1",
+          [migration.plan.id],
+        )).rows[0].count,
+        0,
+      );
+      assertEquals(
+        (await query<{ allowed: number; denied: number }>(
+          sql,
+          `select count(*) filter(where decision='allowed')::int allowed,
+                  count(*) filter(where decision='denied')::int denied
+             from pack_migration_audit_events where plan_id=$1`,
+          [migration.plan.id],
+        )).rows[0],
+        { allowed: 0, denied: 1 },
+      );
+    }
+
+    const successfulCandidate = await loadPackFromFiles(
+      legacySeedMigrationPack("2.0.3", true),
+    );
+    const successful = await createPackMigrationPlan(
+      sql,
+      successfulCandidate,
+      auth,
+    );
+    await sql.begin((tx) =>
+      validateMigrationPlan(tx, successful.plan.id, auth)
+    );
+    const application = await sql.begin((tx) =>
+      applyMigrationPlan(
+        tx,
+        successful.plan.id,
+        { acknowledgement: "reviewed" },
+        auth,
+      )
+    );
+    assert(application);
+    assertEquals(
+      application.candidate_revision_id,
+      successful.plan.to_pack_revision_id,
+    );
+    assertEquals(
+      (await query<{ count: number }>(
+        sql,
+        `select count(*)::int count from pg_constraint where conrelid=$1::regclass and conname=$2`,
+        [table, oldConstraintName],
+      )).rows[0].count,
+      0,
+    );
+    assertEquals(
+      (await query<{ indexdef: string }>(
+        sql,
+        `select indexdef from pg_indexes where schemaname='public' and tablename=$1 and indexname='legacyseed_status_active_name'`,
+        [table],
+      )).rows,
+      [{
+        indexdef:
+          `CREATE UNIQUE INDEX legacyseed_status_active_name ON public.${table} USING btree (project_id, name) WHERE (archived_at IS NULL)`,
+      }],
+    );
+    assertEquals(
+      (await query<{ id: string }>(
+        sql,
+        `select candidate_revision_id id from pack_active_revisions where publisher='test' and pack_name='legacyseed'`,
+      )).rows[0].id,
+      successful.plan.to_pack_revision_id,
+    );
+    assertEquals(
+      (await query<{ count: number }>(
+        sql,
+        `select count(*)::int count from pack_migration_applications a
+         join pack_migration_audit_events e on e.application_id=a.id
+         where a.plan_id=$1 and e.decision='allowed'`,
+        [successful.plan.id],
+      )).rows[0].count,
+      1,
+    );
+  } finally {
+    if (sql) await closePostgresClient(sql).catch(() => undefined);
+    if (runtime) await runtime.stop().catch(() => undefined);
+    if (previous === undefined) Deno.env.delete("OPERANT_DATA_DIR");
+    else Deno.env.set("OPERANT_DATA_DIR", previous);
+    await Deno.remove(root, { recursive: true }).catch(() => undefined);
+  }
+});
+
+function legacySeedMigrationPack(
+  version: string,
+  activeConstraint: boolean,
+): UploadedPackFile[] {
+  return [
+    {
+      path: "pack.yaml",
+      text:
+        `kind: Pack\napiVersion: operant.dev/v1\nmetadata: { publisher: test, name: legacyseed, version: ${version} }\nspec: { purpose: Live full-to-active seed migration proof., axi: {} }\n`,
+    },
+    {
+      path: "resources/status.yaml",
+      text:
+        `kind: Resource\napiVersion: operant.dev/v1\nmetadata: { name: status }\nspec:\n  fields:\n    name: { type: string, required: true${
+          activeConstraint ? "" : ", unique: true"
+        } }\n    label: { type: string, required: true }\n${
+          activeConstraint
+            ? "  constraints:\n    - { name: legacyseed_status_active_name, kind: unique, fields: [name], where: 'active()' }\n"
+            : ""
+        }  axi: {}\n`,
+    },
+    ...activeConstraint
+      ? [{
+        path: "seeds/statuses.yaml",
+        text:
+          `kind: Seed\napiVersion: operant.dev/v1\nmetadata: { name: statuses }\nspec:\n  resource: status\n  key: name\n  mode: changeset\n  rows: [{ name: Ready, label: Ready }]\n  axi: {}\n`,
+      }]
+      : [],
+  ];
+}
+
 async function waitUntilBlocked(
   sql: ReturnType<typeof createPostgresClient>,
   pid: number,

@@ -1,15 +1,16 @@
 // deno-lint-ignore-file no-import-prefix no-unversioned-import
-import { assertEquals } from "jsr:@std/assert";
+import { assertEquals, assertRejects } from "jsr:@std/assert";
 import {
   query,
   type Sql,
 } from "../../../src/adapters/outbound/postgres/client.ts";
-import { uuidV7 } from "../../../src/domain/ids/uuid_v7.ts";
+import { isUuidV7, uuidV7 } from "../../../src/domain/ids/uuid_v7.ts";
 import {
   type CliLauncher,
   type LiveHarness,
   startLiveHarness,
 } from "../../support/live_harness.ts";
+import { makePostgresSeedStageRepository } from "../../../src/adapters/outbound/postgres/repositories/seed_stage_repository.ts";
 import { startHttpProvider } from "../../support/http_provider.ts";
 import {
   seedRead,
@@ -275,6 +276,15 @@ for (const trace of [false, true]) {
           archiveStageId,
         ]);
         assertEquals(archiveCommit.code, 0, archiveCommit.stderr);
+        const firstHistoryBeforeLaterReplacement = await objectHistory(
+          harness,
+          projectId,
+          seedObjectId,
+        );
+        assertCompleteArchivedHistory(
+          firstHistoryBeforeLaterReplacement,
+          seedObjectId,
+        );
         const replacement = await actor!.runOptctl([
           "--json",
           "--project",
@@ -289,6 +299,8 @@ for (const trace of [false, true]) {
         const replacementStage = JSON.parse(replacement.stdout).data.stage;
         assertEquals(replacementStage.operations[0].op, "create");
         const replacementId = replacementStage.operations[0].object_id;
+        assertEquals(isUuidV7(seedObjectId), true);
+        assertEquals(isUuidV7(replacementId), true);
         assertEquals(replacementId === seedObjectId, false);
         const replacementCommit = await actor!.runOptctl([
           "--json",
@@ -330,6 +342,15 @@ for (const trace of [false, true]) {
           JSON.parse(secondArchiveStage.stdout).data.id,
         ]);
         assertEquals(secondArchiveCommit.code, 0, secondArchiveCommit.stderr);
+        const secondHistoryBeforeLaterReplacement = await objectHistory(
+          harness,
+          projectId,
+          replacementId,
+        );
+        assertCompleteArchivedHistory(
+          secondHistoryBeforeLaterReplacement,
+          replacementId,
+        );
         const secondReplacement = await actor!.runOptctl([
           "--json",
           "--project",
@@ -345,6 +366,7 @@ for (const trace of [false, true]) {
           .stage;
         const secondReplacementId = secondReplacementStage.operations[0]
           .object_id;
+        assertEquals(isUuidV7(secondReplacementId), true);
         assertEquals(secondReplacementId === replacementId, false);
         assertEquals(secondReplacementId === seedObjectId, false);
         const secondReplacementCommit = await actor!.runOptctl([
@@ -384,6 +406,16 @@ for (const trace of [false, true]) {
           [projectId],
         )).rows;
         assertEquals(generations.length, 3);
+        assertEquals(
+          generations.every((generation) => isUuidV7(generation.id)),
+          true,
+        );
+        assertEquals(
+          generations.every((generation) =>
+            isUuidV7(generation.current_object_version_id)
+          ),
+          true,
+        );
         assertEquals(generations[0].id, seedObjectId);
         assertEquals(generations[0].version, 2);
         assertEquals(generations[0].archived_at instanceof Date, true);
@@ -400,6 +432,39 @@ for (const trace of [false, true]) {
             [seedObjectId, archivedVersionBefore],
           )).rows[0].count,
           1,
+        );
+        const publicActive = await querySeedGenerations(
+          harness,
+          projectId,
+          false,
+        );
+        assertEquals(publicActive.map((item) => item.id), [
+          secondReplacementId,
+        ]);
+        const publicAll = await querySeedGenerations(harness, projectId, true);
+        assertEquals(
+          publicAll.map((item) => item.id).sort(),
+          [seedObjectId, replacementId, secondReplacementId].sort(),
+        );
+        const firstArchivedHistory = await objectHistory(
+          harness,
+          projectId,
+          seedObjectId,
+        );
+        const secondArchivedHistory = await objectHistory(
+          harness,
+          projectId,
+          replacementId,
+        );
+        assertCompleteArchivedHistory(firstArchivedHistory, seedObjectId);
+        assertCompleteArchivedHistory(secondArchivedHistory, replacementId);
+        assertEquals(
+          firstArchivedHistory,
+          firstHistoryBeforeLaterReplacement,
+        );
+        assertEquals(
+          secondArchivedHistory,
+          secondHistoryBeforeLaterReplacement,
         );
 
         const concurrentProject = await harness.runOptctl([
@@ -450,12 +515,47 @@ for (const trace of [false, true]) {
           concurrentCommits.map((result) => result.code).sort(),
           [0, 1],
         );
-        const rejectedCommit = concurrentCommits.find((result) =>
+        const loserIndex = concurrentCommits.findIndex((result) =>
           result.code !== 0
-        )!;
+        );
+        const rejectedCommit = concurrentCommits[loserIndex];
         assertEquals(
           JSON.parse(rejectedCommit.stderr).error.code,
           "active_seed_key_conflict",
+        );
+        assertEquals(
+          JSON.parse(rejectedCommit.stderr).error.details,
+          { constraint: "actionproof_target_active_name" },
+        );
+        await assertNoAppliedFacts(
+          harness.server.sql,
+          targetTable,
+          concurrentData[loserIndex].id,
+          concurrentData[loserIndex].operations[0].object_id,
+        );
+
+        for (const seedWins of [true, false]) {
+          await assertDirectSeedRace(
+            harness,
+            actor!,
+            targetTable,
+            trace,
+            seedWins,
+          );
+        }
+
+        await assertSeedRevisionBarriers(
+          harness,
+          actor!,
+          pack,
+          targetTable,
+          trace,
+        );
+        await assertMultipleActiveFailsClosed(
+          harness,
+          actor!,
+          targetTable,
+          trace,
         );
 
         const sameStageProject = await harness.runOptctl([
@@ -1135,4 +1235,497 @@ async function runtimeTable(sql: Sql, name: string) {
     `select table_name from pack_runtime_tables where publisher='test' and pack_name='actionproof' and definition_kind='resource' and definition_name=$1`,
     [name],
   )).rows[0].table_name;
+}
+
+async function querySeedGenerations(
+  harness: LiveHarness,
+  projectId: string,
+  includeArchived: boolean,
+): Promise<Array<{ id: string }>> {
+  const result = await harness.runOptctl([
+    "--json",
+    "--project",
+    projectId,
+    "query",
+    "test/actionproof:target",
+    "--where",
+    'name == "Seeded Target"',
+    "--sort",
+    "created_at:asc",
+    "--include-total",
+    ...(includeArchived ? ["--include-archived"] : []),
+  ]);
+  assertEquals(result.code, 0, result.stderr);
+  const envelope = JSON.parse(result.stdout);
+  assertEquals(envelope.meta.total, envelope.data.items.length);
+  return envelope.data.items;
+}
+
+async function objectHistory(
+  harness: LiveHarness,
+  projectId: string,
+  objectId: string,
+): Promise<Array<Record<string, unknown>>> {
+  const result = await harness.runOptctl([
+    "--json",
+    "--project",
+    projectId,
+    "history",
+    "test/actionproof:target",
+    objectId,
+  ]);
+  assertEquals(result.code, 0, result.stderr);
+  return JSON.parse(result.stdout).data.items;
+}
+
+function assertCompleteArchivedHistory(
+  history: Array<Record<string, unknown>>,
+  objectId: string,
+) {
+  assertEquals(isUuidV7(objectId), true);
+  assertEquals(history.map((item) => item.kind), [
+    "object_version",
+    "object_version",
+  ]);
+  assertEquals(history.map((item) => item.version), [2, 1]);
+  assertEquals(history.map((item) => item.operation), ["archive", "create"]);
+  assertEquals(
+    history.every((item) => isUuidV7(item.object_version_id)),
+    true,
+  );
+}
+
+async function assertNoAppliedFacts(
+  sql: Sql,
+  table: string,
+  stageId: string,
+  objectId: string,
+) {
+  const facts = (await query<Record<string, number>>(
+    sql,
+    `select
+       (select count(*)::int from "${table}" where id::text=$2) objects,
+       (select count(*)::int from changeset_commits where stage_id=$1) commits,
+       (select count(*)::int from object_versions v where v.object_id::text=$2) versions,
+       (select count(*)::int from audit_events a where a.changeset_commit_id in
+          (select id from changeset_commits where stage_id=$1)) audits,
+       (select count(*)::int from events e where e.changeset_commit_id in
+          (select id from changeset_commits where stage_id=$1)) events,
+       (select count(*)::int from outbox_deliveries d where d.changeset_commit_id in
+          (select id from changeset_commits where stage_id=$1)) outbox`,
+    [stageId, objectId],
+  )).rows[0];
+  assertEquals(facts, {
+    objects: 0,
+    commits: 0,
+    versions: 0,
+    audits: 0,
+    events: 0,
+    outbox: 0,
+  });
+}
+
+function holdRow(
+  sql: Sql,
+  statement: string,
+  params: unknown[],
+) {
+  const locked = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const done = sql.begin(async (tx) => {
+    await query(tx, statement, params);
+    locked.resolve();
+    await release.promise;
+  });
+  return { locked: locked.promise, release: release.resolve, done };
+}
+
+async function assertDirectSeedRace(
+  harness: LiveHarness,
+  actor: CliLauncher,
+  targetTable: string,
+  trace: boolean,
+  seedWins: boolean,
+) {
+  const orientation = seedWins ? "seed-wins" : "direct-wins";
+  const project = await harness.runOptctl([
+    "--json",
+    "project",
+    "create",
+    `${orientation}-${trace ? "trace" : "default"}`,
+    "--display-name",
+    `Direct Seed ${orientation}`,
+  ]);
+  assertEquals(project.code, 0, project.stderr);
+  const projectId = JSON.parse(project.stdout).data.id as string;
+  const seed = await actor.runOptctl([
+    "--json",
+    "--project",
+    projectId,
+    "seed",
+    "stage",
+    "test/actionproof",
+    "--seed",
+    "targets",
+  ]);
+  assertEquals(seed.code, 0, seed.stderr);
+  const seedStage = JSON.parse(seed.stdout).data.stage;
+  const direct = await harness.runJson(
+    ["--json", "changeset", "stage"],
+    {
+      project_id: projectId,
+      operations: [{
+        op: "create",
+        resource: "test/actionproof:target",
+        fields: { name: "Seeded Target", status: "ready" },
+      }],
+    },
+  );
+  assertEquals(direct.code, 0, direct.stderr);
+  const directStage = JSON.parse(direct.stdout).data;
+  assertEquals(isUuidV7(seedStage.operations[0].object_id), true);
+  assertEquals(isUuidV7(directStage.operations[0].object_id), true);
+
+  const loser = seedWins ? directStage : seedStage;
+  const winner = seedWins ? seedStage : directStage;
+  const held = holdRow(
+    harness.server.sql,
+    "select stage_id from staged_changeset_lifecycle where stage_id=$1 for update",
+    [loser.id],
+  );
+  await held.locked;
+  const loserCommit = (seedWins ? harness : actor).runOptctl([
+    "--json",
+    "changeset",
+    "commit",
+    loser.id,
+    "--timeout",
+    "30s",
+  ]);
+  await observeBlockedQuery(harness.server.sql, "staged_changeset_lifecycle");
+  const winnerCommit = await (seedWins ? actor : harness).runOptctl([
+    "--json",
+    "changeset",
+    "commit",
+    winner.id,
+  ]);
+  assertEquals(winnerCommit.code, 0, winnerCommit.stderr);
+  held.release();
+  await held.done;
+  const rejected = await loserCommit;
+  assertEquals(rejected.code, 1);
+  const error = JSON.parse(rejected.stderr).error;
+  assertEquals(
+    error.code,
+    seedWins ? "constraint_conflict" : "active_seed_key_conflict",
+  );
+  assertEquals(
+    error.details,
+    seedWins ? {} : { constraint: "actionproof_target_active_name" },
+  );
+  await assertNoAppliedFacts(
+    harness.server.sql,
+    targetTable,
+    loser.id,
+    loser.operations[0].object_id,
+  );
+  const active = (await query<{ id: string }>(
+    harness.server.sql,
+    `select id from "${targetTable}" where project_id=$1 and name='Seeded Target' and archived_at is null`,
+    [projectId],
+  )).rows;
+  assertEquals(active, [{ id: winner.operations[0].object_id }]);
+}
+
+async function stagedFactCounts(sql: Sql) {
+  return (await query<Record<string, number>>(
+    sql,
+    `select
+       (select count(*)::int from staged_changesets) stages,
+       (select count(*)::int from staged_changeset_operations) operations,
+       (select count(*)::int from staged_changeset_dependencies) dependencies,
+       (select count(*)::int from staged_hook_executions) hooks,
+       (select count(*)::int from staged_policy_decisions) policies,
+       (select count(*)::int from staged_changeset_lifecycle) lifecycles`,
+  )).rows[0];
+}
+
+async function assertSeedRevisionBarriers(
+  harness: LiveHarness,
+  actor: CliLauncher,
+  pack: string,
+  targetTable: string,
+  trace: boolean,
+) {
+  const alternate = await Deno.makeTempDir({
+    prefix: "operant-seed-revision-barrier-",
+  });
+  const active = (await query<{ id: string }>(
+    harness.server.sql,
+    `select candidate_revision_id id from pack_active_revisions where publisher='test' and pack_name='actionproof'`,
+  )).rows[0].id;
+  try {
+    await copyTree(pack, alternate);
+    const manifestPath = `${alternate}/pack.yaml`;
+    await Deno.writeTextFile(
+      manifestPath,
+      (await Deno.readTextFile(manifestPath)).replace(
+        "version: 1.0.0",
+        "version: 1.0.1",
+      ),
+    );
+    const preview = await harness.runOptctl([
+      "--json",
+      "pack",
+      "preview",
+      alternate,
+    ]);
+    assertEquals(preview.code, 0, preview.stderr);
+    const alternateRevision = (await query<{ id: string }>(
+      harness.server.sql,
+      `select id from pack_candidate_revisions where publisher='test' and pack_name='actionproof' and version='1.0.1'`,
+    )).rows[0].id;
+    assertEquals(alternateRevision === active, false);
+
+    const lookupProject = await harness.runOptctl([
+      "--json",
+      "project",
+      "create",
+      `seed-lookup-revision-${trace ? "trace" : "default"}`,
+      "--display-name",
+      "Seed Lookup Revision Barrier",
+    ]);
+    assertEquals(lookupProject.code, 0, lookupProject.stderr);
+    const lookupProjectId = JSON.parse(lookupProject.stdout).data.id;
+    const beforeStage = await stagedFactCounts(harness.server.sql);
+    const projectHold = holdRow(
+      harness.server.sql,
+      "select id from projects where id=$1 for update",
+      [lookupProjectId],
+    );
+    await projectHold.locked;
+    const blockedStage = actor.runOptctl([
+      "--json",
+      "--project",
+      lookupProjectId,
+      "seed",
+      "stage",
+      "test/actionproof",
+      "--seed",
+      "targets",
+    ]);
+    await observeBlockedQuery(harness.server.sql, "projects where id");
+    await query(
+      harness.server.sql,
+      `update pack_active_revisions set candidate_revision_id=$1 where publisher='test' and pack_name='actionproof'`,
+      [alternateRevision],
+    );
+    projectHold.release();
+    await projectHold.done;
+    const stageResult = await blockedStage;
+    assertEquals(stageResult.code, 1);
+    assertEquals(JSON.parse(stageResult.stderr).error, {
+      code: "project_conflict",
+      message: "Semantic source revision changed before persistence",
+      details: {},
+    });
+    assertEquals(await stagedFactCounts(harness.server.sql), beforeStage);
+    await query(
+      harness.server.sql,
+      `update pack_active_revisions set candidate_revision_id=$1 where publisher='test' and pack_name='actionproof'`,
+      [active],
+    );
+
+    const commitProject = await harness.runOptctl([
+      "--json",
+      "project",
+      "create",
+      `seed-commit-revision-${trace ? "trace" : "default"}`,
+      "--display-name",
+      "Seed Commit Revision Barrier",
+    ]);
+    assertEquals(commitProject.code, 0, commitProject.stderr);
+    const commitProjectId = JSON.parse(commitProject.stdout).data.id;
+    const staged = await actor.runOptctl([
+      "--json",
+      "--project",
+      commitProjectId,
+      "seed",
+      "stage",
+      "test/actionproof",
+      "--seed",
+      "targets",
+    ]);
+    assertEquals(staged.code, 0, staged.stderr);
+    const stage = JSON.parse(staged.stdout).data.stage;
+    const lifecycleHold = holdRow(
+      harness.server.sql,
+      "select stage_id from staged_changeset_lifecycle where stage_id=$1 for update",
+      [stage.id],
+    );
+    await lifecycleHold.locked;
+    const blockedCommit = actor.runOptctl([
+      "--json",
+      "changeset",
+      "commit",
+      stage.id,
+      "--timeout",
+      "30s",
+    ]);
+    await observeBlockedQuery(
+      harness.server.sql,
+      "staged_changeset_lifecycle",
+    );
+    await query(
+      harness.server.sql,
+      `update pack_active_revisions set candidate_revision_id=$1 where publisher='test' and pack_name='actionproof'`,
+      [alternateRevision],
+    );
+    lifecycleHold.release();
+    await lifecycleHold.done;
+    const firstFailure = await blockedCommit;
+    const repeatedFailure = await actor.runOptctl([
+      "--json",
+      "changeset",
+      "commit",
+      stage.id,
+    ]);
+    for (const failure of [firstFailure, repeatedFailure]) {
+      assertEquals(failure.code, 1);
+      assertEquals(JSON.parse(failure.stderr).error.code, "stage_stale");
+    }
+    assertEquals(
+      JSON.parse(firstFailure.stderr).error,
+      JSON.parse(repeatedFailure.stderr).error,
+    );
+    await assertNoAppliedFacts(
+      harness.server.sql,
+      targetTable,
+      stage.id,
+      stage.operations[0].object_id,
+    );
+  } finally {
+    await query(
+      harness.server.sql,
+      `update pack_active_revisions set candidate_revision_id=$1 where publisher='test' and pack_name='actionproof'`,
+      [active],
+    ).catch(() => undefined);
+    await Deno.remove(alternate, { recursive: true }).catch(() => undefined);
+  }
+  assertEquals(
+    (await query<{ id: string }>(
+      harness.server.sql,
+      `select candidate_revision_id id from pack_active_revisions where publisher='test' and pack_name='actionproof'`,
+    )).rows[0].id,
+    active,
+  );
+}
+
+async function assertMultipleActiveFailsClosed(
+  harness: LiveHarness,
+  actor: CliLauncher,
+  targetTable: string,
+  trace: boolean,
+) {
+  const project = await harness.runOptctl([
+    "--json",
+    "project",
+    "create",
+    `multiple-active-${trace ? "trace" : "default"}`,
+    "--display-name",
+    "Multiple Active Corruption",
+  ]);
+  assertEquals(project.code, 0, project.stderr);
+  const projectId = JSON.parse(project.stdout).data.id;
+  const auth = (await query<{ id: string }>(
+    harness.server.sql,
+    "select id from auth_contexts order by created_at desc limit 1",
+  )).rows[0].id;
+  const objectIds = [uuidV7(), uuidV7()];
+  const before = await stagedFactCounts(harness.server.sql);
+  await query(
+    harness.server.sql,
+    "drop index actionproof_target_active_name",
+  );
+  try {
+    await query(
+      harness.server.sql,
+      `insert into "${targetTable}"(id,project_id,created_by,updated_by,name,status)
+       values($1,$3,$4,$4,'Seeded Target','ready'),($2,$3,$4,$4,'Seeded Target','ready')`,
+      [objectIds[0], objectIds[1], projectId, auth],
+    );
+    const repository = makePostgresSeedStageRepository(
+      harness.server.sql,
+      { stageSource: () => Promise.reject(new Error("must not stage")) },
+      {} as never,
+    );
+    await assertRejects(
+      () =>
+        repository.findActiveRow({
+          publisher: "test",
+          pack: "actionproof",
+          resourceName: "target",
+          projectId,
+          key: "name",
+          value: "Seeded Target",
+        }),
+      Error,
+      "active-only seed uniqueness is violated",
+    );
+    const failed = await actor.runOptctl([
+      "--json",
+      "--project",
+      projectId,
+      "seed",
+      "stage",
+      "test/actionproof",
+      "--seed",
+      "targets",
+    ]);
+    assertEquals(failed.code, 1);
+    assertEquals(JSON.parse(failed.stderr).error.code, "internal_error");
+    assertEquals(await stagedFactCounts(harness.server.sql), before);
+  } finally {
+    await query(
+      harness.server.sql,
+      `delete from "${targetTable}" where id=any($1::uuid[])`,
+      [objectIds],
+    );
+    await query(
+      harness.server.sql,
+      `create unique index actionproof_target_active_name on "${targetTable}" (project_id, name) where archived_at is null`,
+    );
+  }
+  assertEquals(
+    (await query<{ indexdef: string }>(
+      harness.server.sql,
+      `select indexdef from pg_indexes where schemaname='public' and tablename=$1 and indexname='actionproof_target_active_name'`,
+      [targetTable],
+    )).rows,
+    [{
+      indexdef:
+        `CREATE UNIQUE INDEX actionproof_target_active_name ON public.${targetTable} USING btree (project_id, name) WHERE (archived_at IS NULL)`,
+    }],
+  );
+  assertEquals(
+    (await query<{ count: number }>(
+      harness.server.sql,
+      `select count(*)::int count from "${targetTable}" where id=any($1::uuid[])`,
+      [objectIds],
+    )).rows[0].count,
+    0,
+  );
+}
+
+async function copyTree(source: string, destination: string): Promise<void> {
+  for await (const entry of Deno.readDir(source)) {
+    const from = `${source}/${entry.name}`;
+    const to = `${destination}/${entry.name}`;
+    if (entry.isDirectory) {
+      await Deno.mkdir(to);
+      await copyTree(from, to);
+    } else {
+      await Deno.copyFile(from, to);
+    }
+  }
 }
