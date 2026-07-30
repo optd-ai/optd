@@ -107,6 +107,125 @@ Deno.test("PG18.4 app-managed startup refuses and preserves a live same-data-dir
   });
 });
 
+Deno.test("PG18.4 app-managed startup resolves a live relative -D from the postmaster cwd", async () => {
+  if (!await hasPostgres18_4()) return;
+  await withManagedDataDir(async (rootDir) => {
+    await initializeAndStop(rootDir);
+    const raw = await startRelativePostgres(rootDir);
+    const pidPath = `${rootDir}/postgres/data/postmaster.pid`;
+    const livePidFile = await Deno.readTextFile(pidPath);
+    try {
+      assertEquals(
+        await readProcCwd(raw.process.pid),
+        `${rootDir}/postgres/data`,
+      );
+      assert(`${rootDir}/postgres/data` !== await Deno.realPath(Deno.cwd()));
+      await assertRejects(
+        () => startManagedPostgres(rootDir),
+        Error,
+        "identifies a live PostgreSQL server for this data directory",
+      );
+      assertEquals(await Deno.readTextFile(pidPath), livePidFile);
+      await assertQueryable(raw.databaseUrl);
+    } finally {
+      await stopRawPostgres(raw);
+    }
+  });
+});
+
+Deno.test("PG18.4 app-managed startup recovers a relative -D postmaster PID for another directory", async () => {
+  if (!await hasPostgres18_4()) return;
+  await withManagedDataDir(async (rootDir) => {
+    await initializeAndStop(rootDir);
+    const otherRoot = await Deno.makeTempDir({ prefix: "operant-pg-other-" });
+    let raw: RawPostgres | undefined;
+    let recovered: Awaited<ReturnType<typeof startManagedPostgres>> | undefined;
+    try {
+      await initializeAndStop(otherRoot);
+      raw = await startRelativePostgres(otherRoot);
+      const pidPath = `${rootDir}/postgres/data/postmaster.pid`;
+      await Deno.writeTextFile(
+        pidPath,
+        `${raw.process.pid}\nrelative other-dir fixture\n`,
+      );
+
+      recovered = await startManagedPostgres(rootDir);
+      assert(
+        (await Deno.readTextFile(pidPath)).split("\n")[0] !==
+          String(raw.process.pid),
+      );
+      await assertQueryable(recovered.databaseUrl);
+      await assertQueryable(raw.databaseUrl);
+    } finally {
+      if (recovered) await stopManagedPostgres(recovered);
+      if (raw) await stopRawPostgres(raw);
+      await Deno.remove(otherRoot, { recursive: true }).catch(() => undefined);
+    }
+  });
+});
+
+Deno.test("PG18.4 app-managed startup fails closed for a postgres identity with a deleted cwd", async () => {
+  if (!await hasPostgres18_4()) return;
+  await withManagedDataDir(async (rootDir) => {
+    await initializeAndStop(rootDir);
+    const deletedCwd = await Deno.makeTempDir({
+      prefix: "operant-pg-deleted-cwd-",
+    });
+    const fixture = startPostgresIdentityFixture(deletedCwd, [
+      "-D",
+      "relative-data",
+    ]);
+    const pidPath = `${rootDir}/postgres/data/postmaster.pid`;
+    const pidFile = `${fixture.pid}\ndeleted cwd fixture\n`;
+    try {
+      await waitForProcCmdline(fixture.pid);
+      await Deno.remove(deletedCwd);
+      await Deno.writeTextFile(pidPath, pidFile);
+      await assertRejects(
+        () => startManagedPostgres(rootDir),
+        Error,
+        "cwd identity",
+      );
+      assertEquals(await Deno.readTextFile(pidPath), pidFile);
+    } finally {
+      fixture.kill("SIGTERM");
+      await fixture.status;
+      await Deno.remove(deletedCwd).catch(() => undefined);
+    }
+  });
+});
+
+Deno.test("PG18.4 app-managed startup fails closed for ambiguous postgres -D identity", async () => {
+  if (!await hasPostgres18_4()) return;
+  await withManagedDataDir(async (rootDir) => {
+    await initializeAndStop(rootDir);
+    const fixtureCwd = await Deno.makeTempDir({
+      prefix: "operant-pg-ambiguous-cwd-",
+    });
+    const fixture = startPostgresIdentityFixture(fixtureCwd, [
+      "-D",
+      "first",
+      "-Dsecond",
+    ]);
+    const pidPath = `${rootDir}/postgres/data/postmaster.pid`;
+    const pidFile = `${fixture.pid}\nambiguous fixture\n`;
+    try {
+      await waitForProcCmdline(fixture.pid);
+      await Deno.writeTextFile(pidPath, pidFile);
+      await assertRejects(
+        () => startManagedPostgres(rootDir),
+        Error,
+        "data-directory identity",
+      );
+      assertEquals(await Deno.readTextFile(pidPath), pidFile);
+    } finally {
+      fixture.kill("SIGTERM");
+      await fixture.status;
+      await Deno.remove(fixtureCwd, { recursive: true }).catch(() => undefined);
+    }
+  });
+});
+
 Deno.test("PG18.4 app-managed startup fails closed and preserves malformed postmaster.pid", async () => {
   if (!await hasPostgres18_4()) return;
   await withManagedDataDir(async (rootDir) => {
@@ -197,6 +316,164 @@ Deno.test("app-managed Postgres starts, migrates, persists sentinel across resta
     await Deno.remove(dataDir, { recursive: true }).catch(() => {});
   }
 });
+
+type RawPostgres = {
+  process: Deno.ChildProcess;
+  databaseUrl: string;
+};
+
+async function startRelativePostgres(rootDir: string): Promise<RawPostgres> {
+  const bins = await findPostgresBins();
+  if (!bins) throw new Error("postgres binaries unexpectedly unavailable");
+  const runDir = `${rootDir}/postgres/relative-run`;
+  await Deno.mkdir(runDir, { recursive: true });
+  const port = freePort();
+  const process = new Deno.Command(bins.postgres, {
+    args: [
+      "-D",
+      ".",
+      "-k",
+      runDir,
+      "-p",
+      String(port),
+      "-c",
+      "listen_addresses=127.0.0.1",
+    ],
+    cwd: `${rootDir}/postgres/data`,
+    stdout: "inherit",
+    stderr: "inherit",
+  }).spawn();
+  const raw = {
+    process,
+    databaseUrl: `postgres://operant@127.0.0.1:${port}/postgres`,
+  };
+  try {
+    await waitForPostgres(bins.psql, port, process);
+    return raw;
+  } catch (error) {
+    try {
+      process.kill("SIGTERM");
+    } catch { /* already stopped */ }
+    await process.status.catch(() => undefined);
+    throw error;
+  }
+}
+
+async function waitForPostgres(
+  psql: string,
+  port: number,
+  process: Deno.ChildProcess,
+): Promise<void> {
+  const deadline = Date.now() + 30_000;
+  let lastError = "";
+  while (Date.now() < deadline) {
+    const status = await Promise.race([
+      process.status.then((value) => ({ exited: true as const, value })),
+      new Promise<{ exited: false }>((resolve) =>
+        setTimeout(() => resolve({ exited: false }), 0)
+      ),
+    ]);
+    if (status.exited) {
+      throw new Error(
+        `relative postgres exited during startup: ${status.value.code}`,
+      );
+    }
+    const output = await new Deno.Command(psql, {
+      args: [
+        "-h",
+        "127.0.0.1",
+        "-p",
+        String(port),
+        "-d",
+        "postgres",
+        "-U",
+        "operant",
+        "-Atc",
+        "select 1",
+      ],
+      stdout: "piped",
+      stderr: "piped",
+    }).output();
+    if (
+      output.success && new TextDecoder().decode(output.stdout).trim() === "1"
+    ) {
+      return;
+    }
+    lastError = new TextDecoder().decode(output.stderr).trim();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(`relative postgres did not become ready: ${lastError}`);
+}
+
+async function stopRawPostgres(raw: RawPostgres): Promise<void> {
+  try {
+    raw.process.kill("SIGTERM");
+  } catch { /* already stopped */ }
+  await raw.process.status.catch(() => undefined);
+}
+
+async function assertQueryable(databaseUrl: string): Promise<void> {
+  const sql = createPostgresClient(databaseUrl);
+  try {
+    assertEquals(
+      (await query<{ value: number }>(sql, "select 1 value")).rows[0].value,
+      1,
+    );
+  } finally {
+    await closePostgresClient(sql);
+  }
+}
+
+function startPostgresIdentityFixture(
+  cwd: string,
+  postgresArgs: string[],
+): Deno.ChildProcess {
+  const shellArgs = postgresArgs.map(shellQuote).join(" ");
+  return new Deno.Command("/bin/bash", {
+    args: [
+      "-c",
+      `exec -a postgres /usr/bin/perl -e '$SIG{TERM}=sub{exit}; sleep 60' -- ${shellArgs}`,
+    ],
+    cwd,
+    stdout: "null",
+    stderr: "null",
+  }).spawn();
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", `'\\''`)}'`;
+}
+
+async function waitForProcCmdline(pid: number): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const output = await new Deno.Command("/bin/cat", {
+      args: [`/proc/${pid}/cmdline`],
+      stdout: "piped",
+      stderr: "null",
+    }).output();
+    const cmdline = new TextDecoder().decode(output.stdout);
+    if (output.success && cmdline.startsWith("postgres\0")) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`postgres identity fixture ${pid} did not start`);
+}
+
+async function readProcCwd(pid: number): Promise<string> {
+  const output = await new Deno.Command("/bin/readlink", {
+    args: ["-e", `/proc/${pid}/cwd`],
+    stdout: "piped",
+    stderr: "piped",
+  }).output();
+  if (!output.success) throw new Error(`cannot read cwd for PID ${pid}`);
+  return new TextDecoder().decode(output.stdout).trimEnd();
+}
+
+function freePort(): number {
+  const listener = Deno.listen({ hostname: "127.0.0.1", port: 0 });
+  const port = (listener.addr as Deno.NetAddr).port;
+  listener.close();
+  return port;
+}
 
 async function hasPostgres18_4(): Promise<boolean> {
   const bins = await findPostgresBins();

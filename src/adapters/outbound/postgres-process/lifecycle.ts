@@ -257,7 +257,26 @@ async function runChecked(command: string, args: string[]): Promise<void> {
   if (!out.success) throw new Error(new TextDecoder().decode(out.stderr));
 }
 
-type PostmasterPidIdentity = "stale" | "live_same_data_dir";
+const PROC_CMDLINE_MAX_BYTES = 4 * 1024 * 1024;
+const PROC_CWD_MAX_BYTES = 8192;
+
+type DirectoryIdentity = {
+  canonicalPath: string;
+  dev: number | null;
+  ino: number | null;
+};
+
+type PostmasterPidInspection = {
+  kind:
+    | "missing"
+    | "non_postgres"
+    | "postgres_other_data_dir"
+    | "live_same_data_dir";
+  managedTarget: DirectoryIdentity;
+  cmdline?: Uint8Array;
+  cwd?: DirectoryIdentity;
+  postgresTarget?: DirectoryIdentity;
+};
 
 async function removeDemonstrablyStalePostmasterPid(
   dataDir: string,
@@ -280,13 +299,16 @@ async function removeDemonstrablyStalePostmasterPid(
     throw new Error(`refusing to remove malformed ${pidPath}`);
   }
 
+  let priorEvidence: PostmasterPidInspection | undefined;
   for (let inspection = 0; inspection < 2; inspection++) {
     const identity = await inspectPostmasterPid(pid, dataDir, pidPath);
-    if (identity === "live_same_data_dir") {
+    if (priorEvidence && !sameInspectionEvidence(priorEvidence, identity)) {
       throw new Error(
-        `refusing to start app-managed PostgreSQL: ${pidPath} identifies a live PostgreSQL server for this data directory (PID ${pid})`,
+        `refusing to remove ${pidPath}: process or data-directory identity for PID ${pid} changed during inspection`,
       );
     }
+    priorEvidence = identity;
+
     let current: string;
     try {
       current = await Deno.readTextFile(pidPath);
@@ -299,6 +321,11 @@ async function removeDemonstrablyStalePostmasterPid(
     }
   }
 
+  if (priorEvidence?.kind === "live_same_data_dir") {
+    throw new Error(
+      `refusing to start app-managed PostgreSQL: ${pidPath} identifies a live PostgreSQL server for this data directory (PID ${pid})`,
+    );
+  }
   await Deno.remove(pidPath);
 }
 
@@ -306,32 +333,13 @@ async function inspectPostmasterPid(
   pid: number,
   dataDir: string,
   pidPath: string,
-): Promise<PostmasterPidIdentity> {
-  const procDir = `/proc/${pid}`;
-  let bytes: Uint8Array;
-  try {
-    bytes = await Deno.readFile(`${procDir}/cmdline`);
-  } catch (error) {
-    if (error instanceof Deno.errors.NotFound) return "stale";
-    const output = await new Deno.Command("/bin/sh", {
-      args: [
-        "-c",
-        'if [ ! -d "$1" ]; then exit 2; fi; exec /bin/cat "$1/cmdline"',
-        "sh",
-        procDir,
-      ],
-      stdout: "piped",
-      stderr: "piped",
-    }).output();
-    if (output.success) bytes = output.stdout;
-    else {
-      if (output.code === 2) return "stale";
-      throw new Error(
-        `refusing to remove ${pidPath}: process identity for PID ${pid} is unreadable`,
-        { cause: error },
-      );
-    }
-  }
+): Promise<PostmasterPidInspection> {
+  const managedTarget = await readDirectoryIdentity(
+    dataDir,
+    "managed PostgreSQL data directory",
+  );
+  const bytes = await readProcCmdline(pid);
+  if (!bytes) return { kind: "missing", managedTarget };
   if (bytes.length === 0) {
     throw new Error(
       `refusing to remove ${pidPath}: process identity for PID ${pid} is unreadable`,
@@ -340,7 +348,9 @@ async function inspectPostmasterPid(
 
   const argv = new TextDecoder().decode(bytes).split("\0").filter(Boolean);
   const executable = argv[0]?.split("/").at(-1);
-  if (executable !== "postgres") return "stale";
+  if (executable !== "postgres") {
+    return { kind: "non_postgres", managedTarget, cmdline: bytes };
+  }
 
   const candidates: string[] = [];
   for (let index = 1; index < argv.length; index++) {
@@ -361,26 +371,207 @@ async function inspectPostmasterPid(
     );
   }
 
-  return await pathsIdentifySameDirectory(candidates[0], dataDir)
-    ? "live_same_data_dir"
-    : "stale";
+  const cwd = await readProcCwdIdentity(pid);
+  if (!cwd) return { kind: "missing", managedTarget };
+  const candidatePath = candidates[0].startsWith("/")
+    ? candidates[0]
+    : `${cwd.canonicalPath}/${candidates[0]}`;
+  const postgresTarget = await readDirectoryIdentity(
+    candidatePath,
+    `PostgreSQL data directory for PID ${pid}`,
+  );
+
+  if (directoriesIdentifySameTarget(postgresTarget, managedTarget)) {
+    return {
+      kind: "live_same_data_dir",
+      managedTarget,
+      cmdline: bytes,
+      cwd,
+      postgresTarget,
+    };
+  }
+  return {
+    kind: "postgres_other_data_dir",
+    managedTarget,
+    cmdline: bytes,
+    cwd,
+    postgresTarget,
+  };
 }
 
-async function pathsIdentifySameDirectory(
-  candidate: string,
-  dataDir: string,
-): Promise<boolean> {
-  if (candidate === dataDir) return true;
+async function readProcCmdline(pid: number): Promise<Uint8Array | null> {
+  const path = `/proc/${pid}/cmdline`;
+  let directError: unknown;
   try {
-    return await Deno.realPath(candidate) === await Deno.realPath(dataDir);
+    return await readBoundedFile(path, PROC_CMDLINE_MAX_BYTES);
   } catch (error) {
-    if (error instanceof Deno.errors.NotFound) return false;
+    directError = error;
+  }
+
+  const output = await new Deno.Command("/bin/cat", {
+    args: [path],
+    stdout: "piped",
+    stderr: "piped",
+  }).output();
+  if (output.success) {
+    if (output.stdout.length > PROC_CMDLINE_MAX_BYTES) {
+      throw new Error(`process cmdline for PID ${pid} exceeds safe bounds`);
+    }
+    return output.stdout;
+  }
+  if (!await procPidExists(pid)) return null;
+  throw new Error(`process identity for PID ${pid} is unreadable`, {
+    cause: directError,
+  });
+}
+
+async function readProcCwdIdentity(
+  pid: number,
+): Promise<DirectoryIdentity | null> {
+  const path = `/proc/${pid}/cwd`;
+  let canonicalPath: string;
+  let directError: unknown;
+  try {
+    canonicalPath = await Deno.realPath(path);
+  } catch (error) {
+    directError = error;
+    const output = await new Deno.Command("/bin/readlink", {
+      args: ["-e", path],
+      stdout: "piped",
+      stderr: "piped",
+    }).output();
+    if (!output.success) {
+      if (!await procPidExists(pid)) return null;
+      throw new Error(
+        `process cwd identity for PID ${pid} is unreadable or deleted`,
+        { cause: directError },
+      );
+    }
+    if (
+      output.stdout.length === 0 || output.stdout.length > PROC_CWD_MAX_BYTES
+    ) {
+      throw new Error(`process cwd identity for PID ${pid} is ambiguous`);
+    }
+    const decoded = new TextDecoder().decode(output.stdout);
+    canonicalPath = decoded.endsWith("\n") ? decoded.slice(0, -1) : decoded;
+    if (
+      !canonicalPath.startsWith("/") || canonicalPath.includes("\n") ||
+      canonicalPath.includes("\r") || canonicalPath.includes("\0")
+    ) {
+      throw new Error(`process cwd identity for PID ${pid} is ambiguous`);
+    }
+  }
+
+  try {
+    return await readDirectoryIdentity(canonicalPath, `cwd for PID ${pid}`);
+  } catch (error) {
+    if (!await procPidExists(pid)) return null;
     throw new Error(
-      "cannot safely resolve PostgreSQL data-directory identity",
-      {
-        cause: error,
-      },
+      `process cwd identity for PID ${pid} is unreadable or deleted`,
+      { cause: error },
     );
+  }
+}
+
+async function readDirectoryIdentity(
+  path: string,
+  description: string,
+): Promise<DirectoryIdentity> {
+  try {
+    const canonicalPath = await Deno.realPath(path);
+    const info = await Deno.stat(canonicalPath);
+    if (!info.isDirectory) throw new Error(`${description} is not a directory`);
+    return {
+      canonicalPath,
+      dev: info.dev ?? null,
+      ino: info.ino ?? null,
+    };
+  } catch (error) {
+    throw new Error(`cannot safely resolve ${description}`, { cause: error });
+  }
+}
+
+function directoriesIdentifySameTarget(
+  left: DirectoryIdentity,
+  right: DirectoryIdentity,
+): boolean {
+  const haveUnixIdentity = left.dev !== null && left.ino !== null &&
+    right.dev !== null && right.ino !== null;
+  if (haveUnixIdentity) {
+    const sameUnixIdentity = left.dev === right.dev && left.ino === right.ino;
+    if (left.canonicalPath === right.canonicalPath && !sameUnixIdentity) {
+      throw new Error(
+        "cannot safely resolve PostgreSQL data-directory identity: canonical target was replaced",
+      );
+    }
+    return sameUnixIdentity;
+  }
+  return left.canonicalPath === right.canonicalPath;
+}
+
+function sameInspectionEvidence(
+  left: PostmasterPidInspection,
+  right: PostmasterPidInspection,
+): boolean {
+  if (
+    left.kind !== right.kind ||
+    !sameDirectoryIdentity(left.managedTarget, right.managedTarget)
+  ) return false;
+  if (left.kind === "missing") return true;
+  if (!sameBytes(left.cmdline, right.cmdline)) return false;
+  if (left.kind === "non_postgres") return true;
+  return sameDirectoryIdentity(left.cwd, right.cwd) &&
+    sameDirectoryIdentity(left.postgresTarget, right.postgresTarget);
+}
+
+function sameDirectoryIdentity(
+  left: DirectoryIdentity | undefined,
+  right: DirectoryIdentity | undefined,
+): boolean {
+  return left !== undefined && right !== undefined &&
+    left.canonicalPath === right.canonicalPath && left.dev === right.dev &&
+    left.ino === right.ino;
+}
+
+function sameBytes(
+  left: Uint8Array | undefined,
+  right: Uint8Array | undefined,
+): boolean {
+  if (!left || !right || left.length !== right.length) return false;
+  return left.every((byte, index) => byte === right[index]);
+}
+
+async function readBoundedFile(
+  path: string,
+  maximumBytes: number,
+): Promise<Uint8Array> {
+  const file = await Deno.open(path, { read: true });
+  try {
+    const buffer = new Uint8Array(maximumBytes + 1);
+    let length = 0;
+    while (length < buffer.length) {
+      const read = await file.read(buffer.subarray(length));
+      if (read === null) break;
+      length += read;
+    }
+    if (length > maximumBytes) throw new Error(`${path} exceeds safe bounds`);
+    return buffer.slice(0, length);
+  } finally {
+    file.close();
+  }
+}
+
+async function procPidExists(pid: number): Promise<boolean> {
+  const path = `/proc/${pid}`;
+  try {
+    return (await Deno.stat(path)).isDirectory;
+  } catch {
+    const output = await new Deno.Command("/bin/test", {
+      args: ["-d", path],
+      stdout: "null",
+      stderr: "null",
+    }).output();
+    return output.success;
   }
 }
 
