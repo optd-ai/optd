@@ -11,7 +11,10 @@ import type {
   PublicFlowCommandResult,
   PublicFlowLauncher,
 } from "../public_flow_contract.ts";
-import type { CompletePublicFlowBackend } from "./backend.ts";
+import {
+  type CompletePublicFlowBackend,
+  QUIESCENT_HOOK_EVIDENCE,
+} from "./backend.ts";
 import { isUuidV7, loginProcess, runJson } from "./helpers.ts";
 import { runCompleteCrmMigration } from "./crm_migration.ts";
 
@@ -25,6 +28,7 @@ export async function runCompleteCrmPublicFlow(
   const failures: unknown[] = [];
   try {
     await harness.compileCurrentCli();
+    await harness.configureProvider([]);
     const PACK = await harness.assetPath("crm");
     const human = await launcher(harness, launchers, "human");
     const requestOnly = await launcher(harness, launchers, "request_only");
@@ -206,6 +210,11 @@ export async function runCompleteCrmPublicFlow(
     assert(
       isUuidV7(String(firstSeed.data.id)),
       JSON.stringify(firstSeed.data),
+    );
+    await assertHookQuiescence(
+      harness,
+      output,
+      "crm:post-commit:first-seed",
     );
 
     for (const role of [`${CRM}:sales_manager`, `${CRM}:crm_admin`]) {
@@ -398,6 +407,13 @@ export async function runCompleteCrmPublicFlow(
         }),
       ]]
     ) {
+      if (args.includes("action")) {
+        await assertHookQuiescence(
+          harness,
+          output,
+          "crm:pre-action:revoked-log-activity",
+        );
+      }
       const denied = await agent.runCli(args);
       output.push(denied.stdout, denied.stderr);
       assertEquals(denied.code, 1, denied.stderr);
@@ -509,6 +525,11 @@ export async function runCompleteCrmPublicFlow(
     assertEquals(secondSeed.data.stage, null);
     assertEquals(await persistenceCounts(harness), beforeSecondSeed);
 
+    await assertHookQuiescence(
+      harness,
+      output,
+      "crm:pre-hook-stage:setup",
+    );
     const setupStage = json(
       await ok(
         runJson(
@@ -569,6 +590,11 @@ export async function runCompleteCrmPublicFlow(
       ]),
       output,
     );
+    await assertHookQuiescence(
+      harness,
+      output,
+      "crm:post-commit:setup",
+    );
     const setupOperation = (key: string) =>
       setupStage.operations.find((value: any) => value.key === key);
     const companyId = String(setupOperation("company").object_id);
@@ -588,6 +614,11 @@ export async function runCompleteCrmPublicFlow(
       ]
     ) assert(isUuidV7(value));
 
+    await assertHookQuiescence(
+      harness,
+      output,
+      "crm:pre-hook-stage:all-seven",
+    );
     const allSeven = json(
       await ok(
         runJson(
@@ -685,11 +716,21 @@ export async function runCompleteCrmPublicFlow(
       ]),
       output,
     );
+    await assertHookQuiescence(
+      harness,
+      output,
+      "crm:post-commit:all-seven",
+    );
     const leadId = String(
       allSeven.operations.find((value: any) => value.key === "lead")
         .object_id,
     );
     assert(isUuidV7(leadId));
+    await assertHookQuiescence(
+      harness,
+      output,
+      "crm:pre-action:convert-lead",
+    );
     const convertLeadResult = await replacementHuman.launcher.runCli([
       "--json",
       "--project",
@@ -718,6 +759,11 @@ export async function runCompleteCrmPublicFlow(
         ["roles", { deep: { relationship: "spoofed" } }],
       ] as const
     ) {
+      await assertHookQuiescence(
+        harness,
+        output,
+        `crm:pre-action:log-activity-spoofed-${field}`,
+      );
       const spoofed = await replacementHuman.launcher.runCli([
         "--json",
         "--project",
@@ -742,6 +788,11 @@ export async function runCompleteCrmPublicFlow(
         "caller-supplied actor or role authority is not accepted",
       );
     }
+    await assertHookQuiescence(
+      harness,
+      output,
+      "crm:pre-action:log-activity-valid",
+    );
     const logged = json(
       await ok(
         replacementHuman.launcher.runCli([
@@ -789,6 +840,11 @@ export async function runCompleteCrmPublicFlow(
         logged.id,
       ]),
       output,
+    );
+    await assertHookQuiescence(
+      harness,
+      output,
+      "crm:post-commit:log-activity",
     );
 
     // The canonical won transition is authored by one sales manager and
@@ -926,6 +982,11 @@ export async function runCompleteCrmPublicFlow(
       ]),
       output,
     );
+    await assertHookQuiescence(
+      harness,
+      output,
+      "crm:post-commit:viewer-link",
+    );
     const exactViewerIdentity = json(
       await ok(
         viewerLaunchers[0].runCli(["--json", "auth", "whoami"]),
@@ -967,6 +1028,11 @@ export async function runCompleteCrmPublicFlow(
     output.push(unrelatedViewerRead.stdout, unrelatedViewerRead.stderr);
     assertEquals(unrelatedViewerRead.code, 1);
 
+    await assertHookQuiescence(
+      harness,
+      output,
+      "crm:pre-hook-stage:proposal",
+    );
     const proposal = json(
       await ok(
         runJson(
@@ -996,6 +1062,16 @@ export async function runCompleteCrmPublicFlow(
         proposal.id,
       ]),
       output,
+    );
+    await assertHookQuiescence(
+      harness,
+      output,
+      "crm:post-commit:proposal",
+    );
+    await assertHookQuiescence(
+      harness,
+      output,
+      "crm:pre-action:mark-won",
     );
     const won = json(
       await ok(
@@ -1066,6 +1142,11 @@ export async function runCompleteCrmPublicFlow(
       ]),
       output,
     );
+    await assertHookQuiescence(
+      harness,
+      output,
+      "crm:post-commit:mark-won",
+    );
     const wonView = json(
       await ok(
         replacementHuman.launcher.runCli([
@@ -1111,6 +1192,11 @@ export async function runCompleteCrmPublicFlow(
     assert(wonHistory.data.items.length >= 4);
 
     // A distinct proposal proves rejection is terminal and cannot commit.
+    await assertHookQuiescence(
+      harness,
+      output,
+      "crm:pre-hook-stage:lost-setup",
+    );
     const lostSetup = json(
       await ok(
         runJson(
@@ -1144,10 +1230,20 @@ export async function runCompleteCrmPublicFlow(
       ]),
       output,
     );
+    await assertHookQuiescence(
+      harness,
+      output,
+      "crm:post-commit:lost-setup",
+    );
     const lostOpportunityId = String(lostSetup.operations[0].object_id);
     for (
       const [version, to] of [[1, "qualified"], [2, "proposal"]] as const
     ) {
+      await assertHookQuiescence(
+        harness,
+        output,
+        `crm:pre-hook-stage:lost-transition-${to}`,
+      );
       const stage = json(
         await ok(
           runJson(
@@ -1178,9 +1274,19 @@ export async function runCompleteCrmPublicFlow(
         ]),
         output,
       );
+      await assertHookQuiescence(
+        harness,
+        output,
+        `crm:post-commit:lost-transition-${to}`,
+      );
     }
     const lostReasonId = await harness.observeCrmLostReasonId(projectId);
     assert(isUuidV7(lostReasonId));
+    await assertHookQuiescence(
+      harness,
+      output,
+      "crm:pre-action:mark-lost",
+    );
     const lostStage = json(
       await ok(
         replacementHuman.launcher.runCli([
@@ -1235,6 +1341,16 @@ export async function runCompleteCrmPublicFlow(
           lostStage.id,
         ]),
         output,
+      );
+      await assertHookQuiescence(
+        harness,
+        output,
+        "crm:post-commit:mark-lost",
+      );
+      await assertHookQuiescence(
+        harness,
+        output,
+        "crm:pre-action:terminal-mark-won",
       );
       const terminal = await replacementHuman.launcher.runCli([
         "--json",
@@ -1347,8 +1463,12 @@ export async function runCompleteCrmPublicFlow(
       true,
     );
 
-    // Existing commits generated real persisted after-commit deliveries. Use
-    // only public controls and observed actual states for administration.
+    // Create one delivery for a controllable terminalization path. This is the
+    // sole commit boundary that intentionally remains non-quiescent.
+    await harness.restartServer({
+      environment: { OPERANT_OUTBOX_POLL_INTERVAL_MS: "60000" },
+    });
+    await harness.waitUntilReady();
     let outboxList = json(
       await ok(
         replacementHuman.launcher.runCli([
@@ -1423,6 +1543,27 @@ export async function runCompleteCrmPublicFlow(
         ]),
         output,
       );
+      const directListResponse = await fetch(
+        `${harness.serverOrigin}/api/v1/outbox?hook=${CRM}%3Anotify_crm_change&limit=100`,
+        { headers: { authorization: `Bearer ${adminToken}` } },
+      );
+      const directList = await directListResponse.json();
+      assertEquals(
+        directListResponse.status,
+        200,
+        JSON.stringify(directList),
+      );
+      deliveries = directList.data.items;
+      output.push(JSON.stringify({
+        trace: "post-commit-delivery-control",
+        states: deliveries.map((item: any) => item.status),
+      }));
+      cancellable = deliveries.find((item: any) =>
+        item.status === "pending" || item.status === "retry_wait"
+      );
+    }
+    for (let attempt = 0; !cancellable && attempt < 100; attempt++) {
+      await delay(20);
       outboxList = json(
         await ok(
           replacementHuman.launcher.runCli([
@@ -1476,6 +1617,10 @@ export async function runCompleteCrmPublicFlow(
     ]);
     output.push(cancelledRetry.stdout, cancelledRetry.stderr);
     assertEquals(cancelledRetry.code, 1);
+    await harness.restartServer({
+      environment: { OPERANT_OUTBOX_POLL_INTERVAL_MS: "20" },
+    });
+    await harness.waitUntilReady();
     const drainSetup = json(
       await ok(
         runJson(
@@ -1618,6 +1763,20 @@ export async function runCompleteCrmPublicFlow(
       "CRM flow, diagnostics, or launcher cleanup failed",
     );
   }
+}
+
+async function assertHookQuiescence(
+  harness: CompletePublicFlowBackend,
+  output: string[],
+  boundary: string,
+): Promise<void> {
+  const evidence = await harness.awaitHookQuiescence();
+  output.push(JSON.stringify({
+    trace: "hook-quiescence",
+    boundary,
+    ...evidence,
+  }));
+  assertEquals(evidence, QUIESCENT_HOOK_EVIDENCE, boundary);
 }
 
 async function launcher(

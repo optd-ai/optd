@@ -17,6 +17,7 @@ import {
 import { isUuidV7, runJson } from "./helpers.ts";
 
 const PROJECTS = "operant/projects";
+const SYNCHRONOUS_HOOK_BUDGET_MS = 2_000;
 
 export async function runCompleteProjectsPublicFlow(
   harness: CompletePublicFlowBackend,
@@ -302,9 +303,10 @@ export async function runCompleteProjectsPublicFlow(
       (scriptedPublicAttempts.items ?? scriptedPublicAttempts.attempts)
         .length >= 2,
     );
-    assertEquals(
-      await harness.awaitHookQuiescence(),
-      QUIESCENT_HOOK_EVIDENCE,
+    await assertHookQuiescence(
+      harness,
+      output,
+      "projects:post-delivery:scripted-retry",
     );
 
     await ok(
@@ -455,7 +457,11 @@ export async function runCompleteProjectsPublicFlow(
       agent.runCli(["--json", "changeset", "commit", projectSetup.id]),
       output,
     );
-    await harness.awaitHookQuiescence();
+    await assertHookQuiescence(
+      harness,
+      output,
+      "projects:post-commit:project-setup",
+    );
     const workProjectId = String(projectSetup.operations[0].object_id);
     assert(isUuidV7(workProjectId));
 
@@ -483,8 +489,17 @@ export async function runCompleteProjectsPublicFlow(
       agent.runCli(["--json", "changeset", "commit", memberSetup.id]),
       output,
     );
-    await harness.awaitHookQuiescence();
+    await assertHookQuiescence(
+      harness,
+      output,
+      "projects:post-commit:member-setup",
+    );
 
+    await assertHookQuiescence(
+      harness,
+      output,
+      "projects:pre-hook-stage:task-setup",
+    );
     const setup = json(
       await ok(
         runJson(harness, ["--json", "changeset", "stage"], {
@@ -509,19 +524,26 @@ export async function runCompleteProjectsPublicFlow(
       ),
     ).data;
     assertEquals(setup.operations.length, 1);
-    assertEquals(setup.hook_executions.length, 1);
-    assertEquals(setup.hook_executions[0].phase, "changeset.validate");
-    assert(setup.hook_executions[0].duration_ms < 2_000);
-    assertStringIncludes(
-      setup.hook_executions[0].stderr,
-      "validate_task errors=0 warnings=0",
-    );
+    assertPersistedHookEvidence(setup, [{
+      phase: "changeset.validate",
+      stderr: "validate_task errors=0 warnings=0",
+    }]);
     await ok(
       agent.runCli(["--json", "changeset", "commit", setup.id]),
       output,
     );
+    await assertHookQuiescence(
+      harness,
+      output,
+      "projects:post-commit:task-setup",
+    );
     const taskId = String(setup.operations[0].object_id);
     assert(isUuidV7(taskId));
+    await assertHookQuiescence(
+      harness,
+      output,
+      "projects:pre-hook-stage:operation-setup",
+    );
     const operationSetup = json(
       await ok(
         runJson(
@@ -589,8 +611,18 @@ export async function runCompleteProjectsPublicFlow(
       ]),
       output,
     );
+    await assertHookQuiescence(
+      harness,
+      output,
+      "projects:post-commit:operation-setup",
+    );
     const operation = (key: string) =>
       operationSetup.operations.find((value: any) => value.key === key);
+    await assertHookQuiescence(
+      harness,
+      output,
+      "projects:pre-hook-stage:all-seven",
+    );
     const allSeven = json(
       await ok(
         runJson(
@@ -687,6 +719,11 @@ export async function runCompleteProjectsPublicFlow(
       ]),
       output,
     );
+    await assertHookQuiescence(
+      harness,
+      output,
+      "projects:post-commit:all-seven",
+    );
 
     const readers: Array<
       { principalId: string; launcher: PublicFlowLauncher }
@@ -760,6 +797,11 @@ export async function runCompleteProjectsPublicFlow(
       ]),
       output,
     );
+    await assertHookQuiescence(
+      harness,
+      output,
+      "projects:post-commit:reader-link",
+    );
     assertEquals(
       (await harness.observeRelationshipTuple({
         pack: "projects_auxiliary",
@@ -820,6 +862,11 @@ export async function runCompleteProjectsPublicFlow(
     );
     assertExists(history.data);
 
+    await assertHookQuiescence(
+      harness,
+      output,
+      "projects:pre-action:start-task",
+    );
     const started = json(
       await ok(
         agent.runCli([
@@ -836,11 +883,28 @@ export async function runCompleteProjectsPublicFlow(
       ),
     ).data;
     assertEquals(started.source.kind, "action");
+    assertPersistedHookEvidence(started, [{
+      phase: "action.stage",
+      stderr: "start_task transitioning",
+    }, {
+      phase: "changeset.validate",
+      stderr: "validate_task errors=0 warnings=0",
+    }]);
     await ok(
       agent.runCli(["--json", "changeset", "commit", started.id]),
       output,
     );
+    await assertHookQuiescence(
+      harness,
+      output,
+      "projects:post-commit:start-task",
+    );
 
+    await assertHookQuiescence(
+      harness,
+      output,
+      "projects:pre-action:complete-task-invalid",
+    );
     const invalid = await agent.runCli([
       "--json",
       "--project",
@@ -859,6 +923,11 @@ export async function runCompleteProjectsPublicFlow(
     output.push(invalid.stdout, invalid.stderr);
     assertEquals(invalid.code, 1);
 
+    await assertHookQuiescence(
+      harness,
+      output,
+      "projects:pre-action:complete-task-valid",
+    );
     const completed = json(
       await ok(
         agent.runCli([
@@ -880,6 +949,16 @@ export async function runCompleteProjectsPublicFlow(
       ),
     ).data;
     assertEquals(completed.status, "awaiting_approval");
+    assertPersistedHookEvidence(completed, [{
+      phase: "action.stage",
+      stderr: "complete_task transitioning",
+    }, {
+      phase: "changeset.validate",
+      stderr: "validate_task errors=0 warnings=0",
+    }, {
+      phase: "changeset.validate",
+      stderr: "validate_task errors=0 warnings=0",
+    }]);
     const requirement = completed.approval_requirements[0];
     const selfApproval = await agent.runCli([
       "--json",
@@ -908,6 +987,16 @@ export async function runCompleteProjectsPublicFlow(
       agent.runCli(["--json", "changeset", "commit", completed.id]),
       output,
     );
+    await assertHookQuiescence(
+      harness,
+      output,
+      "projects:post-commit:complete-task",
+    );
+    await assertHookQuiescence(
+      harness,
+      output,
+      "projects:pre-action:complete-task-rejected",
+    );
     const rejectedCompletion = data(
       await ok(
         agent.runCli([
@@ -929,6 +1018,16 @@ export async function runCompleteProjectsPublicFlow(
       ),
     );
     assertEquals(rejectedCompletion.status, "awaiting_approval");
+    assertPersistedHookEvidence(rejectedCompletion, [{
+      phase: "action.stage",
+      stderr: "complete_task transitioning",
+    }, {
+      phase: "changeset.validate",
+      stderr: "validate_task errors=0 warnings=0",
+    }, {
+      phase: "changeset.validate",
+      stderr: "validate_task errors=0 warnings=0",
+    }]);
     const rejectionRequirement = rejectedCompletion.approval_requirements[0];
     const rejected = data(
       await ok(
@@ -989,9 +1088,10 @@ export async function runCompleteProjectsPublicFlow(
     output.push(injection.stdout, injection.stderr);
     assertEquals(injection.code, 1);
 
-    assertEquals(
-      await harness.awaitHookQuiescence(),
-      QUIESCENT_HOOK_EVIDENCE,
+    await assertHookQuiescence(
+      harness,
+      output,
+      "projects:pre-stage:retry-delivery",
     );
     await harness.enqueueProviderBehaviors([{
       kind: "retry",
@@ -1191,6 +1291,13 @@ export async function runCompleteProjectsPublicFlow(
         }),
       ]]
     ) {
+      if (args.includes("action")) {
+        await assertHookQuiescence(
+          harness,
+          output,
+          "projects:pre-action:revoked-block-task",
+        );
+      }
       const revoked = await agent.runCli(args);
       output.push(revoked.stdout, revoked.stderr);
       assertEquals(revoked.code, 1);
@@ -1217,6 +1324,35 @@ export async function runCompleteProjectsPublicFlow(
       failures,
       "Projects flow, diagnostics, or launcher cleanup failed",
     );
+  }
+}
+
+async function assertHookQuiescence(
+  harness: CompletePublicFlowBackend,
+  output: string[],
+  boundary: string,
+): Promise<void> {
+  const evidence = await harness.awaitHookQuiescence();
+  output.push(JSON.stringify({
+    trace: "hook-quiescence",
+    boundary,
+    ...evidence,
+  }));
+  assertEquals(evidence, QUIESCENT_HOOK_EVIDENCE, boundary);
+}
+
+function assertPersistedHookEvidence(
+  stage: any,
+  expected: readonly Readonly<{ phase: string; stderr: string }>[],
+): void {
+  assertEquals(stage.hook_executions.length, expected.length);
+  for (let index = 0; index < expected.length; index++) {
+    const execution = stage.hook_executions[index];
+    assertEquals(execution.phase, expected[index].phase);
+    assert(Number.isSafeInteger(execution.duration_ms));
+    assert(execution.duration_ms >= 0);
+    assert(execution.duration_ms < SYNCHRONOUS_HOOK_BUDGET_MS);
+    assertStringIncludes(execution.stderr, expected[index].stderr);
   }
 }
 
