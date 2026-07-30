@@ -1414,7 +1414,7 @@ for (const logLevel of ["info", "trace"] as const) {
           startupPollLock.release();
           await startupPollLock.done;
         }
-        await waitForOutboxPollIdle(harness, startupPollPid!);
+        await waitForOutboxPollCompletion(harness, startupPollPid!);
         await installPauseTrigger(harness);
         const drainOneWork = await stageCommit(
           harness,
@@ -2517,28 +2517,31 @@ async function waitForBlockedStartupOutboxPoll(
   );
 }
 
-async function waitForOutboxPollIdle(
+async function waitForOutboxPollCompletion(
   harness: LiveHarness,
   pid: number,
 ): Promise<void> {
   const deadline = Date.now() + 10_000;
   let last: Record<string, unknown> | undefined;
   while (Date.now() < deadline) {
-    last = (await query<Record<string, unknown>>(
+    const observed = (await query<Record<string, unknown>>(
       harness.server.sql,
-      `select pid,state,wait_event_type,wait_event,
-        cardinality(pg_blocking_pids(pid)) blocking_count,left(query,240) query
-       from pg_stat_activity where pid=$1`,
+      `select not exists(
+          select 1 from pg_stat_activity where pid=$1 and state<>'idle'
+        ) complete,
+        (select json_build_object(
+          'pid',pid,'state',state,'wait_event_type',wait_event_type,
+          'wait_event',wait_event,'blocking_pids',pg_blocking_pids(pid),
+          'query',left(query,240))
+         from pg_stat_activity where pid=$1) activity`,
       [pid],
     )).rows[0];
-    if (
-      last?.state === "idle" && last.wait_event_type === "Client" &&
-      Number(last.blocking_count) === 0
-    ) return;
+    last = observed;
+    if (observed.complete === true) return;
     await Promise.resolve();
   }
   throw new Error(
-    `startup outbox poll did not return to idle: ${JSON.stringify(last)}`,
+    `startup outbox poll did not complete: ${JSON.stringify(last)}`,
   );
 }
 
