@@ -29,6 +29,7 @@ export type HttpProvider = {
   enqueueUnkeyed(...behaviors: ProviderBehavior[]): void;
   enqueueForKey(idempotencyKey: string, ...behaviors: ProviderBehavior[]): void;
   release(token: string): void;
+  activeHolds(): readonly string[];
   waitForAttempts(
     count: number,
     timeoutMs?: number,
@@ -144,6 +145,9 @@ export function startHttpProvider(
       const release = holds.get(token);
       if (!release) throw new Error(`provider hold ${token} is not active`);
       release();
+    },
+    activeHolds() {
+      return [...holds.keys()];
     },
     waitForAttempts(count, timeoutMs = 5_000) {
       return waitForMatchingAttempts(

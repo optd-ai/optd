@@ -32,18 +32,24 @@ export type LoginInput = { username: string; password: string };
 export type ProcessTreeKind = "human" | "request_only" | "agent";
 export type CliLauncher = {
   kind: ProcessTreeKind;
-  runOptctl(args: string[], stdin?: string): Promise<CliResult>;
+  runOptctl(
+    args: string[],
+    stdin?: string,
+    environment?: Record<string, string>,
+  ): Promise<CliResult>;
   close(): Promise<void>;
 };
 export type ConcurrentCliRequest = {
   args: string[];
   stdin?: string;
+  environment?: Record<string, string>;
   launcher?: CliLauncher;
 };
 export type ActiveCliCommand = {
+  readonly pid: number;
   result: Promise<CliResult>;
   state(): "running" | "settled";
-  terminate(): Promise<void>;
+  terminate(signal?: "SIGTERM" | "SIGKILL"): Promise<void>;
 };
 export type ProcessLaunchResult = {
   result: CliResult;
@@ -53,6 +59,8 @@ export type HarnessDiagnostics = {
   server: string;
   postgres: string;
   hooks: string;
+  processTree: number[];
+  runtimeResources: string[];
 };
 
 export type LiveHarness = {
@@ -66,8 +74,16 @@ export type LiveHarness = {
   binarySourceDigest: string;
   /** Test-support SQL is only for focused setup/assertions, never acceptance actions. */
   server: { sql: Sql };
-  runOptctl(args: string[], stdin?: string): Promise<CliResult>;
-  startOptctl(args: string[], stdin?: string): Promise<ActiveCliCommand>;
+  runOptctl(
+    args: string[],
+    stdin?: string,
+    environment?: Record<string, string>,
+  ): Promise<CliResult>;
+  startOptctl(
+    args: string[],
+    stdin?: string,
+    environment?: Record<string, string>,
+  ): Promise<ActiveCliCommand>;
   bootstrap(input: BootstrapInput): Promise<CliResult>;
   login(input: LoginInput): Promise<CliResult>;
   bootstrapProcess(input: BootstrapInput): Promise<ProcessLaunchResult>;
@@ -196,6 +212,7 @@ export async function startLiveHarness(
   const startBinary = async (
     args: string[],
     stdin?: string,
+    environment: Record<string, string> = {},
   ): Promise<ActiveCliCommand> => {
     const argv = ["--server", running.url, ...args];
     const startedAt = Date.now();
@@ -204,7 +221,7 @@ export async function startLiveHarness(
     try {
       child = new Deno.Command(binaryPath, {
         args: argv,
-        env,
+        env: { ...env, ...environment },
         stdin: stdin === undefined ? "null" : "piped",
         stdout: "piped",
         stderr: "piped",
@@ -233,12 +250,13 @@ export async function startLiveHarness(
     commandSettlements.add(settled);
     settled.finally(() => commandSettlements.delete(settled));
     return {
+      pid: child.pid,
       result,
       state: () => state,
-      async terminate() {
+      async terminate(signal = "SIGTERM") {
         if (state === "running") {
           try {
-            child.kill("SIGTERM");
+            child.kill(signal);
           } catch {
             // The command may have exited between the state check and signal.
           }
@@ -271,7 +289,8 @@ export async function startLiveHarness(
   const runBinary = async (
     args: string[],
     stdin?: string,
-  ): Promise<CliResult> => (await startBinary(args, stdin)).result;
+    environment: Record<string, string> = {},
+  ): Promise<CliResult> => (await startBinary(args, stdin, environment)).result;
   const harness: LiveHarness = {
     rootDir,
     dataDir,
@@ -383,8 +402,10 @@ export async function startLiveHarness(
     },
     async runConcurrent(requests) {
       return await Promise.all(
-        requests.map(({ args, stdin, launcher }) =>
-          launcher ? launcher.runOptctl(args, stdin) : runBinary(args, stdin)
+        requests.map(({ args, stdin, environment, launcher }) =>
+          launcher
+            ? launcher.runOptctl(args, stdin, environment)
+            : runBinary(args, stdin, environment)
         ),
       );
     },
@@ -436,6 +457,11 @@ export async function startLiveHarness(
         server: serverLog,
         postgres: postgresLines(serverLog),
         hooks: hookRows,
+        processTree: [
+          running.process.pid,
+          ...[...activeCommands].map((child) => child.pid),
+        ],
+        runtimeResources: [rootDir, dataDir, hookCacheDir],
       };
     },
     async close(closeOptions = {}) {
@@ -1089,6 +1115,7 @@ export async function makeProcessTreeLauncher(
         if (message.close) Deno.exit(0);
         const process = new Deno.Command(binary, {
           args: message.argv,
+          env: { ...Deno.env.toObject(), ...message.environment },
           stdin: message.stdin === undefined ? "null" : "piped",
           stdout: "piped",
           stderr: "piped",
@@ -1190,14 +1217,16 @@ export async function makeProcessTreeLauncher(
 
   return {
     kind,
-    async runOptctl(args, stdin) {
+    async runOptctl(args, stdin, environment) {
       if (closed) throw new Error("process-tree launcher is closed");
       const argv = ["--server", serverUrl(), ...args];
       const startedAt = Date.now();
       const operation = queue.then(async () => {
         await authBridge?.before(child.pid);
         await input.write(
-          new TextEncoder().encode(`${JSON.stringify({ argv, stdin })}\n`),
+          new TextEncoder().encode(
+            `${JSON.stringify({ argv, stdin, environment })}\n`,
+          ),
         );
         const result = JSON.parse(await readLine()) as {
           code: number;

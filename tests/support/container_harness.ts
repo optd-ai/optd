@@ -9,7 +9,13 @@ export type CommandResult = {
 export type ContainerCliResult = CommandResult & { argv: string[] };
 
 export type ContainerCliLauncher = {
-  runOptctl(args: string[], stdin?: string): Promise<ContainerCliResult>;
+  readonly root: string;
+  readonly kind: "human" | "request_only" | "agent";
+  runOptctl(
+    args: string[],
+    stdin?: string,
+    env?: Record<string, string>,
+  ): Promise<ContainerCliResult>;
   close(): Promise<void>;
 };
 
@@ -25,14 +31,20 @@ export type ContainerHarness = {
   startAppManaged(extraArgs?: string[]): Promise<void>;
   recreateAppManaged(extraArgs?: string[]): Promise<void>;
   waitReady(timeoutMs?: number): Promise<Record<string, unknown>>;
-  runOptctl(args: string[], stdin?: string): Promise<ContainerCliResult>;
-  createProcessTreeLauncher(): Promise<ContainerCliLauncher>;
+  runOptctl(
+    args: string[],
+    stdin?: string,
+    env?: Record<string, string>,
+  ): Promise<ContainerCliResult>;
+  createProcessTreeLauncher(
+    kind?: "human" | "request_only" | "agent",
+  ): Promise<ContainerCliLauncher>;
   copyPack(hostPath: string): Promise<string>;
   logs(): Promise<string>;
   cleanup(): Promise<void>;
 };
 
-type RunOptions = {
+export type RunOptions = {
   timeoutMs?: number;
   stdin?: string;
   allowFailure?: boolean;
@@ -74,6 +86,7 @@ export async function createContainerHarness(
   const cleanupArgs: string[][] = [];
   let volumeRegistered = false;
   let containerRegistered = false;
+  let retainedExtraArgs: string[] = [];
 
   const docker = async (args: string[], options: RunOptions = {}) =>
     await runCommand("docker", args, options);
@@ -108,11 +121,18 @@ export async function createContainerHarness(
     }
   };
   const cliRoot = `/data/.container-test-clients/default`;
-  const runOptctl = async (args: string[], stdin?: string) => {
+  const runOptctl = async (
+    args: string[],
+    stdin?: string,
+    commandEnv: Record<string, string> = {},
+  ) => {
     const argv = ["--server", "http://127.0.0.1:8789", ...args];
     const result = await docker([
       "exec",
       ...stdin === undefined ? [] : ["--interactive"],
+      ...Object.entries(commandEnv).flatMap((
+        [name, value],
+      ) => ["--env", `${name}=${value}`]),
       "--env",
       `HOME=${cliRoot}/home`,
       "--env",
@@ -141,6 +161,7 @@ export async function createContainerHarness(
     container,
     docker,
     async startAppManaged(extraArgs = []) {
+      retainedExtraArgs = [...extraArgs];
       await docker(["volume", "create", volume]);
       if (!volumeRegistered) {
         cleanupArgs.push(["volume", "rm", "-f", volume]);
@@ -148,9 +169,10 @@ export async function createContainerHarness(
       }
       await runContainer(extraArgs);
     },
-    async recreateAppManaged(extraArgs = []) {
+    async recreateAppManaged(extraArgs = retainedExtraArgs) {
+      retainedExtraArgs = [...extraArgs];
       await docker(["rm", "-f", container], { allowFailure: true });
-      await runContainer(extraArgs);
+      await runContainer(retainedExtraArgs);
     },
     async waitReady(timeoutMs = 90_000) {
       const deadline = Date.now() + timeoutMs;
@@ -170,9 +192,10 @@ export async function createContainerHarness(
       throw new Error(`container readiness timeout: ${last}\n${await logs()}`);
     },
     runOptctl,
-    async createProcessTreeLauncher() {
-      const root = `/data/.container-test-clients/${crypto.randomUUID()}`;
-      return await createDockerProcessTreeLauncher(container, root);
+    async createProcessTreeLauncher(kind = "human") {
+      const root =
+        `/data/.container-test-clients/${kind}-${crypto.randomUUID()}`;
+      return await createDockerProcessTreeLauncher(container, root, kind);
     },
     async copyPack(hostPath) {
       const name = hostPath.replaceAll("\\", "/").split("/").filter(Boolean)
@@ -215,6 +238,7 @@ export async function createContainerHarness(
 async function createDockerProcessTreeLauncher(
   container: string,
   root: string,
+  kind: "human" | "request_only" | "agent",
 ): Promise<ContainerCliLauncher> {
   const worker = `
     const root = Deno.args[0];
@@ -233,7 +257,7 @@ async function createDockerProcessTreeLauncher(
         const child = new Deno.Command("/usr/local/bin/optctl", {
           args: message.argv,
           env: {
-            ...Deno.env.toObject(), HOME: root + "/home",
+            ...Deno.env.toObject(), ...message.env, HOME: root + "/home",
             XDG_CONFIG_HOME: root + "/config", XDG_STATE_HOME: root + "/state",
             OPERANT_AUTH_TREE_STOP_PID: String(Deno.pid),
           },
@@ -295,7 +319,9 @@ async function createDockerProcessTreeLauncher(
     }
   };
   return {
-    async runOptctl(args, stdin) {
+    root,
+    kind,
+    async runOptctl(args, stdin, env) {
       if (closed) throw new Error("container CLI launcher is closed");
       const argv = ["--server", "http://127.0.0.1:8789", ...args];
       let resolveQueue!: () => void;
@@ -304,7 +330,7 @@ async function createDockerProcessTreeLauncher(
       await previous;
       try {
         await input.write(
-          new TextEncoder().encode(`${JSON.stringify({ argv, stdin })}\n`),
+          new TextEncoder().encode(`${JSON.stringify({ argv, stdin, env })}\n`),
         );
         const result = JSON.parse(await readLine()) as CommandResult;
         return {
