@@ -42,6 +42,10 @@ export type HttpProvider = {
   enqueue(...behaviors: ProviderBehavior[]): void;
   enqueueUnkeyed(...behaviors: ProviderBehavior[]): void;
   enqueueForKey(idempotencyKey: string, ...behaviors: ProviderBehavior[]): void;
+  enqueueForKeyNext(
+    idempotencyKey: string,
+    ...behaviors: ProviderBehavior[]
+  ): void;
   release(token: string): void;
   activeHolds(): readonly string[];
   waitForAttempts(
@@ -173,6 +177,11 @@ export function startHttpProvider(
     enqueueForKey(idempotencyKey, ...behaviors) {
       const existing = keyedQueues.get(idempotencyKey) ?? [];
       existing.push(...behaviors);
+      keyedQueues.set(idempotencyKey, existing);
+    },
+    enqueueForKeyNext(idempotencyKey, ...behaviors) {
+      const existing = keyedQueues.get(idempotencyKey) ?? [];
+      existing.unshift(...behaviors);
       keyedQueues.set(idempotencyKey, existing);
     },
     release(token) {
