@@ -1,4 +1,9 @@
-import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert";
+import {
+  assert,
+  assertEquals,
+  assertRejects,
+  assertStringIncludes,
+} from "jsr:@std/assert";
 import {
   closePostgresClient,
   createPostgresClient,
@@ -12,7 +17,9 @@ import {
   assertPostgresLifecycleAvailable,
   findPostgresBins,
   planPostgresRuntime,
+  startManagedPostgres,
   startPostgresRuntime,
+  stopManagedPostgres,
 } from "../../src/adapters/outbound/postgres-process/lifecycle.ts";
 
 Deno.test("Postgres runtime planning preserves external vs app-managed selection", async () => {
@@ -34,6 +41,106 @@ Deno.test("Postgres runtime planning preserves external vs app-managed selection
   }
   const available = await assertPostgresLifecycleAvailable();
   assertEquals(available.mode, "app_managed");
+});
+
+Deno.test("PG18.4 app-managed startup recovers a stale nonexistent postmaster PID", async () => {
+  if (!await hasPostgres18_4()) return;
+  await withManagedDataDir(async (rootDir) => {
+    await initializeAndStop(rootDir);
+    const pidPath = `${rootDir}/postgres/data/postmaster.pid`;
+    await Deno.writeTextFile(pidPath, "2147483647\nstale test fixture\n");
+
+    const runtime = await startManagedPostgres(rootDir);
+    try {
+      assert(
+        (await Deno.readTextFile(pidPath)).split("\n")[0] !== "2147483647",
+      );
+    } finally {
+      await stopManagedPostgres(runtime);
+    }
+  });
+});
+
+Deno.test("PG18.4 app-managed startup recovers a PID reused by a non-Postgres process", async () => {
+  if (!await hasPostgres18_4()) return;
+  await withManagedDataDir(async (rootDir) => {
+    await initializeAndStop(rootDir);
+    const pidPath = `${rootDir}/postgres/data/postmaster.pid`;
+    await Deno.writeTextFile(pidPath, `${Deno.pid}\nPID reuse test fixture\n`);
+
+    const runtime = await startManagedPostgres(rootDir);
+    try {
+      assert(
+        (await Deno.readTextFile(pidPath)).split("\n")[0] !== String(Deno.pid),
+      );
+    } finally {
+      await stopManagedPostgres(runtime);
+    }
+  });
+});
+
+Deno.test("PG18.4 app-managed startup refuses and preserves a live same-data-dir server", async () => {
+  if (!await hasPostgres18_4()) return;
+  await withManagedDataDir(async (rootDir) => {
+    const runtime = await startManagedPostgres(rootDir);
+    const pidPath = `${rootDir}/postgres/data/postmaster.pid`;
+    const livePidFile = await Deno.readTextFile(pidPath);
+    try {
+      await assertRejects(
+        () => startManagedPostgres(rootDir),
+        Error,
+        "identifies a live PostgreSQL server for this data directory",
+      );
+      assertEquals(await Deno.readTextFile(pidPath), livePidFile);
+      const sql = createPostgresClient(runtime.databaseUrl);
+      try {
+        assertEquals(
+          (await query<{ value: number }>(sql, "select 1 value")).rows[0].value,
+          1,
+        );
+      } finally {
+        await closePostgresClient(sql);
+      }
+    } finally {
+      await stopManagedPostgres(runtime);
+    }
+  });
+});
+
+Deno.test("PG18.4 app-managed startup fails closed and preserves malformed postmaster.pid", async () => {
+  if (!await hasPostgres18_4()) return;
+  await withManagedDataDir(async (rootDir) => {
+    await initializeAndStop(rootDir);
+    const pidPath = `${rootDir}/postgres/data/postmaster.pid`;
+    const malformed = "not-a-pid\nmalformed test fixture\n";
+    await Deno.writeTextFile(pidPath, malformed);
+
+    await assertRejects(
+      () => startManagedPostgres(rootDir),
+      Error,
+      "refusing to remove malformed",
+    );
+    assertEquals(await Deno.readTextFile(pidPath), malformed);
+  });
+});
+
+Deno.test("PG18.4 app-managed startup repeatedly recovers hard-stop postmaster.pid files", async () => {
+  if (!await hasPostgres18_4()) return;
+  await withManagedDataDir(async (rootDir) => {
+    for (let recreation = 0; recreation < 3; recreation++) {
+      const runtime = await startManagedPostgres(rootDir);
+      runtime.process.kill("SIGKILL");
+      await runtime.process.status;
+      assert(
+        await exists(`${rootDir}/postgres/data/postmaster.pid`),
+        `hard recreation ${
+          recreation + 1
+        } must retain PostgreSQL's stale PID file`,
+      );
+    }
+    const recovered = await startManagedPostgres(rootDir);
+    await stopManagedPostgres(recovered);
+  });
 });
 
 Deno.test("app-managed Postgres starts, migrates, persists sentinel across restart", async () => {
@@ -90,3 +197,50 @@ Deno.test("app-managed Postgres starts, migrates, persists sentinel across resta
     await Deno.remove(dataDir, { recursive: true }).catch(() => {});
   }
 });
+
+async function hasPostgres18_4(): Promise<boolean> {
+  const bins = await findPostgresBins();
+  if (!bins) {
+    console.warn(
+      "SKIP PG18.4 lifecycle integration: postgres binaries not found",
+    );
+    return false;
+  }
+  const output = await new Deno.Command(bins.postgres, {
+    args: ["--version"],
+    stdout: "piped",
+    stderr: "piped",
+  }).output();
+  const version = new TextDecoder().decode(output.stdout);
+  if (!output.success || !version.includes("18.4")) {
+    console.warn(`SKIP PG18.4 lifecycle integration: found ${version.trim()}`);
+    return false;
+  }
+  return true;
+}
+
+async function withManagedDataDir(
+  run: (rootDir: string) => Promise<void>,
+): Promise<void> {
+  const rootDir = await Deno.makeTempDir({ prefix: "operant-pg-pid-" });
+  try {
+    await run(rootDir);
+  } finally {
+    await Deno.remove(rootDir, { recursive: true }).catch(() => undefined);
+  }
+}
+
+async function initializeAndStop(rootDir: string): Promise<void> {
+  const runtime = await startManagedPostgres(rootDir);
+  await stopManagedPostgres(runtime);
+}
+
+async function exists(path: string): Promise<boolean> {
+  try {
+    await Deno.lstat(path);
+    return true;
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) return false;
+    throw error;
+  }
+}

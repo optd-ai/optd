@@ -15,11 +15,13 @@ import type {
   PublicFlowProcess,
 } from "../public_flow_contract.ts";
 import { PublicFlowAssets } from "./assets.ts";
-import type {
-  CompletePublicFlowBackend,
-  MigrationSideEffects,
-  ProviderBehavior,
-  PublicFlowAsset,
+import {
+  type CompletePublicFlowBackend,
+  type HookQuiescenceEvidence,
+  type MigrationSideEffects,
+  type ProviderBehavior,
+  type PublicFlowAsset,
+  waitForHookQuiescence,
 } from "./backend.ts";
 
 export function createHostPublicFlowBackend(
@@ -135,6 +137,12 @@ export function createHostPublicFlowBackend(
     },
     async releaseProviderBarrier(name) {
       provider?.release(name);
+      const deadline = Date.now() + 10_000;
+      while (Date.now() < deadline) {
+        if (!provider?.activeHolds().includes(name)) return;
+        await delay(20);
+      }
+      throw new Error(`provider barrier ${name} did not complete`);
     },
     async diagnostics() {
       const value = await harness.diagnostics();
@@ -156,23 +164,29 @@ export function createHostPublicFlowBackend(
       await provider?.close().catch(() => undefined);
       await harness.close();
     },
+    async observeHookQuiescence(): Promise<HookQuiescenceEvidence> {
+      const [entries, processes, deliveries] = await Promise.all([
+        hookCacheEntries(harness.hookCacheDir),
+        processesUsingRuntimePaths([harness.hookCacheDir]),
+        query<{ pending: number; running: number; retry_wait: number }>(
+          harness.server.sql,
+          `select
+            count(*) filter (where status='pending')::int pending,
+            count(*) filter (where status='running')::int running,
+            count(*) filter (where status='retry_wait')::int retry_wait
+          from outbox_deliveries`,
+        ).then((result) => result.rows[0]),
+      ]);
+      return {
+        pending: deliveries.pending,
+        running: deliveries.running,
+        retryWait: deliveries.retry_wait,
+        cacheEntries: entries.length,
+        children: processes.length,
+      };
+    },
     async awaitHookQuiescence() {
-      const deadline = Date.now() + 10_000;
-      while (Date.now() < deadline) {
-        const [entries, processes, activeDeliveries] = await Promise.all([
-          hookCacheEntries(harness.hookCacheDir),
-          processesUsingRuntimePaths([harness.hookCacheDir]),
-          query<{ count: number }>(
-            harness.server.sql,
-            "select count(*)::int count from outbox_deliveries where status in ('pending','running')",
-          ).then((result) => result.rows[0].count),
-        ]);
-        if (
-          entries.length === 0 && processes.length === 0 &&
-          activeDeliveries === 0
-        ) return;
-      }
-      throw new Error("host hook runtime did not become quiescent");
+      return await waitForHookQuiescence(backend.observeHookQuiescence);
     },
     async assertQuiescent() {
       assertEquals(cleaned, true);
@@ -346,6 +360,10 @@ export function createHostPublicFlowBackend(
       });
       return provider.url;
     },
+    async enqueueProviderBehaviors(behaviors) {
+      if (!provider) throw new Error("provider is not configured");
+      provider.enqueue(...behaviors);
+    },
     async providerAttempts() {
       return (provider?.attempts ?? []).map((
         { id, idempotencyKey, duplicate, body },
@@ -496,14 +514,29 @@ async function hookCacheEntries(path: string): Promise<string[]> {
 async function processesUsingRuntimePaths(
   paths: readonly string[],
 ): Promise<string[]> {
-  const matches: string[] = [];
-  for await (const entry of Deno.readDir("/proc")) {
-    if (!entry.isDirectory || !/^\d+$/.test(entry.name)) continue;
-    const command = await Deno.readTextFile(`/proc/${entry.name}/cmdline`)
-      .catch(() => "");
-    if (paths.some((path) => command.includes(path))) {
-      matches.push(`${entry.name}:${command.replaceAll("\0", " ")}`);
-    }
+  const output = await new Deno.Command("/bin/sh", {
+    args: [
+      "-c",
+      `for proc in /proc/[0-9]*/cmdline; do
+  pid=\${proc#/proc/}; pid=\${pid%/cmdline}
+  [ "$pid" = "$$" ] && continue
+  command=$(tr '\\000' ' ' < "$proc" 2>/dev/null) || continue
+  for target do
+    case "$command" in
+      *"$target"*) printf '%s:%s\\n' "$pid" "$command"; break ;;
+    esac
+  done
+done`,
+      "sh",
+      ...paths,
+    ],
+    stdout: "piped",
+    stderr: "piped",
+  }).output();
+  if (!output.success) {
+    throw new Error(new TextDecoder().decode(output.stderr));
   }
-  return matches.sort();
+  return new TextDecoder().decode(output.stdout).trim().split("\n").filter(
+    Boolean,
+  ).sort();
 }

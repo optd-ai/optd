@@ -65,6 +65,22 @@ export type ProviderAttemptEvidence = Readonly<{
   body: string;
 }>;
 
+export type HookQuiescenceEvidence = Readonly<{
+  pending: number;
+  running: number;
+  retryWait: number;
+  cacheEntries: number;
+  children: number;
+}>;
+
+export const QUIESCENT_HOOK_EVIDENCE: HookQuiescenceEvidence = Object.freeze({
+  pending: 0,
+  running: 0,
+  retryWait: 0,
+  cacheEntries: 0,
+  children: 0,
+});
+
 /** Test-only semantic evidence and fault controls. Public facts are never made here. */
 export interface CompletePublicFlowEvidence {
   assetPath(asset: PublicFlowAsset): Promise<string>;
@@ -116,6 +132,9 @@ export interface CompletePublicFlowEvidence {
   ciphertextContainsAny(values: readonly string[]): Promise<boolean>;
 
   configureProvider(behaviors: readonly ProviderBehavior[]): Promise<string>;
+  enqueueProviderBehaviors(
+    behaviors: readonly ProviderBehavior[],
+  ): Promise<void>;
   providerAttempts(): Promise<readonly ProviderAttemptEvidence[]>;
   providerEffects(): Promise<readonly ProviderAttemptEvidence[]>;
 
@@ -129,10 +148,33 @@ export interface CompletePublicFlowEvidence {
   ): Promise<MigrationEvidence>;
   observeMigrationSideEffects(planId: string): Promise<MigrationSideEffects>;
 
-  /** Waits until all previously scheduled hook children have exited and cleaned up. */
-  awaitHookQuiescence(): Promise<void>;
+  observeHookQuiescence(): Promise<HookQuiescenceEvidence>;
+  /** Waits until all nonterminal deliveries and hook children have exited and cleaned up. */
+  awaitHookQuiescence(): Promise<HookQuiescenceEvidence>;
   /** Proves cleanup joined all backend-owned processes and removed runtime state. */
   assertQuiescent(): Promise<void>;
+}
+
+export async function waitForHookQuiescence(
+  observe: () => Promise<HookQuiescenceEvidence>,
+  options: Readonly<{ timeoutMs?: number; pollMs?: number }> = {},
+): Promise<HookQuiescenceEvidence> {
+  const deadline = Date.now() + (options.timeoutMs ?? 10_000);
+  let last: HookQuiescenceEvidence | undefined;
+  while (Date.now() < deadline) {
+    last = await observe();
+    if (isHookQuiescent(last)) return last;
+    await new Promise((resolve) => setTimeout(resolve, options.pollMs ?? 20));
+  }
+  throw new Error(
+    `hook runtime did not become quiescent: ${JSON.stringify(last)}`,
+  );
+}
+
+function isHookQuiescent(evidence: HookQuiescenceEvidence): boolean {
+  return evidence.pending === 0 && evidence.running === 0 &&
+    evidence.retryWait === 0 && evidence.cacheEntries === 0 &&
+    evidence.children === 0;
 }
 
 export type CompletePublicFlowBackend =

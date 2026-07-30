@@ -4,6 +4,11 @@ import {
   COMPLETE_PUBLIC_FLOW_DRIVERS,
   visitCompletePublicFlowDrivers,
 } from "./matrix.ts";
+import {
+  type HookQuiescenceEvidence,
+  QUIESCENT_HOOK_EVIDENCE,
+  waitForHookQuiescence,
+} from "./backend.ts";
 import { runCompleteCrmPublicFlow } from "./crm_driver.ts";
 import { runCompleteProjectsPublicFlow } from "./projects_driver.ts";
 
@@ -25,6 +30,44 @@ Deno.test("runtime matrix visits the exact two driver identities in order", asyn
     runCompleteCrmPublicFlow,
     runCompleteProjectsPublicFlow,
   ]);
+});
+
+Deno.test("hook quiescence barrier blocks retry_wait until it is terminalized or cancelled", async () => {
+  let evidence: HookQuiescenceEvidence = {
+    ...QUIESCENT_HOOK_EVIDENCE,
+    retryWait: 1,
+  };
+  let settled = false;
+  const barrier = waitForHookQuiescence(() => Promise.resolve(evidence), {
+    timeoutMs: 500,
+    pollMs: 1,
+  }).then((value) => {
+    settled = true;
+    return value;
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assertEquals(settled, false, "retry_wait caused a false quiescent return");
+  evidence = QUIESCENT_HOOK_EVIDENCE;
+  assertEquals(await barrier, QUIESCENT_HOOK_EVIDENCE);
+});
+
+Deno.test("hook quiescence barrier checks every nonterminal, cache, and child count", async () => {
+  const observations: HookQuiescenceEvidence[] = [
+    { ...QUIESCENT_HOOK_EVIDENCE, pending: 1 },
+    { ...QUIESCENT_HOOK_EVIDENCE, running: 1 },
+    { ...QUIESCENT_HOOK_EVIDENCE, retryWait: 1 },
+    { ...QUIESCENT_HOOK_EVIDENCE, cacheEntries: 1 },
+    { ...QUIESCENT_HOOK_EVIDENCE, children: 1 },
+    QUIESCENT_HOOK_EVIDENCE,
+  ];
+  let calls = 0;
+  const result = await waitForHookQuiescence(
+    () => Promise.resolve(observations[calls++] ?? QUIESCENT_HOOK_EVIDENCE),
+    { timeoutMs: 500, pollMs: 1 },
+  );
+  assertEquals(calls, observations.length);
+  assertEquals(result, QUIESCENT_HOOK_EVIDENCE);
 });
 
 Deno.test("shared public-flow semantic modules are backend neutral", async () => {

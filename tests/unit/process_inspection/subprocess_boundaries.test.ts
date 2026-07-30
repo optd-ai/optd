@@ -22,7 +22,7 @@ Deno.test("production subprocess callsites remain explicitly classified", async 
     [
       { path: "src/adapters/inbound/cli-cliffy/optctl.ts", count: 1 },
       { path: "src/adapters/outbound/deno-hooks/hook_runner.ts", count: 2 },
-      { path: "src/adapters/outbound/postgres-process/lifecycle.ts", count: 3 },
+      { path: "src/adapters/outbound/postgres-process/lifecycle.ts", count: 4 },
       { path: "src/adapters/outbound/process-inspection/linux.ts", count: 1 },
       { path: "src/adapters/outbound/postgres/auth_repository.ts", count: 2 },
     ],
@@ -41,6 +41,15 @@ Deno.test("production subprocess callsites remain explicitly classified", async 
     1,
   );
   assertEquals((cli.match(/childArgs\[0\]/g) ?? []).length, 2);
+
+  const postgresLifecycle =
+    callsites.find((item) =>
+      item.path.endsWith("postgres-process/lifecycle.ts")
+    )!.source;
+  assertMatch(
+    postgresLifecycle,
+    /const procDir = `\/proc\/\$\{pid\}`;[\s\S]*new Deno\.Command\("\/bin\/sh",[\s\S]*exec \/bin\/cat/,
+  );
 
   const hooks =
     callsites.find((item) => item.path.endsWith("deno-hooks/hook_runner.ts"))!

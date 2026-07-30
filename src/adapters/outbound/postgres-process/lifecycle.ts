@@ -133,6 +133,8 @@ export async function startManagedPostgres(
     ]);
   }
 
+  await removeDemonstrablyStalePostmasterPid(dataDir);
+
   const configuredPort = env.get("OPERANT_PG_PORT");
   const port = configuredPort && configuredPort !== "0"
     ? Number(configuredPort)
@@ -253,6 +255,133 @@ async function runChecked(command: string, args: string[]): Promise<void> {
     stderr: "piped",
   }).output();
   if (!out.success) throw new Error(new TextDecoder().decode(out.stderr));
+}
+
+type PostmasterPidIdentity = "stale" | "live_same_data_dir";
+
+async function removeDemonstrablyStalePostmasterPid(
+  dataDir: string,
+): Promise<void> {
+  const pidPath = `${dataDir}/postmaster.pid`;
+  let original: string;
+  try {
+    original = await Deno.readTextFile(pidPath);
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) return;
+    throw new Error(`cannot safely inspect ${pidPath}`, { cause: error });
+  }
+
+  const pidText = original.split(/\r?\n/, 1)[0];
+  if (!/^[1-9][0-9]*$/.test(pidText)) {
+    throw new Error(`refusing to remove malformed ${pidPath}`);
+  }
+  const pid = Number(pidText);
+  if (!Number.isSafeInteger(pid)) {
+    throw new Error(`refusing to remove malformed ${pidPath}`);
+  }
+
+  for (let inspection = 0; inspection < 2; inspection++) {
+    const identity = await inspectPostmasterPid(pid, dataDir, pidPath);
+    if (identity === "live_same_data_dir") {
+      throw new Error(
+        `refusing to start app-managed PostgreSQL: ${pidPath} identifies a live PostgreSQL server for this data directory (PID ${pid})`,
+      );
+    }
+    let current: string;
+    try {
+      current = await Deno.readTextFile(pidPath);
+    } catch (error) {
+      if (error instanceof Deno.errors.NotFound) return;
+      throw new Error(`cannot safely recheck ${pidPath}`, { cause: error });
+    }
+    if (current !== original) {
+      throw new Error(`refusing to remove changed ${pidPath}`);
+    }
+  }
+
+  await Deno.remove(pidPath);
+}
+
+async function inspectPostmasterPid(
+  pid: number,
+  dataDir: string,
+  pidPath: string,
+): Promise<PostmasterPidIdentity> {
+  const procDir = `/proc/${pid}`;
+  let bytes: Uint8Array;
+  try {
+    bytes = await Deno.readFile(`${procDir}/cmdline`);
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) return "stale";
+    const output = await new Deno.Command("/bin/sh", {
+      args: [
+        "-c",
+        'if [ ! -d "$1" ]; then exit 2; fi; exec /bin/cat "$1/cmdline"',
+        "sh",
+        procDir,
+      ],
+      stdout: "piped",
+      stderr: "piped",
+    }).output();
+    if (output.success) bytes = output.stdout;
+    else {
+      if (output.code === 2) return "stale";
+      throw new Error(
+        `refusing to remove ${pidPath}: process identity for PID ${pid} is unreadable`,
+        { cause: error },
+      );
+    }
+  }
+  if (bytes.length === 0) {
+    throw new Error(
+      `refusing to remove ${pidPath}: process identity for PID ${pid} is unreadable`,
+    );
+  }
+
+  const argv = new TextDecoder().decode(bytes).split("\0").filter(Boolean);
+  const executable = argv[0]?.split("/").at(-1);
+  if (executable !== "postgres") return "stale";
+
+  const candidates: string[] = [];
+  for (let index = 1; index < argv.length; index++) {
+    if (argv[index] === "-D") {
+      if (!argv[index + 1]) {
+        throw new Error(
+          `refusing to remove ${pidPath}: PostgreSQL data-directory identity for PID ${pid} is ambiguous`,
+        );
+      }
+      candidates.push(argv[++index]);
+    } else if (argv[index].startsWith("-D") && argv[index].length > 2) {
+      candidates.push(argv[index].slice(2));
+    }
+  }
+  if (candidates.length !== 1) {
+    throw new Error(
+      `refusing to remove ${pidPath}: PostgreSQL data-directory identity for PID ${pid} is ambiguous`,
+    );
+  }
+
+  return await pathsIdentifySameDirectory(candidates[0], dataDir)
+    ? "live_same_data_dir"
+    : "stale";
+}
+
+async function pathsIdentifySameDirectory(
+  candidate: string,
+  dataDir: string,
+): Promise<boolean> {
+  if (candidate === dataDir) return true;
+  try {
+    return await Deno.realPath(candidate) === await Deno.realPath(dataDir);
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) return false;
+    throw new Error(
+      "cannot safely resolve PostgreSQL data-directory identity",
+      {
+        cause: error,
+      },
+    );
+  }
 }
 
 function freePort(): number {

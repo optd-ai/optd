@@ -141,6 +141,34 @@ Deno.test({
       ).then((response) => response.json());
       assertEquals(active.data.state, "active");
 
+      for (let recreation = 0; recreation < 3; recreation++) {
+        await harness.docker(["kill", harness.container]);
+        const retainedPid = await harness.docker([
+          "run",
+          "--rm",
+          "--entrypoint",
+          "/bin/sh",
+          "--volume",
+          `${harness.volume}:/data`,
+          releaseImage,
+          "-c",
+          "test -s /data/postgres/data/postmaster.pid",
+        ]);
+        assertEquals(
+          retainedPid.code,
+          0,
+          `hard recreation ${
+            recreation + 1
+          } must not delete postmaster.pid in the harness`,
+        );
+        await harness.recreateAppManaged();
+        await harness.waitReady();
+        const recovered = await fetch(
+          `http://127.0.0.1:${harness.port}/api/v1/auth/bootstrap/status`,
+        ).then((response) => response.json());
+        assertEquals(recovered.data.state, "active");
+      }
+
       await harness.docker(["stop", "--time", "25", harness.container]);
       await harness.docker(["rm", harness.container]);
       const wrongKey = btoa(

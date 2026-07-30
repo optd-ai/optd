@@ -10,7 +10,10 @@ import type {
   PublicFlowCommandResult,
   PublicFlowLauncher,
 } from "../public_flow_contract.ts";
-import type { CompletePublicFlowBackend } from "./backend.ts";
+import {
+  type CompletePublicFlowBackend,
+  QUIESCENT_HOOK_EVIDENCE,
+} from "./backend.ts";
 import { isUuidV7, runJson } from "./helpers.ts";
 
 const PROJECTS = "operant/projects";
@@ -23,15 +26,12 @@ export async function runCompleteProjectsPublicFlow(
   const failures: unknown[] = [];
   try {
     await harness.compileCurrentCli();
-    await harness.configureProvider([
-      {
-        kind: "retry_then_success",
-        retryAfterSeconds: 1,
-        successHoldToken: "projects-retry-success",
-        body: { retry: true },
-      },
-      { kind: "retry", retryAfterSeconds: 600, body: { retry: true } },
-    ]);
+    await harness.configureProvider([{
+      kind: "retry_then_success",
+      retryAfterSeconds: 1,
+      successHoldToken: "projects-retry-success",
+      body: { retry: true },
+    }]);
     const PACK = await harness.assetPath("projects");
     const AUXILIARY_PACK = await harness.assetPath("projects_auxiliary");
     const human = await launcher(harness, launchers, "human");
@@ -280,7 +280,32 @@ export async function runCompleteProjectsPublicFlow(
       1,
     );
     await harness.releaseProviderBarrier("projects-retry-success");
-    await harness.awaitHookQuiescence();
+    const scriptedDelivery = await waitOutboxDeliveryStatus(
+      human,
+      output,
+      "succeeded",
+      scriptedRetryKey,
+    );
+    assertEquals(scriptedDelivery.id, scriptedRetryKey);
+    const scriptedPublicAttempts = data(
+      await ok(
+        human.runCli([
+          "--json",
+          "outbox",
+          "attempts",
+          scriptedRetryKey,
+        ]),
+        output,
+      ),
+    );
+    assert(
+      (scriptedPublicAttempts.items ?? scriptedPublicAttempts.attempts)
+        .length >= 2,
+    );
+    assertEquals(
+      await harness.awaitHookQuiescence(),
+      QUIESCENT_HOOK_EVIDENCE,
+    );
 
     await ok(
       human.runCli([
@@ -964,54 +989,54 @@ export async function runCompleteProjectsPublicFlow(
     output.push(injection.stdout, injection.stderr);
     assertEquals(injection.code, 1);
 
-    let scriptedDelivery: any;
-    let deliveries: any[] = [];
-    for (let attempt = 0; attempt < 100; attempt++) {
-      const listed = data(
-        await ok(
-          human.runCli([
-            "--json",
-            "outbox",
-            "list",
-            "--hook",
-            "operant/projects:deliver",
-            "--limit",
-            "100",
-          ]),
-          output,
-        ),
-      );
-      deliveries = listed.items ?? listed.deliveries;
-      scriptedDelivery = deliveries.find((item: any) =>
-        item.id === scriptedRetryKey && item.status === "succeeded"
-      );
-      if (
-        scriptedDelivery &&
-        deliveries.some((item: any) => item.status === "retry_wait")
-      ) break;
-      await delay(25);
-    }
-    assert(scriptedDelivery, JSON.stringify(deliveries));
-    const scriptedPublicAttempts = data(
+    assertEquals(
+      await harness.awaitHookQuiescence(),
+      QUIESCENT_HOOK_EVIDENCE,
+    );
+    await harness.enqueueProviderBehaviors([{
+      kind: "retry",
+      retryAfterSeconds: 600,
+      body: { retry: true },
+    }]);
+    const retryStage = data(
       await ok(
-        human.runCli([
-          "--json",
-          "outbox",
-          "attempts",
-          scriptedRetryKey,
-        ]),
+        runJson(harness, ["--json", "changeset", "stage"], {
+          project_id: projectId,
+          operations: [{
+            op: "create",
+            project_id: projectId,
+            resource: `${PROJECTS}:task_tag`,
+            fields: {
+              name: `quiescence-${crypto.randomUUID()}`,
+              color: "blue",
+            },
+          }],
+        }, agent),
         output,
       ),
     );
-    assert(
-      (scriptedPublicAttempts.items ?? scriptedPublicAttempts.attempts)
-        .length >=
-        2,
+    await ok(
+      agent.runCli(["--json", "changeset", "commit", retryStage.id]),
+      output,
     );
-    const cancellable = deliveries.find((item: any) =>
-      item.status === "retry_wait"
+    const cancellable = await waitOutboxDeliveryStatus(
+      human,
+      output,
+      "retry_wait",
     );
-    assert(cancellable, JSON.stringify(deliveries));
+
+    let quiescenceSettled = false;
+    const blockedQuiescence = harness.awaitHookQuiescence().then((value) => {
+      quiescenceSettled = true;
+      return value;
+    });
+    await delay(200);
+    assertEquals(
+      quiescenceSettled,
+      false,
+      "retry_wait must prevent the hook barrier from returning",
+    );
+    assertEquals((await harness.observeHookQuiescence()).retryWait, 1);
     const inspectedDelivery = data(
       await ok(
         human.runCli([
@@ -1034,6 +1059,11 @@ export async function runCompleteProjectsPublicFlow(
         "Projects public-flow cancellation",
       ]),
       output,
+    );
+    assertEquals(await blockedQuiescence, QUIESCENT_HOOK_EVIDENCE);
+    assertEquals(
+      await harness.observeHookQuiescence(),
+      QUIESCENT_HOOK_EVIDENCE,
     );
     const invalidRetry = await human.runCli([
       "--json",
@@ -1220,6 +1250,41 @@ function toon(result: PublicFlowCommandResult): any {
 }
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+async function waitOutboxDeliveryStatus(
+  launcher: PublicFlowLauncher,
+  output: string[],
+  status: string,
+  deliveryId?: string,
+): Promise<any> {
+  let deliveries: any[] = [];
+  for (let attempt = 0; attempt < 200; attempt++) {
+    const listed = data(
+      await ok(
+        launcher.runCli([
+          "--json",
+          "outbox",
+          "list",
+          "--hook",
+          "operant/projects:deliver",
+          "--limit",
+          "100",
+        ]),
+        output,
+      ),
+    );
+    deliveries = listed.items ?? listed.deliveries;
+    const delivery = deliveries.find((item: any) =>
+      item.status === status && (!deliveryId || item.id === deliveryId)
+    );
+    if (delivery) return delivery;
+    await delay(25);
+  }
+  throw new Error(
+    `delivery ${deliveryId ?? "<any>"} did not reach ${status}: ${
+      JSON.stringify(deliveries)
+    }`,
+  );
 }
 function assertParity(actual: any, expected: any) {
   const normalize = (value: any): any =>

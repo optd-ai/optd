@@ -13,11 +13,13 @@ import type {
   PublicFlowProcessTreeKind,
 } from "../public_flow_contract.ts";
 import { PublicFlowAssets } from "./assets.ts";
-import type {
-  CompletePublicFlowBackend,
-  MigrationSideEffects,
-  ProviderBehavior,
-  PublicFlowAsset,
+import {
+  type CompletePublicFlowBackend,
+  type HookQuiescenceEvidence,
+  type MigrationSideEffects,
+  type ProviderBehavior,
+  type PublicFlowAsset,
+  waitForHookQuiescence,
 } from "./backend.ts";
 
 export async function createContainerPublicFlowBackend(
@@ -187,6 +189,12 @@ export async function createContainerPublicFlowBackend(
     },
     async releaseProviderBarrier(name) {
       provider.release(name);
+      const deadline = Date.now() + 10_000;
+      while (Date.now() < deadline) {
+        if (!provider.activeHolds().includes(name)) return;
+        await delay(20);
+      }
+      throw new Error(`provider barrier ${name} did not complete`);
     },
     async diagnostics() {
       const topology = await harness.docker([
@@ -222,25 +230,53 @@ export async function createContainerPublicFlowBackend(
       await provider.close();
       await Deno.remove(assetRoot, { recursive: true }).catch(() => undefined);
     },
-    async awaitHookQuiescence() {
-      const deadline = Date.now() + 10_000;
-      while (Date.now() < deadline) {
-        const [observed, activeDeliveries] = await Promise.all([
-          harness.docker([
-            "exec",
-            harness.container,
-            "sh",
-            "-c",
-            "test -z \"$(find /data/runtime/hooks -maxdepth 1 -name 'invocation_*' -print -quit)\" && ! grep -la '/data/runtime/hooks/invocation_' /proc/[0-9]*/cmdline >/dev/null 2>&1",
-          ], { allowFailure: true }),
-          sqlScalar(
-            harness,
-            "select count(*)::int from outbox_deliveries where status in ('pending','running')",
-          ),
-        ]);
-        if (observed.code === 0 && Number(activeDeliveries) === 0) return;
+    async observeHookQuiescence(): Promise<HookQuiescenceEvidence> {
+      const [runtime, deliveryCounts] = await Promise.all([
+        harness.docker([
+          "exec",
+          harness.container,
+          "sh",
+          "-c",
+          `cache=$(find /data/runtime/hooks -maxdepth 1 -name 'invocation_*' -print | wc -l)
+children=0
+for path in /proc/[0-9]*/cmdline; do
+  pid=\${path#/proc/}; pid=\${pid%/cmdline}
+  [ "$pid" = "$$" ] && continue
+  if grep -Fq '/data/runtime/hooks/invocation_' "$path" 2>/dev/null; then
+    children=$((children + 1))
+  fi
+done
+printf '%s %s\\n' "$cache" "$children"`,
+        ]),
+        sqlScalar(
+          harness,
+          `select concat(
+            count(*) filter (where status='pending'),',',
+            count(*) filter (where status='running'),',',
+            count(*) filter (where status='retry_wait'))
+          from outbox_deliveries`,
+        ),
+      ]);
+      const [cacheEntries, children] = runtime.stdout.trim().split(/\s+/).map(
+        Number,
+      );
+      const [pending, running, retryWait] = deliveryCounts.split(",").map(
+        Number,
+      );
+      if (
+        runtime.code !== 0 ||
+        ![cacheEntries, children, pending, running, retryWait].every(
+          Number.isSafeInteger,
+        )
+      ) {
+        throw new Error(
+          `invalid container quiescence evidence: ${runtime.stdout} ${deliveryCounts}`,
+        );
       }
-      throw new Error("container hook runtime did not become quiescent");
+      return { pending, running, retryWait, cacheEntries, children };
+    },
+    async awaitHookQuiescence() {
+      return await waitForHookQuiescence(backend.observeHookQuiescence);
     },
     async assertQuiescent() {
       assertEquals(cleaned, true);
@@ -445,6 +481,9 @@ export async function createContainerPublicFlowBackend(
       ]);
       await harness.waitReady();
       return provider.url;
+    },
+    async enqueueProviderBehaviors(behaviors) {
+      provider.enqueue(...behaviors);
     },
     async providerAttempts() {
       return provider.attempts.map((
