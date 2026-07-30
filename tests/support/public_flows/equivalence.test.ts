@@ -27,17 +27,71 @@ Deno.test("runtime matrix visits the exact two driver identities in order", asyn
   ]);
 });
 
-Deno.test("shared public-flow drivers are backend neutral and registrations share one matrix", async () => {
-  for (const file of ["crm_driver.ts", "projects_driver.ts"]) {
+Deno.test("shared public-flow semantic modules are backend neutral", async () => {
+  for (
+    const file of ["crm_driver.ts", "crm_migration.ts", "projects_driver.ts"]
+  ) {
     const source = await Deno.readTextFile(new URL(file, import.meta.url));
     assertEquals(
-      /(?:from\s+["'][^"']*(?:live_harness|container_harness|postgres)|docker|\.server\.sql|\.backend\s*[=!])/i
+      /(?:from\s+["'][^"']*(?:live_harness|container_harness|postgres)|\.server\.sql|\.backend\s*[=!])/i
         .test(source),
       false,
       file,
     );
     assertEquals(/from\s+["'][^"']*src\//.test(source), false, file);
+    assertEquals(/\b(?:docker|psql)\b/i.test(source), false, file);
   }
+});
+
+Deno.test("public-flow entrypoints contain no copied semantic command programs", async () => {
+  for (
+    const path of [
+      "../../e2e/full_crm/compiled_cli.test.ts",
+      "../../e2e/full_projects/compiled_cli.test.ts",
+    ]
+  ) {
+    const source = await Deno.readTextFile(new URL(path, import.meta.url));
+    for (
+      const copiedCommand of [
+        /["']bootstrap["']\s*,\s*["']init["']/,
+        /["']changeset["']\s*,\s*["'](?:stage|commit)["']/,
+        /["']migration["']\s*,\s*["'](?:validate|apply)["']/,
+        /["']outbox["']\s*,\s*["'](?:list|inspect|attempts)["']/,
+        /["']action["']\s*,\s*["']stage["']/,
+      ]
+    ) assertEquals(copiedCommand.test(source), false, path);
+    assertEquals(
+      /(?:live_harness|container_harness|host_adapter|container_adapter)/.test(
+        source,
+      ),
+      false,
+      path,
+    );
+  }
+});
+
+Deno.test("public-flow adapters cannot create public facts outside named fault barriers", async () => {
+  for (const file of ["host_adapter.ts", "container_adapter.ts"]) {
+    const source = await Deno.readTextFile(new URL(file, import.meta.url));
+    assertEquals(
+      /\b(?:insert\s+into|update\s+[a-z_\"]+\s+set|delete\s+from|create\s+table)\b/i
+        .test(source),
+      false,
+      file,
+    );
+    const ddl = source.match(/\b(?:create|drop)\s+(?:function|trigger)\b/gi) ??
+      [];
+    assertEquals(ddl.length, 4, file);
+    assertEquals(
+      (source.match(/test_fail_migration_application/g) ?? []).length,
+      5,
+      file,
+    );
+    assert(source.includes("holdMigrationTableLock"), file);
+  }
+});
+
+Deno.test("public-flow registrations share one matrix", async () => {
   const registration = await Deno.readTextFile(
     new URL("register.ts", import.meta.url),
   );

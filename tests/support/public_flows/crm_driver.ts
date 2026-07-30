@@ -22,6 +22,7 @@ export async function runCompleteCrmPublicFlow(
 ): Promise<void> {
   const launchers: PublicFlowLauncher[] = [];
   const output: string[] = [];
+  const failures: unknown[] = [];
   try {
     await harness.compileCurrentCli();
     const PACK = await harness.assetPath("crm");
@@ -1599,11 +1600,23 @@ export async function runCompleteCrmPublicFlow(
     for (const plaintext of [secretV1, secretV2, replacementSecret]) {
       assertEquals(observedText.includes(plaintext), false);
     }
-  } finally {
-    await assertNoLeaks(harness, output).catch(() => undefined);
-    for (const value of launchers.reverse()) {
-      await value.close().catch(() => undefined);
-    }
+  } catch (error) {
+    failures.push(error);
+  }
+  const cleanup = await Promise.allSettled([
+    assertNoLeaks(harness, output),
+    ...launchers.reverse().map((value) => value.close()),
+  ]);
+  failures.push(
+    ...cleanup.flatMap((result) =>
+      result.status === "rejected" ? [result.reason] : []
+    ),
+  );
+  if (failures.length) {
+    throw new AggregateError(
+      failures,
+      "CRM flow, diagnostics, or launcher cleanup failed",
+    );
   }
 }
 

@@ -257,7 +257,16 @@ export async function runCompleteCrmMigration(
   );
   const token = String(finalValidation.confirmation_token);
   assertEquals(token.length, 43);
-  const beforeFault = await harness.observeMigration();
+  const beforePostDdl = await captureMigrationState(
+    harness,
+    human,
+    projectId,
+    leadId,
+    output,
+  );
+  const beforePostDdlAudit = await harness.observeMigrationSideEffects(
+    finalPlan.id,
+  );
   await harness.installMigrationFailureBarrier();
   try {
     await expectedError(
@@ -275,8 +284,28 @@ export async function runCompleteCrmMigration(
   } finally {
     await harness.removeMigrationFailureBarrier();
   }
-  assertEquals(await harness.observeMigration(), beforeFault);
+  await assertFailedMigrationIsAtomic(
+    harness,
+    human,
+    projectId,
+    leadId,
+    finalPlan.id,
+    beforePostDdl,
+    beforePostDdlAudit,
+    "migration_apply_failed",
+    output,
+  );
 
+  const beforeLockTimeout = await captureMigrationState(
+    harness,
+    human,
+    projectId,
+    leadId,
+    output,
+  );
+  const beforeLockAudit = await harness.observeMigrationSideEffects(
+    finalPlan.id,
+  );
   await harness.holdMigrationTableLock();
   try {
     await expectedError(
@@ -296,7 +325,17 @@ export async function runCompleteCrmMigration(
   } finally {
     await harness.releaseMigrationTableLock();
   }
-  assertEquals(await harness.observeMigration(), beforeFault);
+  await assertFailedMigrationIsAtomic(
+    harness,
+    human,
+    projectId,
+    leadId,
+    finalPlan.id,
+    beforeLockTimeout,
+    beforeLockAudit,
+    "pack_install_busy",
+    output,
+  );
   const freshToken = String(
     data(
       await ok(
@@ -350,7 +389,7 @@ export async function runCompleteCrmMigration(
   );
   assertEquals(repeated, applied);
 
-  const finalEvidence = await harness.observeMigration();
+  const finalEvidence = await harness.observeMigration(projectId, leadId);
   assertEquals(finalEvidence.activeRevisionId, finalPlan.to_pack_revision_id);
   const finalMetadata = data(
     await ok(
@@ -432,6 +471,96 @@ export async function runCompleteCrmMigration(
     staleEffects,
   );
   assertEquals(/postgres(?:ql)?:\/\//i.test(output.join("\n")), false);
+}
+
+async function captureMigrationState(
+  harness: CompletePublicFlowBackend,
+  human: PublicFlowLauncher,
+  projectId: string,
+  leadId: string,
+  output: string[],
+): Promise<string> {
+  const metadata = data(
+    await ok(
+      human.runCli(["--json", "metadata", "resource", `${CRM}:lead`]),
+      output,
+    ),
+  );
+  const view = data(
+    await ok(
+      human.runCli([
+        "--json",
+        "--project",
+        projectId,
+        "view",
+        `${CRM}:lead`,
+        leadId,
+      ]),
+      output,
+    ),
+  );
+  const history = data(
+    await ok(
+      human.runCli([
+        "--json",
+        "--project",
+        projectId,
+        "history",
+        `${CRM}:lead`,
+        leadId,
+      ]),
+      output,
+    ),
+  );
+  const publicView = {
+    id: view.id,
+    project_id: view.project_id,
+    resource: view.resource,
+    version: view.version,
+    state: view.state,
+    archived_at: view.archived_at,
+    data: view.data,
+  };
+  return JSON.stringify({
+    activationApplicationCatalogSchemaData: await harness.observeMigration(
+      projectId,
+      leadId,
+    ),
+    publicMetadataFields: metadata.schema.fields,
+    publicLeadView: publicView,
+    publicLeadHistory: history.items,
+    publicLeadData: view.data,
+  });
+}
+
+async function assertFailedMigrationIsAtomic(
+  harness: CompletePublicFlowBackend,
+  human: PublicFlowLauncher,
+  projectId: string,
+  leadId: string,
+  planId: string,
+  beforeBytes: string,
+  beforeAudit: Awaited<
+    ReturnType<CompletePublicFlowBackend["observeMigrationSideEffects"]>
+  >,
+  expectedOutcome: "migration_apply_failed" | "pack_install_busy",
+  output: string[],
+): Promise<void> {
+  assertEquals(
+    await captureMigrationState(harness, human, projectId, leadId, output),
+    beforeBytes,
+  );
+  const afterAudit = await harness.observeMigrationSideEffects(planId);
+  assertEquals(afterAudit.validations, beforeAudit.validations);
+  assertEquals(afterAudit.tokens, beforeAudit.tokens);
+  assertEquals(Number(afterAudit.attempts), Number(beforeAudit.attempts) + 1);
+  assertEquals(Number(afterAudit.audits), Number(beforeAudit.audits) + 1);
+  assertEquals(afterAudit.latestOutcome, expectedOutcome);
+  assertEquals(afterAudit.latestDecision, "denied");
+  assertEquals(
+    JSON.parse(String(afterAudit.latestDetails)),
+    { error_code: expectedOutcome },
+  );
 }
 
 async function ok(promise: Promise<PublicFlowCommandResult>, output: string[]) {

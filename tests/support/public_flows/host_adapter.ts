@@ -358,31 +358,74 @@ export function createHostPublicFlowBackend(
       lockRelease = undefined;
       lockTask = undefined;
     },
-    async observeMigration() {
+    async observeMigration(projectId, leadId) {
       const activeRevisionId = (await query<{ id: string }>(
         harness.server.sql,
         "select candidate_revision_id::text id from pack_active_revisions where publisher='operant' and pack_name='crm'",
       )).rows[0].id;
-      const migrationApplications = (await query<{ count: string }>(
+      const table = (await query<{ table_name: string }>(
         harness.server.sql,
-        "select count(*)::text count from pack_migration_applications",
-      )).rows[0].count;
-      const fields = (await query<{ field_name: string }>(
+        "select table_name from pack_runtime_tables where publisher='operant' and pack_name='crm' and definition_kind='resource' and definition_name='lead'",
+      )).rows[0].table_name;
+      if (!/^[a-z0-9_]+$/.test(table)) throw new Error("invalid lead table");
+      const snapshot = (await query<{
+        activation: string;
+        applications: string;
+        catalog: string;
+        source_fields: string;
+        physical_columns: string;
+        physical_rows: string;
+      }>(
         harness.server.sql,
-        `select jsonb_object_keys(content::jsonb->'spec'->'fields') field_name
-           from pack_source_files
-          where revision=$1 and path='resources/lead.yaml'
-          order by field_name`,
-        [activeRevisionId],
-      )).rows.map((row) => row.field_name);
-      return { activeRevisionId, migrationApplications, fields };
+        `select
+          (select to_jsonb(a)::text from pack_active_revisions a where publisher='operant' and pack_name='crm') activation,
+          (select coalesce(jsonb_agg(to_jsonb(a) order by a.id),'[]'::jsonb)::text from pack_migration_applications a) applications,
+          (select coalesce(jsonb_agg(to_jsonb(t) order by t.definition_kind,t.definition_name),'[]'::jsonb)::text from pack_runtime_tables t where publisher='operant' and pack_name='crm') catalog,
+          (select coalesce(jsonb_agg(field_name order by field_name),'[]'::jsonb)::text from pack_source_files, lateral jsonb_object_keys(content::jsonb->'spec'->'fields') field_name where revision=$1 and path='resources/lead.yaml') source_fields,
+          (select coalesce(jsonb_agg(to_jsonb(c) order by c.ordinal_position),'[]'::jsonb)::text from (select ordinal_position,column_name,data_type,udt_name,is_nullable,column_default from information_schema.columns where table_schema='public' and table_name=$2) c) physical_columns,
+          (select coalesce(jsonb_agg(to_jsonb(r) order by r.id),'[]'::jsonb)::text from ${table} r where r.project_id=$3 and r.id=$4) physical_rows`,
+        [activeRevisionId, table, projectId, leadId],
+      )).rows[0];
+      return {
+        activeRevisionId,
+        activation: snapshot.activation,
+        applications: snapshot.applications,
+        catalog: snapshot.catalog,
+        sourceFields: snapshot.source_fields,
+        physicalColumns: snapshot.physical_columns,
+        physicalRows: snapshot.physical_rows,
+      };
     },
     async observeMigrationSideEffects(planId): Promise<MigrationSideEffects> {
-      return (await query<MigrationSideEffects>(
+      const row = (await query<{
+        validations: string;
+        tokens: string;
+        attempts: string;
+        audits: string;
+        latest_outcome: string | null;
+        latest_decision: string | null;
+        latest_details: string | null;
+      }>(
         harness.server.sql,
-        `select (select count(*)::text from pack_migration_validations where plan_id=$1) validations,(select count(*)::text from pack_migration_confirmation_tokens where plan_id=$1) tokens,(select count(*)::text from pack_migration_attempts where plan_id=$1) attempts`,
+        `select
+          (select count(*)::text from pack_migration_validations where plan_id=$1) validations,
+          (select count(*)::text from pack_migration_confirmation_tokens where plan_id=$1) tokens,
+          (select count(*)::text from pack_migration_attempts where plan_id=$1) attempts,
+          (select count(*)::text from pack_migration_audit_events where plan_id=$1) audits,
+          (select outcome from pack_migration_attempts where plan_id=$1 order by created_at desc,id desc limit 1) latest_outcome,
+          (select decision from pack_migration_audit_events where plan_id=$1 order by created_at desc,id desc limit 1) latest_decision,
+          (select details::text from pack_migration_audit_events where plan_id=$1 order by created_at desc,id desc limit 1) latest_details`,
         [planId],
       )).rows[0];
+      return {
+        validations: row.validations,
+        tokens: row.tokens,
+        attempts: row.attempts,
+        audits: row.audits,
+        latestOutcome: row.latest_outcome,
+        latestDecision: row.latest_decision,
+        latestDetails: row.latest_details,
+      };
     },
   };
   return backend;

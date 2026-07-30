@@ -1,3 +1,4 @@
+// deno-lint-ignore-file no-import-prefix no-unversioned-import
 import { assertEquals } from "jsr:@std/assert";
 import { startHttpProvider } from "../../support/http_provider.ts";
 
@@ -48,6 +49,53 @@ Deno.test("HTTP provider simulates delay, retry, permanent failure, and duplicat
     ]);
     assertEquals(provider.effects.length, 1);
     assertEquals(provider.effects[0].body, "one");
+  } finally {
+    await provider.close();
+  }
+});
+
+Deno.test("HTTP provider keys scripted retry-success to the originating delivery", async () => {
+  const provider = startHttpProvider([{
+    kind: "retry_then_success",
+    retryAfterSeconds: 0,
+    successHoldToken: "delivery-a-success",
+  }]);
+  try {
+    const first = await fetch(provider.url, {
+      method: "POST",
+      headers: { "idempotency-key": "delivery-a" },
+    });
+    assertEquals(first.status, 503);
+    await first.body?.cancel();
+
+    const unrelated = await fetch(provider.url, {
+      method: "POST",
+      headers: { "idempotency-key": "delivery-b" },
+    });
+    assertEquals(unrelated.status, 200);
+    await unrelated.body?.cancel();
+    const retry = fetch(provider.url, {
+      method: "POST",
+      headers: { "idempotency-key": "delivery-a" },
+    });
+    await provider.waitForKeyAttempts("delivery-a", 2);
+    assertEquals(provider.activeHolds(), ["delivery-a-success"]);
+    assertEquals(
+      provider.effects.filter((attempt) =>
+        attempt.idempotencyKey === "delivery-a"
+      ).length,
+      1,
+    );
+    provider.release("delivery-a-success");
+    const succeeded = await retry;
+    assertEquals(succeeded.status, 200);
+    await succeeded.body?.cancel();
+    assertEquals(
+      provider.attempts.filter((attempt) =>
+        attempt.idempotencyKey === "delivery-a"
+      ).map((attempt) => attempt.idempotencyKey),
+      ["delivery-a", "delivery-a"],
+    );
   } finally {
     await provider.close();
   }

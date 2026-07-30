@@ -23,14 +23,22 @@ export type RelationshipTupleEvidence = Readonly<{
 
 export type MigrationEvidence = Readonly<{
   activeRevisionId: string;
-  migrationApplications: string;
-  fields: readonly string[];
+  activation: string;
+  applications: string;
+  catalog: string;
+  sourceFields: string;
+  physicalColumns: string;
+  physicalRows: string;
 }>;
 
 export type MigrationSideEffects = Readonly<{
   validations: string;
   tokens: string;
   attempts: string;
+  audits: string;
+  latestOutcome: string | null;
+  latestDecision: string | null;
+  latestDetails: string | null;
 }>;
 
 export type ProviderBehavior =
@@ -39,6 +47,13 @@ export type ProviderBehavior =
     kind: "retry";
     status?: number;
     retryAfterSeconds: number;
+    body?: unknown;
+  }>
+  | Readonly<{
+    kind: "retry_then_success";
+    status?: number;
+    retryAfterSeconds: number;
+    successHoldToken: string;
     body?: unknown;
   }>
   | Readonly<{ kind: "hold"; token: string; status?: number; body?: unknown }>;
@@ -108,7 +123,10 @@ export interface CompletePublicFlowEvidence {
   removeMigrationFailureBarrier(): Promise<void>;
   holdMigrationTableLock(): Promise<void>;
   releaseMigrationTableLock(): Promise<void>;
-  observeMigration(): Promise<MigrationEvidence>;
+  observeMigration(
+    projectId: string,
+    leadId: string,
+  ): Promise<MigrationEvidence>;
   observeMigrationSideEffects(planId: string): Promise<MigrationSideEffects>;
 }
 

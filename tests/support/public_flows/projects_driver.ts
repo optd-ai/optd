@@ -15,12 +15,17 @@ export async function runCompleteProjectsPublicFlow(
 ): Promise<void> {
   const launchers: PublicFlowLauncher[] = [];
   const output: string[] = [];
+  const failures: unknown[] = [];
   try {
     await harness.compileCurrentCli();
     await harness.configureProvider([
+      {
+        kind: "retry_then_success",
+        retryAfterSeconds: 1,
+        successHoldToken: "projects-retry-success",
+        body: { retry: true },
+      },
       { kind: "retry", retryAfterSeconds: 600, body: { retry: true } },
-      { kind: "success", body: { delivered: true } },
-      { kind: "success", body: { delivered: true } },
     ]);
     const PACK = await harness.assetPath("projects");
     const AUXILIARY_PACK = await harness.assetPath("projects_auxiliary");
@@ -888,6 +893,33 @@ export async function runCompleteProjectsPublicFlow(
     output.push(injection.stdout, injection.stderr);
     assertEquals(injection.code, 1);
 
+    await harness.waitForProviderBarrier("projects-retry-success");
+    const attemptsAtRetrySuccess = await harness.providerAttempts();
+    const attemptsByKey = Map.groupBy(
+      attemptsAtRetrySuccess.filter((attempt) => attempt.idempotencyKey),
+      (attempt) => String(attempt.idempotencyKey),
+    );
+    const scriptedRetry = [...attemptsByKey.entries()].find(([, attempts]) =>
+      attempts.length >= 2
+    );
+    assert(scriptedRetry, JSON.stringify(attemptsAtRetrySuccess));
+    const [scriptedRetryKey, scriptedRetryAttempts] = scriptedRetry;
+    assert(scriptedRetryKey.length > 0);
+    assert(scriptedRetryAttempts.length >= 2);
+    assert(
+      scriptedRetryAttempts.every((attempt) =>
+        attempt.idempotencyKey === scriptedRetryKey
+      ),
+    );
+    assertEquals(
+      (await harness.providerEffects()).filter((attempt) =>
+        attempt.idempotencyKey === scriptedRetryKey
+      ).length,
+      1,
+    );
+    await harness.releaseProviderBarrier("projects-retry-success");
+
+    let scriptedDelivery: any;
     let deliveries: any[] = [];
     for (let attempt = 0; attempt < 100; attempt++) {
       const listed = data(
@@ -905,9 +937,32 @@ export async function runCompleteProjectsPublicFlow(
         ),
       );
       deliveries = listed.items ?? listed.deliveries;
-      if (deliveries.some((item: any) => item.status === "retry_wait")) break;
+      scriptedDelivery = deliveries.find((item: any) =>
+        item.id === scriptedRetryKey && item.status === "succeeded"
+      );
+      if (
+        scriptedDelivery &&
+        deliveries.some((item: any) => item.status === "retry_wait")
+      ) break;
       await delay(25);
     }
+    assert(scriptedDelivery, JSON.stringify(deliveries));
+    const scriptedPublicAttempts = data(
+      await ok(
+        human.runCli([
+          "--json",
+          "outbox",
+          "attempts",
+          scriptedRetryKey,
+        ]),
+        output,
+      ),
+    );
+    assert(
+      (scriptedPublicAttempts.items ?? scriptedPublicAttempts.attempts)
+        .length >=
+        2,
+    );
     const cancellable = deliveries.find((item: any) =>
       item.status === "retry_wait"
     );
@@ -963,8 +1018,14 @@ export async function runCompleteProjectsPublicFlow(
     assert((deliveryAttempts.items ?? deliveryAttempts.attempts).length >= 1);
     const providerAttempts = await harness.providerAttempts();
     const providerEffects = await harness.providerEffects();
-    assert(providerAttempts.length >= 1);
+    assert(providerAttempts.length >= 2);
     assert(providerAttempts.every((attempt) => attempt.idempotencyKey));
+    assertEquals(
+      providerEffects.filter((attempt) =>
+        attempt.idempotencyKey === scriptedRetryKey
+      ).length,
+      1,
+    );
     assertEquals(
       new Set(providerEffects.map((attempt) => attempt.idempotencyKey)).size,
       providerEffects.length,
@@ -1064,11 +1125,23 @@ export async function runCompleteProjectsPublicFlow(
     const diagnostics = await harness.diagnostics();
     assert(diagnostics.serverLogs.length > 0);
     assert(diagnostics.runtimeResources.length > 0);
-  } finally {
-    await assertNoLeaks(harness, output).catch(() => undefined);
-    for (const value of launchers.reverse()) {
-      await value.close().catch(() => undefined);
-    }
+  } catch (error) {
+    failures.push(error);
+  }
+  const cleanup = await Promise.allSettled([
+    assertNoLeaks(harness, output),
+    ...launchers.reverse().map((value) => value.close()),
+  ]);
+  failures.push(
+    ...cleanup.flatMap((result) =>
+      result.status === "rejected" ? [result.reason] : []
+    ),
+  );
+  if (failures.length) {
+    throw new AggregateError(
+      failures,
+      "Projects flow, diagnostics, or launcher cleanup failed",
+    );
   }
 }
 

@@ -476,22 +476,59 @@ export async function createContainerPublicFlowBackend(
       await lockChild.status.catch(() => undefined);
       lockChild = undefined;
     },
-    async observeMigration() {
+    async observeMigration(projectId, leadId) {
+      const activeRevisionId = await sqlScalar(
+        harness,
+        "select candidate_revision_id::text from pack_active_revisions where publisher='operant' and pack_name='crm'",
+      );
+      const table = await sqlScalar(
+        harness,
+        "select table_name from pack_runtime_tables where publisher='operant' and pack_name='crm' and definition_kind='resource' and definition_name='lead'",
+      );
+      if (!/^[a-z0-9_]+$/.test(table)) throw new Error("invalid lead table");
       return await sqlJson(
         harness,
-        `with active as (select candidate_revision_id::text id from pack_active_revisions where publisher='operant' and pack_name='crm') select json_build_object('activeRevisionId',(select id from active),'migrationApplications',(select count(*)::text from pack_migration_applications),'fields',(select coalesce(json_agg(field_name order by field_name),'[]'::json) from pack_source_files, lateral jsonb_object_keys(content::jsonb->'spec'->'fields') field_name where revision=(select id from active) and path='resources/lead.yaml'))`,
+        `select json_build_object(
+          'activeRevisionId',${literal(activeRevisionId)},
+          'activation',(select to_jsonb(a)::text from pack_active_revisions a where publisher='operant' and pack_name='crm'),
+          'applications',(select coalesce(jsonb_agg(to_jsonb(a) order by a.id),'[]'::jsonb)::text from pack_migration_applications a),
+          'catalog',(select coalesce(jsonb_agg(to_jsonb(t) order by t.definition_kind,t.definition_name),'[]'::jsonb)::text from pack_runtime_tables t where publisher='operant' and pack_name='crm'),
+          'sourceFields',(select coalesce(jsonb_agg(field_name order by field_name),'[]'::jsonb)::text from pack_source_files, lateral jsonb_object_keys(content::jsonb->'spec'->'fields') field_name where revision=${
+          literal(activeRevisionId)
+        } and path='resources/lead.yaml'),
+          'physicalColumns',(select coalesce(jsonb_agg(to_jsonb(c) order by c.ordinal_position),'[]'::jsonb)::text from (select ordinal_position,column_name,data_type,udt_name,is_nullable,column_default from information_schema.columns where table_schema='public' and table_name=${
+          literal(table)
+        }) c),
+          'physicalRows',(select coalesce(jsonb_agg(to_jsonb(r) order by r.id),'[]'::jsonb)::text from ${table} r where r.project_id=${
+          literal(projectId)
+        } and r.id=${literal(leadId)}))`,
       );
     },
     async observeMigrationSideEffects(planId): Promise<MigrationSideEffects> {
       return await sqlJson(
         harness,
-        `select json_build_object('validations',(select count(*)::text from pack_migration_validations where plan_id=${
+        `select json_build_object(
+          'validations',(select count(*)::text from pack_migration_validations where plan_id=${
           literal(planId)
-        }),'tokens',(select count(*)::text from pack_migration_confirmation_tokens where plan_id=${
+        }),
+          'tokens',(select count(*)::text from pack_migration_confirmation_tokens where plan_id=${
           literal(planId)
-        }),'attempts',(select count(*)::text from pack_migration_attempts where plan_id=${
+        }),
+          'attempts',(select count(*)::text from pack_migration_attempts where plan_id=${
           literal(planId)
-        }))`,
+        }),
+          'audits',(select count(*)::text from pack_migration_audit_events where plan_id=${
+          literal(planId)
+        }),
+          'latestOutcome',(select outcome from pack_migration_attempts where plan_id=${
+          literal(planId)
+        } order by created_at desc,id desc limit 1),
+          'latestDecision',(select decision from pack_migration_audit_events where plan_id=${
+          literal(planId)
+        } order by created_at desc,id desc limit 1),
+          'latestDetails',(select details::text from pack_migration_audit_events where plan_id=${
+          literal(planId)
+        } order by created_at desc,id desc limit 1))`,
       );
     },
   };

@@ -263,28 +263,69 @@ Deno.test({
       const containerPack = await harness.copyPack(pack);
       await ok(["--json", "pack", "apply", containerPack, "--safe"]);
       provider.enqueue(
-        { kind: "retry", retryAfterSeconds: 2 },
-        { kind: "hold", token: "leased" },
-        { kind: "success" },
-        { kind: "success" },
+        {
+          kind: "hold_retry",
+          token: "retry-response-generation-0",
+          retryAfterSeconds: 2,
+        },
+        { kind: "hold", token: "lease-generation-0" },
       );
-      for (const key of ["retry", "leased"]) {
-        const staged = await stageChangeset(harness, launcher, projectId, [{
-          op: "create",
-          project_id: projectId,
-          resource: "test/containeroutbox:item",
-          fields: { key },
-        }]);
-        assertEquals(staged.raw.code, 0, staged.raw.stderr);
-        await ok(["--json", "changeset", "commit", staged.data.id]);
-      }
-      await provider.waitForAttempts(2, 15_000);
-      const before = await waitOutboxStates(launcher, [
-        "retry_wait",
-        "running",
+
+      const retryStage = await stageChangeset(harness, launcher, projectId, [{
+        op: "create",
+        project_id: projectId,
+        resource: "test/containeroutbox:item",
+        fields: { key: "retry" },
+      }]);
+      assertEquals(retryStage.raw.code, 0, retryStage.raw.stderr);
+      await ok(["--json", "changeset", "commit", retryStage.data.id]);
+      await waitProviderHold(provider, "retry-response-generation-0");
+      provider.release("retry-response-generation-0");
+      const retrying = await waitOutboxStatus(launcher, "retry_wait");
+      provider.enqueueForKey(String(retrying.id), {
+        kind: "hold",
+        token: "retry-recovery-generation-0",
+      });
+      const retryEvidence = await ok([
+        "--json",
+        "outbox",
+        "inspect",
+        String(retrying.id),
       ]);
-      const running = before.find((item) => item.status === "running")!;
-      const retrying = before.find((item) => item.status === "retry_wait")!;
+      assertEquals(retryEvidence.status, "retry_wait");
+      assertEquals(retryEvidence.retry_generation, 0);
+      assertEquals(retryEvidence.attempts_in_generation, 1);
+      assertEquals(retryEvidence.total_attempts, 1);
+      assertEquals(retryEvidence.attempts_summary.latest.outcome, "retry");
+      const retryAttempts = await ok([
+        "--json",
+        "outbox",
+        "attempts",
+        String(retrying.id),
+      ]);
+      assertEquals(retryAttempts.items[0].retry_generation, 0);
+      assertEquals(retryAttempts.items[0].attempt_number, 1);
+      assertEquals(retryAttempts.items[0].total_attempt_number, 1);
+      assertEquals(retryAttempts.items[0].outcome, "retry");
+
+      const leasedStage = await stageChangeset(harness, launcher, projectId, [{
+        op: "create",
+        project_id: projectId,
+        resource: "test/containeroutbox:item",
+        fields: { key: "leased" },
+      }]);
+      assertEquals(leasedStage.raw.code, 0, leasedStage.raw.stderr);
+      await ok(["--json", "changeset", "commit", leasedStage.data.id]);
+      await waitProviderHold(provider, "lease-generation-0");
+      const running = await waitOutboxStatus(
+        launcher,
+        "running",
+        new Set([String(retrying.id)]),
+      );
+      provider.enqueueForKey(String(running.id), {
+        kind: "hold",
+        token: "lease-recovery-generation-0",
+      });
       const runningEvidence = await ok([
         "--json",
         "outbox",
@@ -292,6 +333,10 @@ Deno.test({
         String(running.id),
       ]);
       assertEquals(runningEvidence.status, "running");
+      assertEquals(runningEvidence.retry_generation, 0);
+      assertEquals(runningEvidence.attempts_in_generation, 1);
+      assertEquals(runningEvidence.total_attempts, 1);
+      assert(runningEvidence.attempts_summary.latest.attempt_id);
       const runningAttempts = await ok([
         "--json",
         "outbox",
@@ -301,16 +346,32 @@ Deno.test({
       const runningAttempt = runningAttempts.items.find((attempt: {
         state: string;
       }) => attempt.state === "running");
-      assert(runningAttempt?.lease_expires_at);
-      assert(
-        provider.attempts.some((attempt) =>
-          attempt.idempotencyKey === running.id
-        ),
+      assertEquals(
+        runningAttempt.id,
+        runningEvidence.attempts_summary.latest.attempt_id,
       );
+      assertEquals(runningAttempt.retry_generation, 0);
+      assertEquals(runningAttempt.attempt_number, 1);
+      assertEquals(runningAttempt.total_attempt_number, 1);
+      assert(runningAttempt.lease_expires_at);
+
       await harness.docker(["kill", harness.container]);
       await launcher.close().catch(() => undefined);
       launcher = undefined;
-      provider.release("leased");
+      provider.release("lease-generation-0");
+      const retryRecoveryWasActive = provider.activeHolds().includes(
+        "retry-recovery-generation-0",
+      );
+      if (retryRecoveryWasActive) {
+        provider.release("retry-recovery-generation-0");
+        provider.enqueueForKey(String(retrying.id), {
+          kind: "hold",
+          token: "retry-recovery-generation-1",
+        });
+      }
+      const retryRecoveryToken = retryRecoveryWasActive
+        ? "retry-recovery-generation-1"
+        : "retry-recovery-generation-0";
       const attemptsAtRestart = provider.attempts.length;
       await harness.recreateAppManaged([
         "--add-host",
@@ -329,14 +390,20 @@ Deno.test({
         "OPERANT_OUTBOX_MAX_BACKOFF_MS=100",
       ]);
       await harness.waitReady();
-      await provider.waitForAttempts(attemptsAtRestart + 2, 15_000);
-      const recoveredRunningAttempt = provider.attempts.slice(attemptsAtRestart)
-        .find((attempt) => attempt.idempotencyKey === running.id);
+      await Promise.all([
+        waitProviderHold(provider, retryRecoveryToken),
+        waitProviderHold(provider, "lease-recovery-generation-0"),
+      ]);
+      const restartedAttempts = provider.attempts.slice(attemptsAtRestart);
+      const recoveredRunningAttempt = restartedAttempts.find((attempt) =>
+        attempt.idempotencyKey === running.id
+      );
       assert(recoveredRunningAttempt);
       assert(
         recoveredRunningAttempt.receivedAt >=
           new Date(String(runningAttempt.lease_expires_at)).getTime(),
       );
+
       launcher = await harness.createProcessTreeLauncher();
       const login = await launcher.runOptctl([
         "--json",
@@ -347,29 +414,80 @@ Deno.test({
         "--password-stdin",
       ], "container outbox password\n");
       assertEquals(login.code, 0, login.stderr);
-      const recovered = await waitOutboxStates(launcher, [
-        "succeeded",
-        "succeeded",
-      ]);
-      const ids = new Set(recovered.map((item) => item.id));
-      assert(ids.has(running.id));
-      assert(ids.has(retrying.id));
-      const sameDeliveryAttempts = provider.attempts.filter((attempt) =>
-        attempt.idempotencyKey === running.id
-      );
-      assert(sameDeliveryAttempts.length >= 2);
-      assertEquals(
-        new Set(sameDeliveryAttempts.map((attempt) => attempt.idempotencyKey))
-          .size,
-        1,
-      );
-      assertEquals(
-        provider.effects.filter((attempt) =>
-          attempt.idempotencyKey === running.id
-        )
-          .length,
-        1,
-      );
+      for (const delivery of [retrying, running]) {
+        const recoveredEvidence = await ok([
+          "--json",
+          "outbox",
+          "inspect",
+          String(delivery.id),
+        ]);
+        assertEquals(recoveredEvidence.status, "running");
+        assertEquals(recoveredEvidence.retry_generation, 0);
+        assertEquals(recoveredEvidence.attempts_in_generation, 2);
+        assertEquals(recoveredEvidence.total_attempts, 2);
+        const recoveredAttempts = await ok([
+          "--json",
+          "outbox",
+          "attempts",
+          String(delivery.id),
+        ]);
+        const active = recoveredAttempts.items.find((attempt: {
+          state: string;
+        }) => attempt.state === "running");
+        assertEquals(
+          active.id,
+          recoveredEvidence.attempts_summary.latest.attempt_id,
+        );
+        assertEquals(active.retry_generation, 0);
+        assertEquals(active.attempt_number, 2);
+        assertEquals(active.total_attempt_number, 2);
+        assert(active.lease_expires_at);
+      }
+      provider.release(retryRecoveryToken);
+      provider.release("lease-recovery-generation-0");
+      for (const delivery of [retrying, running]) {
+        const terminal = await waitOutboxStatus(
+          launcher,
+          "succeeded",
+          new Set(
+            [retrying, running].filter((item) => item.id !== delivery.id).map((
+              item,
+            ) => String(item.id)),
+          ),
+        );
+        assertEquals(terminal.id, delivery.id);
+        const terminalEvidence = await ok([
+          "--json",
+          "outbox",
+          "inspect",
+          String(delivery.id),
+        ]);
+        assertEquals(terminalEvidence.status, "succeeded");
+        assertEquals(terminalEvidence.retry_generation, 0);
+        assertEquals(terminalEvidence.attempts_in_generation, 2);
+        assertEquals(terminalEvidence.total_attempts, 2);
+        assertEquals(
+          terminalEvidence.attempts_summary.latest.outcome,
+          "succeeded",
+        );
+      }
+      for (const delivery of [retrying, running]) {
+        const sameDeliveryAttempts = provider.attempts.filter((attempt) =>
+          attempt.idempotencyKey === delivery.id
+        );
+        assert(sameDeliveryAttempts.length >= 2);
+        assertEquals(
+          new Set(sameDeliveryAttempts.map((attempt) => attempt.idempotencyKey))
+            .size,
+          1,
+        );
+        assertEquals(
+          provider.effects.filter((attempt) =>
+            attempt.idempotencyKey === delivery.id
+          ).length,
+          1,
+        );
+      }
       const topology = await harness.docker([
         "exec",
         harness.container,
@@ -771,10 +889,11 @@ async function stageChangeset(
   return { raw, data: raw.code === 0 ? JSON.parse(raw.stdout).data : {} };
 }
 
-async function waitOutboxStates(
+async function waitOutboxStatus(
   launcher: ContainerCliLauncher,
-  expected: string[],
-): Promise<Array<Record<string, unknown>>> {
+  status: string,
+  excludedIds = new Set<string>(),
+): Promise<Record<string, unknown>> {
   const deadline = Date.now() + 20_000;
   let items: Array<Record<string, unknown>> = [];
   while (Date.now() < deadline) {
@@ -787,27 +906,28 @@ async function waitOutboxStates(
     ]);
     if (result.code === 0) {
       items = JSON.parse(result.stdout).data.items;
-      const available = items.map((item) => String(item.status));
-      const remaining = [...available];
-      const matched = expected.every((status) => {
-        const index = remaining.indexOf(status);
-        if (index < 0) return false;
-        remaining.splice(index, 1);
-        return true;
-      });
-      if (matched) {
-        const candidates = [...items];
-        return expected.map((status) => {
-          const index = candidates.findIndex((item) => item.status === status);
-          return candidates.splice(index, 1)[0];
-        });
-      }
+      const matched = items.find((item) =>
+        item.status === status && !excludedIds.has(String(item.id))
+      );
+      if (matched) return matched;
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   throw new Error(
-    `outbox states ${expected.join(",")} not reached: ${JSON.stringify(items)}`,
+    `outbox status ${status} not reached: ${JSON.stringify(items)}`,
   );
+}
+
+async function waitProviderHold(
+  provider: ReturnType<typeof startHttpProvider>,
+  token: string,
+): Promise<void> {
+  const deadline = Date.now() + 15_000;
+  while (Date.now() < deadline) {
+    if (provider.activeHolds().includes(token)) return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(`provider hold ${token} was not reached`);
 }
 
 async function writeContainerOutboxPack(root: string, providerUrl: string) {

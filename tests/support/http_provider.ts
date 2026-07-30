@@ -7,6 +7,20 @@ export type ProviderBehavior =
     retryAfterSeconds: number;
     body?: unknown;
   }
+  | {
+    kind: "hold_retry";
+    token: string;
+    status?: number;
+    retryAfterSeconds: number;
+    body?: unknown;
+  }
+  | {
+    kind: "retry_then_success";
+    status?: number;
+    retryAfterSeconds: number;
+    successHoldToken: string;
+    body?: unknown;
+  }
   | { kind: "permanent_failure"; status?: number; body?: unknown }
   | { kind: "hold"; token: string; status?: number; body?: unknown };
 
@@ -76,6 +90,21 @@ export function startHttpProvider(
       kind: "success",
     };
     if (key !== null && keyed?.length === 0) keyedQueues.delete(key);
+    if (behavior.kind === "retry_then_success") {
+      if (key === null) {
+        return new Response(
+          JSON.stringify({ error: "scripted retry requires idempotency key" }),
+          { status: 400, headers: { "content-type": "application/json" } },
+        );
+      }
+      const existing = keyedQueues.get(key) ?? [];
+      existing.unshift({
+        kind: "hold",
+        token: behavior.successHoldToken,
+        body: { delivered: true },
+      });
+      keyedQueues.set(key, existing);
+    }
     const duplicate = key !== null && effectedKeys.has(key);
     const attempt: ProviderAttempt = {
       id: attempts.length + 1,
@@ -101,20 +130,25 @@ export function startHttpProvider(
       await abortableDelay(behavior.delayMs, controller.signal).catch(() =>
         undefined
       );
-    } else if (behavior.kind === "hold") {
+    } else if (behavior.kind === "hold" || behavior.kind === "hold_retry") {
       await new Promise<void>((resolve) => {
         holds.set(behavior.token, resolve);
         if (controller.signal.aborted) resolve();
       });
       holds.delete(behavior.token);
     }
-    const status = behavior.kind === "retry"
+    const status = behavior.kind === "retry" ||
+        behavior.kind === "hold_retry" ||
+        behavior.kind === "retry_then_success"
       ? behavior.status ?? 503
       : behavior.kind === "permanent_failure"
       ? behavior.status ?? 422
       : behavior.status ?? 200;
     const headers = new Headers({ "content-type": "application/json" });
-    if (behavior.kind === "retry") {
+    if (
+      behavior.kind === "retry" || behavior.kind === "hold_retry" ||
+      behavior.kind === "retry_then_success"
+    ) {
       headers.set("retry-after", String(behavior.retryAfterSeconds));
     }
     return new Response(JSON.stringify(behavior.body ?? { ok: status < 400 }), {
