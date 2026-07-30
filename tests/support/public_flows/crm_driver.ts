@@ -1469,6 +1469,14 @@ export async function runCompleteCrmPublicFlow(
       environment: { OPERANT_OUTBOX_POLL_INTERVAL_MS: "60000" },
     });
     await harness.waitUntilReady();
+    await refreshHumanLauncher(
+      harness,
+      launchers,
+      replacementHuman,
+      output,
+      "crm-admin",
+      "crm acceptance password",
+    );
     let outboxList = json(
       await ok(
         replacementHuman.launcher.runCli([
@@ -1621,6 +1629,14 @@ export async function runCompleteCrmPublicFlow(
       environment: { OPERANT_OUTBOX_POLL_INTERVAL_MS: "20" },
     });
     await harness.waitUntilReady();
+    await refreshHumanLauncher(
+      harness,
+      launchers,
+      replacementHuman,
+      output,
+      "crm-admin",
+      "crm acceptance password",
+    );
     const drainSetup = json(
       await ok(
         runJson(
@@ -1763,6 +1779,23 @@ export async function runCompleteCrmPublicFlow(
       "CRM flow, diagnostics, or launcher cleanup failed",
     );
   }
+}
+
+async function refreshHumanLauncher(
+  harness: CompletePublicFlowBackend,
+  launchers: PublicFlowLauncher[],
+  holder: Readonly<{ launcher: PublicFlowLauncher }>,
+  output: string[],
+  username: string,
+  password: string,
+): Promise<void> {
+  const refreshed = await loginProcess(harness, { username, password });
+  launchers.push(refreshed.launcher);
+  await ok(Promise.resolve(refreshed.result), output);
+  Object.defineProperty(holder, "launcher", {
+    value: refreshed.launcher,
+    configurable: true,
+  });
 }
 
 async function assertHookQuiescence(
