@@ -540,8 +540,8 @@ Deno.test("action staging orchestration stays inward over granular capabilities"
   assertMatch(application, /ActionCatalog/);
   assertMatch(application, /ActionTargetReader/);
   assertMatch(application, /PinnedActionHookCatalog/);
-  assertMatch(application, /TargetedPolicyEvaluator/);
-  assertMatch(application, /TargetedAuthorityCutoff/);
+  assertMatch(application, /ActionStageAuthorityPort/);
+  assertMatch(application, /ActionStageAuthorityCutoff/);
   assertMatch(application, /HookExecutionEvidenceRepository/);
   assertMatch(application, /lockAndEvaluate/);
   assertMatch(application, /executeHooks/);
@@ -558,6 +558,12 @@ Deno.test("all frozen hook and action ports have production consumers and implem
     "src/application/services/actions/stage_actions.ts",
     "src/application/services/hooks/trusted_stage_hook_coordinator.ts",
   ].map((path) => Deno.readTextFile(path))).then((values) => values.join("\n"));
+  const postgresActionAdapter = await Deno.readTextFile(
+    "src/adapters/outbound/postgres/repositories/action_stage_repository.ts",
+  );
+  const composition = await Deno.readTextFile(
+    "src/composition/application.ts",
+  );
   const implementations = await Promise.all([
     "src/adapters/outbound/deno-hooks/trusted_stage_hook_adapter.ts",
     "src/adapters/outbound/postgres/repositories/action_stage_repository.ts",
@@ -568,21 +574,29 @@ Deno.test("all frozen hook and action ports have production consumers and implem
     const port of [
       "HookExecutor",
       "HookSecretResolver",
-      "TargetedPolicyEvaluator",
+      "ActionStageAuthorityPort",
       "PinnedActionHookCatalog",
       "ActionTargetReader",
-      "TargetedAuthorityCutoff",
+      "ActionStageAuthorityCutoff",
       "HookExecutionEvidenceRepository",
     ]
   ) {
     assertMatch(application, new RegExp(`\\b${port}\\b`));
   }
+  assertMatch(postgresActionAdapter, /makePostgresActionStageRepository/);
+  assertMatch(postgresActionAdapter, /createActionStageAuthorityCutoff/);
+  assertMatch(postgresActionAdapter, /assertActionStageAuthorityCutoff/);
+  assertMatch(composition, /makeStageActionService/);
+  assertMatch(
+    composition,
+    /\.\.\.makePostgresActionStageRepository\(sql, changesets\)/,
+  );
   assertMatch(implementations, /DenoHookExecutor/);
   assertMatch(implementations, /makeHookSecretResolver/);
   assertMatch(implementations, /lockAndEvaluate/);
   assertMatch(implementations, /pinned/);
   assertMatch(implementations, /current/);
-  assertMatch(implementations, /assertAllowed/);
+  assertMatch(implementations, /assertActionStageAuthorityCutoff/);
   assertMatch(implementations, /record/);
   assertEquals(
     implementations.includes("TrustedStageHookCoordinator implements"),
