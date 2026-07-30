@@ -128,6 +128,11 @@ export interface CompletePublicFlowEvidence {
     leadId: string,
   ): Promise<MigrationEvidence>;
   observeMigrationSideEffects(planId: string): Promise<MigrationSideEffects>;
+
+  /** Waits until all previously scheduled hook children have exited and cleaned up. */
+  awaitHookQuiescence(): Promise<void>;
+  /** Proves cleanup joined all backend-owned processes and removed runtime state. */
+  assertQuiescent(): Promise<void>;
 }
 
 export type CompletePublicFlowBackend =

@@ -222,6 +222,41 @@ export async function createContainerPublicFlowBackend(
       await provider.close();
       await Deno.remove(assetRoot, { recursive: true }).catch(() => undefined);
     },
+    async awaitHookQuiescence() {
+      const deadline = Date.now() + 10_000;
+      while (Date.now() < deadline) {
+        const [observed, activeDeliveries] = await Promise.all([
+          harness.docker([
+            "exec",
+            harness.container,
+            "sh",
+            "-c",
+            "test -z \"$(find /data/runtime/hooks -maxdepth 1 -name 'invocation_*' -print -quit)\" && ! grep -la '/data/runtime/hooks/invocation_' /proc/[0-9]*/cmdline >/dev/null 2>&1",
+          ], { allowFailure: true }),
+          sqlScalar(
+            harness,
+            "select count(*)::int from outbox_deliveries where status in ('pending','running')",
+          ),
+        ]);
+        if (observed.code === 0 && Number(activeDeliveries) === 0) return;
+      }
+      throw new Error("container hook runtime did not become quiescent");
+    },
+    async assertQuiescent() {
+      assertEquals(cleaned, true);
+      const container = await harness.docker([
+        "container",
+        "inspect",
+        harness.container,
+      ], { allowFailure: true });
+      const volume = await harness.docker([
+        "volume",
+        "inspect",
+        harness.volume,
+      ], { allowFailure: true });
+      assertEquals(container.code === 0, false, container.stdout);
+      assertEquals(volume.code === 0, false, volume.stdout);
+    },
     async assetPath(asset) {
       if (asset === "crm") return "/opt/operant/prototypes/crm-default-pack";
       if (asset === "projects") {

@@ -1,5 +1,5 @@
 // deno-lint-ignore-file no-import-prefix no-unversioned-import require-await
-import { assertStringIncludes } from "jsr:@std/assert";
+import { assertEquals, assertStringIncludes } from "jsr:@std/assert";
 import { join } from "jsr:@std/path";
 import { query } from "../../../src/adapters/outbound/postgres/client.ts";
 import {
@@ -155,6 +155,36 @@ export function createHostPublicFlowBackend(
       await backend.releaseMigrationTableLock().catch(() => undefined);
       await provider?.close().catch(() => undefined);
       await harness.close();
+    },
+    async awaitHookQuiescence() {
+      const deadline = Date.now() + 10_000;
+      while (Date.now() < deadline) {
+        const [entries, processes, activeDeliveries] = await Promise.all([
+          hookCacheEntries(harness.hookCacheDir),
+          processesUsingRuntimePaths([harness.hookCacheDir]),
+          query<{ count: number }>(
+            harness.server.sql,
+            "select count(*)::int count from outbox_deliveries where status in ('pending','running')",
+          ).then((result) => result.rows[0].count),
+        ]);
+        if (
+          entries.length === 0 && processes.length === 0 &&
+          activeDeliveries === 0
+        ) return;
+      }
+      throw new Error("host hook runtime did not become quiescent");
+    },
+    async assertQuiescent() {
+      assertEquals(cleaned, true);
+      assertEquals(await pathExists(harness.rootDir), false);
+      assertEquals(
+        await processesUsingRuntimePaths([
+          harness.rootDir,
+          harness.hookCacheDir,
+          harness.binaryPath,
+        ]),
+        [],
+      );
     },
     assetPath(asset: PublicFlowAsset) {
       return assets.path(asset);
@@ -439,4 +469,41 @@ function settledProcess(
 
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await Deno.lstat(path);
+    return true;
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) return false;
+    throw error;
+  }
+}
+
+async function hookCacheEntries(path: string): Promise<string[]> {
+  try {
+    return (await Array.fromAsync(Deno.readDir(path)))
+      .map((entry) => entry.name)
+      .filter((name) => name.startsWith("invocation_"))
+      .sort();
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) return [];
+    throw error;
+  }
+}
+
+async function processesUsingRuntimePaths(
+  paths: readonly string[],
+): Promise<string[]> {
+  const matches: string[] = [];
+  for await (const entry of Deno.readDir("/proc")) {
+    if (!entry.isDirectory || !/^\d+$/.test(entry.name)) continue;
+    const command = await Deno.readTextFile(`/proc/${entry.name}/cmdline`)
+      .catch(() => "");
+    if (paths.some((path) => command.includes(path))) {
+      matches.push(`${entry.name}:${command.replaceAll("\0", " ")}`);
+    }
+  }
+  return matches.sort();
 }

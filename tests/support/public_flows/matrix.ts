@@ -30,6 +30,7 @@ export async function runCompletePublicFlowMatrix(
       await driver(backend);
     } finally {
       await backend.cleanup();
+      await backend.assertQuiescent();
     }
   });
 }

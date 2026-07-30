@@ -1,5 +1,10 @@
 // deno-lint-ignore-file no-explicit-any no-import-prefix no-unversioned-import
-import { assert, assertEquals, assertExists } from "jsr:@std/assert";
+import {
+  assert,
+  assertEquals,
+  assertExists,
+  assertStringIncludes,
+} from "jsr:@std/assert";
 import { decode as decodeToon } from "npm:@toon-format/toon";
 import type {
   PublicFlowCommandResult,
@@ -250,6 +255,33 @@ export async function runCompleteProjectsPublicFlow(
     assertEquals(seed2.data.stage, null);
     assertEquals(await harness.observePersistenceCounts(), beforeRepeatedSeed);
 
+    await harness.waitForProviderBarrier("projects-retry-success");
+    const attemptsAtRetrySuccess = await harness.providerAttempts();
+    const attemptsByKey = Map.groupBy(
+      attemptsAtRetrySuccess.filter((attempt) => attempt.idempotencyKey),
+      (attempt) => String(attempt.idempotencyKey),
+    );
+    const scriptedRetry = [...attemptsByKey.entries()].find(([, attempts]) =>
+      attempts.length >= 2
+    );
+    assert(scriptedRetry, JSON.stringify(attemptsAtRetrySuccess));
+    const [scriptedRetryKey, scriptedRetryAttempts] = scriptedRetry;
+    assert(scriptedRetryKey.length > 0);
+    assert(scriptedRetryAttempts.length >= 2);
+    assert(
+      scriptedRetryAttempts.every((attempt) =>
+        attempt.idempotencyKey === scriptedRetryKey
+      ),
+    );
+    assertEquals(
+      (await harness.providerEffects()).filter((attempt) =>
+        attempt.idempotencyKey === scriptedRetryKey
+      ).length,
+      1,
+    );
+    await harness.releaseProviderBarrier("projects-retry-success");
+    await harness.awaitHookQuiescence();
+
     await ok(
       human.runCli([
         "--json",
@@ -371,7 +403,7 @@ export async function runCompleteProjectsPublicFlow(
 
     const todoId = await harness.observeProjectsTodoStageId(projectId);
     assert(isUuidV7(todoId));
-    const setup = json(
+    const projectSetup = json(
       await ok(
         runJson(harness, ["--json", "changeset", "stage"], {
           project_id: projectId,
@@ -387,23 +419,59 @@ export async function runCompleteProjectsPublicFlow(
               visibility: "members",
               start_date: "2026-07-24",
             },
-          }, {
+          }],
+        }, agent),
+        output,
+      ),
+    ).data;
+    assertEquals(projectSetup.operations.length, 1);
+    assertEquals(projectSetup.hook_executions, []);
+    await ok(
+      agent.runCli(["--json", "changeset", "commit", projectSetup.id]),
+      output,
+    );
+    await harness.awaitHookQuiescence();
+    const workProjectId = String(projectSetup.operations[0].object_id);
+    assert(isUuidV7(workProjectId));
+
+    const memberSetup = json(
+      await ok(
+        runJson(harness, ["--json", "changeset", "stage"], {
+          project_id: projectId,
+          operations: [{
             op: "create",
             key: "member",
             project_id: projectId,
             resource: `${PROJECTS}:project_member`,
             fields: {
-              work_project_id: { $ref: "project.object_id" },
+              work_project_id: workProjectId,
               principal_id: principalId,
             },
-          }, {
+          }],
+        }, agent),
+        output,
+      ),
+    ).data;
+    assertEquals(memberSetup.operations.length, 1);
+    assertEquals(memberSetup.hook_executions, []);
+    await ok(
+      agent.runCli(["--json", "changeset", "commit", memberSetup.id]),
+      output,
+    );
+    await harness.awaitHookQuiescence();
+
+    const setup = json(
+      await ok(
+        runJson(harness, ["--json", "changeset", "stage"], {
+          project_id: projectId,
+          operations: [{
             op: "create",
             key: "task",
             project_id: projectId,
             resource: `${PROJECTS}:task`,
             fields: {
               title: "Ship Projects",
-              work_project_id: { $ref: "project.object_id" },
+              work_project_id: workProjectId,
               stage_id: todoId,
               state: "todo",
               assignee_id: principalId,
@@ -415,17 +483,20 @@ export async function runCompleteProjectsPublicFlow(
         output,
       ),
     ).data;
+    assertEquals(setup.operations.length, 1);
+    assertEquals(setup.hook_executions.length, 1);
+    assertEquals(setup.hook_executions[0].phase, "changeset.validate");
+    assert(setup.hook_executions[0].duration_ms < 2_000);
+    assertStringIncludes(
+      setup.hook_executions[0].stderr,
+      "validate_task errors=0 warnings=0",
+    );
     await ok(
       agent.runCli(["--json", "changeset", "commit", setup.id]),
       output,
     );
-    const taskId = String(
-      setup.operations.find((v: any) => v.key === "task").object_id,
-    );
+    const taskId = String(setup.operations[0].object_id);
     assert(isUuidV7(taskId));
-    const workProjectId = String(
-      setup.operations.find((v: any) => v.key === "project").object_id,
-    );
     const operationSetup = json(
       await ok(
         runJson(
@@ -892,32 +963,6 @@ export async function runCompleteProjectsPublicFlow(
     ]);
     output.push(injection.stdout, injection.stderr);
     assertEquals(injection.code, 1);
-
-    await harness.waitForProviderBarrier("projects-retry-success");
-    const attemptsAtRetrySuccess = await harness.providerAttempts();
-    const attemptsByKey = Map.groupBy(
-      attemptsAtRetrySuccess.filter((attempt) => attempt.idempotencyKey),
-      (attempt) => String(attempt.idempotencyKey),
-    );
-    const scriptedRetry = [...attemptsByKey.entries()].find(([, attempts]) =>
-      attempts.length >= 2
-    );
-    assert(scriptedRetry, JSON.stringify(attemptsAtRetrySuccess));
-    const [scriptedRetryKey, scriptedRetryAttempts] = scriptedRetry;
-    assert(scriptedRetryKey.length > 0);
-    assert(scriptedRetryAttempts.length >= 2);
-    assert(
-      scriptedRetryAttempts.every((attempt) =>
-        attempt.idempotencyKey === scriptedRetryKey
-      ),
-    );
-    assertEquals(
-      (await harness.providerEffects()).filter((attempt) =>
-        attempt.idempotencyKey === scriptedRetryKey
-      ).length,
-      1,
-    );
-    await harness.releaseProviderBarrier("projects-retry-success");
 
     let scriptedDelivery: any;
     let deliveries: any[] = [];
