@@ -336,6 +336,11 @@ Deno.test({
       assertEquals(retryAttempts.items[0].total_attempt_number, 1);
       assertEquals(retryAttempts.items[0].outcome, "retry");
       await waitProviderHold(provider, "retry-recovery-generation-0");
+      assertProviderHoldActive(
+        provider,
+        "retry-recovery-generation-0",
+        String(retrying.id),
+      );
       const retryBeforeCrash = await ok([
         "--json",
         "outbox",
@@ -346,6 +351,41 @@ Deno.test({
       assertEquals(retryBeforeCrash.retry_generation, 0);
       assertEquals(retryBeforeCrash.attempts_in_generation, 2);
       assertEquals(retryBeforeCrash.total_attempts, 2);
+      assertProviderHoldActive(
+        provider,
+        "retry-recovery-generation-0",
+        String(retrying.id),
+      );
+      const retryBeforeCrashAttempts = await ok([
+        "--json",
+        "outbox",
+        "attempts",
+        String(retrying.id),
+      ]);
+      const activeRetryBeforeCrash = retryBeforeCrashAttempts.items.find(
+        (attempt: { state: string }) => attempt.state === "running",
+      );
+      assert(activeRetryBeforeCrash);
+      assertEquals(
+        activeRetryBeforeCrash.id,
+        retryBeforeCrash.attempts_summary.latest.attempt_id,
+      );
+      assertEquals(activeRetryBeforeCrash.retry_generation, 0);
+      assertEquals(activeRetryBeforeCrash.attempt_number, 2);
+      assertEquals(activeRetryBeforeCrash.total_attempt_number, 2);
+      const retryBeforeCrashProviderAttempt = provider.attempts.filter(
+        (attempt) => attempt.idempotencyKey === retrying.id,
+      ).at(-1);
+      assert(retryBeforeCrashProviderAttempt);
+      assertEquals(
+        JSON.parse(retryBeforeCrashProviderAttempt.body).attempt_id,
+        activeRetryBeforeCrash.id,
+      );
+      assertProviderHoldActive(
+        provider,
+        "retry-recovery-generation-0",
+        String(retrying.id),
+      );
 
       await harness.docker(["kill", harness.container]);
       await launcher.close().catch(() => undefined);
@@ -357,6 +397,11 @@ Deno.test({
       });
       launcher = await restartOutboxContainer(harness, provider.url);
       await waitProviderHold(provider, "retry-recovery-generation-1");
+      assertProviderHoldActive(
+        provider,
+        "retry-recovery-generation-1",
+        String(retrying.id),
+      );
       const recoveredRetry = await ok([
         "--json",
         "outbox",
@@ -367,6 +412,11 @@ Deno.test({
       assertEquals(recoveredRetry.retry_generation, 0);
       assertEquals(recoveredRetry.attempts_in_generation, 3);
       assertEquals(recoveredRetry.total_attempts, 3);
+      assertProviderHoldActive(
+        provider,
+        "retry-recovery-generation-1",
+        String(retrying.id),
+      );
       const recoveredRetryAttempts = await ok([
         "--json",
         "outbox",
@@ -384,8 +434,25 @@ Deno.test({
       assertEquals(activeRetry.attempt_number, 3);
       assertEquals(activeRetry.total_attempt_number, 3);
       assert(activeRetry.lease_expires_at);
+      const recoveredRetryProviderAttempt = provider.attempts.filter(
+        (attempt) => attempt.idempotencyKey === retrying.id,
+      ).at(-1);
+      assert(recoveredRetryProviderAttempt);
+      assertEquals(
+        JSON.parse(recoveredRetryProviderAttempt.body).attempt_id,
+        activeRetry.id,
+      );
+      assertProviderHoldActive(
+        provider,
+        "retry-recovery-generation-1",
+        String(retrying.id),
+      );
       provider.release("retry-recovery-generation-1");
-      await waitOutboxStatus(launcher, "succeeded");
+      await waitOutboxDeliveryStatus(
+        launcher,
+        String(retrying.id),
+        "succeeded",
+      );
 
       const leasedStage = await stageChangeset(harness, launcher, projectId, [{
         op: "create",
@@ -396,6 +463,11 @@ Deno.test({
       assertEquals(leasedStage.raw.code, 0, leasedStage.raw.stderr);
       await ok(["--json", "changeset", "commit", leasedStage.data.id]);
       await waitProviderHold(provider, "lease-generation-0");
+      assertProviderHoldActive(
+        provider,
+        "lease-generation-0",
+        "unresolved-delivery",
+      );
       const running = await waitOutboxStatus(
         launcher,
         "running",
@@ -411,6 +483,11 @@ Deno.test({
       assertEquals(runningEvidence.retry_generation, 0);
       assertEquals(runningEvidence.attempts_in_generation, 1);
       assertEquals(runningEvidence.total_attempts, 1);
+      assertProviderHoldActive(
+        provider,
+        "lease-generation-0",
+        String(running.id),
+      );
       const runningAttempts = await ok([
         "--json",
         "outbox",
@@ -428,6 +505,19 @@ Deno.test({
       assertEquals(runningAttempt.attempt_number, 1);
       assertEquals(runningAttempt.total_attempt_number, 1);
       assert(runningAttempt.lease_expires_at);
+      const runningProviderAttempt = provider.attempts.filter((attempt) =>
+        attempt.idempotencyKey === running.id
+      ).at(-1);
+      assert(runningProviderAttempt);
+      assertEquals(
+        JSON.parse(runningProviderAttempt.body).attempt_id,
+        runningAttempt.id,
+      );
+      assertProviderHoldActive(
+        provider,
+        "lease-generation-0",
+        String(running.id),
+      );
 
       await harness.docker(["kill", harness.container]);
       await launcher.close().catch(() => undefined);
@@ -440,6 +530,11 @@ Deno.test({
       const attemptsAtLeaseRestart = provider.attempts.length;
       launcher = await restartOutboxContainer(harness, provider.url);
       await waitProviderHold(provider, "lease-recovery-generation-1");
+      assertProviderHoldActive(
+        provider,
+        "lease-recovery-generation-1",
+        String(running.id),
+      );
       const recoveredProviderAttempt = provider.attempts.slice(
         attemptsAtLeaseRestart,
       ).find((attempt) => attempt.idempotencyKey === running.id);
@@ -458,6 +553,11 @@ Deno.test({
       assertEquals(recoveredLease.retry_generation, 0);
       assertEquals(recoveredLease.attempts_in_generation, 2);
       assertEquals(recoveredLease.total_attempts, 2);
+      assertProviderHoldActive(
+        provider,
+        "lease-recovery-generation-1",
+        String(running.id),
+      );
       const recoveredLeaseAttempts = await ok([
         "--json",
         "outbox",
@@ -467,6 +567,15 @@ Deno.test({
       const activeLease = recoveredLeaseAttempts.items.find((attempt: {
         state: string;
       }) => attempt.state === "running");
+      assert(
+        activeLease,
+        JSON.stringify({
+          recovered_delivery: recoveredLease,
+          recovered_attempts: recoveredLeaseAttempts,
+          provider_attempt: recoveredProviderAttempt,
+          active_holds: provider.activeHolds(),
+        }),
+      );
       assertEquals(
         activeLease.id,
         recoveredLease.attempts_summary.latest.attempt_id,
@@ -475,11 +584,20 @@ Deno.test({
       assertEquals(activeLease.attempt_number, 2);
       assertEquals(activeLease.total_attempt_number, 2);
       assert(activeLease.lease_expires_at);
+      assertEquals(
+        JSON.parse(recoveredProviderAttempt.body).attempt_id,
+        activeLease.id,
+      );
+      assertProviderHoldActive(
+        provider,
+        "lease-recovery-generation-1",
+        String(running.id),
+      );
       provider.release("lease-recovery-generation-1");
-      await waitOutboxStatus(
+      await waitOutboxDeliveryStatus(
         launcher,
+        String(running.id),
         "succeeded",
-        new Set([String(retrying.id)]),
       );
 
       for (
@@ -948,16 +1066,78 @@ async function waitOutboxStatus(
   );
 }
 
+async function waitOutboxDeliveryStatus(
+  launcher: ContainerCliLauncher,
+  id: string,
+  status: string,
+): Promise<Record<string, unknown>> {
+  const deadline = Date.now() + 20_000;
+  let last: { code: number; stdout: string; stderr: string } | undefined;
+  while (Date.now() < deadline) {
+    last = await launcher.runOptctl([
+      "--json",
+      "outbox",
+      "inspect",
+      id,
+    ]);
+    if (last.code === 0) {
+      const delivery = JSON.parse(last.stdout).data as Record<string, unknown>;
+      if (delivery.status === status) return delivery;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(
+    `outbox delivery ${id} did not reach ${status}: ${JSON.stringify(last)}`,
+  );
+}
+
 async function waitProviderHold(
   provider: ReturnType<typeof startHttpProvider>,
   token: string,
 ): Promise<void> {
-  const deadline = Date.now() + 15_000;
+  const deadline = Date.now() + 60_000;
   while (Date.now() < deadline) {
     if (provider.activeHolds().includes(token)) return;
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
-  throw new Error(`provider hold ${token} was not reached`);
+  throw new Error(
+    `provider hold ${token} was not reached: ${
+      JSON.stringify({
+        active_holds: provider.activeHolds(),
+        attempts: provider.attempts.map((attempt) => ({
+          id: attempt.id,
+          idempotency_key: attempt.idempotencyKey,
+          received_at: attempt.receivedAt,
+          body: attempt.body,
+        })),
+      })
+    }`,
+  );
+}
+
+function assertProviderHoldActive(
+  provider: ReturnType<typeof startHttpProvider>,
+  token: string,
+  deliveryId: string,
+): void {
+  assertEquals(
+    provider.activeHolds().includes(token),
+    true,
+    JSON.stringify({
+      expected_hold: token,
+      delivery_id: deliveryId,
+      active_holds: provider.activeHolds(),
+      provider_attempts: provider.attempts.filter((attempt) =>
+        deliveryId === "unresolved-delivery" ||
+        attempt.idempotencyKey === deliveryId
+      ).map((attempt) => ({
+        id: attempt.id,
+        idempotency_key: attempt.idempotencyKey,
+        received_at: attempt.receivedAt,
+        body: attempt.body,
+      })),
+    }),
+  );
 }
 
 async function releaseActiveProviderHolds(
@@ -1022,7 +1202,7 @@ async function writeContainerOutboxPack(root: string, providerUrl: string) {
   const host = new URL(providerUrl).host;
   await Deno.writeTextFile(
     `${root}/hooks/deliver.yaml`,
-    `kind: Hook\napiVersion: operant.dev/v1\nmetadata: { name: deliver }\nspec:\n  script: deliver.ts\n  timeout: 1s\n  permissions: { net: [${host}], env: false, read: false, write: false, run: false }\n  secrets: []\n  effects: { operations: [] }\n  output: { schema: delivery.v1 }\n  attachments:\n    - phase: event.after_commit\n      event: object.created\n      order: 10\n      condition: 'event_type == "object.created"'\n      input: { event: '$event' }\n  axi: {}\n`,
+    `kind: Hook\napiVersion: operant.dev/v1\nmetadata: { name: deliver }\nspec:\n  script: deliver.ts\n  timeout: 30s\n  permissions: { net: [${host}], env: false, read: false, write: false, run: false }\n  secrets: []\n  effects: { operations: [] }\n  output: { schema: delivery.v1 }\n  attachments:\n    - phase: event.after_commit\n      event: object.created\n      order: 10\n      condition: 'event_type == "object.created"'\n      input: { event: '$event' }\n  axi: {}\n`,
   );
   await Deno.writeTextFile(
     `${root}/hooks/deliver.ts`,
