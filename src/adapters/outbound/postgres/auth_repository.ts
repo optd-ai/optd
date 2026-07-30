@@ -334,20 +334,25 @@ export class PostgresAuthRepository implements AuthRepository {
           `insert into login_throttles(username) values ($1) on conflict do nothing`,
           [username],
         );
-        const throttle =
-          (await query<{ failure_count: number; next_allowed_at: Date | null }>(
-            tx,
-            `select failure_count, next_allowed_at from login_throttles where username=$1 for update`,
-            [username],
-          )).rows[0]!;
+        const throttle = (await query<{
+          failure_count: number;
+          next_allowed_at: Date | null;
+          wall_clock: Date;
+        }>(
+          tx,
+          `select failure_count, next_allowed_at, clock_timestamp() wall_clock from login_throttles where username=$1 for update`,
+          [username],
+        )).rows[0]!;
         if (
           throttle.next_allowed_at &&
-          new Date(throttle.next_allowed_at).getTime() > Date.now()
+          new Date(throttle.next_allowed_at).getTime() >
+            new Date(throttle.wall_clock).getTime()
         ) {
           const retry = Math.max(
             1,
             Math.ceil(
-              (new Date(throttle.next_allowed_at).getTime() - Date.now()) /
+              (new Date(throttle.next_allowed_at).getTime() -
+                new Date(throttle.wall_clock).getTime()) /
                 1000,
             ),
           );
@@ -384,7 +389,7 @@ export class PostgresAuthRepository implements AuthRepository {
           const delay = failures < 5 ? 0 : Math.min(30, 2 ** (failures - 5));
           await query(
             tx,
-            `update login_throttles set failure_count=$2, next_allowed_at=case when $3::int=0 then null else now()+make_interval(secs => $3) end, updated_at=now() where username=$1`,
+            `update login_throttles set failure_count=$2, next_allowed_at=case when $3::int=0 then null else wall_clock.at+make_interval(secs => $3) end, updated_at=wall_clock.at from (select clock_timestamp() at) wall_clock where username=$1`,
             [username, failures, delay],
           );
           return err(
@@ -2948,20 +2953,25 @@ async function confirmHumanPassword(
     `insert into login_throttles(username) values($1) on conflict do nothing`,
     [user.username],
   );
-  const throttle =
-    (await query<{ failure_count: number; next_allowed_at: Date | null }>(
-      sql,
-      `select failure_count,next_allowed_at from login_throttles where username=$1 for update`,
-      [user.username],
-    )).rows[0]!;
+  const throttle = (await query<{
+    failure_count: number;
+    next_allowed_at: Date | null;
+    wall_clock: Date;
+  }>(
+    sql,
+    `select failure_count,next_allowed_at,clock_timestamp() wall_clock from login_throttles where username=$1 for update`,
+    [user.username],
+  )).rows[0]!;
   if (
     throttle.next_allowed_at &&
-    new Date(throttle.next_allowed_at).getTime() > Date.now()
+    new Date(throttle.next_allowed_at).getTime() >
+      new Date(throttle.wall_clock).getTime()
   ) {
     const retry = Math.max(
       1,
       Math.ceil(
-        (new Date(throttle.next_allowed_at).getTime() - Date.now()) / 1000,
+        (new Date(throttle.next_allowed_at).getTime() -
+          new Date(throttle.wall_clock).getTime()) / 1000,
       ),
     );
     return err(
@@ -2980,7 +2990,7 @@ async function confirmHumanPassword(
     const delay = failures < 5 ? 0 : Math.min(30, 2 ** (failures - 5));
     await query(
       sql,
-      `update login_throttles set failure_count=$2,next_allowed_at=case when $3::int=0 then null else now()+make_interval(secs=>$3) end,updated_at=now() where username=$1`,
+      `update login_throttles set failure_count=$2,next_allowed_at=case when $3::int=0 then null else wall_clock.at+make_interval(secs=>$3) end,updated_at=wall_clock.at from (select clock_timestamp() at) wall_clock where username=$1`,
       [user.username, failures, delay],
     );
     return err(

@@ -102,6 +102,122 @@ Deno.test("successful concurrent login atomically upgrades a weaker Argon creden
   }
 });
 
+Deno.test("login throttle starts after delayed password verification wall clock", async () => {
+  const harness = await startLiveHarness();
+  const releaseLock = Promise.withResolvers<void>();
+  let lockTask: Promise<void> | undefined;
+  try {
+    const username = "wall-clock-throttle-admin";
+    const password = "administrator password";
+    assertEquals((await harness.bootstrap({ username, password })).code, 0);
+    for (let failure = 1; failure <= 4; failure++) {
+      const result = await harness.runOptctl([
+        "--json",
+        "auth",
+        "login",
+        "--username",
+        username,
+        "--password-stdin",
+      ], `incorrect password ${failure}\n`);
+      assertEquals(result.code, 1);
+      assertEquals(JSON.parse(result.stderr).error.code, "login_invalid");
+    }
+
+    const locked = Promise.withResolvers<void>();
+    lockTask = harness.server.sql.begin(async (tx) => {
+      await query(
+        tx,
+        "select username from login_throttles where username=$1 for update",
+        [username],
+      );
+      locked.resolve();
+      await releaseLock.promise;
+    });
+    await locked.promise;
+
+    const fifthFailure = harness.runOptctl([
+      "--json",
+      "auth",
+      "login",
+      "--username",
+      username,
+      "--password-stdin",
+    ], "incorrect password five\n");
+    const blocked = await waitForDelayedLoginThrottleWaiter(harness);
+    assertEquals(blocked.blocked, true);
+    assertEquals(blocked.transaction_age_ms >= 1_100, true);
+    releaseLock.resolve();
+    await lockTask;
+    lockTask = undefined;
+
+    const fifth = await fifthFailure;
+    assertEquals(fifth.code, 1);
+    assertEquals(JSON.parse(fifth.stderr).error.code, "login_invalid");
+    const armed = (await query<{
+      failure_count: number;
+      next_allowed_at: Date;
+      throttle_ms: number;
+      remaining_ms: number;
+    }>(
+      harness.server.sql,
+      `select failure_count,next_allowed_at,
+        (extract(epoch from(next_allowed_at-updated_at))*1000)::int throttle_ms,
+        (extract(epoch from(next_allowed_at-clock_timestamp()))*1000)::int remaining_ms
+       from login_throttles where username=$1`,
+      [username],
+    )).rows[0];
+    assertEquals(armed.failure_count, 5);
+    assertEquals(armed.throttle_ms, 1_000);
+    assertEquals(armed.remaining_ms > 0, true);
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const response = await fetch(`${harness.baseUrl}/api/v1/auth/login`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
+      const body = await response.json() as {
+        error: { code: string; details: { retry_after_seconds: number } };
+      };
+      assertEquals(response.status, 429);
+      assertEquals(response.headers.get("retry-after"), "1");
+      assertEquals(body.error.code, "login_throttled");
+      assertEquals(body.error.details.retry_after_seconds, 1);
+      const unchanged = (await query<{ next_allowed_at: Date }>(
+        harness.server.sql,
+        "select next_allowed_at from login_throttles where username=$1",
+        [username],
+      )).rows[0];
+      assertEquals(
+        new Date(unchanged.next_allowed_at).getTime(),
+        new Date(armed.next_allowed_at).getTime(),
+      );
+    }
+
+    await waitForLoginThrottleBoundary(
+      harness,
+      username,
+      armed.next_allowed_at,
+    );
+    const recovered = await harness.login({ username, password });
+    assertEquals(recovered.code, 0, recovered.stderr);
+    const reset = (await query<{
+      failure_count: number;
+      next_allowed_at: Date | null;
+    }>(
+      harness.server.sql,
+      "select failure_count,next_allowed_at from login_throttles where username=$1",
+      [username],
+    )).rows[0];
+    assertEquals(reset.failure_count, 0);
+    assertEquals(reset.next_allowed_at, null);
+  } finally {
+    releaseLock.resolve();
+    await lockTask?.catch(() => undefined);
+    await harness.close();
+  }
+});
+
 Deno.test("destructive confirmations share serialized login throttling", async () => {
   const harness = await startLiveHarness();
   try {
@@ -224,6 +340,66 @@ Deno.test("destructive confirmations share serialized login throttling", async (
     await harness.close();
   }
 });
+
+async function waitForDelayedLoginThrottleWaiter(
+  harness: Awaited<ReturnType<typeof startLiveHarness>>,
+): Promise<{ blocked: boolean; transaction_age_ms: number }> {
+  const deadline = Date.now() + 10_000;
+  let last: Record<string, unknown>[] = [];
+  while (Date.now() < deadline) {
+    last = (await query<Record<string, unknown>>(
+      harness.server.sql,
+      `select cardinality(pg_blocking_pids(pid))>0 blocked,
+        extract(epoch from(clock_timestamp()-xact_start))*1000 transaction_age_ms,
+        state,wait_event_type,wait_event,left(query,240) query
+       from pg_stat_activity
+       where datname=current_database() and pid<>pg_backend_pid()
+         and query like '%login_throttles where username=$1 for update%'`,
+    )).rows;
+    const delayed = last.find((row) =>
+      row.blocked === true && Number(row.transaction_age_ms) >= 1_100
+    );
+    if (delayed) {
+      return {
+        blocked: true,
+        transaction_age_ms: Number(delayed.transaction_age_ms),
+      };
+    }
+    await Promise.resolve();
+  }
+  throw new Error(
+    `login throttle waiter was not delayed: ${JSON.stringify(last)}`,
+  );
+}
+
+async function waitForLoginThrottleBoundary(
+  harness: Awaited<ReturnType<typeof startLiveHarness>>,
+  username: string,
+  expectedNextAllowedAt: Date,
+): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  let last: { next_allowed_at: Date; boundary_reached: boolean } | undefined;
+  while (Date.now() < deadline) {
+    last = (await query<{
+      next_allowed_at: Date;
+      boundary_reached: boolean;
+    }>(
+      harness.server.sql,
+      `select next_allowed_at,clock_timestamp()>=next_allowed_at boundary_reached
+       from login_throttles where username=$1`,
+      [username],
+    )).rows[0];
+    assertEquals(
+      new Date(last.next_allowed_at).getTime(),
+      new Date(expectedNextAllowedAt).getTime(),
+    );
+    if (last.boundary_reached) return;
+    await Promise.resolve();
+  }
+  throw new Error(
+    `login throttle boundary was not reached: ${JSON.stringify(last)}`,
+  );
+}
 
 async function capturedCliErrorCode(
   harness: Awaited<ReturnType<typeof startLiveHarness>>,
