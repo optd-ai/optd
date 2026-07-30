@@ -7,6 +7,10 @@ import {
 } from "jsr:@std/assert";
 import { decode as decodeToon } from "npm:@toon-format/toon";
 import { query } from "../../../src/adapters/outbound/postgres/client.ts";
+import {
+  startManagedPostgres,
+  stopManagedPostgres,
+} from "../../../src/adapters/outbound/postgres-process/lifecycle.ts";
 import { isUuidV7, uuidV7 } from "../../../src/domain/ids/uuid_v7.ts";
 import { startHttpProvider } from "../../support/http_provider.ts";
 import {
@@ -28,7 +32,12 @@ for (const logLevel of ["info", "trace"] as const) {
       const secretKey = btoa(
         String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32))),
       );
+      const externalRoot = await Deno.makeTempDir({
+        prefix: "durable-outbox-postgres-",
+      });
+      const external = await startManagedPostgres(externalRoot);
       const harness = await startLiveHarness({
+        externalDatabaseUrl: external.databaseUrl,
         forceFreshCompile: true,
         environment: {
           OPERANT_LOG_LEVEL: logLevel,
@@ -1394,6 +1403,18 @@ for (const logLevel of ["info", "trace"] as const) {
         await harness.restart({
           environment: { OPERANT_OUTBOX_POLL_INTERVAL_MS: "60000" },
         });
+        const startupPollLock = await holdOutboxDeliveryTable(harness);
+        let startupPollPid: number;
+        try {
+          await harness.restart({
+            environment: { OPERANT_OUTBOX_POLL_INTERVAL_MS: "60000" },
+          });
+          startupPollPid = await waitForBlockedStartupOutboxPoll(harness);
+        } finally {
+          startupPollLock.release();
+          await startupPollLock.done;
+        }
+        await waitForOutboxPollIdle(harness, startupPollPid!);
         await installPauseTrigger(harness);
         const drainOneWork = await stageCommit(
           harness,
@@ -1913,7 +1934,11 @@ for (const logLevel of ["info", "trace"] as const) {
       } finally {
         await provider.close().catch(() => undefined);
         await harness.close().catch(() => undefined);
-        await Deno.remove(pack, { recursive: true }).catch(() => undefined);
+        await stopManagedPostgres(external).catch(() => undefined);
+        await Promise.all([
+          Deno.remove(pack, { recursive: true }).catch(() => undefined),
+          Deno.remove(externalRoot, { recursive: true }).catch(() => undefined),
+        ]);
       }
     },
   });
@@ -2449,6 +2474,74 @@ type ArrayRow = {
   idempotency_key: string;
   grant_evidence_json: Array<Record<string, unknown>>;
 };
+async function holdOutboxDeliveryTable(harness: LiveHarness): Promise<{
+  release(): void;
+  done: Promise<void>;
+}> {
+  const locked = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const done = harness.server.sql.begin(async (tx) => {
+    await query(tx, "lock table outbox_deliveries in access exclusive mode");
+    locked.resolve();
+    await release.promise;
+  });
+  await locked.promise;
+  return { release: release.resolve, done };
+}
+
+async function waitForBlockedStartupOutboxPoll(
+  harness: LiveHarness,
+): Promise<number> {
+  const deadline = Date.now() + 10_000;
+  let last: Record<string, unknown>[] = [];
+  while (Date.now() < deadline) {
+    last = (await query<Record<string, unknown>>(
+      harness.server.sql,
+      `select pid,state,wait_event_type,wait_event,
+        pg_blocking_pids(pid) blocking_pids,left(query,240) query
+       from pg_stat_activity
+       where datname=current_database() and pid<>pg_backend_pid()
+         and cardinality(pg_blocking_pids(pid))>0
+         and query like '%outbox_deliveries%'`,
+    )).rows;
+    const waiter = last.find((row) =>
+      row.wait_event_type === "Lock" && Number.isSafeInteger(Number(row.pid))
+    );
+    if (waiter) return Number(waiter.pid);
+    await Promise.resolve();
+  }
+  throw new Error(
+    `startup outbox poll did not wait on delivery lock: ${
+      JSON.stringify(last)
+    }`,
+  );
+}
+
+async function waitForOutboxPollIdle(
+  harness: LiveHarness,
+  pid: number,
+): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  let last: Record<string, unknown> | undefined;
+  while (Date.now() < deadline) {
+    last = (await query<Record<string, unknown>>(
+      harness.server.sql,
+      `select pid,state,wait_event_type,wait_event,
+        cardinality(pg_blocking_pids(pid)) blocking_count,left(query,240) query
+       from pg_stat_activity where pid=$1`,
+      [pid],
+    )).rows[0];
+    if (
+      last?.state === "idle" && last.wait_event_type === "Client" &&
+      Number(last.blocking_count) === 0
+    ) return;
+    await Promise.resolve();
+  }
+  throw new Error(
+    `startup outbox poll did not return to idle: ${JSON.stringify(last)}`,
+  );
+}
+
 async function installPauseTrigger(harness: LiveHarness) {
   await query(
     harness.server.sql,
