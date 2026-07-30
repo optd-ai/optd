@@ -400,7 +400,8 @@ async function inspectPostmasterPid(
 }
 
 async function readProcCmdline(pid: number): Promise<Uint8Array | null> {
-  const path = `/proc/${pid}/cmdline`;
+  const fixedPid = fixedNumericPid(pid);
+  const path = `/proc/${fixedPid}/cmdline`;
   let directError: unknown;
   try {
     return await readBoundedFile(path, PROC_CMDLINE_MAX_BYTES);
@@ -408,8 +409,11 @@ async function readProcCmdline(pid: number): Promise<Uint8Array | null> {
     directError = error;
   }
 
-  const output = await new Deno.Command("/bin/cat", {
-    args: [path],
+  const output = await new Deno.Command("/bin/sh", {
+    args: [
+      "-c",
+      `if [ "$$" -eq ${fixedPid} ]; then exit 2; fi; exec /bin/cat /proc/${fixedPid}/cmdline`,
+    ],
     stdout: "piped",
     stderr: "piped",
   }).output();
@@ -428,15 +432,19 @@ async function readProcCmdline(pid: number): Promise<Uint8Array | null> {
 async function readProcCwdIdentity(
   pid: number,
 ): Promise<DirectoryIdentity | null> {
-  const path = `/proc/${pid}/cwd`;
+  const fixedPid = fixedNumericPid(pid);
+  const path = `/proc/${fixedPid}/cwd`;
   let canonicalPath: string;
   let directError: unknown;
   try {
     canonicalPath = await Deno.realPath(path);
   } catch (error) {
     directError = error;
-    const output = await new Deno.Command("/bin/readlink", {
-      args: ["-e", path],
+    const output = await new Deno.Command("/bin/sh", {
+      args: [
+        "-c",
+        `if [ "$$" -eq ${fixedPid} ]; then exit 2; fi; exec /bin/readlink -e /proc/${fixedPid}/cwd`,
+      ],
       stdout: "piped",
       stderr: "piped",
     }).output();
@@ -562,17 +570,28 @@ async function readBoundedFile(
 }
 
 async function procPidExists(pid: number): Promise<boolean> {
-  const path = `/proc/${pid}`;
+  const fixedPid = fixedNumericPid(pid);
+  const path = `/proc/${fixedPid}`;
   try {
     return (await Deno.stat(path)).isDirectory;
   } catch {
-    const output = await new Deno.Command("/bin/test", {
-      args: ["-d", path],
+    const output = await new Deno.Command("/bin/sh", {
+      args: [
+        "-c",
+        `if [ "$$" -eq ${fixedPid} ]; then exit 1; fi; test -d /proc/${fixedPid}`,
+      ],
       stdout: "null",
       stderr: "null",
     }).output();
     return output.success;
   }
+}
+
+function fixedNumericPid(pid: number): string {
+  if (!Number.isSafeInteger(pid) || pid <= 0) {
+    throw new Error("invalid process ID for procfs inspection");
+  }
+  return String(pid);
 }
 
 function freePort(): number {
