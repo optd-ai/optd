@@ -1649,7 +1649,9 @@ Deno.test("post-hook persistence observation bounds a stalled command", async ()
   let terminated = false;
   let state: "running" | "settled" = "running";
   let observations = 0;
+  const fakeCommandPid = Number.MAX_SAFE_INTEGER;
   const command: ActiveCliCommand = {
+    pid: fakeCommandPid,
     result: new Promise(() => undefined),
     state: () => state,
     terminate() {
@@ -1686,6 +1688,9 @@ Deno.test("post-hook persistence observation bounds a stalled command", async ()
   assertStringIncludes(error.message, '"command_state":"running"');
   assertStringIncludes(error.message, '"provider_attempts":3');
   assertStringIncludes(error.message, '"observations":');
+  assertEquals(command.pid, fakeCommandPid);
+  assertEquals(Number.isSafeInteger(command.pid), true);
+  assertEquals(command.pid > 0xffff_ffff, true);
   assertEquals(terminated, true);
   assertEquals(state, "settled");
   assertEquals(observations > 0, true);
