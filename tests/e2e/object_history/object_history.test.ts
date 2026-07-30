@@ -476,11 +476,10 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
     const agentSmoke = await fetch(currentUrl, {
       headers: { authorization: `Bearer ${agent.token}` },
     });
-    assertEquals(
-      agentSmoke.status,
-      200,
-      JSON.stringify(await agentSmoke.json()),
-    );
+    const agentSmokeBody = await agentSmoke.json();
+    assertEquals(agentSmoke.status, 200, JSON.stringify(agentSmokeBody));
+    assertEquals(agentSmokeBody.ok, true);
+    assertEquals(agentSmokeBody.data.kind, "object");
     await raceBeforeAgentBoundary(
       harness,
       agent,
@@ -534,6 +533,7 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
       agent,
       leadTable,
       currentUrl,
+      "object",
       () =>
         query(
           harness.server.sql,
@@ -551,6 +551,7 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
       agent,
       leadTable,
       historyUrl,
+      "history",
       () =>
         query(
           harness.server.sql,
@@ -566,8 +567,11 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
     const agentFirstPage = await fetch(`${historyUrl}?limit=1`, {
       headers: { authorization: `Bearer ${agent.token}` },
     });
+    const agentFirstPageBody = await agentFirstPage.json();
     assertEquals(agentFirstPage.status, 200);
-    const agentCursor = (await agentFirstPage.json()).meta.next_cursor;
+    assertEquals(agentFirstPageBody.ok, true);
+    assertEquals(Array.isArray(agentFirstPageBody.data.items), true);
+    const agentCursor = agentFirstPageBody.meta.next_cursor;
     const alternate = await createAlternateAgentRoot(harness, agent, auth);
     await query(
       harness.server.sql,
@@ -580,11 +584,10 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
         headers: { authorization: `Bearer ${agent.token}` },
       },
     );
+    const changedRootContinuationBody = await changedRootContinuation.json();
     assertEquals(changedRootContinuation.status, 400);
-    assertEquals(
-      (await changedRootContinuation.json()).error.code,
-      "invalid_cursor",
-    );
+    assertEquals(changedRootContinuationBody.ok, false);
+    assertEquals(changedRootContinuationBody.error.code, "invalid_cursor");
     const mismatch = await harness.runOptctl([
       "--json",
       "--project",
@@ -633,8 +636,10 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
         password: "History-Admin-Password-42!",
       }),
     });
+    const freshLoginBody = await freshLogin.json();
     assertEquals(freshLogin.status, 200);
-    const freshCredentials = (await freshLogin.json()).data.credentials;
+    assertEquals(freshLoginBody.ok, true);
+    const freshCredentials = freshLoginBody.data.credentials;
     const requestToken = freshCredentials.authorization_request_token;
     const fullToken = freshCredentials.token;
     for (
@@ -647,26 +652,29 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
       const invalid = await fetch(`${harness.baseUrl}${path}`, {
         headers: { authorization: `Bearer ${fullToken}` },
       });
+      const invalidBody = await invalid.json();
       assertEquals(invalid.status, 400);
-      assertEquals((await invalid.json()).error.code, "bad_request");
+      assertEquals(invalidBody.ok, false);
+      assertEquals(invalidBody.error.code, "bad_request");
     }
     const invalidMetadataQuery = await fetch(
       `${harness.baseUrl}/api/v1/metadata/packs/operant/crm/hooks/validate_lead?include_security=false`,
       { headers: { authorization: `Bearer ${fullToken}` } },
     );
+    const invalidMetadataQueryBody = await invalidMetadataQuery.json();
     assertEquals(invalidMetadataQuery.status, 400);
-    assertEquals((await invalidMetadataQuery.json()).error.code, "bad_request");
+    assertEquals(invalidMetadataQueryBody.ok, false);
+    assertEquals(invalidMetadataQueryBody.error.code, "bad_request");
     const denied = await fetch(
       `${harness.baseUrl}/api/v1/projects/${projectOne}/objects/operant/crm/lead/${ids.object}`,
       {
         headers: { authorization: `Bearer ${requestToken}` },
       },
     );
+    const deniedBody = await denied.json();
     assertEquals(denied.status, 403);
-    assertEquals(
-      (await denied.json()).error.code,
-      "authorization_insufficient",
-    );
+    assertEquals(deniedBody.ok, false);
+    assertEquals(deniedBody.error.code, "authorization_insufficient");
     assertEquals(
       (await harness.runOptctl(["project", "select", "history-other"])).code,
       0,
@@ -953,10 +961,14 @@ async function raceBeforeAgentBoundary(
     `create trigger test_agent_auth_context_barrier_trigger after insert on auth_contexts
     for each row execute function test_agent_auth_context_barrier()`,
   );
+  const controller = new AbortController();
+  let response: Promise<Response> | undefined;
   try {
-    const response = fetch(url, {
+    response = fetch(url, {
       headers: { authorization: `Bearer ${agent.token}` },
+      signal: controller.signal,
     });
+    void response.catch(() => undefined);
     for (let attempt = 0; attempt < 100; attempt++) {
       const sleeping = (await query<{ sleeping: boolean }>(
         harness.server.sql,
@@ -972,9 +984,13 @@ async function raceBeforeAgentBoundary(
     }
     await mutate();
     const denied = await response;
+    const deniedBody = await denied.json();
     assertEquals(denied.status, 404);
-    assertEquals((await denied.json()).error.code, "not_found");
+    assertEquals(deniedBody.ok, false);
+    assertEquals(deniedBody.error.code, "not_found");
   } finally {
+    controller.abort();
+    await cancelUnconsumedResponse(response);
     await query(
       harness.server.sql,
       "drop trigger if exists test_agent_auth_context_barrier_trigger on auth_contexts",
@@ -996,8 +1012,9 @@ async function mutateBeforeAgentBoundary(
   const denied = await fetch(url, {
     headers: { authorization: `Bearer ${agent.token}` },
   });
+  const deniedBody = await denied.json();
   assert(denied.status === 401 || denied.status === 404);
-  assertEquals((await denied.json()).ok, false);
+  assertEquals(deniedBody.ok, false);
 }
 
 async function mutateAfterAgentLocks(
@@ -1005,12 +1022,17 @@ async function mutateAfterAgentLocks(
   agent: AgentLineageFixture,
   table: string,
   url: string,
+  responseKind: "object" | "history",
   mutate: () => Promise<unknown>,
 ) {
   let release!: () => void;
   let ready!: () => void;
+  let rejectReady!: (error: unknown) => void;
   const releaseWait = new Promise<void>((resolve) => release = resolve);
-  const readyWait = new Promise<void>((resolve) => ready = resolve);
+  const readyWait = new Promise<void>((resolve, reject) => {
+    ready = resolve;
+    rejectReady = reject;
+  });
   const blocker = harness.server.sql.begin(async (tx) => {
     await query(
       tx,
@@ -1019,21 +1041,56 @@ async function mutateAfterAgentLocks(
     ready();
     await releaseWait;
   });
-  await readyWait;
-  const response = fetch(url, {
-    headers: { authorization: `Bearer ${agent.token}` },
-  }).catch((error) => error as Error);
-  await waitForTableBarrier(harness, table);
-  let changed = false;
-  const mutation = mutate().then(() => changed = true);
-  await new Promise((resolve) => setTimeout(resolve, 100));
-  assertEquals(changed, false, "ancestor mutation must wait for lineage locks");
-  release();
-  await blocker;
-  const disclosed = await response;
-  if (disclosed instanceof Error) throw disclosed;
-  assertEquals(disclosed.status, 200);
-  await mutation;
+  void blocker.catch(rejectReady);
+  const controller = new AbortController();
+  let response: Promise<Response> | undefined;
+  let mutation: Promise<unknown> | undefined;
+  try {
+    await readyWait;
+    response = fetch(url, {
+      headers: { authorization: `Bearer ${agent.token}` },
+      signal: controller.signal,
+    });
+    void response.catch(() => undefined);
+    await waitForTableBarrier(harness, table);
+    let changed = false;
+    mutation = mutate().then((value) => {
+      changed = true;
+      return value;
+    });
+    void mutation.catch(() => undefined);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assertEquals(
+      changed,
+      false,
+      "ancestor mutation must wait for lineage locks",
+    );
+    release();
+    await blocker;
+    const disclosed = await response;
+    assertEquals(disclosed.status, 200);
+    const disclosedBody = await disclosed.json();
+    assertEquals(disclosedBody.ok, true);
+    if (responseKind === "object") {
+      assertEquals(disclosedBody.data.kind, "object");
+    } else {
+      assertEquals(Array.isArray(disclosedBody.data.items), true);
+    }
+    await mutation;
+  } finally {
+    release();
+    await blocker.catch(() => undefined);
+    controller.abort();
+    await cancelUnconsumedResponse(response);
+    await mutation?.catch(() => undefined);
+  }
+}
+
+async function cancelUnconsumedResponse(response?: Promise<Response>) {
+  const settled = await response?.catch(() => undefined);
+  if (settled && !settled.bodyUsed) {
+    await settled.body?.cancel().catch(() => undefined);
+  }
 }
 
 async function waitForTableBarrier(harness: LiveHarness, table: string) {
