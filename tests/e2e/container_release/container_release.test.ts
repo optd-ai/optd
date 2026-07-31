@@ -12,6 +12,7 @@ import { registerContainerPublicFlowMatrix } from "../../support/public_flows/re
 
 let imagePromise: Promise<string> | undefined;
 const image = () => imagePromise ??= buildReleaseImage();
+const releaseExecutionAnonymousVolumesBefore = await anonymousDockerVolumeIds();
 
 Deno.test({
   name:
@@ -170,7 +171,7 @@ Deno.test({
       }
 
       await harness.docker(["stop", "--time", "25", harness.container]);
-      await harness.docker(["rm", harness.container]);
+      await harness.docker(["rm", "-f", "-v", harness.container]);
       const wrongKey = btoa(
         String.fromCharCode(...new Uint8Array(32).fill(9)),
       );
@@ -204,7 +205,9 @@ Deno.test({
         assertStringIncludes(diagnostics, expected);
         assert(!diagnostics.includes(harness.masterKey));
         assert(!diagnostics.includes(wrongKey));
-        await harness.docker(["rm", "-f", name], { allowFailure: true });
+        await harness.docker(["rm", "-f", "-v", name], {
+          allowFailure: true,
+        });
       }
 
       await harness.docker([
@@ -667,6 +670,7 @@ Deno.test({
     const root = await Deno.makeTempDir({
       prefix: "operant-container-unwritable-",
     });
+    const anonymousVolumesBefore = await anonymousDockerVolumeIds();
     await Deno.chmod(root, 0o500);
     try {
       const malformed = await runCommand("docker", [
@@ -683,6 +687,10 @@ Deno.test({
       const malformedLogs = `${malformed.stdout}\n${malformed.stderr}`;
       assertStringIncludes(malformedLogs, "secret_master_key_invalid");
       assert(!malformedLogs.includes("not-logged"));
+      assertEquals(
+        (await containerAnonymousDockerVolumeIds(malformedName)).size,
+        1,
+      );
 
       const unwritable = await runCommand("docker", [
         "run",
@@ -756,12 +764,17 @@ Deno.test({
       await runCommand("docker", [
         "rm",
         "-f",
+        "-v",
         malformedName,
         bindName,
         goodBindName,
       ], {
         allowFailure: true,
       });
+      await assertNoNewAnonymousDockerVolumes(
+        anonymousVolumesBefore,
+        "malformed key and unwritable data cleanup",
+      );
     }
   },
 });
@@ -783,6 +796,7 @@ Deno.test({
     const badAuthApp = `operant-cr-bad-auth-${id}`;
     const token = "external-token-not-logged";
     const key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+    const anonymousVolumesBefore = await anonymousDockerVolumeIds();
     try {
       await runCommand("docker", ["network", "create", network]);
       await runCommand("docker", [
@@ -903,7 +917,7 @@ Deno.test({
         assertStringIncludes(failureLogs, '"mode":"external"');
         assert(!failureLogs.includes(credential));
         assert(!failureLogs.includes(token));
-        await runCommand("docker", ["rm", "-f", name], {
+        await runCommand("docker", ["rm", "-f", "-v", name], {
           allowFailure: true,
         });
       }
@@ -911,6 +925,7 @@ Deno.test({
       await runCommand("docker", [
         "rm",
         "-f",
+        "-v",
         app,
         badApp,
         unreachableApp,
@@ -923,6 +938,10 @@ Deno.test({
       await runCommand("docker", ["network", "rm", network], {
         allowFailure: true,
       });
+      await assertNoNewAnonymousDockerVolumes(
+        anonymousVolumesBefore,
+        "external PostgreSQL cleanup",
+      );
     }
   },
 });
@@ -955,12 +974,17 @@ Deno.test({
         "compose.external-postgres.yml",
         ...args,
       ], { timeoutMs: 180_000, allowFailure, env });
+    const anonymousVolumesBefore = await anonymousDockerVolumeIds();
     try {
       await runCommand("docker", ["tag", releaseImage, tagged]);
       await compose(["up", "-d", "--no-build"]);
       await waitHttpReady(port);
       const pgId = (await compose(["ps", "-q", "postgres"])).stdout.trim();
       const appId = (await compose(["ps", "-q", "operant"])).stdout.trim();
+      const firstAppAnonymousVolumes = await containerAnonymousDockerVolumeIds(
+        appId,
+      );
+      assertEquals(firstAppAnonymousVolumes.size, 1);
       const bootstrap = await compose([
         "exec",
         "-T",
@@ -990,12 +1014,29 @@ Deno.test({
           .stdout.trim(),
         "true",
       );
-      await compose(["rm", "-f", "operant"]);
+      await compose(["rm", "-f", "-v", "operant"]);
+      await assertNoNewAnonymousDockerVolumes(
+        anonymousVolumesBefore,
+        "first Compose Operant removal",
+      );
       await compose(["up", "-d", "--no-deps", "--no-build", "operant"]);
       await waitHttpReady(port);
       assertEquals(
         (await compose(["ps", "-q", "postgres"])).stdout.trim(),
         pgId,
+      );
+      const recreatedAppId = (await compose(["ps", "-q", "operant"]))
+        .stdout.trim();
+      assert(recreatedAppId !== appId);
+      const recreatedAppAnonymousVolumes =
+        await containerAnonymousDockerVolumeIds(recreatedAppId);
+      assertEquals(recreatedAppAnonymousVolumes.size, 1);
+      assertEquals(
+        newAnonymousDockerVolumeIds(
+          anonymousVolumesBefore,
+          await anonymousDockerVolumeIds(),
+        ),
+        [...recreatedAppAnonymousVolumes].sort(),
       );
       const status = await fetch(
         `http://127.0.0.1:${port}/api/v1/auth/bootstrap/status`,
@@ -1006,9 +1047,73 @@ Deno.test({
       await runCommand("docker", ["image", "rm", tagged], {
         allowFailure: true,
       });
+      await assertNoNewAnonymousDockerVolumes(
+        anonymousVolumesBefore,
+        "Compose cleanup",
+      );
+      await assertNoNewAnonymousDockerVolumes(
+        releaseExecutionAnonymousVolumesBefore,
+        "complete container release execution",
+      );
     }
   },
 });
+
+async function anonymousDockerVolumeIds(): Promise<Set<string>> {
+  const result = await runCommand("docker", [
+    "volume",
+    "ls",
+    "--filter",
+    "label=com.docker.volume.anonymous",
+    "--quiet",
+  ]);
+  return new Set(
+    result.stdout.split("\n").map((id) => id.trim()).filter(
+      Boolean,
+    ),
+  );
+}
+
+async function containerAnonymousDockerVolumeIds(
+  container: string,
+): Promise<Set<string>> {
+  const inspected = await runCommand("docker", [
+    "inspect",
+    container,
+    "--format",
+    "{{json .Mounts}}",
+  ]);
+  const mounts = JSON.parse(inspected.stdout) as Array<{
+    Type: string;
+    Name?: string;
+  }>;
+  const anonymous = await anonymousDockerVolumeIds();
+  return new Set(
+    mounts
+      .filter((mount) =>
+        mount.Type === "volume" && mount.Name && anonymous.has(mount.Name)
+      )
+      .map((mount) => mount.Name!),
+  );
+}
+
+function newAnonymousDockerVolumeIds(
+  before: Set<string>,
+  after: Set<string>,
+): string[] {
+  return [...after].filter((id) => !before.has(id)).sort();
+}
+
+async function assertNoNewAnonymousDockerVolumes(
+  before: Set<string>,
+  context: string,
+): Promise<void> {
+  assertEquals(
+    newAnonymousDockerVolumeIds(before, await anonymousDockerVolumeIds()),
+    [],
+    `${context} leaked anonymous Docker volume IDs`,
+  );
+}
 
 async function stageChangeset(
   harness: ContainerHarness,
