@@ -1,5 +1,6 @@
 // deno-lint-ignore-file no-import-prefix no-unversioned-import
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert";
+import { runAuxiliaryContainerCases } from "../../support/auxiliary_container_cleanup.ts";
 import {
   buildReleaseImage,
   type ContainerCliLauncher,
@@ -175,40 +176,56 @@ Deno.test({
       const wrongKey = btoa(
         String.fromCharCode(...new Uint8Array(32).fill(9)),
       );
-      for (
-        const [suffix, keyArgs, expected] of [
-          ["missing", [], "secret_key_unavailable"],
-          [
-            "wrong",
-            ["--env", `OPERANT_SECRET_MASTER_KEY=${wrongKey}`],
-            "secret_key_mismatch",
-          ],
-          [
-            "malformed",
-            ["--env", "OPERANT_SECRET_MASTER_KEY=malformed"],
-            "secret_master_key_invalid",
-          ],
-        ] as const
-      ) {
-        const name = `${harness.id}-${suffix}`;
-        const failed = await harness.docker([
-          "run",
-          "--name",
-          name,
-          "--volume",
-          `${harness.volume}:/data`,
-          ...keyArgs,
-          harness.image,
-        ], { allowFailure: true, timeoutMs: 60_000 });
-        assert(failed.code !== 0);
-        const diagnostics = `${failed.stdout}${failed.stderr}`;
-        assertStringIncludes(diagnostics, expected);
-        assert(!diagnostics.includes(harness.masterKey));
-        assert(!diagnostics.includes(wrongKey));
-        await harness.docker(["rm", "-f", "-v", name], {
-          allowFailure: true,
-        });
-      }
+      const auxiliaryCases = [
+        {
+          name: `${harness.id}-missing`,
+          keyArgs: [] as string[],
+          expected: "secret_key_unavailable",
+        },
+        {
+          name: `${harness.id}-wrong`,
+          keyArgs: ["--env", `OPERANT_SECRET_MASTER_KEY=${wrongKey}`],
+          expected: "secret_key_mismatch",
+        },
+        {
+          name: `${harness.id}-malformed`,
+          keyArgs: ["--env", "OPERANT_SECRET_MASTER_KEY=malformed"],
+          expected: "secret_master_key_invalid",
+        },
+      ];
+      await runAuxiliaryContainerCases(
+        auxiliaryCases,
+        async ({ name, keyArgs, expected }) => {
+          const failed = await harness.docker([
+            "run",
+            "--name",
+            name,
+            "--volume",
+            `${harness.volume}:/data`,
+            ...keyArgs,
+            harness.image,
+          ], { allowFailure: true, timeoutMs: 60_000 });
+          assert(failed.code !== 0);
+          const diagnostics = `${failed.stdout}${failed.stderr}`;
+          assertStringIncludes(diagnostics, expected);
+          assert(!diagnostics.includes(harness.masterKey));
+          assert(!diagnostics.includes(wrongKey));
+        },
+        async (name) => {
+          const removed = await harness.docker(["rm", "-f", "-v", name], {
+            allowFailure: true,
+            timeoutMs: 20_000,
+          });
+          const diagnostics = `${removed.stdout}${removed.stderr}`;
+          if (
+            removed.code !== 0 && !diagnostics.includes("No such container")
+          ) {
+            throw new Error(
+              `failed to remove auxiliary container ${name}: ${diagnostics}`,
+            );
+          }
+        },
+      );
 
       await harness.docker([
         "run",
