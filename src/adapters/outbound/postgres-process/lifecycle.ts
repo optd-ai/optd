@@ -1,6 +1,7 @@
 export const MIN_POSTGRES_MAJOR = 17;
 const POSTGRES_STARTUP_TIMEOUT_MS = 30_000;
-const POSTGRES_SMART_SHUTDOWN_TIMEOUT_MS = 10_000;
+const POSTGRES_SMART_SHUTDOWN_TIMEOUT_MS = 8_000;
+const POSTGRES_FAST_SHUTDOWN_TIMEOUT_MS = 8_000;
 
 export type PostgresRuntimeMode = "external" | "app_managed";
 
@@ -175,7 +176,29 @@ export async function startManagedPostgres(
   return managed;
 }
 
-export async function stopManagedPostgres(pg: ManagedPostgres): Promise<void> {
+type PostgresShutdownEscalation = {
+  event: "postgres_shutdown_escalated";
+  shutdownMode: "fast" | "immediate";
+  signal: "SIGINT" | "SIGQUIT";
+  reason: "smart_shutdown_timeout" | "fast_shutdown_timeout";
+  graceMs: number;
+};
+
+type PostgresShutdownOptions = {
+  /** Internal adapter controls used by deterministic lifecycle tests. */
+  smartTimeoutMs?: number;
+  fastTimeoutMs?: number;
+  onEscalation?: (event: PostgresShutdownEscalation) => void;
+};
+
+export async function stopManagedPostgres(
+  pg: ManagedPostgres,
+  options: PostgresShutdownOptions = {},
+): Promise<void> {
+  const smartTimeoutMs = options.smartTimeoutMs ??
+    POSTGRES_SMART_SHUTDOWN_TIMEOUT_MS;
+  const fastTimeoutMs = options.fastTimeoutMs ??
+    POSTGRES_FAST_SHUTDOWN_TIMEOUT_MS;
   const status = pg.process.status;
   try {
     pg.process.kill("SIGTERM");
@@ -183,27 +206,74 @@ export async function stopManagedPostgres(pg: ManagedPostgres): Promise<void> {
     // Already stopped.
   }
 
-  let smartTimer: ReturnType<typeof setTimeout> | undefined;
-  const smartStopped = await Promise.race([
-    status.then(() => true, () => true),
-    new Promise<false>((resolve) => {
-      smartTimer = setTimeout(
-        () => resolve(false),
-        POSTGRES_SMART_SHUTDOWN_TIMEOUT_MS,
-      );
-    }),
-  ]);
-  if (smartTimer !== undefined) clearTimeout(smartTimer);
-  if (!smartStopped) {
-    try {
-      // PostgreSQL SIGINT is its documented fast shutdown: active
-      // transactions are rolled back and clients are disconnected cleanly.
-      pg.process.kill("SIGINT");
-    } catch {
-      // The postmaster exited at the smart-shutdown boundary.
-    }
+  if (await processStoppedWithin(status, smartTimeoutMs)) {
+    await status.catch(() => undefined);
+    return;
   }
+
+  const fastEvent: PostgresShutdownEscalation = {
+    event: "postgres_shutdown_escalated",
+    shutdownMode: "fast",
+    signal: "SIGINT",
+    reason: "smart_shutdown_timeout",
+    graceMs: smartTimeoutMs,
+  };
+  console.warn(JSON.stringify(fastEvent));
+  options.onEscalation?.(fastEvent);
+  try {
+    // PostgreSQL SIGINT is its documented fast shutdown: active
+    // transactions are rolled back and clients are disconnected cleanly.
+    pg.process.kill("SIGINT");
+  } catch {
+    // The postmaster exited at the smart-shutdown boundary.
+  }
+
+  if (await processStoppedWithin(status, fastTimeoutMs)) {
+    await status.catch(() => undefined);
+    return;
+  }
+
+  const immediateEvent: PostgresShutdownEscalation = {
+    event: "postgres_shutdown_escalated",
+    shutdownMode: "immediate",
+    signal: "SIGQUIT",
+    reason: "fast_shutdown_timeout",
+    graceMs: fastTimeoutMs,
+  };
+  console.warn(JSON.stringify(immediateEvent));
+  options.onEscalation?.(immediateEvent);
+  try {
+    // PostgreSQL SIGQUIT is its documented immediate shutdown. It deliberately
+    // skips the clean checkpoint so crash recovery runs on the next start, and
+    // is reserved for the final data-safe fallback before an orchestrator's
+    // SIGKILL deadline.
+    pg.process.kill("SIGQUIT");
+  } catch {
+    // The postmaster exited at the fast-shutdown boundary.
+  }
+  // Child status is authoritative: do not report the runtime stopped until the
+  // postmaster has exited and Deno has reaped it.
   await status.catch(() => undefined);
+}
+
+async function processStoppedWithin(
+  status: Promise<Deno.CommandStatus>,
+  timeoutMs: number,
+): Promise<boolean> {
+  if (!Number.isFinite(timeoutMs) || timeoutMs < 0) {
+    throw new Error("PostgreSQL shutdown grace must be a non-negative number");
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      status.then(() => true, () => true),
+      new Promise<false>((resolve) => {
+        timer = setTimeout(() => resolve(false), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }
 
 export function assertSupportedPostgresVersionNumber(

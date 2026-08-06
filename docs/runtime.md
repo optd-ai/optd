@@ -106,7 +106,12 @@ the HTTP listener (so new readiness/work is rejected), stops the one outbox poll
 loop within its grace bound, closes authentication listeners and the SQL pool,
 and finally stops app-managed PostgreSQL. External PostgreSQL is never signaled.
 The server runs under `tini` as PID 1 so SIGTERM/SIGINT are forwarded and zombie
-children are reaped. Allow at least 30 seconds termination grace.
+children are reaped. App-managed PostgreSQL gets an 8-second smart-shutdown
+window and then an 8-second fast-shutdown window. If both expire, Operant logs a
+redacted `postgres_shutdown_escalated` lifecycle event and uses PostgreSQL's
+documented immediate shutdown so the postmaster is reaped before the
+orchestrator's final SIGKILL deadline; the next start performs crash recovery.
+Allow at least 30 seconds termination grace.
 
 ## Runtime environment
 

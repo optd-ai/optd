@@ -262,7 +262,48 @@ Deno.test("PG18.4 app-managed startup repeatedly recovers hard-stop postmaster.p
   });
 });
 
-Deno.test("PG18.4 app-managed stop escalates a blocked smart shutdown and restarts cleanly", async () => {
+Deno.test("PG18.4 app-managed ordinary stop completes a clean smart shutdown", async () => {
+  if (!await hasPostgres18_4()) return;
+  await withManagedDataDir(async (rootDir) => {
+    const bins = await findPostgresBins();
+    if (!bins) throw new Error("postgres binaries unexpectedly unavailable");
+    const runtime = await startManagedPostgres(rootDir);
+    const postmasterPid = runtime.process.pid;
+    const sql = createPostgresClient(runtime.databaseUrl);
+    try {
+      await query(
+        sql,
+        "create table lifecycle_smart_sentinel(id integer primary key, value text not null)",
+      );
+      await query(
+        sql,
+        "insert into lifecycle_smart_sentinel values (1, 'smart-persisted')",
+      );
+    } finally {
+      await closePostgresClient(sql);
+    }
+
+    const escalations: string[] = [];
+    await stopManagedPostgres(runtime, {
+      smartTimeoutMs: 5_000,
+      fastTimeoutMs: 5_000,
+      onEscalation: (event) => escalations.push(event.shutdownMode),
+    });
+    assertEquals(escalations, []);
+    assertEquals((await runtime.process.status).success, true);
+    assertEquals(await processExists(postmasterPid), false);
+    assertEquals(
+      await exists(`${rootDir}/postgres/data/postmaster.pid`),
+      false,
+    );
+    assertEquals(
+      await readClusterState(bins.postgres, runtime.dataDir),
+      "shut down",
+    );
+  });
+});
+
+Deno.test("PG18.4 app-managed blocked client reaches fast shutdown and restarts cleanly", async () => {
   if (!await hasPostgres18_4()) return;
   await withManagedDataDir(async (rootDir) => {
     const bins = await findPostgresBins();
@@ -307,23 +348,22 @@ Deno.test("PG18.4 app-managed stop escalates a blocked smart shutdown and restar
       );
       await waitForShutdownBlocker(observer);
 
+      const escalations: string[] = [];
       const started = performance.now();
-      let stopTimer: ReturnType<typeof setTimeout> | undefined;
-      await Promise.race([
-        stopManagedPostgres(runtime),
-        new Promise<never>((_, reject) => {
-          stopTimer = setTimeout(
-            () => reject(new Error("managed PostgreSQL stop exceeded 15s")),
-            15_000,
-          );
-        }),
-      ]).finally(() => {
-        if (stopTimer !== undefined) clearTimeout(stopTimer);
+      await stopManagedPostgres(runtime, {
+        smartTimeoutMs: 100,
+        fastTimeoutMs: 5_000,
+        onEscalation: (event) => escalations.push(event.shutdownMode),
       });
       const elapsed = performance.now() - started;
-      if (elapsed >= 15_000) {
-        throw new Error(`managed PostgreSQL stop took ${elapsed}ms`);
+      if (elapsed >= 6_000) {
+        throw new Error(`managed PostgreSQL fast stop took ${elapsed}ms`);
       }
+      assertEquals(escalations, ["fast"]);
+      assertEquals(
+        await readClusterState(bins.postgres, runtime.dataDir),
+        "shut down",
+      );
       const [blockerStatus] = await blockerOutput;
       assertEquals(blockerStatus.success, false);
       assertEquals(await processExists(postmasterPid), false);
@@ -350,6 +390,105 @@ Deno.test("PG18.4 app-managed stop escalates a blocked smart shutdown and restar
       }
       try {
         runtime.process.kill("SIGINT");
+      } catch { /* already stopped */ }
+      await runtime.process.status.catch(() => undefined);
+      try {
+        blocker.kill("SIGTERM");
+      } catch { /* already stopped */ }
+      await blockerOutput.catch(() => undefined);
+    }
+  });
+});
+
+Deno.test("PG18.4 app-managed delayed stop reaches immediate fallback and crash-recovers", async () => {
+  if (!await hasPostgres18_4()) return;
+  await withManagedDataDir(async (rootDir) => {
+    const bins = await findPostgresBins();
+    if (!bins) throw new Error("postgres binaries unexpectedly unavailable");
+    const runtime = await startManagedPostgres(rootDir);
+    const postmasterPid = runtime.process.pid;
+    let restarted:
+      | Awaited<ReturnType<typeof startManagedPostgres>>
+      | undefined;
+    let observer = createPostgresClient(runtime.databaseUrl);
+    const blockerUrl = new URL(runtime.databaseUrl);
+    blockerUrl.searchParams.set(
+      "application_name",
+      "operant_shutdown_blocker",
+    );
+    const blocker = new Deno.Command(bins.psql, {
+      args: [
+        blockerUrl.toString(),
+        "-X",
+        "--set",
+        "ON_ERROR_STOP=1",
+        "--command",
+        "begin; select pg_sleep(60); commit;",
+      ],
+      stdin: "null",
+      stdout: "piped",
+      stderr: "piped",
+    }).spawn();
+    const blockerOutput = Promise.all([
+      blocker.status,
+      new Response(blocker.stdout).text(),
+      new Response(blocker.stderr).text(),
+    ]);
+    try {
+      await query(
+        observer,
+        "create table lifecycle_immediate_sentinel (id integer primary key, value text not null)",
+      );
+      await query(
+        observer,
+        "insert into lifecycle_immediate_sentinel values (1, 'committed-before-immediate')",
+      );
+      await waitForShutdownBlocker(observer);
+
+      const escalations: string[] = [];
+      const started = performance.now();
+      await stopManagedPostgres(runtime, {
+        smartTimeoutMs: 50,
+        fastTimeoutMs: 0,
+        onEscalation: (event) => escalations.push(event.shutdownMode),
+      });
+      const elapsed = performance.now() - started;
+      assert(elapsed < 25_000, `immediate fallback took ${elapsed}ms`);
+      assertEquals(escalations, ["fast", "immediate"]);
+      assertEquals(await processExists(postmasterPid), false);
+      assertEquals(
+        await exists(`${rootDir}/postgres/data/postmaster.pid`),
+        false,
+      );
+      assertEquals(
+        await readClusterState(bins.postgres, runtime.dataDir),
+        "in production",
+      );
+      const [blockerStatus] = await blockerOutput;
+      assertEquals(blockerStatus.success, false);
+      await closePostgresClient(observer).catch(() => undefined);
+
+      restarted = await startManagedPostgres(rootDir);
+      observer = createPostgresClient(restarted.databaseUrl);
+      const persisted = await query<{ value: string }>(
+        observer,
+        "select value from lifecycle_immediate_sentinel where id = 1",
+      );
+      assertEquals(persisted.rows[0]?.value, "committed-before-immediate");
+      await closePostgresClient(observer);
+      await stopManagedPostgres(restarted);
+      restarted = undefined;
+      assertEquals(
+        await readClusterState(bins.postgres, runtime.dataDir),
+        "shut down",
+      );
+    } finally {
+      await closePostgresClient(observer).catch(() => undefined);
+      if (restarted) {
+        await stopManagedPostgres(restarted).catch(() => undefined);
+      }
+      try {
+        runtime.process.kill("SIGQUIT");
       } catch { /* already stopped */ }
       await runtime.process.status.catch(() => undefined);
       try {
@@ -590,6 +729,30 @@ function freePort(): number {
   const port = (listener.addr as Deno.NetAddr).port;
   listener.close();
   return port;
+}
+
+async function readClusterState(
+  postgresBin: string,
+  dataDir: string,
+): Promise<string> {
+  const pgControlData = `${
+    postgresBin.slice(0, postgresBin.lastIndexOf("/") + 1)
+  }pg_controldata`;
+  const output = await new Deno.Command(pgControlData, {
+    args: [dataDir],
+    stdout: "piped",
+    stderr: "piped",
+  }).output();
+  if (!output.success) {
+    throw new Error(
+      `pg_controldata failed: ${new TextDecoder().decode(output.stderr)}`,
+    );
+  }
+  const state = new TextDecoder().decode(output.stdout).match(
+    /^Database cluster state:\s+(.+)$/m,
+  )?.[1]?.trim();
+  if (!state) throw new Error("pg_controldata did not report cluster state");
+  return state;
 }
 
 async function hasPostgres18_4(): Promise<boolean> {
