@@ -1,6 +1,6 @@
 export const MIN_POSTGRES_MAJOR = 17;
 const POSTGRES_STARTUP_TIMEOUT_MS = 30_000;
-const POSTGRES_SMART_SHUTDOWN_TIMEOUT_MS = 5_000;
+const POSTGRES_SMART_SHUTDOWN_TIMEOUT_MS = 10_000;
 
 export type PostgresRuntimeMode = "external" | "app_managed";
 
