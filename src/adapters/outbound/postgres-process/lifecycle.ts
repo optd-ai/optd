@@ -1,5 +1,6 @@
 export const MIN_POSTGRES_MAJOR = 17;
 const POSTGRES_STARTUP_TIMEOUT_MS = 30_000;
+const POSTGRES_SMART_SHUTDOWN_TIMEOUT_MS = 5_000;
 
 export type PostgresRuntimeMode = "external" | "app_managed";
 
@@ -175,12 +176,34 @@ export async function startManagedPostgres(
 }
 
 export async function stopManagedPostgres(pg: ManagedPostgres): Promise<void> {
+  const status = pg.process.status;
   try {
     pg.process.kill("SIGTERM");
   } catch {
     // Already stopped.
   }
-  await pg.process.status.catch(() => undefined);
+
+  let smartTimer: ReturnType<typeof setTimeout> | undefined;
+  const smartStopped = await Promise.race([
+    status.then(() => true, () => true),
+    new Promise<false>((resolve) => {
+      smartTimer = setTimeout(
+        () => resolve(false),
+        POSTGRES_SMART_SHUTDOWN_TIMEOUT_MS,
+      );
+    }),
+  ]);
+  if (smartTimer !== undefined) clearTimeout(smartTimer);
+  if (!smartStopped) {
+    try {
+      // PostgreSQL SIGINT is its documented fast shutdown: active
+      // transactions are rolled back and clients are disconnected cleanly.
+      pg.process.kill("SIGINT");
+    } catch {
+      // The postmaster exited at the smart-shutdown boundary.
+    }
+  }
+  await status.catch(() => undefined);
 }
 
 export function assertSupportedPostgresVersionNumber(

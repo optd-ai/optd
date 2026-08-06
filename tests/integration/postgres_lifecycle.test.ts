@@ -262,6 +262,104 @@ Deno.test("PG18.4 app-managed startup repeatedly recovers hard-stop postmaster.p
   });
 });
 
+Deno.test("PG18.4 app-managed stop escalates a blocked smart shutdown and restarts cleanly", async () => {
+  if (!await hasPostgres18_4()) return;
+  await withManagedDataDir(async (rootDir) => {
+    const bins = await findPostgresBins();
+    if (!bins) throw new Error("postgres binaries unexpectedly unavailable");
+    let runtime = await startManagedPostgres(rootDir);
+    let restarted:
+      | Awaited<ReturnType<typeof startManagedPostgres>>
+      | undefined;
+    let observer = createPostgresClient(runtime.databaseUrl);
+    const postmasterPid = runtime.process.pid;
+    const blockerUrl = new URL(runtime.databaseUrl);
+    blockerUrl.searchParams.set(
+      "application_name",
+      "operant_shutdown_blocker",
+    );
+    const blocker = new Deno.Command(bins.psql, {
+      args: [
+        blockerUrl.toString(),
+        "-X",
+        "--set",
+        "ON_ERROR_STOP=1",
+        "--command",
+        "begin; select pg_sleep(60); commit;",
+      ],
+      stdin: "null",
+      stdout: "piped",
+      stderr: "piped",
+    }).spawn();
+    const blockerOutput = Promise.all([
+      blocker.status,
+      new Response(blocker.stdout).text(),
+      new Response(blocker.stderr).text(),
+    ]);
+    try {
+      await query(
+        observer,
+        "create table lifecycle_shutdown_sentinel (id integer primary key, value text not null)",
+      );
+      await query(
+        observer,
+        "insert into lifecycle_shutdown_sentinel(id, value) values (1, 'persisted')",
+      );
+      await waitForShutdownBlocker(observer);
+
+      const started = performance.now();
+      let stopTimer: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([
+        stopManagedPostgres(runtime),
+        new Promise<never>((_, reject) => {
+          stopTimer = setTimeout(
+            () => reject(new Error("managed PostgreSQL stop exceeded 15s")),
+            15_000,
+          );
+        }),
+      ]).finally(() => {
+        if (stopTimer !== undefined) clearTimeout(stopTimer);
+      });
+      const elapsed = performance.now() - started;
+      if (elapsed >= 15_000) {
+        throw new Error(`managed PostgreSQL stop took ${elapsed}ms`);
+      }
+      const [blockerStatus] = await blockerOutput;
+      assertEquals(blockerStatus.success, false);
+      assertEquals(await processExists(postmasterPid), false);
+      assertEquals(
+        await exists(`${rootDir}/postgres/data/postmaster.pid`),
+        false,
+      );
+      await closePostgresClient(observer).catch(() => undefined);
+
+      restarted = await startManagedPostgres(rootDir);
+      observer = createPostgresClient(restarted.databaseUrl);
+      const persisted = await query<{ value: string }>(
+        observer,
+        "select value from lifecycle_shutdown_sentinel where id = 1",
+      );
+      assertEquals(persisted.rows[0]?.value, "persisted");
+      await closePostgresClient(observer);
+      await stopManagedPostgres(restarted);
+      restarted = undefined;
+    } finally {
+      await closePostgresClient(observer).catch(() => undefined);
+      if (restarted) {
+        await stopManagedPostgres(restarted).catch(() => undefined);
+      }
+      try {
+        runtime.process.kill("SIGINT");
+      } catch { /* already stopped */ }
+      await runtime.process.status.catch(() => undefined);
+      try {
+        blocker.kill("SIGTERM");
+      } catch { /* already stopped */ }
+      await blockerOutput.catch(() => undefined);
+    }
+  });
+});
+
 Deno.test("app-managed Postgres starts, migrates, persists sentinel across restart", async () => {
   if (!Deno.env.get("OPERANT_DATABASE_URL") && !await findPostgresBins()) {
     console.warn(
@@ -424,6 +522,25 @@ async function assertQueryable(databaseUrl: string): Promise<void> {
   }
 }
 
+async function waitForShutdownBlocker(
+  sql: ReturnType<typeof createPostgresClient>,
+) {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const active = await query<{ active: number }>(
+      sql,
+      `select count(*)::int active
+         from pg_stat_activity
+        where application_name = 'operant_shutdown_blocker'
+          and state = 'active'
+          and query like '%pg_sleep%'`,
+    );
+    if (active.rows[0]?.active === 1) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error("independent PostgreSQL blocker transaction did not start");
+}
+
 function startPostgresIdentityFixture(
   cwd: string,
   postgresArgs: string[],
@@ -520,4 +637,13 @@ async function exists(path: string): Promise<boolean> {
     if (error instanceof Deno.errors.NotFound) return false;
     throw error;
   }
+}
+
+async function processExists(pid: number): Promise<boolean> {
+  const output = await new Deno.Command("/bin/sh", {
+    args: ["-c", 'kill -0 "$1" 2>/dev/null', "sh", String(pid)],
+    stdout: "null",
+    stderr: "null",
+  }).output();
+  return output.success;
 }
