@@ -267,7 +267,7 @@ Deno.test("PG18.4 app-managed stop escalates a blocked smart shutdown and restar
   await withManagedDataDir(async (rootDir) => {
     const bins = await findPostgresBins();
     if (!bins) throw new Error("postgres binaries unexpectedly unavailable");
-    let runtime = await startManagedPostgres(rootDir);
+    const runtime = await startManagedPostgres(rootDir);
     let restarted:
       | Awaited<ReturnType<typeof startManagedPostgres>>
       | undefined;
