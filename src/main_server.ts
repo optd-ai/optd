@@ -306,16 +306,6 @@ async function runMain(): Promise<void> {
   const server = await startServer({
     hostname: config.host,
     port: config.port,
-    onListen: (url) => {
-      console.log(
-        JSON.stringify({
-          ok: true,
-          event: "server_listening",
-          listening: url,
-          version: OPERANT_VERSION,
-        }),
-      );
-    },
   });
   let stopping = false;
   const stop = async (signal: "SIGTERM" | "SIGINT") => {
@@ -341,6 +331,14 @@ async function runMain(): Promise<void> {
   const onInt = () => void stop("SIGINT");
   Deno.addSignalListener("SIGTERM", onTerm);
   Deno.addSignalListener("SIGINT", onInt);
+  console.log(
+    JSON.stringify({
+      ok: true,
+      event: "server_listening",
+      listening: server.url,
+      version: OPERANT_VERSION,
+    }),
+  );
 }
 
 function redactedError(
