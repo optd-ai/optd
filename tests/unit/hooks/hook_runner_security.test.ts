@@ -188,6 +188,50 @@ Deno.test("trusted fetch rejects declared redirects without contacting destinati
   }
 });
 
+Deno.test("trusted completion cuts off scheduled post-output network side effects", async () => {
+  let attempts = 0;
+  const controller = new AbortController();
+  const destination = Deno.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    signal: controller.signal,
+    onListen() {},
+  }, () => {
+    attempts++;
+    return new Response("unexpected");
+  });
+  const address = destination.addr as Deno.NetAddr;
+  const cacheDir = await Deno.makeTempDir();
+  try {
+    const result = await new DenoHookRunner({ cacheDir }).run(
+      hook(
+        `${valid}
+         setTimeout(() => fetch("http://127.0.0.1:${address.port}/late").catch(() => {}), 75);
+         setInterval(() => {}, 60_000);`,
+        {
+          timeoutMs: 2_000,
+          permissions: {
+            net: [`127.0.0.1:${address.port}`],
+            env: false,
+            read: false,
+            write: false,
+            run: false,
+          },
+        },
+      ),
+      envelope,
+    );
+    assertEquals(result.ok, true);
+    assertEquals(result.exitCode, 0);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    assertEquals(attempts, 0);
+  } finally {
+    controller.abort();
+    await destination.finished.catch(() => undefined);
+    await Deno.remove(cacheDir, { recursive: true }).catch(() => undefined);
+  }
+});
+
 Deno.test("hook Deno runtime requires an absolute verified interpreter", async () => {
   assertEquals(await resolveHookDenoBinary(Deno.execPath()), Deno.execPath());
   let rejected = false;

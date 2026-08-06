@@ -711,6 +711,9 @@ export async function resolveHookDenoBinary(
 function trustedPrelude(readyFrame: string): string {
   return `const __operantEncoder = new globalThis.TextEncoder();
 const __operantWriteStderr = Deno.stderr.writeSync.bind(Deno.stderr);
+const __operantCloseStdout = Deno.stdout.close.bind(Deno.stdout);
+const __operantCloseStderr = Deno.stderr.close.bind(Deno.stderr);
+const __operantExit = Deno.exit.bind(Deno);
 (() => {
   const nativeFetch = globalThis.fetch.bind(globalThis);
   const safeFetch = async function (input, init = undefined) {
@@ -764,6 +767,13 @@ __operantWriteStderr(
   __operantEncoder.encode(${JSON.stringify(readyFrame)}),
 );
 await import("./hook.ts");
+// Hook modules may leave timers, sockets, or other event-loop resources open.
+// Module settlement is the semantic completion boundary: close the output pipes
+// after their final synchronous writes, then force runtime termination so the
+// parent still accepts output only after receiving authoritative process status.
+try { __operantCloseStdout(); } catch { /* hook may have closed stdout */ }
+try { __operantCloseStderr(); } catch { /* hook may have closed stderr */ }
+__operantExit(0);
 `;
 }
 

@@ -169,6 +169,115 @@ Deno.test("DenoHookRunner accepts authoritative fast valid exits concurrently", 
   }
 });
 
+Deno.test("DenoHookRunner terminates after settled output despite open event-loop resources", async () => {
+  const cacheDir = await Deno.makeTempDir();
+  try {
+    const runner = new DenoHookRunner({ cacheDir });
+    const result = await runner.run(
+      hook(
+        "open_resources",
+        `console.error("final-business-log");
+         console.log(JSON.stringify({ allow: true, errors: [], warnings: [], required_approvals: [] }));
+         setInterval(() => console.error("post-completion-log"), 60_000);`,
+        { timeoutMs: 2_000 },
+      ),
+      {
+        hook: "open_resources",
+        phase: "changeset.validate",
+        input: {},
+      },
+    );
+    if (!result.ok) throw new Error(JSON.stringify(result));
+    assertEquals(result.exitCode, 0);
+    assertEquals(result.logs, "final-business-log\n");
+    if (result.durationMs >= 2_000) {
+      throw new Error(
+        `settled hook waited for timeout: ${result.durationMs}ms`,
+      );
+    }
+  } finally {
+    await Deno.remove(cacheDir, { recursive: true }).catch(() => undefined);
+  }
+});
+
+Deno.test("DenoHookRunner repeatedly completes real two-second pack hooks under CPU stress", async () => {
+  const cacheDir = await Deno.makeTempDir();
+  const stressor = new Worker(
+    "data:application/javascript,while(true){}",
+    { type: "module" },
+  );
+  try {
+    const runner = new DenoHookRunner({ cacheDir });
+    const normalizeSource = await Deno.readTextFile(
+      new URL(
+        "../../prototypes/crm-default-pack/hooks/normalize_lead.ts",
+        import.meta.url,
+      ),
+    );
+    const startSource = await Deno.readTextFile(
+      new URL(
+        "../../prototypes/project-management-pack/hooks/start_task.ts",
+        import.meta.url,
+      ),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const runs = await Promise.all(
+      Array.from({ length: 16 }, (_, index) =>
+        Promise.all([
+          runner.run(
+            hook(`normalize_lead_${index}`, "", {
+              scriptContent: normalizeSource,
+              outputSchema: "patch.v1",
+              timeoutMs: 2_000,
+            }),
+            {
+              hook: `normalize_lead_${index}`,
+              phase: "changeset.before_preview",
+              input: {
+                operation: {
+                  fields: {
+                    email: ` Person${index}@Example.com `,
+                    name: " Person ",
+                  },
+                },
+              },
+            },
+          ),
+          runner.run(
+            hook(`start_task_${index}`, "", {
+              scriptContent: startSource,
+              outputSchema: "changeset.operations.v1",
+              timeoutMs: 2_000,
+            }),
+            {
+              hook: `start_task_${index}`,
+              phase: "action.before_execute",
+              input: {
+                action_input: {
+                  task_id: `task-${index}`,
+                  stage_id: "stage",
+                },
+                task: { version: 1 },
+              },
+            },
+          ),
+        ])),
+    );
+    for (const result of runs.flat()) {
+      if (!result.ok) throw new Error(JSON.stringify(result));
+      assertEquals(result.exitCode, 0);
+      if (result.durationMs >= 2_000) {
+        throw new Error(
+          `${result.hook} approached its execution bound: ${result.durationMs}ms`,
+        );
+      }
+    }
+  } finally {
+    stressor.terminate();
+    await Deno.remove(cacheDir, { recursive: true }).catch(() => undefined);
+  }
+});
+
 Deno.test("DenoHookRunner preserves diagnostics after accepted child closes stdin", async () => {
   const runner = new DenoHookRunner({ cacheDir: await Deno.makeTempDir() });
   const result = await runner.run(
