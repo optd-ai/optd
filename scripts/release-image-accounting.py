@@ -449,24 +449,7 @@ def dockerfile_steps(data: bytes) -> list[str]:
         raise RuntimeError("immutable Dockerfile has an unterminated continuation")
     if not logical:
         raise RuntimeError("immutable Dockerfile has no build Steps")
-    global_args: dict[str, str] = {}
-    expanded: list[str] = []
-    variable = re.compile(r"\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))")
-    for instruction in logical:
-        keyword, _, body = instruction.partition(" ")
-        if keyword.upper() == "ARG" and "=" in body and not any(
-            step.upper().startswith("FROM ") for step in expanded
-        ):
-            name, value = body.split("=", 1)
-            global_args[name] = value
-        if keyword.upper() == "FROM":
-            body = variable.sub(
-                lambda match: global_args.get(match.group(1) or match.group(2), match.group(0)),
-                body,
-            )
-            instruction = f"FROM {body}"
-        expanded.append(instruction)
-    return expanded
+    return logical
 
 
 @dataclass
@@ -491,12 +474,23 @@ def parse_protocol(stdout: bytes, stderr: bytes, expected: list[str], status: in
         nonlocal current_number, current_instruction, current_results
         if not current_number:
             return
-        if len(current_results) != 1:
+        before_first_stage = not any(
+            frame.instruction.upper().startswith("FROM ") for frame in frames
+        )
+        allowed_empty = (
+            before_first_stage and current_instruction.upper().startswith("ARG ")
+        ) or current_instruction.upper().startswith("FROM SCRATCH")
+        if len(current_results) == 1:
+            frames.append(StepFrame(current_number, current_instruction, current_results[0]))
+        elif not current_results and allowed_empty:
+            # The legacy daemon emits no result ID for global ARG and emits an
+            # explicitly empty result for FROM scratch. These completed frames
+            # authorize no image identity.
+            frames.append(StepFrame(current_number, current_instruction, ""))
+        else:
             errors.append(
                 f"Step {current_number}/{len(expected)} has {len(current_results)} engine result IDs"
             )
-        else:
-            frames.append(StepFrame(current_number, current_instruction, current_results[0]))
         current_number = 0
         current_instruction = ""
         current_results = []
@@ -527,6 +521,10 @@ def parse_protocol(stdout: bytes, stderr: bytes, expected: list[str], status: in
         if success:
             finish_frame()
             success_tokens.append(success.group(1).decode())
+            continue
+        if re.fullmatch(rb" ---> (?:Running in|Removed intermediate container) [0-9a-f]{12}\r?", line):
+            continue
+        if line == b" ---> " and current_instruction.upper().startswith("FROM SCRATCH"):
             continue
         if line.startswith(CONTROL_PREFIX):
             errors.append(f"malformed or spoofed legacy engine control line: {line!r}")
@@ -578,13 +576,48 @@ def instruction_matches_created_by(instruction: str, created_by: Any) -> bool:
     actual_keyword, _, actual_body = actual.partition(" ")
     if actual_keyword.upper() != keyword.upper():
         return False
-    if keyword.upper() == "COPY":
+    upper = keyword.upper()
+    if upper == "COPY":
         destination = normalize_space(body).rsplit(" ", 1)[-1]
         return normalize_space(actual_body).endswith(destination) or f" in {destination}" in actual_body
-    if keyword.upper() in ("ARG", "LABEL", "ENV") and "$" in body:
-        # The daemon records expanded build arguments. The immutable keyword,
-        # graph position, transcript instruction, and exact history value are
-        # all retained and revalidated even when textual expansion differs.
+    if upper in ("ENTRYPOINT", "CMD", "VOLUME") and body.startswith("["):
+        try:
+            values = json.loads(body)
+        except json.JSONDecodeError:
+            return False
+        if not isinstance(values, list) or any(not isinstance(value, str) for value in values):
+            return False
+        if upper == "VOLUME":
+            expected_actual = "[" + " ".join(values) + "]"
+        else:
+            expected_actual = "[" + " ".join(json.dumps(value) for value in values) + "]"
+        return actual_body == expected_actual
+    if upper == "HEALTHCHECK":
+        match = re.fullmatch(
+            r"--interval=([^ ]+) --timeout=([^ ]+) --start-period=([^ ]+) --retries=([0-9]+) CMD (\[.*\])",
+            body,
+        )
+        if not match:
+            return False
+        try:
+            command = json.loads(match.group(5))
+        except json.JSONDecodeError:
+            return False
+        if not isinstance(command, list) or any(not isinstance(value, str) for value in command):
+            return False
+        command.insert(0, "CMD")
+        expected_actual = (
+            "&{["
+            + " ".join(json.dumps(value) for value in command)
+            + f'] "{match.group(1)}" "{match.group(2)}" "{match.group(3)}" "0s" '
+            + repr(chr(int(match.group(4))))
+            + "}"
+        )
+        return actual_body == expected_actual
+    if upper in ("ARG", "LABEL", "ENV") and "$" in body:
+        # Build arguments are expanded by the daemon in CreatedBy. Exact raw
+        # instruction ownership is already fixed by the Step frame; the exact
+        # expanded CreatedBy value is retained and rechecked before every rm.
         return True
     return normalize_space(actual_body) == normalize_space(body)
 
@@ -659,12 +692,14 @@ def command_account(args: argparse.Namespace) -> int:
     if hashlib.sha256(stdout).hexdigest() != result.get("stdout_sha256") or hashlib.sha256(stderr).hexdigest() != result.get("stderr_sha256"):
         raise RuntimeError("durable transcript hash mismatch")
     status = int(result["status"])
-    expected_steps = dockerfile_steps(dockerfile_data)
+    expected_steps = dockerfile_steps(dockerfile_data) + [f"LABEL {LABEL}={args.run_id}"]
     frames, success_token = parse_protocol(stdout, stderr, expected_steps, status)
     if not set(baseline) <= set(post):
         raise RuntimeError(f"baseline images disappeared during build: {sorted(set(baseline)-set(post))!r}")
     delta = set(post) - set(baseline)
-    resolved_frames = [(frame, resolve_token(frame.token, post)) for frame in frames]
+    resolved_frames = [
+        (frame, resolve_token(frame.token, post)) for frame in frames if frame.token
+    ]
     if len({frame.number for frame, _ in resolved_frames}) != len(resolved_frames):
         raise RuntimeError("duplicate completed legacy Step frame")
     success_id = resolve_token(success_token, post) if success_token else ""
@@ -681,8 +716,13 @@ def command_account(args: argparse.Namespace) -> int:
     frame_for_id: dict[str, StepFrame] = {}
     prior_by_frame: dict[int, str] = {}
     stage_prior = ""
-    for frame, identity in resolved_frames:
+    for frame in frames:
         instruction = expected_steps[frame.number - 1]
+        if not frame.token:
+            if instruction.upper().startswith("FROM SCRATCH"):
+                stage_prior = ""
+            continue
+        identity = resolve_token(frame.token, post)
         if instruction.upper().startswith("FROM "):
             stage_prior = identity
             continue

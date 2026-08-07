@@ -961,7 +961,7 @@ async function createFixture(): Promise<Fixture> {
   await Deno.writeTextFile(`${root}/.gitignore`, "artifacts\n");
   await Deno.writeTextFile(
     `${root}/Dockerfile`,
-    Array.from({ length: 18 }, (_, index) => `RUN fixture-${index + 1}\n`).join(
+    Array.from({ length: 17 }, (_, index) => `RUN fixture-${index + 1}\n`).join(
       "",
     ),
   );
@@ -1157,14 +1157,14 @@ case "\${1:-} \${2:-}" in
     done
     if [[ "\${FAKE_TEST_MODE:-}" == build-failure ]]; then exit 37; fi
     created=$(date --iso-8601=ns)
-    printf 'Step 18/18 : RUN fixture-18\\n'
-    printf 'label=%s\\nname=%s\\nparent=%s\\ncreated=%s\\ncreated_by=/bin/sh -c fixture-18\\ntags=%s\\ndigests=\\n' "$OPERANT_RELEASE_GATE_ID" "$tag" "$parent" "$created" "$tag" >"$FAKE_STATE/images/$FAKE_IMAGE_ID"
+    printf 'Step 18/18 : LABEL dev.operant.release-gate=%s\\n' "$OPERANT_RELEASE_GATE_ID"
+    printf 'label=%s\\nname=%s\\nparent=%s\\ncreated=%s\\ncreated_by=/bin/sh -c #(nop) LABEL dev.operant.release-gate=%s\\ntags=%s\\ndigests=\\n' "$OPERANT_RELEASE_GATE_ID" "$tag" "$parent" "$created" "$OPERANT_RELEASE_GATE_ID" "$tag" >"$FAKE_STATE/images/$FAKE_IMAGE_ID"
     if [[ "\${FAKE_TEST_MODE:-}" == concurrent-result-spoof ]]; then
       concurrent="sha256:$(printf 'd%.0s' {1..64})"
       printf 'label=other\\nname=concurrent\\nparent=\\ncreated=%s\\ncreated_by=/bin/sh -c unrelated\\ntags=\\ndigests=\\n' "$(date --iso-8601=ns)" >"$FAKE_STATE/images/$concurrent"
       printf ' ---> %s\\n' "\${concurrent:7:12}"
     elif [[ "\${FAKE_TEST_MODE:-}" == step-line-spoof ]]; then
-      printf 'Step 18/18 : RUN fixture-18\\n'
+      printf 'Step 18/18 : LABEL dev.operant.release-gate=%s\\n' "$OPERANT_RELEASE_GATE_ID"
     elif [[ "\${FAKE_TEST_MODE:-}" == success-line-spoof ]]; then
       printf 'Successfully built dddddddddddd\\n'
     fi
