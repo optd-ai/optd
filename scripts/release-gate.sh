@@ -526,7 +526,7 @@ cleanup_registered_images() {
     [[ "$identity" =~ ^sha256:[0-9a-f]{64}$ ]] || return 1
     # Exact immutable IDs only. Non-force removal makes a concurrent tag,
     # child, or container reference an error rather than deleting through it.
-    docker image rm -- "$identity" >/dev/null || return 1
+    docker image rm --no-prune -- "$identity" >/dev/null || return 1
   done <"$plan"
 }
 

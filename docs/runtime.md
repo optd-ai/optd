@@ -114,14 +114,15 @@ registry.
 Before its first image removal, cleanup revalidates the complete registered set,
 immutable evidence, final tag and label, parent/child relationships, tags,
 digests, and container references. It removes exact full IDs child-to-parent
-without force or mutable tags and then requires the all-image snapshot to be
-byte-identical to baseline. Unknown concurrent deltas, ambiguous short IDs,
-unexpected references, or removal failures block image deletion and retain the
-private evidence directory for audit; unrelated images are never removed.
-`release-artifacts.sh` requires a clean exact source revision and a full
-immutable image ID, compiles the standalone CLI with the frozen lockfile, fsyncs
-same-filesystem staging, and rolls an interrupted publication back to the prior
-output. Output symlinks and replaced output parents are rejected.
+with `--no-prune`, without force or mutable tags, and then requires the
+all-image snapshot to be byte-identical to baseline. Unknown concurrent deltas,
+ambiguous short IDs, unexpected references, or removal failures block image
+deletion and retain the private evidence directory for audit; unrelated images
+are never removed. `release-artifacts.sh` requires a clean exact source revision
+and a full immutable image ID, compiles the standalone CLI with the frozen
+lockfile, fsyncs same-filesystem staging, and rolls an interrupted publication
+back to the prior output. Output symlinks and replaced output parents are
+rejected.
 
 ## Liveness, readiness, and startup
 

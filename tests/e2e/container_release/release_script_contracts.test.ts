@@ -101,7 +101,7 @@ Deno.test("gate uses NUL paths, one build, one suite, and only the frozen image 
     assertStringIncludes(docker, `container create`);
     assertStringIncludes(docker, imageId);
     assert(!docker.includes("container create operant:"), docker);
-    assertStringIncludes(docker, `image rm -- ${imageId}`);
+    assertStringIncludes(docker, `image rm --no-prune -- ${imageId}`);
     assert(!docker.includes("image rm -- operant:"), docker);
     assert(!docker.includes("image prune"), docker);
   } finally {
@@ -119,7 +119,7 @@ Deno.test("legacy builder registers and removes a 17-intermediate chain with exa
     const docker = await readLog(fixture, "docker.log");
     assertEquals(
       docker.split("\n").filter((line) =>
-        line.startsWith("image rm -- sha256:")
+        line.startsWith("image rm --no-prune -- sha256:")
       ).length,
       18,
     );
@@ -138,7 +138,7 @@ Deno.test("failed legacy build cleans every emitted intermediate and preserves s
     const docker = await readLog(fixture, "docker.log");
     assertEquals(
       docker.split("\n").filter((line) =>
-        line.startsWith("image rm -- sha256:")
+        line.startsWith("image rm --no-prune -- sha256:")
       ).length,
       17,
     );
@@ -167,7 +167,7 @@ Deno.test("a signaled build durably accounts and cleans every emitted intermedia
     const docker = await readLog(fixture, "docker.log");
     assertEquals(
       docker.split("\n").filter((line) =>
-        line.startsWith("image rm -- sha256:")
+        line.startsWith("image rm --no-prune -- sha256:")
       ).length,
       5,
     );
@@ -184,7 +184,10 @@ Deno.test("unknown deltas and spoofed or ambiguous transcript IDs fail closed wi
       assert(result.code !== 0, `${mode}\n${result.stdout}\n${result.stderr}`);
       assert((await resourceIds(fixture, "images")).length > 0, mode);
       const docker = await readLog(fixture, "docker.log");
-      assert(!docker.includes("image rm -- sha256:"), `${mode}\n${docker}`);
+      assert(
+        !docker.includes("image rm --no-prune -- sha256:"),
+        `${mode}\n${docker}`,
+      );
       assertStringIncludes(
         result.stderr,
         "legacy builder image authority is ambiguous",
@@ -205,7 +208,7 @@ Deno.test("a baseline ancestor emitted by the builder is retained", async () => 
     assertEquals(result.code, 0, `${result.stdout}\n${result.stderr}`);
     assertEquals(await resourceIds(fixture, "images"), [baseline]);
     const docker = await readLog(fixture, "docker.log");
-    assert(!docker.includes(`image rm -- ${baseline}`), docker);
+    assert(!docker.includes(`image rm --no-prune -- ${baseline}`), docker);
   } finally {
     await removeFixture(fixture);
   }
@@ -230,7 +233,10 @@ Deno.test("unexpected image tags, digests, children, and references block all im
       const result = await runGate(fixture, { FAKE_TEST_MODE: mode });
       assert(result.code !== 0, `${mode}\n${result.stdout}\n${result.stderr}`);
       const docker = await readLog(fixture, "docker.log");
-      assert(!docker.includes("image rm -- sha256:"), `${mode}\n${docker}`);
+      assert(
+        !docker.includes("image rm --no-prune -- sha256:"),
+        `${mode}\n${docker}`,
+      );
       assertStringIncludes(result.stderr, "image ownership preflight failed");
     } finally {
       await removeFixture(fixture);
@@ -249,7 +255,7 @@ Deno.test("an exact-ID removal failure blocks and leaves unrelated resources int
     assert(result.code !== 0, `${result.stdout}\n${result.stderr}`);
     assert((await resourceIds(fixture, "images")).includes(unrelated));
     const docker = await readLog(fixture, "docker.log");
-    assert(!docker.includes(`image rm -- ${unrelated}`), docker);
+    assert(!docker.includes(`image rm --no-prune -- ${unrelated}`), docker);
   } finally {
     await removeFixture(fixture);
   }
@@ -748,7 +754,7 @@ Deno.test("image cleanup never dereferences a drifted mutable tag", async () => 
     const docker = await readLog(fixture, "docker.log");
     assert(!docker.includes("image rm -- operant:"), docker);
     assert(!docker.includes("image rm --force -- operant:"), docker);
-    assert(!docker.includes(`image rm -- ${imageId}`), docker);
+    assert(!docker.includes(`image rm --no-prune -- ${imageId}`), docker);
     assertEquals((await resourceIds(fixture, "images")).length, 18);
   } finally {
     await removeFixture(fixture);
