@@ -11,11 +11,13 @@ state_root=""
 source_root=""
 source_archive=""
 source_archive_sha256=""
+immutable_dockerfile=""
 artifact_dir=""
 release_image_tag=""
 release_image_id=""
 image_built=false
 build_accounting_started=false
+build_accounting_complete=false
 baseline_ready=false
 cleanup_active=false
 owned_sequence=0
@@ -474,11 +476,7 @@ run_owned() {
 
 account_build_images() {
   [[ "$build_accounting_started" == true ]] || return 0
-  [[ ! -f "$state_root/registry/image-accounting.json" ]] || return 0
-  [[ -f "$state_root/build-transcript/result.json" ]] || {
-    status_message "build transcript has no durable result; image authority is unavailable"
-    return 1
-  }
+  [[ "$build_accounting_complete" != true ]] || return 0
   atomic_sorted_command "$state_root/post-build-images" docker image ls --all --no-trunc --quiet || return 1
   python3 "$source_root/scripts/release-image-accounting.py" account \
     --baseline "$state_root/before/docker/images" \
@@ -486,48 +484,34 @@ account_build_images() {
     --transcript "$state_root/build-transcript" \
     --registry "$state_root/registry" \
     --run-id "$run_id" \
-    --tag "$release_image_tag" || return 1
-  release_image_id=$(python3 - "$state_root/registry/image-accounting.json" <<'PY'
-import json, sys
-print(json.load(open(sys.argv[1], encoding='utf-8'))['final_id'])
-PY
-  )
+    --tag "$release_image_tag" \
+    --dockerfile "$immutable_dockerfile" || return 1
+  release_image_id=$(python3 "$source_root/scripts/release-image-accounting.py" final-id \
+    --registry "$state_root/registry" --run-id "$run_id") || return 1
+  build_accounting_complete=true
 }
 
 cleanup_registered_images() {
-  local phase=${1:-all}
-  local plan="$state_root/cleanup-images.ids"
   if [[ "$build_accounting_started" != true ]]; then
-    if [[ "$phase" != action ]]; then
-      [[ -f "$state_root/before/docker/images" ]] || return 1
-      atomic_sorted_command "$state_root/cleanup-current-images" docker image ls --all --no-trunc --quiet || return 1
-      cmp -s -- "$state_root/before/docker/images" "$state_root/cleanup-current-images" || return 1
-      : >"$plan"
-    fi
-    return 0
+    [[ -f "$state_root/before/docker/images" ]] || return 1
+    atomic_sorted_command "$state_root/cleanup-current-images" docker image ls --all --no-trunc --quiet || return 1
+    cmp -s -- "$state_root/before/docker/images" "$state_root/cleanup-current-images" || return 1
+    return
   fi
-  if [[ "$phase" != action ]]; then
-    if ! python3 "$source_root/scripts/release-image-accounting.py" preflight \
-      --baseline "$state_root/before/docker/images" \
-      --registry "$state_root/registry" \
-      --transcript "$state_root/build-transcript" \
-      --run-id "$run_id" \
-      --tag "$release_image_tag" \
-      --final-id "$release_image_id" \
-      --plan "$plan"; then
-      status_message "image ownership preflight failed; preserving every registered and unregistered image"
-      return 1
-    fi
-    [[ "$phase" != preflight ]] || return 0
+  # One trusted helper owns all safe authority descriptors from complete
+  # preflight through child-to-parent exact-ID action. It re-snapshots and
+  # re-inspects the complete mutable Docker world immediately before each rm.
+  if ! python3 "$source_root/scripts/release-image-accounting.py" cleanup \
+    --baseline "$state_root/before/docker/images" \
+    --registry "$state_root/registry" \
+    --transcript "$state_root/build-transcript" \
+    --run-id "$run_id" \
+    --tag "$release_image_tag" \
+    --final-id "$release_image_id" \
+    --dockerfile "$immutable_dockerfile"; then
+    status_message "image ownership preflight failed or exact action conflicted; preserving all images not already exactly removed"
+    return 1
   fi
-  [[ -f "$plan" ]] || return 1
-  local identity
-  while IFS= read -r identity; do
-    [[ "$identity" =~ ^sha256:[0-9a-f]{64}$ ]] || return 1
-    # Exact immutable IDs only. Non-force removal makes a concurrent tag,
-    # child, or container reference an error rather than deleting through it.
-    docker image rm --no-prune -- "$identity" >/dev/null || return 1
-  done <"$plan"
 }
 
 inspect_label() {
@@ -693,13 +677,8 @@ cleanup_and_compare() {
       status_message "non-image Docker cleanup blocked before its first destructive command"
     fi
     # Image authority is independently preflighted only after owned containers
-    # are gone, and always in full before the first exact-ID image removal.
-    if cleanup_registered_images preflight; then
-      cleanup_registered_images action || cleanup_status=1
-    else
-      cleanup_status=1
-      status_message "image cleanup blocked before its first image removal"
-    fi
+    # are gone. One helper keeps the trusted authority in memory through action.
+    cleanup_registered_images || cleanup_status=1
 
     cd "$repo_root" || cleanup_status=1
     if [[ -n "$source_root" && -e "$source_root/.git" ]]; then
@@ -846,9 +825,11 @@ printf '%s\t%s\n' "$state_root" state-root >"$state_root/registry/temps"
 sync -f "$state_root/registry"
 source_root="$state_root/source"
 source_archive="$state_root/source.tar"
+immutable_dockerfile="$state_root/immutable-Dockerfile"
 artifact_dir="$state_root/artifacts"
 printf '%s\t%s\n' "$source_root" source-worktree >>"$state_root/registry/temps"
 printf '%s\t%s\n' "$source_archive" immutable-archive >>"$state_root/registry/temps"
+printf '%s\t%s\n' "$immutable_dockerfile" immutable-dockerfile >>"$state_root/registry/temps"
 printf '%s\t%s\n' "$artifact_dir" artifacts >>"$state_root/registry/temps"
 sync -f "$state_root/registry/temps"
 
@@ -867,6 +848,11 @@ chmod 0400 -- "$source_archive"
 verify_source_archive
 git worktree add --detach -- "$source_root" "$release_revision" >/dev/null
 verify_source
+dockerfile_sha256=$(git -C "$source_root" show "$release_revision:Dockerfile" | sha256sum)
+dockerfile_sha256=${dockerfile_sha256%% *}
+python3 "$source_root/scripts/release-image-accounting.py" pin-dockerfile \
+  --source "$source_root/Dockerfile" --destination "$immutable_dockerfile" \
+  --sha256 "$dockerfile_sha256"
 
 release_paths="$state_root/release-ts.zlist"
 git -C "$source_root" diff --name-only -z --diff-filter=ACMR "$release_base..$release_revision" -- '*.ts' >"$release_paths"
@@ -914,19 +900,24 @@ append_registry images "pending:$release_image_tag" "$release_image_tag"
 verify_source_archive
 build_transcript="$state_root/build-transcript"
 build_accounting_started=true
-build_status=0
-if ! run_owned image-build python3 "$source_root/scripts/release-image-accounting.py" capture \
+capture_status=0
+if run_owned image-build python3 "$source_root/scripts/release-image-accounting.py" capture \
   --transcript "$build_transcript" --stdin "$source_archive" -- \
   docker build --pull=false --no-cache \
   --label "$gate_label_key=$run_id" --build-arg "OPERANT_REVISION=$release_revision" \
   --build-arg "OPERANT_VERSION=$release_version" --tag "$release_image_tag" -; then
-  build_status=$?
-  # Negated-condition status is zero; recover the exact durable child status.
-  build_status=$(python3 - "$build_transcript/result.json" <<'PY'
-import json, sys
-print(json.load(open(sys.argv[1], encoding='utf-8'))['status'])
-PY
-  )
+  capture_status=0
+else
+  capture_status=$?
+fi
+# Always validate and consume the descriptor-safe durable result. Capture's
+# process status must exactly preserve any forwarded signal even if Docker
+# traps that signal and exits zero.
+build_status=$(python3 "$source_root/scripts/release-image-accounting.py" status \
+  --transcript "$build_transcript")
+if ((capture_status != build_status)); then
+  status_message "capture process status disagrees with durable signal result: process=$capture_status durable=$build_status"
+  exit 1
 fi
 # Snapshot immediately after the sole build, before source checks or any later
 # phase can create an image. Accounting registers and fsyncs every proven delta

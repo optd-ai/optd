@@ -147,37 +147,52 @@ Deno.test("failed legacy build cleans every emitted intermediate and preserves s
   }
 });
 
-Deno.test("a signaled build durably accounts and cleans every emitted intermediate", async () => {
-  const fixture = await createFixture();
-  try {
-    const child = new Deno.Command("bash", {
-      args: ["scripts/release-gate.sh"],
-      cwd: fixture.root,
-      env: fixtureEnv(fixture, { FAKE_TEST_MODE: "build-signal" }),
-      stdout: "piped",
-      stderr: "piped",
-    }).spawn();
-    await waitForPath(`${fixture.state}/build-signal-ready`);
-    await new Deno.Command("kill", {
-      args: ["-TERM", String(child.pid)],
-    }).output();
-    const result = await child.output();
-    assertEquals(result.code, 143, new TextDecoder().decode(result.stderr));
-    assertEquals(await resourceIds(fixture, "images"), []);
-    const docker = await readLog(fixture, "docker.log");
-    assertEquals(
-      docker.split("\n").filter((line) =>
-        line.startsWith("image rm --no-prune -- sha256:")
-      ).length,
-      5,
-    );
-  } finally {
-    await removeFixture(fixture);
+Deno.test("a signaled build preserves 143 and cleans only completed Steps even when Docker exits zero", async () => {
+  for (const mode of ["build-signal", "build-signal-child-zero"]) {
+    const fixture = await createFixture();
+    try {
+      const child = new Deno.Command("bash", {
+        args: ["scripts/release-gate.sh"],
+        cwd: fixture.root,
+        env: fixtureEnv(fixture, { FAKE_TEST_MODE: mode }),
+        stdout: "piped",
+        stderr: "piped",
+      }).spawn();
+      await waitForPath(`${fixture.state}/build-signal-ready`);
+      await new Deno.Command("kill", {
+        args: ["-TERM", String(child.pid)],
+      }).output();
+      const result = await child.output();
+      assertEquals(
+        result.code,
+        143,
+        `${mode}: ${new TextDecoder().decode(result.stderr)}`,
+      );
+      assertEquals(await resourceIds(fixture, "images"), []);
+      const docker = await readLog(fixture, "docker.log");
+      assertEquals(
+        docker.split("\n").filter((line) =>
+          line.startsWith("image rm --no-prune -- sha256:")
+        ).length,
+        5,
+      );
+    } finally {
+      await removeFixture(fixture);
+    }
   }
 });
 
 Deno.test("unknown deltas and spoofed or ambiguous transcript IDs fail closed without image deletion", async () => {
-  for (const mode of ["unknown-delta", "transcript-spoof", "ambiguous-short"]) {
+  for (
+    const mode of [
+      "unknown-delta",
+      "transcript-spoof",
+      "ambiguous-short",
+      "concurrent-result-spoof",
+      "step-line-spoof",
+      "success-line-spoof",
+    ]
+  ) {
     const fixture = await createFixture();
     try {
       const result = await runGate(fixture, { FAKE_TEST_MODE: mode });
@@ -242,6 +257,36 @@ Deno.test("unexpected image tags, digests, children, and references block all im
       await removeFixture(fixture);
     }
   }
+});
+
+Deno.test("unsafe authority paths and post-preflight Docker races block before image removal", async () => {
+  for (
+    const mode of [
+      "authority-symlink-0666",
+      "action-tag-race",
+      "action-parent-race",
+      "action-ref-race",
+      "action-disappearance-race",
+    ]
+  ) {
+    const fixture = await createFixture();
+    try {
+      const result = await runGate(fixture, { FAKE_TEST_MODE: mode });
+      assert(result.code !== 0, `${mode}\n${result.stdout}\n${result.stderr}`);
+      const docker = await readLog(fixture, "docker.log");
+      assert(
+        !docker.includes("image rm --no-prune -- sha256:"),
+        `${mode} reached destructive image action:\n${docker}`,
+      );
+      assertStringIncludes(result.stderr, "image ownership preflight failed");
+    } finally {
+      await removeFixture(fixture);
+    }
+  }
+
+  const source = await Deno.readTextFile("scripts/release-gate.sh");
+  assert(!source.includes("cleanup-images.ids"));
+  assert(!source.includes("preflight \\"));
 });
 
 Deno.test("an exact-ID removal failure blocks and leaves unrelated resources intact", async () => {
@@ -914,13 +959,15 @@ async function createFixture(): Promise<Fixture> {
   );
   await Deno.writeTextFile(`${root}/deno.json`, "{}\n");
   await Deno.writeTextFile(`${root}/.gitignore`, "artifacts\n");
-  for (
-    const file of [
-      "Dockerfile",
-      "docker-compose.yml",
-      "docs/runtime.md",
-    ]
-  ) await Deno.writeTextFile(`${root}/${file}`, "release contract\n");
+  await Deno.writeTextFile(
+    `${root}/Dockerfile`,
+    Array.from({ length: 18 }, (_, index) => `RUN fixture-${index + 1}\n`).join(
+      "",
+    ),
+  );
+  for (const file of ["docker-compose.yml", "docs/runtime.md"]) {
+    await Deno.writeTextFile(`${root}/${file}`, "release contract\n");
+  }
   await command(["git", "add", "--all"], root);
   await command(
     ["git", "commit", "--quiet", "-m", "test: release fixture"],
@@ -1001,6 +1048,11 @@ if [[ "$*" == "task test" ]]; then
     unexpected-ref)
       printf 'label=other\\nname=unexpected-ref\\nimage=%s\\n' "$FAKE_IMAGE_ID" >"$FAKE_STATE/containers/unexpected-ref"
       ;;
+    authority-symlink-0666)
+      mv -- "$OPERANT_RELEASE_GATE_REGISTRY/image-authority.json" "$FAKE_STATE/outside-authority.json"
+      chmod 0666 -- "$FAKE_STATE/outside-authority.json"
+      ln -s -- "$FAKE_STATE/outside-authority.json" "$OPERANT_RELEASE_GATE_REGISTRY/image-authority.json"
+      ;;
     pid-mismatch)
       setsid sleep 120 >/dev/null 2>&1 & pid=$!
       printf '%s\\n' "$pid" >"$FAKE_STATE/mismatch-pid"
@@ -1042,7 +1094,10 @@ list_kind() {
 }
 filter_value() {
   key=$1; shift
-  for arg in "$@"; do [[ "$arg" != "label=$key="* ]] || { printf '%s' "\${arg#label=$key=}"; return; }; done
+  for arg in "$@"; do
+    [[ "$arg" != "label=$key="* ]] || { printf '%s' "\${arg#label=$key=}"; return; }
+    [[ "$arg" != "$key="* ]] || { printf '%s' "\${arg#$key=}"; return; }
+  done
 }
 arg_after() { target=$1; shift; while (($#)); do [[ "$1" == "$target" ]] && { printf '%s' "$2"; return; }; shift; done; }
 last_arg() { printf '%s' "\${!#}"; }
@@ -1056,6 +1111,21 @@ case "\${1:-} \${2:-}" in
     if [[ -n "$ancestor" ]]; then
       shopt -s nullglob
       for file in "$FAKE_STATE/containers"/*; do [[ "$(value image "$file")" != "$ancestor" ]] || basename -- "$file"; done | LC_ALL=C sort
+      case "\${FAKE_TEST_MODE:-}" in
+        action-tag-race|action-parent-race|action-ref-race|action-disappearance-race)
+          count=0; [[ ! -e "$FAKE_STATE/cleanup-ref-count" ]] || count=$(<"$FAKE_STATE/cleanup-ref-count")
+          count=$((count+1)); printf '%s\\n' "$count" >"$FAKE_STATE/cleanup-ref-count"
+          if [[ "$count" == 1 ]]; then
+            victim="sha256:$(printf '%012x' 1)$(printf '0%.0s' {1..52})"
+            case "$FAKE_TEST_MODE" in
+              action-tag-race) sed -i 's/^tags=.*/tags=concurrent:latest/' "$FAKE_STATE/images/$victim" ;;
+              action-parent-race) sed -i 's/^parent=.*/parent=sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc/' "$FAKE_STATE/images/$victim" ;;
+              action-ref-race) printf 'label=other\\nname=race-ref\\nimage=%s\\n' "$victim" >"$FAKE_STATE/containers/race-ref" ;;
+              action-disappearance-race) rm -f -- "$FAKE_STATE/images/$victim" ;;
+            esac
+          fi
+          ;;
+      esac
     else
       list_kind containers "$filter" "$project"
     fi ;;
@@ -1067,26 +1137,37 @@ case "\${1:-} \${2:-}" in
     list_kind networks "$filter" "$project" ;;
   "build --pull=false")
     count=$(<"$FAKE_STATE/build-count"); printf '%s\\n' "$((count+1))" >"$FAKE_STATE/build-count"
+    if [[ "\${FAKE_TEST_MODE:-}" == build-signal-child-zero ]]; then trap 'exit 0' TERM; fi
     tag=$(arg_after --tag "$@")
     parent=""
     if [[ -s "$FAKE_STATE/base-image" ]]; then
       parent=$(<"$FAKE_STATE/base-image")
-      printf ' ---> %s\\n' "\${parent:7:12}"
     fi
     for number in $(seq 1 17); do
       identity="sha256:$(printf '%012x' "$number")$(printf '0%.0s' {1..52})"
       created=$(date --iso-8601=ns)
-      printf 'label=\\nname=%s\\nparent=%s\\ncreated=%s\\ntags=\\ndigests=\\n' "$identity" "$parent" "$created" >"$FAKE_STATE/images/$identity"
+      printf 'Step %s/18 : RUN fixture-%s\\n' "$number" "$number"
+      printf 'label=\\nname=%s\\nparent=%s\\ncreated=%s\\ncreated_by=/bin/sh -c fixture-%s\\ntags=\\ndigests=\\n' "$identity" "$parent" "$created" "$number" >"$FAKE_STATE/images/$identity"
       printf ' ---> %s\\n' "\${identity:7:12}"
       parent=$identity
-      if [[ "\${FAKE_TEST_MODE:-}" == build-signal && "$number" == 5 ]]; then
+      if [[ "\${FAKE_TEST_MODE:-}" == build-signal* && "$number" == 5 ]]; then
         : >"$FAKE_STATE/build-signal-ready"
         sleep 120
       fi
     done
     if [[ "\${FAKE_TEST_MODE:-}" == build-failure ]]; then exit 37; fi
     created=$(date --iso-8601=ns)
-    printf 'label=%s\\nname=%s\\nparent=%s\\ncreated=%s\\ntags=%s\\ndigests=\\n' "$OPERANT_RELEASE_GATE_ID" "$tag" "$parent" "$created" "$tag" >"$FAKE_STATE/images/$FAKE_IMAGE_ID"
+    printf 'Step 18/18 : RUN fixture-18\\n'
+    printf 'label=%s\\nname=%s\\nparent=%s\\ncreated=%s\\ncreated_by=/bin/sh -c fixture-18\\ntags=%s\\ndigests=\\n' "$OPERANT_RELEASE_GATE_ID" "$tag" "$parent" "$created" "$tag" >"$FAKE_STATE/images/$FAKE_IMAGE_ID"
+    if [[ "\${FAKE_TEST_MODE:-}" == concurrent-result-spoof ]]; then
+      concurrent="sha256:$(printf 'd%.0s' {1..64})"
+      printf 'label=other\\nname=concurrent\\nparent=\\ncreated=%s\\ncreated_by=/bin/sh -c unrelated\\ntags=\\ndigests=\\n' "$(date --iso-8601=ns)" >"$FAKE_STATE/images/$concurrent"
+      printf ' ---> %s\\n' "\${concurrent:7:12}"
+    elif [[ "\${FAKE_TEST_MODE:-}" == step-line-spoof ]]; then
+      printf 'Step 18/18 : RUN fixture-18\\n'
+    elif [[ "\${FAKE_TEST_MODE:-}" == success-line-spoof ]]; then
+      printf 'Successfully built dddddddddddd\\n'
+    fi
     printf ' ---> %s\\nSuccessfully built %s\\nSuccessfully tagged %s\\n' "\${FAKE_IMAGE_ID:7:12}" "\${FAKE_IMAGE_ID:7:12}" "$tag"
     printf '%s\\n' "$FAKE_IMAGE_ID" >"$FAKE_STATE/tag-image"
     if [[ "\${FAKE_TEST_MODE:-}" == unknown-delta ]]; then
@@ -1141,10 +1222,22 @@ PY
     esac ;;
   "image history")
     identity=$(last_arg "$@")
-    while [[ -n "$identity" ]]; do
-      printf '%s\\n' "$identity"
-      identity=$(value parent "$FAKE_STATE/images/$identity")
-    done ;;
+    if [[ "$*" == *"--format"* ]]; then
+      python3 - "$identity" "$FAKE_STATE/images/$identity" <<'PY'
+import json, pathlib, sys
+identity, path = sys.argv[1:]
+values = {}
+for line in pathlib.Path(path).read_text().splitlines():
+    key, _, value = line.partition('=')
+    values[key] = value
+print(json.dumps({'ID': identity, 'CreatedBy': values.get('created_by', '')}))
+PY
+    else
+      while [[ -n "$identity" ]]; do
+        printf '%s\\n' "$identity"
+        identity=$(value parent "$FAKE_STATE/images/$identity")
+      done
+    fi ;;
   "image rm")
     identity=$(last_arg "$@"); [[ "$identity" != operant:* ]] || identity=$(<"$FAKE_STATE/tag-image")
     if [[ "\${FAKE_TEST_MODE:-}" == removal-failure && ! -e "$FAKE_STATE/removal-failed" ]]; then : >"$FAKE_STATE/removal-failed"; exit 73; fi
