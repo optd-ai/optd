@@ -604,6 +604,20 @@ function fixtureEnv(
     FAKE_REVISION: fixture.revision,
     FAKE_IMAGE_ID: imageId,
     OPERANT_RELEASE_BASE: fixture.base,
+    // Controlled fixtures are subprocesses, not recursive executions of the
+    // parent gate. Never let its ownership or immutable-source context bleed
+    // into their isolated fake registries and repositories.
+    OPERANT_RELEASE_GATE_ACTIVE: "0",
+    OPERANT_RELEASE_GATE_ID: "",
+    OPERANT_RELEASE_GATE_REGISTRY: "",
+    OPERANT_RELEASE_SOURCE_REVISION: "",
+    OPERANT_RELEASE_SOURCE_ROOT: "",
+    OPERANT_CONTAINER_IMAGE: "",
+    OPERANT_CONTAINER_IMAGE_TAG: "",
+    OPERANT_CONTAINER_IMAGE_ID: "",
+    OPERANT_CONTAINER_REVISION: "",
+    OPERANT_CONTAINER_VERSION: "",
+    OPERANT_CONTAINER_SKIP_BUILD: "",
     ...extraEnv,
   };
 }
