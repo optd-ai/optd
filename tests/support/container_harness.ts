@@ -512,7 +512,12 @@ async function verifyGateDockerRemoval(
       "--format",
       format,
     ], { allowFailure: true });
-    if (inspected.code === 0 && inspected.stdout.trim() !== gateId) {
+    if (inspected.code !== 0) {
+      throw new Error(
+        `refusing to remove ${kind} after gate-label inspection failed: ${identity}`,
+      );
+    }
+    if (inspected.stdout.trim() !== gateId) {
       throw new Error(
         `refusing to remove ${kind} after gate-label mismatch: ${identity}`,
       );
@@ -679,6 +684,98 @@ function prepareGateDockerCreation(
   return { args };
 }
 
+const composeResourceCommands = [
+  ["containers", ["container", "ls", "--all", "--no-trunc", "--quiet"]],
+  ["volumes", ["volume", "ls", "--quiet"]],
+  ["networks", ["network", "ls", "--no-trunc", "--quiet"]],
+] as const;
+
+async function listExactComposeResources(
+  command: readonly string[],
+  project: string,
+  gateId?: string,
+): Promise<string[]> {
+  const filters = [
+    "--filter",
+    `label=com.docker.compose.project=${project}`,
+    ...gateId ? ["--filter", `label=dev.operant.release-gate=${gateId}`] : [],
+  ];
+  const listed = await runCommandRaw("docker", [...command, ...filters]);
+  const identities = listed.stdout.split("\n").filter(Boolean);
+  if (identities.some((identity) => /\s/.test(identity))) {
+    throw new Error("ambiguous Docker identity in Compose ownership listing");
+  }
+  const exact = [...new Set(identities)].sort();
+  if (exact.length !== identities.length) {
+    throw new Error("duplicate Docker identity in Compose ownership listing");
+  }
+  return exact;
+}
+
+async function preflightComposeRemoval(
+  project: string,
+  gateId: string,
+): Promise<void> {
+  const inventories: Array<{
+    kind: "containers" | "volumes" | "networks";
+    identities: string[];
+  }> = [];
+  for (const [kind, command] of composeResourceCommands) {
+    const projectResources = await listExactComposeResources(command, project);
+    const ownedResources = await listExactComposeResources(
+      command,
+      project,
+      gateId,
+    );
+    if (projectResources.join("\n") !== ownedResources.join("\n")) {
+      throw new Error(
+        `refusing Compose removal after exact project/run inventory mismatch: ${kind}`,
+      );
+    }
+    inventories.push({ kind, identities: projectResources });
+  }
+
+  // Complete every ownership inspection before allowing the first destructive
+  // Compose command. This keeps a late inspect error from following an earlier
+  // resource removal.
+  for (const { kind, identities } of inventories) {
+    for (const identity of identities) {
+      const format = kind === "containers"
+        ? "{{json .Config.Labels}}"
+        : "{{json .Labels}}";
+      const inspected = await runCommandRaw("docker", [
+        kind.slice(0, -1),
+        "inspect",
+        identity,
+        "--format",
+        format,
+      ], { allowFailure: true });
+      if (inspected.code !== 0) {
+        throw new Error(
+          `refusing Compose removal after ${kind} inspection failed: ${identity}`,
+        );
+      }
+      let labels: Record<string, unknown>;
+      try {
+        labels = JSON.parse(inspected.stdout.trim());
+      } catch {
+        throw new Error(
+          `refusing Compose removal after ambiguous ${kind} labels: ${identity}`,
+        );
+      }
+      if (
+        labels["com.docker.compose.project"] !== project ||
+        labels["dev.operant.release-gate"] !== gateId
+      ) {
+        throw new Error(
+          `refusing Compose removal after exact label mismatch: ${kind}/${identity}`,
+        );
+      }
+      await appendGateRegistry(kind, identity, `compose:${project}`);
+    }
+  }
+}
+
 async function runRegisteredGateCompose(
   args: string[],
   options: RunOptions,
@@ -686,24 +783,28 @@ async function runRegisteredGateCompose(
 ): Promise<CommandResult> {
   const project = options.env?.COMPOSE_PROJECT_NAME ??
     Deno.env.get("COMPOSE_PROJECT_NAME") ?? "unknown";
-  await appendGateRegistry("containers", `pending:compose:${project}`, project);
+  const destructive = args.some((arg) => arg === "down" || arg === "rm");
+  if (destructive) {
+    await preflightComposeRemoval(project, gateId);
+  } else {
+    await appendGateRegistry(
+      "containers",
+      `pending:compose:${project}`,
+      project,
+    );
+  }
+
   const result = await runCommandRaw("docker", args, {
     ...options,
     allowFailure: true,
   });
-  for (
-    const [kind, command] of [
-      ["containers", ["container", "ls", "--all", "--no-trunc", "--quiet"]],
-      ["volumes", ["volume", "ls", "--quiet"]],
-      ["networks", ["network", "ls", "--no-trunc", "--quiet"]],
-    ] as const
-  ) {
-    const listed = await runCommandRaw("docker", [
-      ...command,
-      "--filter",
-      `label=dev.operant.release-gate=${gateId}`,
-    ]);
-    for (const identity of listed.stdout.split("\n").filter(Boolean)) {
+  for (const [kind, command] of composeResourceCommands) {
+    const identities = await listExactComposeResources(
+      command,
+      project,
+      gateId,
+    );
+    for (const identity of identities) {
       await appendGateRegistry(kind, identity, `compose:${project}`);
     }
   }

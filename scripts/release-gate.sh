@@ -17,6 +17,7 @@ release_image_id=""
 image_built=false
 baseline_ready=false
 cleanup_active=false
+owned_sequence=0
 
 status_message() {
   printf 'release gate: %s\n' "$*" >&2
@@ -167,19 +168,35 @@ head = subprocess.run(
 ).stdout.decode().strip()
 if head != revision:
     raise SystemExit(f'source revision changed: expected {revision}, got {head}')
+index = subprocess.run(
+    ['git', '-C', str(root), 'diff', '--cached', '--quiet', revision, '--'],
+    stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+)
+if index.returncode != 0:
+    raise SystemExit('source index differs from immutable commit')
 raw = subprocess.run(
-    ['git', '-C', str(root), 'ls-files', '--stage', '-z'],
-    check=True, stdout=subprocess.PIPE,
+    ['git', '-C', str(root), 'ls-tree', '-rz', '--full-tree', revision],
+    check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
 ).stdout
 expected = {}
 for record in raw.split(b'\0'):
     if not record:
         continue
     metadata, path = record.split(b'\t', 1)
-    mode, oid, stage = metadata.split(b' ')
-    if stage != b'0':
-        raise SystemExit('source snapshot contains an unmerged index entry')
+    mode, object_type, oid = metadata.split(b' ')
+    if object_type != b'blob' or mode not in (b'100644', b'100755', b'120000'):
+        raise SystemExit(
+            f'unsupported immutable tree entry: mode={mode!r} type={object_type!r} path={path!r}'
+        )
+    if path in expected:
+        raise SystemExit(f'duplicate immutable tree path: {path!r}')
     expected[path] = (mode, oid.decode())
+object_format = subprocess.run(
+    ['git', '-C', str(root), 'rev-parse', '--show-object-format'],
+    check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+).stdout.decode().strip()
+if object_format not in ('sha1', 'sha256'):
+    raise SystemExit(f'unsupported Git object format: {object_format}')
 
 actual_paths = set()
 for directory, names, files in os.walk(os.fsencode(root), topdown=True, followlinks=False):
@@ -202,6 +219,8 @@ for path, (mode, oid) in expected.items():
     full = os.path.join(os.fsencode(root), path)
     st = os.lstat(full)
     if mode == b'120000':
+        if not stat.S_ISLNK(st.st_mode):
+            raise SystemExit(f'tracked symlink changed type: {path!r}')
         data = os.readlink(full)
         if isinstance(data, str):
             data = os.fsencode(data)
@@ -214,14 +233,19 @@ for path, (mode, oid) in expected.items():
         actual_exec = bool(st.st_mode & stat.S_IXUSR)
         if expected_exec != actual_exec:
             raise SystemExit(f'tracked executable mode changed: {path!r}')
-    digest = hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest()
-    if digest != oid:
-        raise SystemExit(f'tracked content changed: {path!r}')
+    hasher = hashlib.new(object_format)
+    hasher.update(b'blob ' + str(len(data)).encode() + b'\0' + data)
+    if hasher.hexdigest() != oid:
+        raise SystemExit(f'tracked content changed from immutable commit blob: {path!r}')
 PY
 }
 
 register_owned_pid() {
   local pid=$1
+  if [[ "${OPERANT_RELEASE_TEST_PRE_REGISTRATION_FAILURE:-0}" == 1 && ! -e "$state_root/pre-registration-failure-injected" ]]; then
+    : >"$state_root/pre-registration-failure-injected"
+    return 1
+  fi
   python3 - "$pid" "$state_root" "$run_id" <<'PY'
 import base64
 import json
@@ -284,108 +308,59 @@ with path.open('x') as stream:
 PY
 }
 
-verify_owned_pid() {
+signal_owned_pid() {
   local record=$1
-  python3 - "$record" "$state_root" "$run_id" <<'PY'
-import base64
-import json
-import os
-import pathlib
-import sys
-
-record = json.loads(pathlib.Path(sys.argv[1]).read_text())
-state = sys.argv[2]
-run_id = sys.argv[3]
-if record['run_id'] != run_id or record['data_dir'] != state:
-    raise SystemExit(1)
-if pathlib.Path('/proc/sys/kernel/random/boot_id').read_text().strip() != record['boot_id']:
-    raise SystemExit(1)
-
-def process_stat(pid):
-    raw = (pathlib.Path('/proc') / str(pid) / 'stat').read_text()
-    fields = raw[raw.rfind(') ') + 2:].split()
-    return int(fields[1]), fields[19]
-
-def identity(pid):
-    proc = pathlib.Path('/proc') / str(pid)
-    ppid, start_ticks = process_stat(pid)
-    uid = next(
-        line.split()[1] for line in (proc / 'status').read_text().splitlines()
-        if line.startswith('Uid:')
-    )
-    return {
-        'pid': pid,
-        'ppid': ppid,
-        'start_ticks': start_ticks,
-        'uid': uid,
-        'exe': os.readlink(proc / 'exe'),
-        'cwd': os.readlink(proc / 'cwd'),
-        'cmdline_b64': base64.b64encode((proc / 'cmdline').read_bytes()).decode(),
-    }
-current = identity(record['pid'])
-for field in ('pid', 'ppid', 'start_ticks', 'uid', 'exe', 'cwd', 'cmdline_b64'):
-    if current[field] != record[field]:
-        raise SystemExit(1)
-if run_id not in base64.b64decode(current['cmdline_b64']).decode(errors='replace'):
-    raise SystemExit(1)
-ancestry = []
-parent = current['ppid']
-while parent > 0:
-    ancestor_ppid, ancestor_start = process_stat(parent)
-    ancestry.append([parent, ancestor_start])
-    if ancestor_ppid == parent:
-        break
-    parent = ancestor_ppid
-if ancestry != record['ancestry']:
-    raise SystemExit(1)
-PY
+  local signal_name=$2
+  local signal_status
+  python3 "$source_root/scripts/release-pidfd-signal.py" \
+    "$record" "$state_root" "$run_id" "$signal_name"
+  signal_status=$?
+  [[ "$signal_status" == 3 ]] && return 0
+  return "$signal_status"
 }
 
 run_owned() {
   local description=$1
   shift
-  setsid bash -c '
-    run_id=$1
-    state_root=$2
-    shift 2
-    kill -STOP "$$"
-    child=""
-    forward() { [[ -z "$child" ]] || kill -TERM "$child" 2>/dev/null || true; }
-    trap forward TERM INT HUP
-    "$@" & child=$!
-    if wait "$child"; then exit 0; else exit $?; fi
-  ' "operant-release-owned-$run_id" "$run_id" "$state_root" "$@" &
+  owned_sequence=$((owned_sequence + 1))
+  local control="$state_root/owned-control-$owned_sequence"
+  (umask 077 && : >"$control")
+  python3 "$source_root/scripts/release-owned-supervisor.py" \
+    "$control" "$run_id" "$state_root" "$@" &
   local supervisor=$!
-  local state=""
-  local attempt
-  for attempt in {1..200}; do
-    [[ -r "/proc/$supervisor/status" ]] || break
-    while IFS= read -r line; do
-      [[ "$line" == State:* ]] && state=$line
-    done <"/proc/$supervisor/status"
-    [[ "$state" == *T* ]] && break
-    sleep 0.01
-  done
-  if [[ "$state" != *T* ]]; then
-    status_message "owned process failed to enter registration stop: $description"
-    kill -KILL "$supervisor" 2>/dev/null || true
-    wait "$supervisor" 2>/dev/null || true
-    return 1
-  fi
-  register_owned_pid "$supervisor"
   local record="$state_root/registry/pids/$supervisor.json"
-  if ! verify_owned_pid "$record"; then
-    status_message "owned process identity changed before start: $description"
-    kill -KILL "$supervisor" 2>/dev/null || true
+
+  # The supervisor cannot launch the workload until this exact identity is
+  # durably registered and a start token is written. On any pre-registration
+  # failure, its bounded control wait exits without a numeric signal.
+  if ! register_owned_pid "$supervisor"; then
+    status_message "owned process registration failed before launch: $description"
+    printf 'abort\n' >"$control" 2>/dev/null || true
     wait "$supervisor" 2>/dev/null || true
+    rm -f -- "$control"
     return 1
   fi
-  kill -CONT "$supervisor"
-  if wait "$supervisor"; then
-    return 0
-  else
-    return $?
+  if ! signal_owned_pid "$record" CONT; then
+    status_message "refusing CONT after owned PID identity inspection failed: $supervisor ($description)"
+    printf 'abort\n' >"$control" 2>/dev/null || true
+    wait "$supervisor" 2>/dev/null || true
+    rm -f -- "$control"
+    return 1
   fi
+  if ! printf 'start\n' >"$control"; then
+    status_message "could not authorize registered workload launch: $description"
+    wait "$supervisor" 2>/dev/null || true
+    rm -f -- "$control"
+    return 1
+  fi
+  rm -f -- "$control"
+
+  local command_status=0
+  wait "$supervisor" || command_status=$?
+  mkdir -p -- "$state_root/registry/pids/completed"
+  mv -- "$record" "$state_root/registry/pids/completed/$supervisor.json" || return 1
+  sync -f "$state_root/registry/pids/completed"
+  return "$command_status"
 }
 
 inspect_label() {
@@ -402,42 +377,69 @@ inspect_label() {
 
 cleanup_registered_docker_kind() {
   local kind=$1
+  local phase=${2:-all}
   local file="$state_root/registry/$kind"
   local identities="$state_root/cleanup-${kind}.ids"
   local labeled="$state_root/cleanup-${kind}.labeled"
-  : >"$identities"
-  if [[ -f "$file" ]]; then
-    cut -f1 -- "$file" >>"$identities" || return 1
-  fi
+  if [[ "$phase" != action ]]; then
+    : >"$identities"
+  [[ -f "$file" ]] || return 1
   case "$kind" in
     containers) atomic_sorted_command "$labeled" docker container ls --all --no-trunc --quiet --filter "label=$gate_label_key=$run_id" || return 1 ;;
     volumes) atomic_sorted_command "$labeled" docker volume ls --quiet --filter "label=$gate_label_key=$run_id" || return 1 ;;
     networks) atomic_sorted_command "$labeled" docker network ls --no-trunc --quiet --filter "label=$gate_label_key=$run_id" || return 1 ;;
     images) atomic_sorted_command "$labeled" docker image ls --no-trunc --quiet --filter "label=$gate_label_key=$run_id" || return 1 ;;
   esac
-  cat -- "$labeled" >>"$identities" || return 1
+  # Exact run-label enumeration is the active-resource authority. The durable
+  # registry remains audit evidence, but may legitimately contain resources
+  # already removed by successful --rm/Compose operations.
+  cat -- "$labeled" >"$identities" || return 1
   LC_ALL=C sort -u -o "$identities" -- "$identities" || return 1
   local identity label
+  # Revalidate the complete inventory before the first destructive command.
+  # An inspect failure is ambiguous ownership, never evidence that a resource
+  # disappeared or is safe to remove.
   while IFS= read -r identity; do
     [[ -n "$identity" && "$identity" != pending:* ]] || continue
     if ! label=$(inspect_label "$kind" "$identity" 2>/dev/null); then
-      continue
+      status_message "refusing cleanup after $kind ownership inspection failed: $identity"
+      return 1
     fi
     if [[ "$label" != "$run_id" ]]; then
       status_message "refusing cleanup after $kind identity/label mismatch: $identity"
       return 1
     fi
+    if [[ "$kind" == images && "$identity" != "$release_image_id" ]]; then
+      status_message "refusing cleanup of a run-labeled image other than the frozen full ID: $identity"
+      return 1
+    fi
+  done <"$identities"
+
+  local tag_image_id=""
+  if [[ "$kind" == images && "${OPERANT_RELEASE_KEEP_IMAGE:-0}" != "1" && -n "$release_image_tag" ]]; then
+    if ! tag_image_id=$(docker image inspect "$release_image_tag" --format '{{.Id}}' 2>/dev/null); then
+      status_message "convenience image tag mapping is unavailable during exact-ID cleanup: $release_image_tag"
+      return 1
+    elif [[ "$tag_image_id" != "$release_image_id" ]]; then
+      status_message "convenience image tag drifted; preserving its retag target: tag=$release_image_tag target=$tag_image_id owned=$release_image_id"
+      return 1
+    fi
+  fi
+    [[ "$phase" != preflight ]] || return 0
+  fi
+  [[ -f "$identities" ]] || return 1
+
+  while IFS= read -r identity; do
+    [[ -n "$identity" && "$identity" != pending:* ]] || continue
     case "$kind" in
       containers) docker container rm --force --volumes "$identity" >/dev/null || return 1 ;;
       volumes) docker volume rm --force "$identity" >/dev/null || return 1 ;;
       networks) docker network rm "$identity" >/dev/null || return 1 ;;
       images)
         if [[ "${OPERANT_RELEASE_KEEP_IMAGE:-0}" != "1" ]]; then
-          if [[ "$identity" != "$release_image_id" || -z "$release_image_tag" ]]; then
-            status_message "refusing to remove a run-labeled image without its exact registered tag: $identity"
-            return 1
-          fi
-          docker image rm -- "$release_image_tag" >/dev/null || return 1
+          # The mutable convenience tag is accounting evidence only. Docker is
+          # instructed to remove precisely the frozen, revalidated full ID.
+          docker image rm --force -- "$identity" >/dev/null || return 1
         fi
         ;;
     esac
@@ -494,25 +496,19 @@ cleanup_owned_processes() {
   for record in "$state_root"/registry/pids/*.json; do
     pid=${record##*/}
     pid=${pid%.json}
-    [[ -d "/proc/$pid" ]] || continue
-    if ! verify_owned_pid "$record"; then
-      status_message "refusing TERM after owned PID identity mismatch: $pid"
+    if ! signal_owned_pid "$record" TERM; then
+      status_message "refusing TERM after owned PID identity inspection failed: $pid"
       status=1
-      continue
     fi
-    kill -TERM -- "-$pid" 2>/dev/null || status=1
   done
   sleep 1
   for record in "$state_root"/registry/pids/*.json; do
     pid=${record##*/}
     pid=${pid%.json}
-    [[ -d "/proc/$pid" ]] || continue
-    if ! verify_owned_pid "$record"; then
-      status_message "refusing KILL after owned PID identity mismatch: $pid"
+    if ! signal_owned_pid "$record" KILL; then
+      status_message "refusing KILL after owned PID identity inspection failed: $pid"
       status=1
-      continue
     fi
-    kill -KILL -- "-$pid" 2>/dev/null || status=1
   done
   shopt -u nullglob
   return "$status"
@@ -530,10 +526,20 @@ cleanup_and_compare() {
 
   if [[ -n "$state_root" && -d "$state_root" ]]; then
     cleanup_owned_processes || cleanup_status=1
-    cleanup_registered_docker_kind containers || cleanup_status=1
-    cleanup_registered_docker_kind volumes || cleanup_status=1
-    cleanup_registered_docker_kind networks || cleanup_status=1
-    cleanup_registered_docker_kind images || cleanup_status=1
+    local docker_cleanup_ready=true kind
+    for kind in containers volumes networks images; do
+      if ! cleanup_registered_docker_kind "$kind" preflight; then
+        docker_cleanup_ready=false
+        cleanup_status=1
+      fi
+    done
+    if [[ "$docker_cleanup_ready" == true ]]; then
+      for kind in containers volumes networks images; do
+        cleanup_registered_docker_kind "$kind" action || cleanup_status=1
+      done
+    else
+      status_message "Docker cleanup blocked before its first destructive command"
+    fi
 
     cd "$repo_root" || cleanup_status=1
     if [[ -n "$source_root" && -e "$source_root/.git" ]]; then
@@ -636,7 +642,7 @@ trap 'signal_exit 143' TERM
 trap 'signal_exit 129' HUP
 
 chmod 0700 -- "$state_root"
-mkdir -p -- "$state_root/registry/pids" "$state_root/before/docker" "$state_root/before/host" "$state_root/after/docker" "$state_root/after/host"
+mkdir -p -- "$state_root/registry/pids/completed" "$state_root/before/docker" "$state_root/before/host" "$state_root/after/docker" "$state_root/after/host"
 for kind in containers volumes networks images; do : >"$state_root/registry/$kind"; done
 printf '%s\t%s\n' "$state_root" state-root >"$state_root/registry/temps"
 sync -f "$state_root/registry"

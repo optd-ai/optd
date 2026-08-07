@@ -116,17 +116,29 @@ cleanup() {
       printf 'release artifacts: output parent identity changed during rollback\n' >&2
       cleanup_status=1
     else
+      local output_clear=false
       if [[ -n "$out" && -e "$out" ]]; then
         failed_publication=$(mktemp -d "$parent_real/.${name}.failed.XXXXXX") || cleanup_status=1
         if [[ -n "$failed_publication" ]]; then
-          rmdir -- "$failed_publication" || cleanup_status=1
-          mv -- "$out" "$failed_publication" || cleanup_status=1
+          if ! rmdir -- "$failed_publication"; then
+            cleanup_status=1
+          elif mv -- "$out" "$failed_publication"; then
+            output_clear=true
+          else
+            printf 'release artifacts: could not quarantine failed publication; retained prior output for recovery at: %s\n' "$backup" >&2
+            cleanup_status=1
+          fi
         fi
+      else
+        output_clear=true
       fi
-      if [[ -n "$backup" && -e "$backup" ]]; then
-        mv -- "$backup" "$out" || cleanup_status=1
-        sync_path "$parent_real" || cleanup_status=1
-        backup=""
+      if [[ -n "$backup" && -e "$backup" && "$output_clear" == true ]]; then
+        if mv -- "$backup" "$out"; then
+          sync_path "$parent_real" || cleanup_status=1
+          backup=""
+        else
+          cleanup_status=1
+        fi
       fi
       [[ -z "$failed_publication" || ! -e "$failed_publication" ]] || rm -rf -- "$failed_publication" || cleanup_status=1
     fi
