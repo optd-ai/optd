@@ -15,6 +15,7 @@ artifact_dir=""
 release_image_tag=""
 release_image_id=""
 image_built=false
+build_accounting_started=false
 baseline_ready=false
 cleanup_active=false
 owned_sequence=0
@@ -47,7 +48,7 @@ atomic_sorted_command() {
 snapshot_docker() {
   local destination=$1
   mkdir -p -- "$destination" || return 1
-  atomic_sorted_command "$destination/images" docker image ls --no-trunc --quiet || return 1
+  atomic_sorted_command "$destination/images" docker image ls --all --no-trunc --quiet || return 1
   atomic_sorted_command "$destination/containers" docker container ls --all --no-trunc --quiet || return 1
   atomic_sorted_command "$destination/volumes" docker volume ls --quiet || return 1
   atomic_sorted_command "$destination/networks" docker network ls --no-trunc --quiet || return 1
@@ -471,6 +472,64 @@ run_owned() {
   return "$command_status"
 }
 
+account_build_images() {
+  [[ "$build_accounting_started" == true ]] || return 0
+  [[ ! -f "$state_root/registry/image-accounting.json" ]] || return 0
+  [[ -f "$state_root/build-transcript/result.json" ]] || {
+    status_message "build transcript has no durable result; image authority is unavailable"
+    return 1
+  }
+  atomic_sorted_command "$state_root/post-build-images" docker image ls --all --no-trunc --quiet || return 1
+  python3 "$source_root/scripts/release-image-accounting.py" account \
+    --baseline "$state_root/before/docker/images" \
+    --post "$state_root/post-build-images" \
+    --transcript "$state_root/build-transcript" \
+    --registry "$state_root/registry" \
+    --run-id "$run_id" \
+    --tag "$release_image_tag" || return 1
+  release_image_id=$(python3 - "$state_root/registry/image-accounting.json" <<'PY'
+import json, sys
+print(json.load(open(sys.argv[1], encoding='utf-8'))['final_id'])
+PY
+  )
+}
+
+cleanup_registered_images() {
+  local phase=${1:-all}
+  local plan="$state_root/cleanup-images.ids"
+  if [[ "$build_accounting_started" != true ]]; then
+    if [[ "$phase" != action ]]; then
+      [[ -f "$state_root/before/docker/images" ]] || return 1
+      atomic_sorted_command "$state_root/cleanup-current-images" docker image ls --all --no-trunc --quiet || return 1
+      cmp -s -- "$state_root/before/docker/images" "$state_root/cleanup-current-images" || return 1
+      : >"$plan"
+    fi
+    return 0
+  fi
+  if [[ "$phase" != action ]]; then
+    if ! python3 "$source_root/scripts/release-image-accounting.py" preflight \
+      --baseline "$state_root/before/docker/images" \
+      --registry "$state_root/registry" \
+      --transcript "$state_root/build-transcript" \
+      --run-id "$run_id" \
+      --tag "$release_image_tag" \
+      --final-id "$release_image_id" \
+      --plan "$plan"; then
+      status_message "image ownership preflight failed; preserving every registered and unregistered image"
+      return 1
+    fi
+    [[ "$phase" != preflight ]] || return 0
+  fi
+  [[ -f "$plan" ]] || return 1
+  local identity
+  while IFS= read -r identity; do
+    [[ "$identity" =~ ^sha256:[0-9a-f]{64}$ ]] || return 1
+    # Exact immutable IDs only. Non-force removal makes a concurrent tag,
+    # child, or container reference an error rather than deleting through it.
+    docker image rm -- "$identity" >/dev/null || return 1
+  done <"$plan"
+}
+
 inspect_label() {
   local kind=$1
   local identity=$2
@@ -486,6 +545,10 @@ inspect_label() {
 cleanup_registered_docker_kind() {
   local kind=$1
   local phase=${2:-all}
+  if [[ "$kind" == images ]]; then
+    cleanup_registered_images "$phase"
+    return
+  fi
   local file="$state_root/registry/$kind"
   local identities="$state_root/cleanup-${kind}.ids"
   local labeled="$state_root/cleanup-${kind}.labeled"
@@ -496,7 +559,6 @@ cleanup_registered_docker_kind() {
     containers) atomic_sorted_command "$labeled" docker container ls --all --no-trunc --quiet --filter "label=$gate_label_key=$run_id" || return 1 ;;
     volumes) atomic_sorted_command "$labeled" docker volume ls --quiet --filter "label=$gate_label_key=$run_id" || return 1 ;;
     networks) atomic_sorted_command "$labeled" docker network ls --no-trunc --quiet --filter "label=$gate_label_key=$run_id" || return 1 ;;
-    images) atomic_sorted_command "$labeled" docker image ls --no-trunc --quiet --filter "label=$gate_label_key=$run_id" || return 1 ;;
   esac
   # Exact run-label enumeration is the active-resource authority. The durable
   # registry remains audit evidence, but may legitimately contain resources
@@ -517,22 +579,7 @@ cleanup_registered_docker_kind() {
       status_message "refusing cleanup after $kind identity/label mismatch: $identity"
       return 1
     fi
-    if [[ "$kind" == images && "$identity" != "$release_image_id" ]]; then
-      status_message "refusing cleanup of a run-labeled image other than the frozen full ID: $identity"
-      return 1
-    fi
   done <"$identities"
-
-  local tag_image_id=""
-  if [[ "$kind" == images && "${OPERANT_RELEASE_KEEP_IMAGE:-0}" != "1" && -n "$release_image_tag" ]]; then
-    if ! tag_image_id=$(docker image inspect "$release_image_tag" --format '{{.Id}}' 2>/dev/null); then
-      status_message "convenience image tag mapping is unavailable during exact-ID cleanup: $release_image_tag"
-      return 1
-    elif [[ "$tag_image_id" != "$release_image_id" ]]; then
-      status_message "convenience image tag drifted; preserving its retag target: tag=$release_image_tag target=$tag_image_id owned=$release_image_id"
-      return 1
-    fi
-  fi
     [[ "$phase" != preflight ]] || return 0
   fi
   [[ -f "$identities" ]] || return 1
@@ -543,13 +590,6 @@ cleanup_registered_docker_kind() {
       containers) docker container rm --force --volumes "$identity" >/dev/null || return 1 ;;
       volumes) docker volume rm --force "$identity" >/dev/null || return 1 ;;
       networks) docker network rm "$identity" >/dev/null || return 1 ;;
-      images)
-        if [[ "${OPERANT_RELEASE_KEEP_IMAGE:-0}" != "1" ]]; then
-          # The mutable convenience tag is accounting evidence only. Docker is
-          # instructed to remove precisely the frozen, revalidated full ID.
-          docker image rm --force -- "$identity" >/dev/null || return 1
-        fi
-        ;;
     esac
   done <"$identities"
 }
@@ -634,19 +674,31 @@ cleanup_and_compare() {
 
   if [[ -n "$state_root" && -d "$state_root" ]]; then
     cleanup_owned_processes || cleanup_status=1
+    # A signal can transfer control directly from the one build into this trap.
+    # Once its registered capture process is stopped, account its durable
+    # transcript and exact delta before any Docker cleanup decision.
+    account_build_images || cleanup_status=1
     local docker_cleanup_ready=true kind
-    for kind in containers volumes networks images; do
+    for kind in containers volumes networks; do
       if ! cleanup_registered_docker_kind "$kind" preflight; then
         docker_cleanup_ready=false
         cleanup_status=1
       fi
     done
     if [[ "$docker_cleanup_ready" == true ]]; then
-      for kind in containers volumes networks images; do
+      for kind in containers volumes networks; do
         cleanup_registered_docker_kind "$kind" action || cleanup_status=1
       done
     else
-      status_message "Docker cleanup blocked before its first destructive command"
+      status_message "non-image Docker cleanup blocked before its first destructive command"
+    fi
+    # Image authority is independently preflighted only after owned containers
+    # are gone, and always in full before the first exact-ID image removal.
+    if cleanup_registered_images preflight; then
+      cleanup_registered_images action || cleanup_status=1
+    else
+      cleanup_status=1
+      status_message "image cleanup blocked before its first image removal"
     fi
 
     cd "$repo_root" || cleanup_status=1
@@ -658,9 +710,7 @@ cleanup_and_compare() {
     scan_run_labels_empty containers || cleanup_status=1
     scan_run_labels_empty volumes || cleanup_status=1
     scan_run_labels_empty networks || cleanup_status=1
-    if [[ "${OPERANT_RELEASE_KEEP_IMAGE:-0}" != "1" ]]; then
-      scan_run_labels_empty images || cleanup_status=1
-    fi
+    scan_run_labels_empty images || cleanup_status=1
 
     if [[ "$baseline_ready" == true ]]; then
       snapshot_docker "$state_root/after/docker" || cleanup_status=1
@@ -680,7 +730,11 @@ cleanup_and_compare() {
       scan_unregistered_host_markers || cleanup_status=1
     fi
 
-    rm -rf -- "$state_root" || cleanup_status=1
+    if ((cleanup_status == 0)); then
+      rm -rf -- "$state_root" || cleanup_status=1
+    else
+      status_message "retained release-gate evidence after cleanup failure: $state_root"
+    fi
   fi
 
   if ((primary_status != 0)); then
@@ -701,6 +755,10 @@ repo_root=$(git rev-parse --show-toplevel)
 cd "$repo_root"
 if [[ "${OPERANT_RELEASE_GATE_ACTIVE:-0}" == "1" ]]; then
   status_message "nested release-gate execution is forbidden"
+  exit 1
+fi
+if [[ -n "${OPERANT_RELEASE_KEEP_IMAGE:-}" && "${OPERANT_RELEASE_KEEP_IMAGE}" != "0" ]]; then
+  status_message "OPERANT_RELEASE_KEEP_IMAGE is incompatible with exact all-image baseline restoration"
   exit 1
 fi
 if ! release_revision=$(git rev-parse --verify 'HEAD^{commit}'); then
@@ -781,6 +839,9 @@ for path in paths:
         os.close(descriptor)
 PY
 for kind in containers volumes networks images; do : >"$state_root/registry/$kind"; done
+mkdir -p -- "$state_root/registry/image-evidence"
+chmod 0700 -- "$state_root/registry/image-evidence"
+sync -f "$state_root/registry/image-evidence"
 printf '%s\t%s\n' "$state_root" state-root >"$state_root/registry/temps"
 sync -f "$state_root/registry"
 source_root="$state_root/source"
@@ -851,14 +912,37 @@ release_image_tag="operant:${release_version}-${run_id}"
 printf 'COMMAND: docker build --pull=false --no-cache ... --tag %s - < immutable git archive\n' "$release_image_tag"
 append_registry images "pending:$release_image_tag" "$release_image_tag"
 verify_source_archive
-run_owned image-build bash -c 'exec docker build --pull=false --no-cache \
-  --label "$1=$2" --build-arg "OPERANT_REVISION=$3" \
-  --build-arg "OPERANT_VERSION=$4" --tag "$5" - <"$6"' \
-  operant-build "$gate_label_key" "$run_id" "$release_revision" "$release_version" "$release_image_tag" "$source_archive"
+build_transcript="$state_root/build-transcript"
+build_accounting_started=true
+build_status=0
+if ! run_owned image-build python3 "$source_root/scripts/release-image-accounting.py" capture \
+  --transcript "$build_transcript" --stdin "$source_archive" -- \
+  docker build --pull=false --no-cache \
+  --label "$gate_label_key=$run_id" --build-arg "OPERANT_REVISION=$release_revision" \
+  --build-arg "OPERANT_VERSION=$release_version" --tag "$release_image_tag" -; then
+  build_status=$?
+  # Negated-condition status is zero; recover the exact durable child status.
+  build_status=$(python3 - "$build_transcript/result.json" <<'PY'
+import json, sys
+print(json.load(open(sys.argv[1], encoding='utf-8'))['status'])
+PY
+  )
+fi
+# Snapshot immediately after the sole build, before source checks or any later
+# phase can create an image. Accounting registers and fsyncs every proven delta
+# even when the build itself failed or was signaled.
+account_status=0
+account_build_images || account_status=$?
+if ((account_status != 0)); then
+  status_message "legacy builder image authority is ambiguous; retaining transcript evidence and refusing image deletion"
+  exit "$account_status"
+fi
+if ((build_status != 0)); then
+  exit "$build_status"
+fi
 verify_source_archive
 verify_source
 image_built=true
-release_image_id=$(docker image inspect "$release_image_tag" --format '{{.Id}}')
 image_revision=$(docker image inspect "$release_image_id" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')
 image_version=$(docker image inspect "$release_image_id" --format '{{index .Config.Labels "org.opencontainers.image.version"}}')
 image_gate_id=$(docker image inspect "$release_image_id" --format "{{index .Config.Labels \"$gate_label_key\"}}")
@@ -866,7 +950,6 @@ if [[ ! "$release_image_id" =~ ^sha256:[0-9a-f]{64}$ || "$image_revision" != "$r
   status_message "built image identity mismatch: id=$release_image_id revision=$image_revision version=$image_version gate=$image_gate_id"
   exit 1
 fi
-append_registry images "$release_image_id" "$release_image_tag"
 export OPERANT_CONTAINER_IMAGE="$release_image_id"
 export OPERANT_CONTAINER_IMAGE_TAG="$release_image_tag"
 export OPERANT_CONTAINER_IMAGE_ID="$release_image_id"
@@ -911,4 +994,4 @@ fi
 git diff --check "$release_base..$release_revision"
 verify_source
 
-printf '\nrelease gate complete; immutable image is removed on EXIT (set OPERANT_RELEASE_KEEP_IMAGE=1 to retain it)\n'
+printf '\nrelease gate complete; every gate-created image is removed on EXIT\n'

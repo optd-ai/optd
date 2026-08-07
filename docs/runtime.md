@@ -102,14 +102,26 @@ owned Docker name, label, Compose project, and durable registry entry.
 
 The parent trap is installed as soon as the single state root exists. On every
 exit it revalidates registered Docker labels and Linux process identity before
-cleanup, never uses name-prefix ownership, and never prunes. Independent Docker
-inventory and exact run-label scans fail closed; an unregistered delta blocks
-the gate without being deleted. Set `OPERANT_RELEASE_KEEP_IMAGE=1` to retain the
-exact image intentionally. `release-artifacts.sh` requires a clean exact source
-revision and a full immutable image ID, compiles the standalone CLI with the
-frozen lockfile, fsyncs same-filesystem staging, and rolls an interrupted
-publication back to the prior output. Output symlinks and replaced output
-parents are rejected.
+cleanup, never uses name-prefix ownership, and never prunes. The image baseline
+is the exact sorted result of `docker image ls --all --no-trunc --quiet`.
+Because the supported daemon uses the legacy builder, the gate durably captures
+that one build's stdout, stderr, exit status, and terminating signal. Only IDs
+on legacy builder result lines can be resolved against the exact post-build
+delta; creation times, parent chains, final history when available, and the
+final run label must agree before each proven full ID is fsynced to the
+registry.
+
+Before its first image removal, cleanup revalidates the complete registered set,
+immutable evidence, final tag and label, parent/child relationships, tags,
+digests, and container references. It removes exact full IDs child-to-parent
+without force or mutable tags and then requires the all-image snapshot to be
+byte-identical to baseline. Unknown concurrent deltas, ambiguous short IDs,
+unexpected references, or removal failures block image deletion and retain the
+private evidence directory for audit; unrelated images are never removed.
+`release-artifacts.sh` requires a clean exact source revision and a full
+immutable image ID, compiles the standalone CLI with the frozen lockfile, fsyncs
+same-filesystem staging, and rolls an interrupted publication back to the prior
+output. Output symlinks and replaced output parents are rejected.
 
 ## Liveness, readiness, and startup
 

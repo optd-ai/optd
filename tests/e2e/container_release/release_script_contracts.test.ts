@@ -34,7 +34,7 @@ Deno.test("release scripts reject dirty source and invalid explicit bases before
 Deno.test("every initial Docker inventory failure reaches exact cleanup", async () => {
   for (
     const command of [
-      "image ls --no-trunc --quiet",
+      "image ls --all --no-trunc --quiet",
       "container ls --all --no-trunc --quiet",
       "volume ls --quiet",
       "network ls --no-trunc --quiet",
@@ -101,8 +101,155 @@ Deno.test("gate uses NUL paths, one build, one suite, and only the frozen image 
     assertStringIncludes(docker, `container create`);
     assertStringIncludes(docker, imageId);
     assert(!docker.includes("container create operant:"), docker);
-    assertStringIncludes(docker, `image rm --force -- ${imageId}`);
+    assertStringIncludes(docker, `image rm -- ${imageId}`);
     assert(!docker.includes("image rm -- operant:"), docker);
+    assert(!docker.includes("image prune"), docker);
+  } finally {
+    await removeFixture(fixture);
+  }
+});
+
+Deno.test("legacy builder registers and removes a 17-intermediate chain with exact all-image equality", async () => {
+  const fixture = await createFixture();
+  try {
+    const before = await resourceIds(fixture, "images");
+    const result = await runGate(fixture);
+    assertEquals(result.code, 0, `${result.stdout}\n${result.stderr}`);
+    assertEquals(await resourceIds(fixture, "images"), before);
+    const docker = await readLog(fixture, "docker.log");
+    assertEquals(
+      docker.split("\n").filter((line) =>
+        line.startsWith("image rm -- sha256:")
+      ).length,
+      18,
+    );
+    assert(!docker.includes("image prune"), docker);
+  } finally {
+    await removeFixture(fixture);
+  }
+});
+
+Deno.test("failed legacy build cleans every emitted intermediate and preserves status", async () => {
+  const fixture = await createFixture();
+  try {
+    const result = await runGate(fixture, { FAKE_TEST_MODE: "build-failure" });
+    assertEquals(result.code, 37, `${result.stdout}\n${result.stderr}`);
+    assertEquals(await resourceIds(fixture, "images"), []);
+    const docker = await readLog(fixture, "docker.log");
+    assertEquals(
+      docker.split("\n").filter((line) =>
+        line.startsWith("image rm -- sha256:")
+      ).length,
+      17,
+    );
+  } finally {
+    await removeFixture(fixture);
+  }
+});
+
+Deno.test("a signaled build durably accounts and cleans every emitted intermediate", async () => {
+  const fixture = await createFixture();
+  try {
+    const child = new Deno.Command("bash", {
+      args: ["scripts/release-gate.sh"],
+      cwd: fixture.root,
+      env: fixtureEnv(fixture, { FAKE_TEST_MODE: "build-signal" }),
+      stdout: "piped",
+      stderr: "piped",
+    }).spawn();
+    await waitForPath(`${fixture.state}/build-signal-ready`);
+    await new Deno.Command("kill", {
+      args: ["-TERM", String(child.pid)],
+    }).output();
+    const result = await child.output();
+    assertEquals(result.code, 143, new TextDecoder().decode(result.stderr));
+    assertEquals(await resourceIds(fixture, "images"), []);
+    const docker = await readLog(fixture, "docker.log");
+    assertEquals(
+      docker.split("\n").filter((line) =>
+        line.startsWith("image rm -- sha256:")
+      ).length,
+      5,
+    );
+  } finally {
+    await removeFixture(fixture);
+  }
+});
+
+Deno.test("unknown deltas and spoofed or ambiguous transcript IDs fail closed without image deletion", async () => {
+  for (const mode of ["unknown-delta", "transcript-spoof", "ambiguous-short"]) {
+    const fixture = await createFixture();
+    try {
+      const result = await runGate(fixture, { FAKE_TEST_MODE: mode });
+      assert(result.code !== 0, `${mode}\n${result.stdout}\n${result.stderr}`);
+      assert((await resourceIds(fixture, "images")).length > 0, mode);
+      const docker = await readLog(fixture, "docker.log");
+      assert(!docker.includes("image rm -- sha256:"), `${mode}\n${docker}`);
+      assertStringIncludes(
+        result.stderr,
+        "legacy builder image authority is ambiguous",
+      );
+    } finally {
+      await removeFixture(fixture);
+    }
+  }
+});
+
+Deno.test("a baseline ancestor emitted by the builder is retained", async () => {
+  const fixture = await createFixture();
+  const baseline = `sha256:${"b".repeat(64)}`;
+  try {
+    await seedImageMetadata(fixture, baseline);
+    await Deno.writeTextFile(`${fixture.state}/base-image`, `${baseline}\n`);
+    const result = await runGate(fixture);
+    assertEquals(result.code, 0, `${result.stdout}\n${result.stderr}`);
+    assertEquals(await resourceIds(fixture, "images"), [baseline]);
+    const docker = await readLog(fixture, "docker.log");
+    assert(!docker.includes(`image rm -- ${baseline}`), docker);
+  } finally {
+    await removeFixture(fixture);
+  }
+});
+
+Deno.test("unexpected image tags, digests, children, and references block all image removal", async () => {
+  for (
+    const mode of [
+      "unexpected-tag",
+      "unexpected-digest",
+      "unexpected-child",
+      "unexpected-ref",
+    ]
+  ) {
+    const fixture = await createFixture();
+    try {
+      if (mode === "unexpected-child") {
+        const child = `sha256:${"c".repeat(64)}`;
+        await seedImageMetadata(fixture, child);
+        await Deno.writeTextFile(`${fixture.state}/base-child`, `${child}\n`);
+      }
+      const result = await runGate(fixture, { FAKE_TEST_MODE: mode });
+      assert(result.code !== 0, `${mode}\n${result.stdout}\n${result.stderr}`);
+      const docker = await readLog(fixture, "docker.log");
+      assert(!docker.includes("image rm -- sha256:"), `${mode}\n${docker}`);
+      assertStringIncludes(result.stderr, "image ownership preflight failed");
+    } finally {
+      await removeFixture(fixture);
+    }
+  }
+});
+
+Deno.test("an exact-ID removal failure blocks and leaves unrelated resources intact", async () => {
+  const fixture = await createFixture();
+  const unrelated = `sha256:${"d".repeat(64)}`;
+  try {
+    await seedImageMetadata(fixture, unrelated);
+    const result = await runGate(fixture, {
+      FAKE_TEST_MODE: "removal-failure",
+    });
+    assert(result.code !== 0, `${result.stdout}\n${result.stderr}`);
+    assert((await resourceIds(fixture, "images")).includes(unrelated));
+    const docker = await readLog(fixture, "docker.log");
+    assert(!docker.includes(`image rm -- ${unrelated}`), docker);
   } finally {
     await removeFixture(fixture);
   }
@@ -594,12 +741,15 @@ Deno.test("image cleanup never dereferences a drifted mutable tag", async () => 
   try {
     const result = await runGate(fixture, { FAKE_TEST_MODE: "image-retag" });
     assert(result.code !== 0);
-    assertStringIncludes(result.stderr, "convenience image tag drifted");
+    assertStringIncludes(
+      result.stderr,
+      "mutable convenience tag drifted from the frozen image ID",
+    );
     const docker = await readLog(fixture, "docker.log");
     assert(!docker.includes("image rm -- operant:"), docker);
     assert(!docker.includes("image rm --force -- operant:"), docker);
-    assert(!docker.includes(`image rm --force -- ${imageId}`), docker);
-    assertEquals(await resourceIds(fixture, "images"), [imageId]);
+    assert(!docker.includes(`image rm -- ${imageId}`), docker);
+    assertEquals((await resourceIds(fixture, "images")).length, 18);
   } finally {
     await removeFixture(fixture);
   }
@@ -669,6 +819,7 @@ type Fixture = {
   registry: string;
   base: string;
   revision: string;
+  retainedEvidence: string[];
 };
 
 async function createFixture(): Promise<Fixture> {
@@ -734,6 +885,10 @@ async function createFixture(): Promise<Fixture> {
     `${root}/scripts/release-pidfd-signal.py`,
   );
   await Deno.copyFile(
+    "scripts/release-image-accounting.py",
+    `${root}/scripts/release-image-accounting.py`,
+  );
+  await Deno.copyFile(
     "compose.external-postgres.yml",
     `${root}/compose.external-postgres.yml`,
   );
@@ -741,6 +896,7 @@ async function createFixture(): Promise<Fixture> {
   await Deno.chmod(`${root}/scripts/release-artifacts.sh`, 0o755);
   await Deno.chmod(`${root}/scripts/release-owned-supervisor.py`, 0o755);
   await Deno.chmod(`${root}/scripts/release-pidfd-signal.py`, 0o755);
+  await Deno.chmod(`${root}/scripts/release-image-accounting.py`, 0o755);
   await Deno.writeTextFile(`${root}/src/main_optctl.ts`, "export {};\n");
   await Deno.writeTextFile(
     `${root}/tests/ordinary.ts`,
@@ -769,7 +925,16 @@ async function createFixture(): Promise<Fixture> {
 
   await executable(`${bin}/deno`, fakeDeno());
   await executable(`${bin}/docker`, fakeDocker());
-  return { home, root, bin, state, registry, base, revision };
+  return {
+    home,
+    root,
+    bin,
+    state,
+    registry,
+    base,
+    revision,
+    retainedEvidence: [],
+  };
 }
 
 function fakeDeno(): string {
@@ -814,6 +979,21 @@ if [[ "$*" == "task test" ]]; then
       ;;
     image-retag)
       : >"$FAKE_STATE/retag"
+      ;;
+    unexpected-tag)
+      intermediate="sha256:$(printf '%012x' 1)$(printf '0%.0s' {1..52})"
+      sed -i 's/^tags=.*/tags=unexpected:latest/' "$FAKE_STATE/images/$intermediate"
+      ;;
+    unexpected-digest)
+      intermediate="sha256:$(printf '%012x' 1)$(printf '0%.0s' {1..52})"
+      sed -i 's/^digests=.*/digests=unexpected@example/' "$FAKE_STATE/images/$intermediate"
+      ;;
+    unexpected-child)
+      child=$(<"$FAKE_STATE/base-child")
+      sed -i "s|^parent=.*|parent=$FAKE_IMAGE_ID|" "$FAKE_STATE/images/$child"
+      ;;
+    unexpected-ref)
+      printf 'label=other\\nname=unexpected-ref\\nimage=%s\\n' "$FAKE_IMAGE_ID" >"$FAKE_STATE/containers/unexpected-ref"
       ;;
     pid-mismatch)
       setsid sleep 120 >/dev/null 2>&1 & pid=$!
@@ -866,7 +1046,13 @@ case "\${1:-} \${2:-}" in
     list_kind images "$filter" "$project" ;;
   "container ls")
     filter=$(filter_value dev.operant.release-gate "$@"); project=$(filter_value com.docker.compose.project "$@")
-    list_kind containers "$filter" "$project" ;;
+    ancestor=$(filter_value ancestor "$@")
+    if [[ -n "$ancestor" ]]; then
+      shopt -s nullglob
+      for file in "$FAKE_STATE/containers"/*; do [[ "$(value image "$file")" != "$ancestor" ]] || basename -- "$file"; done | LC_ALL=C sort
+    else
+      list_kind containers "$filter" "$project"
+    fi ;;
   "volume ls")
     filter=$(filter_value dev.operant.release-gate "$@"); project=$(filter_value com.docker.compose.project "$@")
     list_kind volumes "$filter" "$project" ;;
@@ -876,25 +1062,86 @@ case "\${1:-} \${2:-}" in
   "build --pull=false")
     count=$(<"$FAKE_STATE/build-count"); printf '%s\\n' "$((count+1))" >"$FAKE_STATE/build-count"
     tag=$(arg_after --tag "$@")
-    printf 'label=%s\\nname=%s\\n' "$OPERANT_RELEASE_GATE_ID" "$tag" >"$FAKE_STATE/images/$FAKE_IMAGE_ID"
+    parent=""
+    if [[ -s "$FAKE_STATE/base-image" ]]; then
+      parent=$(<"$FAKE_STATE/base-image")
+      printf ' ---> %s\\n' "\${parent:7:12}"
+    fi
+    for number in $(seq 1 17); do
+      identity="sha256:$(printf '%012x' "$number")$(printf '0%.0s' {1..52})"
+      created=$(date --iso-8601=ns)
+      printf 'label=\\nname=%s\\nparent=%s\\ncreated=%s\\ntags=\\ndigests=\\n' "$identity" "$parent" "$created" >"$FAKE_STATE/images/$identity"
+      printf ' ---> %s\\n' "\${identity:7:12}"
+      parent=$identity
+      if [[ "\${FAKE_TEST_MODE:-}" == build-signal && "$number" == 5 ]]; then
+        : >"$FAKE_STATE/build-signal-ready"
+        sleep 120
+      fi
+    done
+    if [[ "\${FAKE_TEST_MODE:-}" == build-failure ]]; then exit 37; fi
+    created=$(date --iso-8601=ns)
+    printf 'label=%s\\nname=%s\\nparent=%s\\ncreated=%s\\ntags=%s\\ndigests=\\n' "$OPERANT_RELEASE_GATE_ID" "$tag" "$parent" "$created" "$tag" >"$FAKE_STATE/images/$FAKE_IMAGE_ID"
+    printf ' ---> %s\\nSuccessfully built %s\\nSuccessfully tagged %s\\n' "\${FAKE_IMAGE_ID:7:12}" "\${FAKE_IMAGE_ID:7:12}" "$tag"
     printf '%s\\n' "$FAKE_IMAGE_ID" >"$FAKE_STATE/tag-image"
+    if [[ "\${FAKE_TEST_MODE:-}" == unknown-delta ]]; then
+      unknown="sha256:$(printf 'e%.0s' {1..64})"
+      printf 'label=other\\nname=unknown\\nparent=\\ncreated=%s\\ntags=\\ndigests=\\n' "$(date --iso-8601=ns)" >"$FAKE_STATE/images/$unknown"
+    elif [[ "\${FAKE_TEST_MODE:-}" == ambiguous-short ]]; then
+      one="sha256:deadbeefcafe$(printf '1%.0s' {1..52})"
+      two="sha256:deadbeefcafe$(printf '2%.0s' {1..52})"
+      for identity in "$one" "$two"; do
+        printf 'label=other\\nname=spoof\\nparent=\\ncreated=%s\\ntags=\\ndigests=\\n' "$(date --iso-8601=ns)" >"$FAKE_STATE/images/$identity"
+      done
+      printf ' ---> deadbeefcafe\\n'
+    elif [[ "\${FAKE_TEST_MODE:-}" == transcript-spoof ]]; then
+      printf ' ---> ffffffffffff\\n'
+    fi
     ;;
   "image inspect")
     identity=$3; [[ "$identity" != operant:* ]] || identity=$(<"$FAKE_STATE/tag-image")
     if [[ -e "$FAKE_STATE/retag" && "$3" == operant:* ]]; then identity="sha256:$(printf 'b%.0s' {1..64})"; fi
+    file="$FAKE_STATE/images/$identity"
+    [[ -e "$file" ]] || exit 1
+    if [[ "$*" != *" --format "* ]]; then
+      python3 - "$identity" "$file" <<'PY'
+import json, pathlib, sys
+identity, path = sys.argv[1:]
+values = {}
+for line in pathlib.Path(path).read_text().splitlines():
+    key, _, value = line.partition('=')
+    values[key] = value
+labels = {'dev.operant.release-gate': values['label']} if values.get('label') else None
+print(json.dumps([{
+    'Id': identity,
+    'Parent': values.get('parent', ''),
+    'Created': values.get('created', ''),
+    'RepoTags': [values['tags']] if values.get('tags') else None,
+    'RepoDigests': [values['digests']] if values.get('digests') else None,
+    'Config': {'Labels': labels},
+}]))
+PY
+      exit
+    fi
     format=$(last_arg "$@")
     case "$format" in
       *'.Id}} {{index .Config.Labels'*) printf '%s %s release-gate-%s\\n' "$identity" "$FAKE_REVISION" "\${FAKE_REVISION:0:12}" ;;
       *org.opencontainers.image.revision*) printf '%s\\n' "$FAKE_REVISION" ;;
       *org.opencontainers.image.version*) printf 'release-gate-%s\\n' "\${FAKE_REVISION:0:12}" ;;
-      *dev.operant.release-gate*) value label "$FAKE_STATE/images/$FAKE_IMAGE_ID" ;;
+      *dev.operant.release-gate*) value label "$file" ;;
       *json*.Config.Labels*) printf '{"org.opencontainers.image.revision":"%s","org.opencontainers.image.version":"release-gate-%s"}\\n' "$FAKE_REVISION" "\${FAKE_REVISION:0:12}" ;;
       *RepoDigests*) printf 'operant@example-digest\\n' ;;
       *'{{.Id}}'*) printf '%s\\n' "$identity" ;;
       *) printf '%s %s release-gate-%s\\n' "$identity" "$FAKE_REVISION" "\${FAKE_REVISION:0:12}" ;;
     esac ;;
+  "image history")
+    identity=$(last_arg "$@")
+    while [[ -n "$identity" ]]; do
+      printf '%s\\n' "$identity"
+      identity=$(value parent "$FAKE_STATE/images/$identity")
+    done ;;
   "image rm")
     identity=$(last_arg "$@"); [[ "$identity" != operant:* ]] || identity=$(<"$FAKE_STATE/tag-image")
+    if [[ "\${FAKE_TEST_MODE:-}" == removal-failure && ! -e "$FAKE_STATE/removal-failed" ]]; then : >"$FAKE_STATE/removal-failed"; exit 73; fi
     rm -f -- "$FAKE_STATE/images/$identity"
     [[ ! -e "$FAKE_STATE/tag-image" || "$(<"$FAKE_STATE/tag-image")" != "$identity" ]] || rm -f -- "$FAKE_STATE/tag-image" ;;
   "container create")
@@ -942,11 +1189,19 @@ async function runGate(
   fixture: Fixture,
   extraEnv: Record<string, string> = {},
 ) {
-  return await run(
+  const result = await run(
     fixture,
     ["bash", "scripts/release-gate.sh"],
     extraEnv,
   );
+  for (
+    const match of result.stderr.matchAll(
+      /retained release-gate evidence after cleanup failure: (\/tmp\/operant-release-gate-[^\s]+)/g,
+    )
+  ) {
+    fixture.retainedEvidence.push(match[1]);
+  }
+  return result;
 }
 
 async function runPidfdAdversary(
@@ -1315,6 +1570,16 @@ async function seedImage(fixture: Fixture): Promise<void> {
   await Deno.writeTextFile(`${fixture.state}/tag-image`, `${imageId}\n`);
 }
 
+async function seedImageMetadata(
+  fixture: Fixture,
+  identity: string,
+): Promise<void> {
+  await Deno.writeTextFile(
+    `${fixture.state}/images/${identity}`,
+    `label=other\nname=${identity}\nparent=\ncreated=2020-01-01T00:00:00Z\ntags=\ndigests=\n`,
+  );
+}
+
 async function seedResource(
   fixture: Fixture,
   kind: "images" | "containers" | "volumes" | "networks",
@@ -1415,5 +1680,8 @@ async function killProcess(pid: number): Promise<void> {
 }
 
 async function removeFixture(fixture: Fixture): Promise<void> {
+  for (const path of fixture.retainedEvidence) {
+    await Deno.remove(path, { recursive: true }).catch(() => undefined);
+  }
   await Deno.remove(fixture.home, { recursive: true }).catch(() => undefined);
 }
