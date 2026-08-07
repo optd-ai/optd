@@ -54,7 +54,37 @@ export type RunOptions = {
 export async function buildReleaseImage(): Promise<string> {
   const image = Deno.env.get("OPERANT_CONTAINER_IMAGE") ??
     `operant:container-release-${sourceSuffix()}`;
-  if (Deno.env.get("OPERANT_CONTAINER_SKIP_BUILD") === "1") return image;
+  if (Deno.env.get("OPERANT_CONTAINER_SKIP_BUILD") === "1") {
+    const expectedId = Deno.env.get("OPERANT_CONTAINER_IMAGE_ID");
+    const expectedRevision = Deno.env.get("OPERANT_CONTAINER_REVISION");
+    const expectedVersion = Deno.env.get("OPERANT_CONTAINER_VERSION");
+    if (!Deno.env.get("OPERANT_CONTAINER_IMAGE") || !expectedId) {
+      throw new Error(
+        "skip-build requires OPERANT_CONTAINER_IMAGE and OPERANT_CONTAINER_IMAGE_ID",
+      );
+    }
+    const inspected = await runCommand("docker", [
+      "image",
+      "inspect",
+      image,
+      "--format",
+      '{{.Id}} {{index .Config.Labels "org.opencontainers.image.revision"}} {{index .Config.Labels "org.opencontainers.image.version"}}',
+    ]);
+    const [actualId, actualRevision, actualVersion] = inspected.stdout.trim()
+      .split(" ");
+    if (
+      actualId !== expectedId ||
+      (expectedRevision && actualRevision !== expectedRevision) ||
+      (expectedVersion && actualVersion !== expectedVersion)
+    ) {
+      throw new Error(
+        `configured release image identity mismatch: expected ${expectedId} ${
+          expectedRevision ?? "*"
+        } ${expectedVersion ?? "*"}, got ${inspected.stdout.trim()}`,
+      );
+    }
+    return image;
+  }
   const revision = (await runCommand("git", ["rev-parse", "HEAD"])).stdout
     .trim();
   await runCommand("docker", [
@@ -84,6 +114,10 @@ export async function createContainerHarness(
   const bootstrapToken = randomSecret();
   const masterKey = randomSecret();
   const cleanupArgs: string[][] = [];
+  const gateLabel = Deno.env.get("OPERANT_RELEASE_GATE_ID");
+  const labelArgs = gateLabel
+    ? ["--label", `dev.operant.release-gate=${gateLabel}`]
+    : [];
   let volumeRegistered = false;
   let containerRegistered = false;
   let retainedExtraArgs: string[] = [];
@@ -104,6 +138,7 @@ export async function createContainerHarness(
       "--detach",
       "--name",
       container,
+      ...labelArgs,
       "--publish",
       `127.0.0.1:${port}:8789`,
       "--env",
@@ -162,7 +197,14 @@ export async function createContainerHarness(
     docker,
     async startAppManaged(extraArgs = []) {
       retainedExtraArgs = [...extraArgs];
-      await docker(["volume", "create", volume]);
+      await docker([
+        "volume",
+        "create",
+        ...gateLabel
+          ? ["--label", `dev.operant.release-gate=${gateLabel}`]
+          : [],
+        volume,
+      ]);
       if (!volumeRegistered) {
         cleanupArgs.push(["volume", "rm", "-f", volume]);
         volumeRegistered = true;

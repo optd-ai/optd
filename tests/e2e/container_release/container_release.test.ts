@@ -272,7 +272,7 @@ Deno.test({
         "--env",
         `OPERANT_HOOK_NET_ALLOW=${new URL(provider.url).host}`,
         "--env",
-        "OPERANT_OUTBOX_POLL_INTERVAL_MS=20",
+        "OPERANT_OUTBOX_POLL_INTERVAL_MS=60000",
         "--env",
         "OPERANT_OUTBOX_BATCH_SIZE=2",
         "--env",
@@ -311,12 +311,58 @@ Deno.test({
       const containerPack = await harness.copyPack(pack);
       await ok(["--json", "pack", "apply", containerPack, "--safe"]);
       provider.enqueue(
+        { kind: "hold", token: "queued-recovery-generation-0" },
         {
           kind: "hold_retry",
           token: "retry-response-generation-0",
           retryAfterSeconds: 2,
         },
         { kind: "hold", token: "lease-generation-0" },
+      );
+
+      const queuedStage = await stageChangeset(harness, launcher, projectId, [{
+        op: "create",
+        project_id: projectId,
+        resource: "test/containeroutbox:item",
+        fields: { key: "queued" },
+      }]);
+      assertEquals(queuedStage.raw.code, 0, queuedStage.raw.stderr);
+      await ok(["--json", "changeset", "commit", queuedStage.data.id]);
+      const queued = await waitOutboxStatus(launcher, "queued");
+      const queuedEvidence = await ok([
+        "--json",
+        "outbox",
+        "inspect",
+        String(queued.id),
+      ]);
+      assertEquals(queuedEvidence.status, "queued");
+      assertEquals(queuedEvidence.total_attempts, 0);
+      await harness.docker(["kill", harness.container]);
+      await launcher.close().catch(() => undefined);
+      launcher = undefined;
+      launcher = await restartOutboxContainer(harness, provider.url);
+      await waitProviderHold(provider, "queued-recovery-generation-0");
+      assertProviderHoldActive(
+        provider,
+        "queued-recovery-generation-0",
+        String(queued.id),
+      );
+      provider.release("queued-recovery-generation-0");
+      await waitOutboxDeliveryStatus(
+        launcher,
+        String(queued.id),
+        "succeeded",
+      );
+      const recoveredQueued = await ok([
+        "--json",
+        "outbox",
+        "inspect",
+        String(queued.id),
+      ]);
+      assertEquals(recoveredQueued.total_attempts, 1);
+      assertEquals(
+        recoveredQueued.attempts_summary.latest.outcome,
+        "succeeded",
       );
 
       const retryStage = await stageChangeset(harness, launcher, projectId, [{

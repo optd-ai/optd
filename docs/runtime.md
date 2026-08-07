@@ -91,6 +91,16 @@ deno task release-gate
 ./scripts/release-artifacts.sh operant:0.1.0-dev dist
 ```
 
+`release-gate` refuses tracked or untracked source changes, builds one no-cache
+image labeled with the exact source revision, and reuses that image for the
+complete checked/container suite and artifact checks. It removes that exact
+image on exit after comparing full container, volume, network, owned-process,
+and owned-temporary-directory inventories; set `OPERANT_RELEASE_KEEP_IMAGE=1` to
+retain it. `release-artifacts.sh` likewise requires clean source and a matching
+image revision, compiles the standalone CLI with the frozen lockfile, and swaps
+a fully checksummed staging directory into place only after every artifact
+succeeds.
+
 ## Liveness, readiness, and startup
 
 - `GET /live` reports that the HTTP process can answer. Use it for liveness.
