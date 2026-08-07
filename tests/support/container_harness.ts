@@ -492,20 +492,40 @@ async function verifyGateDockerRemoval(
   gateId: string,
 ): Promise<void> {
   let kind: "container" | "volume" | "network" | undefined;
-  let identities: string[] = [];
+  let removalArgs: string[] = [];
   if (args[0] === "rm" || (args[0] === "container" && args[1] === "rm")) {
     kind = "container";
-    identities = args.slice(args[0] === "rm" ? 1 : 2).filter((arg) =>
-      !arg.startsWith("-") && !/^\d+$/.test(arg)
-    );
+    removalArgs = args.slice(args[0] === "rm" ? 1 : 2);
   } else if (args[0] === "volume" && args[1] === "rm") {
     kind = "volume";
-    identities = args.slice(2).filter((arg) => !arg.startsWith("-"));
+    removalArgs = args.slice(2);
   } else if (args[0] === "network" && args[1] === "rm") {
     kind = "network";
-    identities = args.slice(2).filter((arg) => !arg.startsWith("-"));
+    removalArgs = args.slice(2);
   }
   if (!kind) return;
+
+  const allowedFlags = kind === "container"
+    ? new Set(["--force", "--link", "--volumes", "-f", "-l", "-v"])
+    : new Set(["--force", "-f"]);
+  const identities: string[] = [];
+  let optionsEnded = false;
+  for (const arg of removalArgs) {
+    if (optionsEnded) {
+      identities.push(arg);
+    } else if (arg === "--") {
+      optionsEnded = true;
+    } else if (allowedFlags.has(arg)) {
+      continue;
+    } else if (arg.startsWith("-")) {
+      throw new Error(
+        `refusing to parse unsupported or ambiguous docker ${kind} rm option: ${arg}`,
+      );
+    } else {
+      identities.push(arg);
+    }
+  }
+
   for (const identity of identities) {
     const format = kind === "container"
       ? '{{index .Config.Labels "dev.operant.release-gate"}}'

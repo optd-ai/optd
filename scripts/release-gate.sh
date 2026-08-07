@@ -251,10 +251,14 @@ import base64
 import json
 import os
 import pathlib
+import stat
 import sys
 
 pid = int(sys.argv[1])
-state = pathlib.Path(sys.argv[2])
+supplied_state = pathlib.Path(sys.argv[2])
+state = pathlib.Path(os.path.abspath(supplied_state))
+if not supplied_state.is_absolute() or supplied_state != state:
+    raise SystemExit('state root is not an exact canonical absolute path')
 run_id = sys.argv[3]
 boot = pathlib.Path('/proc/sys/kernel/random/boot_id').read_text().strip()
 
@@ -299,12 +303,116 @@ record = {
     'data_dir': str(state),
     'ancestry': ancestry,
 }
-path = state / 'registry' / 'pids' / f'{pid}.json'
-with path.open('x') as stream:
-    json.dump(record, stream, sort_keys=True, separators=(',', ':'))
-    stream.write('\n')
-    stream.flush()
-    os.fsync(stream.fileno())
+registry = state / 'registry'
+pids = registry / 'pids'
+directory_flags = os.O_RDONLY | os.O_CLOEXEC | os.O_DIRECTORY | os.O_NOFOLLOW
+
+def open_without_symlinks(path):
+    descriptor = os.open('/', directory_flags)
+    try:
+        for component in path.parts[1:]:
+            following = os.open(component, directory_flags, dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = following
+        return descriptor
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+def check_directory(descriptor, path_entry, description):
+    opened = os.fstat(descriptor)
+    if not stat.S_ISDIR(opened.st_mode):
+        raise RuntimeError(f'{description} is not a directory')
+    if opened.st_uid != os.geteuid() or stat.S_IMODE(opened.st_mode) != 0o700:
+        raise RuntimeError(f'{description} is not private and owned')
+    if (opened.st_dev, opened.st_ino) != (path_entry.st_dev, path_entry.st_ino):
+        raise RuntimeError(f'{description} path identity changed')
+    return opened
+
+state_fd = registry_fd = pids_fd = record_fd = -1
+created = False
+try:
+    state_fd = open_without_symlinks(state)
+    registry_fd = os.open('registry', directory_flags, dir_fd=state_fd)
+    pids_fd = os.open('pids', directory_flags, dir_fd=registry_fd)
+    state_identity = check_directory(
+        state_fd, os.stat(state, follow_symlinks=False), 'state root'
+    )
+    registry_identity = check_directory(
+        registry_fd,
+        os.stat('registry', dir_fd=state_fd, follow_symlinks=False),
+        'registry root',
+    )
+    pids_identity = check_directory(
+        pids_fd,
+        os.stat('pids', dir_fd=registry_fd, follow_symlinks=False),
+        'PID registry',
+    )
+    data = (json.dumps(record, sort_keys=True, separators=(',', ':')) + '\n').encode()
+    old_umask = os.umask(0o077)
+    try:
+        record_fd = os.open(
+            f'{pid}.json',
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW,
+            0o600,
+            dir_fd=pids_fd,
+        )
+        created = True
+    finally:
+        os.umask(old_umask)
+    os.fchmod(record_fd, 0o600)
+    metadata = os.fstat(record_fd)
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_nlink != 1
+        or metadata.st_uid != os.geteuid()
+        or stat.S_IMODE(metadata.st_mode) != 0o600
+    ):
+        raise RuntimeError('created PID registry record is not a private owned regular file')
+    entry = os.stat(f'{pid}.json', dir_fd=pids_fd, follow_symlinks=False)
+    if (metadata.st_dev, metadata.st_ino) != (entry.st_dev, entry.st_ino):
+        raise RuntimeError('created PID registry record path identity changed')
+    view = memoryview(data)
+    while view:
+        written = os.write(record_fd, view)
+        if written <= 0:
+            raise RuntimeError('could not write PID registry record')
+        view = view[written:]
+    os.fsync(record_fd)
+    metadata_after = os.fstat(record_fd)
+    entry_after = os.stat(f'{pid}.json', dir_fd=pids_fd, follow_symlinks=False)
+    if (
+        (metadata.st_dev, metadata.st_ino) != (metadata_after.st_dev, metadata_after.st_ino)
+        or (metadata.st_dev, metadata.st_ino) != (entry_after.st_dev, entry_after.st_ino)
+        or metadata_after.st_nlink != 1
+        or metadata_after.st_uid != os.geteuid()
+        or stat.S_IMODE(metadata_after.st_mode) != 0o600
+    ):
+        raise RuntimeError('PID registry record changed during durable creation')
+    check_directory(state_fd, os.stat(state, follow_symlinks=False), 'state root')
+    check_directory(
+        registry_fd,
+        os.stat('registry', dir_fd=state_fd, follow_symlinks=False),
+        'registry root',
+    )
+    check_directory(
+        pids_fd,
+        os.stat('pids', dir_fd=registry_fd, follow_symlinks=False),
+        'PID registry',
+    )
+    os.fsync(pids_fd)
+    os.fsync(registry_fd)
+except BaseException:
+    if created:
+        try:
+            os.unlink(f'{pid}.json', dir_fd=pids_fd)
+        except OSError:
+            pass
+    raise
+finally:
+    for descriptor in (record_fd, pids_fd, registry_fd, state_fd):
+        if descriptor >= 0:
+            os.close(descriptor)
 PY
 }
 
@@ -313,7 +421,7 @@ signal_owned_pid() {
   local signal_name=$2
   local signal_status
   python3 "$source_root/scripts/release-pidfd-signal.py" \
-    "$record" "$state_root" "$run_id" "$signal_name"
+    "$record" "$state_root" "$state_root/registry" "$run_id" "$signal_name"
   signal_status=$?
   [[ "$signal_status" == 3 ]] && return 0
   return "$signal_status"
@@ -635,6 +743,7 @@ if [[ ! "$run_id" =~ ^[0-9a-f]{32}$ ]]; then
   status_message "could not generate a cryptographically unique gate run ID"
   exit 1
 fi
+umask 077
 state_root=$(mktemp -d -t "operant-release-gate-${run_id}-XXXXXX")
 trap cleanup_and_compare EXIT
 trap 'signal_exit 130' INT
@@ -643,6 +752,34 @@ trap 'signal_exit 129' HUP
 
 chmod 0700 -- "$state_root"
 mkdir -p -- "$state_root/registry/pids/completed" "$state_root/before/docker" "$state_root/before/host" "$state_root/after/docker" "$state_root/after/host"
+chmod 0700 -- \
+  "$state_root/registry" "$state_root/registry/pids" "$state_root/registry/pids/completed" \
+  "$state_root/before" "$state_root/before/docker" "$state_root/before/host" \
+  "$state_root/after" "$state_root/after/docker" "$state_root/after/host"
+python3 - "$state_root" <<'PY'
+import os
+import pathlib
+import stat
+import sys
+
+state = pathlib.Path(sys.argv[1])
+paths = [state, state / 'registry', state / 'registry' / 'pids']
+flags = os.O_RDONLY | os.O_CLOEXEC | os.O_DIRECTORY | os.O_NOFOLLOW
+for path in paths:
+    descriptor = os.open(path, flags)
+    try:
+        opened = os.fstat(descriptor)
+        entry = os.stat(path, follow_symlinks=False)
+        if (
+            not stat.S_ISDIR(opened.st_mode)
+            or opened.st_uid != os.geteuid()
+            or stat.S_IMODE(opened.st_mode) != 0o700
+            or (opened.st_dev, opened.st_ino) != (entry.st_dev, entry.st_ino)
+        ):
+            raise SystemExit(f'unsafe release-gate directory identity: {path}')
+    finally:
+        os.close(descriptor)
+PY
 for kind in containers volumes networks images; do : >"$state_root/registry/$kind"; done
 printf '%s\t%s\n' "$state_root" state-root >"$state_root/registry/temps"
 sync -f "$state_root/registry"
