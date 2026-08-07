@@ -469,9 +469,10 @@ def parse_protocol(stdout: bytes, stderr: bytes, expected: list[str], status: in
     current_instruction = ""
     current_results: list[str] = []
     success_tokens: list[str] = []
+    incomplete_tail = 0
 
-    def finish_frame() -> None:
-        nonlocal current_number, current_instruction, current_results
+    def finish_frame(allow_incomplete: bool = False) -> None:
+        nonlocal current_number, current_instruction, current_results, incomplete_tail
         if not current_number:
             return
         before_first_stage = not any(
@@ -487,6 +488,11 @@ def parse_protocol(stdout: bytes, stderr: bytes, expected: list[str], status: in
             # explicitly empty result for FROM scratch. These completed frames
             # authorize no image identity.
             frames.append(StepFrame(current_number, current_instruction, ""))
+        elif not current_results and allow_incomplete:
+            # A failed or signaled daemon can stop after announcing its final
+            # Step. The started frame has no identity; only earlier completed
+            # frames remain eligible for cleanup authority.
+            incomplete_tail = current_number
         else:
             errors.append(
                 f"Step {current_number}/{len(expected)} has {len(current_results)} engine result IDs"
@@ -528,13 +534,15 @@ def parse_protocol(stdout: bytes, stderr: bytes, expected: list[str], status: in
             continue
         if line.startswith(CONTROL_PREFIX):
             errors.append(f"malformed or spoofed legacy engine control line: {line!r}")
-    finish_frame()
+    finish_frame(allow_incomplete=True)
     completed = len(frames)
     if errors:
         raise RuntimeError("; ".join(errors))
     if [frame.number for frame in frames] != list(range(1, completed + 1)):
         raise RuntimeError("legacy Step sequence is incomplete or ambiguous")
     if status == 0:
+        if incomplete_tail:
+            raise RuntimeError("successful legacy build ended with an incomplete Step frame")
         if completed != len(expected):
             raise RuntimeError(f"successful legacy build completed only {completed}/{len(expected)} Steps")
         if len(success_tokens) != 1:
@@ -542,6 +550,8 @@ def parse_protocol(stdout: bytes, stderr: bytes, expected: list[str], status: in
         return frames, success_tokens[0]
     if success_tokens:
         raise RuntimeError("failed or signaled build emitted a Successfully built line")
+    if incomplete_tail and incomplete_tail != completed + 1:
+        raise RuntimeError("incomplete legacy Step frame is non-final or ambiguous")
     return frames, ""
 
 

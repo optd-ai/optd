@@ -147,6 +147,169 @@ Deno.test("failed legacy build cleans every emitted intermediate and preserves s
   }
 });
 
+Deno.test("failed build with a final incomplete Step cleans prior completed images and preserves status", async () => {
+  const fixture = await createFixture();
+  const baseline = `sha256:${"b".repeat(64)}`;
+  try {
+    await seedImageMetadata(fixture, baseline);
+    await Deno.writeTextFile(`${fixture.state}/base-image`, `${baseline}\n`);
+    const before = await resourceIds(fixture, "images");
+    const result = await runGate(fixture, {
+      FAKE_TEST_MODE: "build-failure-incomplete",
+    });
+    assertEquals(result.code, 37, `${result.stdout}\n${result.stderr}`);
+    assertEquals(await resourceIds(fixture, "images"), before);
+    const docker = await readLog(fixture, "docker.log");
+    assertEquals(
+      docker.split("\n").filter((line) =>
+        line.startsWith("image rm --no-prune -- sha256:")
+      ).length,
+      1,
+    );
+  } finally {
+    await removeFixture(fixture);
+  }
+});
+
+Deno.test("signaled build with a final incomplete Step cleans prior completed images and preserves 143", async () => {
+  const fixture = await createFixture();
+  const baseline = `sha256:${"b".repeat(64)}`;
+  try {
+    await seedImageMetadata(fixture, baseline);
+    await Deno.writeTextFile(`${fixture.state}/base-image`, `${baseline}\n`);
+    const before = await resourceIds(fixture, "images");
+    const child = new Deno.Command("bash", {
+      args: ["scripts/release-gate.sh"],
+      cwd: fixture.root,
+      env: fixtureEnv(fixture, {
+        FAKE_TEST_MODE: "build-signal-incomplete",
+      }),
+      stdout: "piped",
+      stderr: "piped",
+    }).spawn();
+    await waitForPath(`${fixture.state}/build-signal-ready`);
+    await new Deno.Command("kill", {
+      args: ["-TERM", String(child.pid)],
+    }).output();
+    const result = await child.output();
+    assertEquals(
+      result.code,
+      143,
+      new TextDecoder().decode(result.stderr),
+    );
+    assertEquals(await resourceIds(fixture, "images"), before);
+    const docker = await readLog(fixture, "docker.log");
+    assertEquals(
+      docker.split("\n").filter((line) =>
+        line.startsWith("image rm --no-prune -- sha256:")
+      ).length,
+      1,
+    );
+  } finally {
+    await removeFixture(fixture);
+  }
+});
+
+Deno.test("successful status with an incomplete Step is rejected without image authority", async () => {
+  const fixture = await createFixture();
+  try {
+    const result = await runGate(fixture, {
+      FAKE_TEST_MODE: "build-success-incomplete",
+    });
+    assert(result.code !== 0, `${result.stdout}\n${result.stderr}`);
+    assertEquals((await resourceIds(fixture, "images")).length, 1);
+    assertStringIncludes(
+      result.stderr,
+      "legacy builder image authority is ambiguous",
+    );
+    assert(
+      !(await readLog(fixture, "docker.log")).includes(
+        "image rm --no-prune -- sha256:",
+      ),
+    );
+  } finally {
+    await removeFixture(fixture);
+  }
+});
+
+Deno.test("a result after an incomplete Step is rejected as spoofed protocol", async () => {
+  const fixture = await createFixture();
+  try {
+    const result = await runGate(fixture, {
+      FAKE_TEST_MODE: "incomplete-then-spoof-result",
+    });
+    assert(result.code !== 0, `${result.stdout}\n${result.stderr}`);
+    assertEquals((await resourceIds(fixture, "images")).length, 1);
+    assertStringIncludes(
+      result.stderr,
+      "legacy builder image authority is ambiguous",
+    );
+    assert(
+      !(await readLog(fixture, "docker.log")).includes(
+        "image rm --no-prune -- sha256:",
+      ),
+    );
+  } finally {
+    await removeFixture(fixture);
+  }
+});
+
+Deno.test("multiple or non-final incomplete Steps are rejected", async () => {
+  for (
+    const mode of [
+      "multiple-incomplete",
+      "nonfinal-incomplete",
+    ]
+  ) {
+    const fixture = await createFixture();
+    try {
+      const result = await runGate(fixture, { FAKE_TEST_MODE: mode });
+      assert(
+        result.code !== 0,
+        `${mode}\n${result.stdout}\n${result.stderr}`,
+      );
+      assertStringIncludes(
+        result.stderr,
+        "legacy builder image authority is ambiguous",
+      );
+      assert(
+        !(await readLog(fixture, "docker.log")).includes(
+          "image rm --no-prune -- sha256:",
+        ),
+        mode,
+      );
+    } finally {
+      await removeFixture(fixture);
+    }
+  }
+});
+
+Deno.test("an unreported image from an incomplete Step blocks cleanup authority", async () => {
+  const fixture = await createFixture();
+  try {
+    const result = await runGate(fixture, {
+      FAKE_TEST_MODE: "incomplete-unknown-delta",
+    });
+    assert(result.code !== 0, `${result.stdout}\n${result.stderr}`);
+    assertEquals((await resourceIds(fixture, "images")).length, 2);
+    assertStringIncludes(
+      result.stderr,
+      "post-build delta has IDs not owned by completed Steps",
+    );
+    assertStringIncludes(
+      result.stderr,
+      "legacy builder image authority is ambiguous",
+    );
+    assert(
+      !(await readLog(fixture, "docker.log")).includes(
+        "image rm --no-prune -- sha256:",
+      ),
+    );
+  } finally {
+    await removeFixture(fixture);
+  }
+});
+
 Deno.test("a signaled build preserves 143 and cleans only completed Steps even when Docker exits zero", async () => {
   for (const mode of ["build-signal", "build-signal-child-zero"]) {
     const fixture = await createFixture();
@@ -1147,6 +1310,46 @@ case "\${1:-} \${2:-}" in
       identity="sha256:$(printf '%012x' "$number")$(printf '0%.0s' {1..52})"
       created=$(date --iso-8601=ns)
       printf 'Step %s/18 : RUN fixture-%s\\n' "$number" "$number"
+      case "\${FAKE_TEST_MODE:-}" in
+        build-failure-incomplete)
+          [[ "$number" != 2 ]] || exit 37
+          ;;
+        build-signal-incomplete)
+          if [[ "$number" == 2 ]]; then
+            : >"$FAKE_STATE/build-signal-ready"
+            sleep 120
+          fi
+          ;;
+        build-success-incomplete)
+          [[ "$number" != 2 ]] || exit 0
+          ;;
+        incomplete-then-spoof-result)
+          if [[ "$number" == 2 ]]; then
+            printf 'Step 3/18 : RUN fixture-3\\n'
+            printf ' ---> dddddddddddd\\n'
+            exit 37
+          fi
+          ;;
+        multiple-incomplete)
+          if [[ "$number" == 1 ]]; then
+            printf 'Step 2/18 : RUN fixture-2\\n'
+            exit 37
+          fi
+          ;;
+        nonfinal-incomplete)
+          if [[ "$number" == 1 ]]; then
+            printf 'Step 2/18 : RUN fixture-2\\n'
+            printf ' ---> dddddddddddd\\n'
+            exit 37
+          fi
+          ;;
+        incomplete-unknown-delta)
+          if [[ "$number" == 2 ]]; then
+            printf 'label=\\nname=%s\\nparent=%s\\ncreated=%s\\ncreated_by=/bin/sh -c fixture-%s\\ntags=\\ndigests=\\n' "$identity" "$parent" "$created" "$number" >"$FAKE_STATE/images/$identity"
+            exit 37
+          fi
+          ;;
+      esac
       printf 'label=\\nname=%s\\nparent=%s\\ncreated=%s\\ncreated_by=/bin/sh -c fixture-%s\\ntags=\\ndigests=\\n' "$identity" "$parent" "$created" "$number" >"$FAKE_STATE/images/$identity"
       printf ' ---> %s\\n' "\${identity:7:12}"
       parent=$identity
