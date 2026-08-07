@@ -83,7 +83,7 @@ export async function buildReleaseImage(): Promise<string> {
         } ${expectedVersion ?? "*"}, got ${inspected.stdout.trim()}`,
       );
     }
-    return image;
+    return expectedId;
   }
   const revision = (await runCommand("git", ["rev-parse", "HEAD"])).stdout
     .trim();
@@ -99,13 +99,26 @@ export async function buildReleaseImage(): Promise<string> {
     image,
     ".",
   ], { timeoutMs: 15 * 60_000 });
-  return image;
+  return (await runCommand("docker", [
+    "image",
+    "inspect",
+    image,
+    "--format",
+    "{{.Id}}",
+  ])).stdout.trim();
 }
 
 export async function createContainerHarness(
   image: string,
 ): Promise<ContainerHarness> {
-  const id = `operant-cr-${
+  const gateId = Deno.env.get("OPERANT_RELEASE_GATE_ID");
+  const expectedImageId = Deno.env.get("OPERANT_CONTAINER_IMAGE_ID");
+  if (gateId && (!expectedImageId || image !== expectedImageId)) {
+    throw new Error(
+      `gate harness requires its frozen image ID: expected ${expectedImageId}, got ${image}`,
+    );
+  }
+  const id = `operant-cr-${gateId ? `${gateId.slice(0, 12)}-` : ""}${
     crypto.randomUUID().replaceAll("-", "").slice(0, 12)
   }`;
   const port = await freePort();
@@ -114,7 +127,7 @@ export async function createContainerHarness(
   const bootstrapToken = randomSecret();
   const masterKey = randomSecret();
   const cleanupArgs: string[][] = [];
-  const gateLabel = Deno.env.get("OPERANT_RELEASE_GATE_ID");
+  const gateLabel = gateId;
   const labelArgs = gateLabel
     ? ["--label", `dev.operant.release-gate=${gateLabel}`]
     : [];
@@ -402,6 +415,333 @@ async function createDockerProcessTreeLauncher(
 }
 
 export async function runCommand(
+  command: string,
+  args: string[],
+  options: RunOptions = {},
+): Promise<CommandResult> {
+  const gateId = Deno.env.get("OPERANT_RELEASE_GATE_ID");
+  if (command === "docker" && gateId && args[0] === "run") {
+    return await runRegisteredGateContainer(args.slice(1), options, gateId);
+  }
+  if (command === "docker" && gateId && args[0] === "compose") {
+    return await runRegisteredGateCompose(args, options, gateId);
+  }
+  if (command === "docker" && gateId) {
+    await verifyGateDockerRemoval(args, gateId);
+  }
+
+  let effectiveArgs = args;
+  let registration:
+    | { kind: "containers" | "volumes" | "networks"; name: string }
+    | undefined;
+  if (command === "docker" && gateId) {
+    const prepared = prepareGateDockerCreation(args, gateId);
+    effectiveArgs = prepared.args;
+    registration = prepared.registration;
+    if (registration) {
+      await appendGateRegistry(
+        registration.kind,
+        `pending:${registration.name}`,
+        registration.name,
+      );
+    }
+  }
+
+  const result = await runCommandRaw(command, effectiveArgs, options);
+  if (registration && result.code === 0) {
+    let identity = result.stdout.trim().split("\n").at(-1) ?? "";
+    if (registration.kind === "containers") {
+      identity = (await runCommandRaw("docker", [
+        "container",
+        "inspect",
+        identity || registration.name,
+        "--format",
+        "{{.Id}}",
+      ])).stdout.trim();
+      await registerContainerAndMounts(identity, registration.name);
+    } else if (registration.kind === "volumes") {
+      identity = (await runCommandRaw("docker", [
+        "volume",
+        "inspect",
+        registration.name,
+        "--format",
+        "{{.Name}}",
+      ])).stdout.trim();
+      await appendGateRegistry("volumes", identity, registration.name);
+    } else {
+      identity = (await runCommandRaw("docker", [
+        "network",
+        "inspect",
+        registration.name,
+        "--format",
+        "{{.Id}}",
+      ])).stdout.trim();
+      await appendGateRegistry("networks", identity, registration.name);
+    }
+  }
+  return result;
+}
+
+async function verifyGateDockerRemoval(
+  args: string[],
+  gateId: string,
+): Promise<void> {
+  let kind: "container" | "volume" | "network" | undefined;
+  let identities: string[] = [];
+  if (args[0] === "rm" || (args[0] === "container" && args[1] === "rm")) {
+    kind = "container";
+    identities = args.slice(args[0] === "rm" ? 1 : 2).filter((arg) =>
+      !arg.startsWith("-") && !/^\d+$/.test(arg)
+    );
+  } else if (args[0] === "volume" && args[1] === "rm") {
+    kind = "volume";
+    identities = args.slice(2).filter((arg) => !arg.startsWith("-"));
+  } else if (args[0] === "network" && args[1] === "rm") {
+    kind = "network";
+    identities = args.slice(2).filter((arg) => !arg.startsWith("-"));
+  }
+  if (!kind) return;
+  for (const identity of identities) {
+    const format = kind === "container"
+      ? '{{index .Config.Labels "dev.operant.release-gate"}}'
+      : '{{index .Labels "dev.operant.release-gate"}}';
+    const inspected = await runCommandRaw("docker", [
+      kind,
+      "inspect",
+      identity,
+      "--format",
+      format,
+    ], { allowFailure: true });
+    if (inspected.code === 0 && inspected.stdout.trim() !== gateId) {
+      throw new Error(
+        `refusing to remove ${kind} after gate-label mismatch: ${identity}`,
+      );
+    }
+  }
+}
+
+async function runRegisteredGateContainer(
+  runArgs: string[],
+  options: RunOptions,
+  gateId: string,
+): Promise<CommandResult> {
+  const createArgs: string[] = [];
+  let detached = false;
+  let remove = false;
+  let interactive = options.stdin !== undefined;
+  let name = "";
+  for (let index = 0; index < runArgs.length; index++) {
+    const arg = runArgs[index];
+    if (arg === "--detach" || arg === "-d") {
+      detached = true;
+      continue;
+    }
+    if (arg === "--rm") {
+      remove = true;
+      continue;
+    }
+    if (arg === "--interactive" || arg === "-i") interactive = true;
+    if (arg === "--name" && index + 1 < runArgs.length) {
+      name = runArgs[index + 1];
+    }
+    createArgs.push(arg);
+  }
+  if (!name) {
+    name = `operant-gate-${gateId.slice(0, 12)}-${
+      crypto.randomUUID().replaceAll("-", "").slice(0, 12)
+    }`;
+    createArgs.unshift("--name", name);
+  }
+  createArgs.unshift("--label", `dev.operant.release-gate=${gateId}`);
+  await appendGateRegistry("containers", `pending:${name}`, name);
+  const created = await runCommandRaw("docker", [
+    "container",
+    "create",
+    ...createArgs,
+  ], {
+    ...options,
+    stdin: undefined,
+    allowFailure: false,
+  });
+  const containerId = created.stdout.trim();
+  await registerContainerAndMounts(containerId, name);
+
+  let result: CommandResult;
+  try {
+    if (detached) {
+      const started = await runCommandRaw("docker", [
+        "container",
+        "start",
+        containerId,
+      ], options);
+      result = { ...started, stdout: `${containerId}\n` };
+    } else {
+      result = await runCommandRaw("docker", [
+        "container",
+        "start",
+        "--attach",
+        ...interactive ? ["--interactive"] : [],
+        containerId,
+      ], options);
+    }
+  } finally {
+    if (remove) {
+      await verifyGateDockerRemoval([
+        "container",
+        "rm",
+        "--force",
+        "--volumes",
+        containerId,
+      ], gateId);
+      await runCommandRaw("docker", [
+        "container",
+        "rm",
+        "--force",
+        "--volumes",
+        containerId,
+      ], { allowFailure: true, timeoutMs: 20_000 });
+    }
+  }
+  return result;
+}
+
+async function registerContainerAndMounts(
+  containerId: string,
+  name: string,
+): Promise<void> {
+  await appendGateRegistry("containers", containerId, name);
+  const mounts = await runCommandRaw("docker", [
+    "container",
+    "inspect",
+    containerId,
+    "--format",
+    '{{range .Mounts}}{{if eq .Type "volume"}}{{println .Name}}{{end}}{{end}}',
+  ]);
+  for (const volume of mounts.stdout.split("\n").filter(Boolean)) {
+    await appendGateRegistry("volumes", volume, `${name}:mount`);
+  }
+}
+
+function prepareGateDockerCreation(
+  args: string[],
+  gateId: string,
+): {
+  args: string[];
+  registration?: {
+    kind: "containers" | "volumes" | "networks";
+    name: string;
+  };
+} {
+  if (
+    (args[0] === "create" ||
+      (args[0] === "container" && args[1] === "create"))
+  ) {
+    const offset = args[0] === "create" ? 1 : 2;
+    const effective = [...args];
+    effective.splice(
+      offset,
+      0,
+      "--label",
+      `dev.operant.release-gate=${gateId}`,
+    );
+    const nameIndex = effective.indexOf("--name");
+    const name = nameIndex >= 0
+      ? effective[nameIndex + 1]
+      : `operant-gate-${gateId.slice(0, 12)}-pending`;
+    return { args: effective, registration: { kind: "containers", name } };
+  }
+  if (args[0] === "volume" && args[1] === "create") {
+    const name = args.at(-1) ?? "";
+    return {
+      args: [
+        "volume",
+        "create",
+        "--label",
+        `dev.operant.release-gate=${gateId}`,
+        ...args.slice(2),
+      ],
+      registration: { kind: "volumes", name },
+    };
+  }
+  if (args[0] === "network" && args[1] === "create") {
+    const name = args.at(-1) ?? "";
+    return {
+      args: [
+        "network",
+        "create",
+        "--label",
+        `dev.operant.release-gate=${gateId}`,
+        ...args.slice(2),
+      ],
+      registration: { kind: "networks", name },
+    };
+  }
+  return { args };
+}
+
+async function runRegisteredGateCompose(
+  args: string[],
+  options: RunOptions,
+  gateId: string,
+): Promise<CommandResult> {
+  const project = options.env?.COMPOSE_PROJECT_NAME ??
+    Deno.env.get("COMPOSE_PROJECT_NAME") ?? "unknown";
+  await appendGateRegistry("containers", `pending:compose:${project}`, project);
+  const result = await runCommandRaw("docker", args, {
+    ...options,
+    allowFailure: true,
+  });
+  for (
+    const [kind, command] of [
+      ["containers", ["container", "ls", "--all", "--no-trunc", "--quiet"]],
+      ["volumes", ["volume", "ls", "--quiet"]],
+      ["networks", ["network", "ls", "--no-trunc", "--quiet"]],
+    ] as const
+  ) {
+    const listed = await runCommandRaw("docker", [
+      ...command,
+      "--filter",
+      `label=dev.operant.release-gate=${gateId}`,
+    ]);
+    for (const identity of listed.stdout.split("\n").filter(Boolean)) {
+      await appendGateRegistry(kind, identity, `compose:${project}`);
+    }
+  }
+  if (result.code !== 0 && !options.allowFailure) {
+    throw new Error(
+      `docker ${args.join(" ")} exited ${result.code}: ${result.stderr}`,
+    );
+  }
+  return result;
+}
+
+async function appendGateRegistry(
+  kind: "containers" | "volumes" | "networks",
+  identity: string,
+  name: string,
+): Promise<void> {
+  const root = Deno.env.get("OPERANT_RELEASE_GATE_REGISTRY");
+  if (!root) {
+    throw new Error(
+      "release gate Docker creation requires its durable registry",
+    );
+  }
+  if (/\r|\n|\t/.test(identity) || /\r|\n|\t/.test(name)) {
+    throw new Error("release gate registry identity contains a delimiter");
+  }
+  const file = await Deno.open(`${root}/${kind}`, {
+    append: true,
+    write: true,
+  });
+  try {
+    file.writeSync(new TextEncoder().encode(`${identity}\t${name}\n`));
+    file.syncSync();
+  } finally {
+    file.close();
+  }
+}
+
+async function runCommandRaw(
   command: string,
   args: string[],
   options: RunOptions = {},

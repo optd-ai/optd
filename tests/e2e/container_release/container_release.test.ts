@@ -726,7 +726,7 @@ Deno.test({
   sanitizeOps: false,
   async fn() {
     const releaseImage = await image();
-    const id = crypto.randomUUID().replaceAll("-", "").slice(0, 12);
+    const id = releaseScopedId(12);
     const malformedName = `operant-cr-bad-key-${id}`;
     const bindName = `operant-cr-bad-bind-${id}`;
     const goodBindName = `operant-cr-good-bind-${id}`;
@@ -849,7 +849,7 @@ Deno.test({
   sanitizeOps: false,
   async fn() {
     const releaseImage = await image();
-    const id = crypto.randomUUID().replaceAll("-", "").slice(0, 12);
+    const id = releaseScopedId(12);
     const network = `operant-cr-net-${id}`;
     const pg = `operant-cr-pg-${id}`;
     const app = `operant-cr-ext-${id}`;
@@ -1016,15 +1016,17 @@ Deno.test({
   sanitizeOps: false,
   async fn() {
     const releaseImage = await image();
-    const id = crypto.randomUUID().replaceAll("-", "").slice(0, 10);
+    const id = releaseScopedId(10);
     const project = `operant-ext-${id}`;
     const version = `compose-${id}`;
-    const tagged = `operant:${version}`;
     const port = 20000 + Math.floor(Math.random() * 20000);
     const env = {
       ...Deno.env.toObject(),
       COMPOSE_PROJECT_NAME: project,
       OPERANT_VERSION: version,
+      OPERANT_IMAGE: releaseImage,
+      OPERANT_RELEASE_GATE_ID: Deno.env.get("OPERANT_RELEASE_GATE_ID") ??
+        "standalone",
       OPERANT_PORT: String(port),
       OPERANT_POSTGRES_PASSWORD: `pg-${id}-password`,
       OPERANT_BOOTSTRAP_TOKEN: `bootstrap-${id}`,
@@ -1039,7 +1041,6 @@ Deno.test({
       ], { timeoutMs: 180_000, allowFailure, env });
     const anonymousVolumesBefore = await anonymousDockerVolumeIds();
     try {
-      await runCommand("docker", ["tag", releaseImage, tagged]);
       await compose(["up", "-d", "--no-build"]);
       await waitHttpReady(port);
       const pgId = (await compose(["ps", "-q", "postgres"])).stdout.trim();
@@ -1107,9 +1108,6 @@ Deno.test({
       assertEquals(status.data.state, "active");
     } finally {
       await compose(["down", "--volumes", "--remove-orphans"], true);
-      await runCommand("docker", ["image", "rm", tagged], {
-        allowFailure: true,
-      });
       await assertNoNewAnonymousDockerVolumes(
         anonymousVolumesBefore,
         "Compose cleanup",
@@ -1121,6 +1119,15 @@ Deno.test({
     }
   },
 });
+
+function releaseScopedId(randomLength: number): string {
+  const gateId = Deno.env.get("OPERANT_RELEASE_GATE_ID");
+  const random = crypto.randomUUID().replaceAll("-", "").slice(
+    0,
+    randomLength,
+  );
+  return gateId ? `${gateId.slice(0, 12)}-${random}` : random;
+}
 
 async function anonymousDockerVolumeIds(): Promise<Set<string>> {
   const result = await runCommand("docker", [

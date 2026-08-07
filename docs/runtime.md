@@ -91,15 +91,25 @@ deno task release-gate
 ./scripts/release-artifacts.sh operant:0.1.0-dev dist
 ```
 
-`release-gate` refuses tracked or untracked source changes, builds one no-cache
-image labeled with the exact source revision, and reuses that image for the
-complete checked/container suite and artifact checks. It removes that exact
-image on exit after comparing full container, volume, network, owned-process,
-and owned-temporary-directory inventories; set `OPERANT_RELEASE_KEEP_IMAGE=1` to
-retain it. `release-artifacts.sh` likewise requires clean source and a matching
-image revision, compiles the standalone CLI with the frozen lockfile, and swaps
-a fully checksummed staging directory into place only after every artifact
-succeeds.
+`release-gate` refuses tracked or untracked source changes. Set
+`OPERANT_RELEASE_BASE` to a full 40-character commit ID when checking a range
+other than the frozen handoff; the commit must exist locally and be an ancestor
+of exact `HEAD`. The gate builds one no-cache image from an immutable
+`git
+archive`, then executes artifacts and the complete container suite only by
+its frozen full image ID. A cryptographically unique run ID is carried by every
+owned Docker name, label, Compose project, and durable registry entry.
+
+The parent trap is installed as soon as the single state root exists. On every
+exit it revalidates registered Docker labels and Linux process identity before
+cleanup, never uses name-prefix ownership, and never prunes. Independent Docker
+inventory and exact run-label scans fail closed; an unregistered delta blocks
+the gate without being deleted. Set `OPERANT_RELEASE_KEEP_IMAGE=1` to retain the
+exact image intentionally. `release-artifacts.sh` requires a clean exact source
+revision and a full immutable image ID, compiles the standalone CLI with the
+frozen lockfile, fsyncs same-filesystem staging, and rolls an interrupted
+publication back to the prior output. Output symlinks and replaced output
+parents are rejected.
 
 ## Liveness, readiness, and startup
 
