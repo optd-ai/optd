@@ -101,6 +101,8 @@ Deno.test("gate uses NUL paths, one build, one suite, and only the frozen image 
     assertStringIncludes(docker, `container create`);
     assertStringIncludes(docker, imageId);
     assert(!docker.includes("container create operant:"), docker);
+    assertStringIncludes(docker, `image rm --force -- ${imageId}`);
+    assert(!docker.includes("image rm -- operant:"), docker);
   } finally {
     await removeFixture(fixture);
   }
@@ -147,6 +149,84 @@ Deno.test("exact run labels clean registered and discovered owned resources", as
   }
 });
 
+Deno.test("Docker ownership inspect failure blocks removal before destruction", async () => {
+  const fixture = await createFixture();
+  try {
+    const gateId = "c".repeat(32);
+    await seedResource(fixture, "containers", "victim", gateId);
+    const source = `
+      import { runCommand } from ${
+      JSON.stringify(
+        new URL("../../support/container_harness.ts", import.meta.url).href,
+      )
+    };
+      try {
+        await runCommand("docker", ["container", "rm", "--force", "victim"]);
+        Deno.exit(91);
+      } catch (error) {
+        console.error(String(error));
+      }
+    `;
+    const result = await runHarnessEval(fixture, source, {
+      OPERANT_RELEASE_GATE_ID: gateId,
+      FAKE_DOCKER_FAIL_ALWAYS_MATCH: "container inspect victim",
+    });
+    assertEquals(result.code, 0, result.stderr);
+    assertStringIncludes(result.stderr, "inspection failed");
+    const docker = await readLog(fixture, "docker.log");
+    assertStringIncludes(docker, "container inspect victim");
+    assert(!docker.includes("container rm --force victim"), docker);
+  } finally {
+    await removeFixture(fixture);
+  }
+});
+
+Deno.test("Compose down preflights exact resources and never runs after inspect failure", async () => {
+  const fixture = await createFixture();
+  try {
+    const gateId = "d".repeat(32);
+    await Deno.writeTextFile(
+      `${fixture.state}/containers/compose-container`,
+      `label=${gateId}\nproject=exact-project\nname=compose-container\n`,
+    );
+    const source = `
+      import { runCommand } from ${
+      JSON.stringify(
+        new URL("../../support/container_harness.ts", import.meta.url).href,
+      )
+    };
+      try {
+        await runCommand("docker", ["compose", "-f", "compose.external-postgres.yml", "down", "--volumes", "--remove-orphans"], {
+          env: { COMPOSE_PROJECT_NAME: "exact-project" },
+        });
+        Deno.exit(91);
+      } catch (error) {
+        console.error(String(error));
+      }
+    `;
+    const result = await runHarnessEval(fixture, source, {
+      OPERANT_RELEASE_GATE_ID: gateId,
+      FAKE_DOCKER_FAIL_ALWAYS_MATCH: "container inspect compose-container",
+    });
+    assertEquals(result.code, 0, result.stderr);
+    assertStringIncludes(result.stderr, "inspection failed");
+    const docker = await readLog(fixture, "docker.log");
+    assertStringIncludes(
+      docker,
+      "container ls --all --no-trunc --quiet --filter label=com.docker.compose.project=exact-project",
+    );
+    assertStringIncludes(docker, "container inspect compose-container");
+    assert(
+      !docker.includes(
+        "compose -f compose.external-postgres.yml down --volumes --remove-orphans",
+      ),
+      docker,
+    );
+  } finally {
+    await removeFixture(fixture);
+  }
+});
+
 Deno.test("missing baseline resources fail while preserving the primary status", async () => {
   const fixture = await createFixture();
   try {
@@ -178,6 +258,50 @@ Deno.test("source mutation after a host phase is rejected", async () => {
   }
 });
 
+Deno.test("staged mutation with unchanged HEAD fails immutable tree verification", async () => {
+  const fixture = await createFixture();
+  try {
+    const result = await runGate(fixture, {
+      FAKE_TEST_MODE: "staged-source-mutation",
+    });
+    assert(result.code !== 0);
+    assertStringIncludes(
+      result.stderr,
+      "source index differs from immutable commit",
+    );
+    assertEquals((await readLog(fixture, "suite-count")).trim(), "1");
+  } finally {
+    await removeFixture(fixture);
+  }
+});
+
+Deno.test("pre-registration failure cannot launch or numerically kill a workload", async () => {
+  const fixture = await createFixture();
+  try {
+    const result = await runGate(fixture, {
+      OPERANT_RELEASE_TEST_PRE_REGISTRATION_FAILURE: "1",
+    });
+    assert(result.code !== 0);
+    assertStringIncludes(result.stderr, "registration failed before launch");
+    assertEquals(await readLog(fixture, "deno.args"), "");
+  } finally {
+    await removeFixture(fixture);
+  }
+});
+
+for (const signalName of ["CONT", "TERM", "KILL"] as const) {
+  for (const mode of ["mismatch", "reuse", "inspect-failure"] as const) {
+    Deno.test(
+      `pidfd ${signalName} blocks deterministic ${mode} without signaling`,
+      async () => {
+        const result = await runPidfdAdversary(signalName, mode);
+        assertEquals(result.code, 0, `${result.stdout}\n${result.stderr}`);
+        assertStringIncludes(result.stdout, "blocked-without-signal");
+      },
+    );
+  }
+}
+
 Deno.test("PID identity mismatch is never signaled", async () => {
   const fixture = await createFixture();
   let pid = 0;
@@ -186,7 +310,7 @@ Deno.test("PID identity mismatch is never signaled", async () => {
     assert(result.code !== 0);
     assertStringIncludes(
       result.stderr,
-      "refusing TERM after owned PID identity mismatch",
+      "refusing TERM after owned PID identity inspection failed",
     );
     pid = Number((await readLog(fixture, "mismatch-pid")).trim());
     assert(pid > 1);
@@ -237,6 +361,76 @@ Deno.test("artifact publication rolls back TERM and rejects symlink outputs", as
     const symlink = await runArtifact(fixture, imageId, output);
     assert(symlink.code !== 0);
     assertStringIncludes(symlink.stderr, "symlink");
+  } finally {
+    await removeFixture(fixture);
+  }
+});
+
+Deno.test("quarantine failure retains the old backup at its top-level recovery path", async () => {
+  const fixture = await createFixture();
+  try {
+    await seedImage(fixture);
+    const output = `${fixture.root}/artifacts`;
+    await Deno.mkdir(output);
+    await Deno.writeTextFile(`${output}/sentinel`, "original");
+    await executable(
+      `${fixture.bin}/mv`,
+      `#!/usr/bin/env bash\nset -euo pipefail\nfor arg in "$@"; do [[ "$arg" != *'.failed.'* ]] || exit 74; done\nexec /usr/bin/mv "$@"\n`,
+    );
+    const marker = `${fixture.state}/after-publish-quarantine-failure`;
+    const child = new Deno.Command("bash", {
+      args: ["scripts/release-artifacts.sh", imageId, output],
+      cwd: fixture.root,
+      env: fixtureEnv(fixture, {
+        OPERANT_CONTAINER_IMAGE_ID: imageId,
+        OPERANT_RELEASE_ARTIFACT_AFTER_PUBLISH_FILE: marker,
+      }),
+      stdout: "piped",
+      stderr: "piped",
+    }).spawn();
+    await waitForPath(marker);
+    await new Deno.Command("kill", {
+      args: ["-TERM", String(child.pid)],
+    }).output();
+    const terminated = await child.output();
+    assertEquals(terminated.code, 143);
+    const stderr = new TextDecoder().decode(terminated.stderr);
+    assertStringIncludes(stderr, "could not quarantine failed publication");
+    assertStringIncludes(stderr, "retained prior-output backup");
+
+    const backups = (await directoryNames(fixture.root)).filter((name) =>
+      name.startsWith(".artifacts.backup.")
+    );
+    assertEquals(backups.length, 1, JSON.stringify(backups));
+    assertEquals(
+      await Deno.readTextFile(`${fixture.root}/${backups[0]}/sentinel`),
+      "original",
+    );
+    assert(await pathExists(`${output}/optctl`));
+    assert(!(await pathExists(`${output}/sentinel`)));
+    assertEquals(
+      (await directoryNames(output)).filter((name) =>
+        name.includes(".artifacts.backup.")
+      ),
+      [],
+    );
+    assertStringIncludes(stderr, `${fixture.root}/${backups[0]}`);
+  } finally {
+    await removeFixture(fixture);
+  }
+});
+
+Deno.test("image cleanup never dereferences a drifted mutable tag", async () => {
+  const fixture = await createFixture();
+  try {
+    const result = await runGate(fixture, { FAKE_TEST_MODE: "image-retag" });
+    assert(result.code !== 0);
+    assertStringIncludes(result.stderr, "convenience image tag drifted");
+    const docker = await readLog(fixture, "docker.log");
+    assert(!docker.includes("image rm -- operant:"), docker);
+    assert(!docker.includes("image rm --force -- operant:"), docker);
+    assert(!docker.includes(`image rm --force -- ${imageId}`), docker);
+    assertEquals(await resourceIds(fixture, "images"), [imageId]);
   } finally {
     await removeFixture(fixture);
   }
@@ -363,11 +557,21 @@ async function createFixture(): Promise<Fixture> {
     `${root}/scripts/release-artifacts.sh`,
   );
   await Deno.copyFile(
+    "scripts/release-owned-supervisor.py",
+    `${root}/scripts/release-owned-supervisor.py`,
+  );
+  await Deno.copyFile(
+    "scripts/release-pidfd-signal.py",
+    `${root}/scripts/release-pidfd-signal.py`,
+  );
+  await Deno.copyFile(
     "compose.external-postgres.yml",
     `${root}/compose.external-postgres.yml`,
   );
   await Deno.chmod(`${root}/scripts/release-gate.sh`, 0o755);
   await Deno.chmod(`${root}/scripts/release-artifacts.sh`, 0o755);
+  await Deno.chmod(`${root}/scripts/release-owned-supervisor.py`, 0o755);
+  await Deno.chmod(`${root}/scripts/release-pidfd-signal.py`, 0o755);
   await Deno.writeTextFile(`${root}/src/main_optctl.ts`, "export {};\n");
   await Deno.writeTextFile(
     `${root}/tests/ordinary.ts`,
@@ -434,6 +638,14 @@ if [[ "$*" == "task test" ]]; then
     source-mutation)
       printf '// mutated\\n' >>"$OPERANT_RELEASE_SOURCE_ROOT/tests/ordinary.ts"
       ;;
+    staged-source-mutation)
+      printf '// staged mutation\\n' >>"$OPERANT_RELEASE_SOURCE_ROOT/tests/ordinary.ts"
+      printf 'staged extra\\n' >"$OPERANT_RELEASE_SOURCE_ROOT/tests/staged-extra.ts"
+      git -C "$OPERANT_RELEASE_SOURCE_ROOT" add -- tests/ordinary.ts tests/staged-extra.ts
+      ;;
+    image-retag)
+      : >"$FAKE_STATE/retag"
+      ;;
     pid-mismatch)
       setsid sleep 120 >/dev/null 2>&1 & pid=$!
       printf '%s\\n' "$pid" >"$FAKE_STATE/mismatch-pid"
@@ -465,28 +677,33 @@ fi
 if [[ -n "\${FAKE_DOCKER_FAIL_ALWAYS_MATCH:-}" && "$command_line" == *"$FAKE_DOCKER_FAIL_ALWAYS_MATCH"* ]]; then exit 72; fi
 value() { sed -n "s/^$1=//p" "$2" | head -1; }
 list_kind() {
-  kind=$1; filter="\${2:-}"
+  kind=$1; filter="\${2:-}"; project="\${3:-}"
   shopt -s nullglob
   for file in "$FAKE_STATE/$kind"/*; do
     if [[ -n "$filter" && "$(value label "$file")" != "$filter" ]]; then continue; fi
+    if [[ -n "$project" && "$(value project "$file")" != "$project" ]]; then continue; fi
     basename -- "$file"
   done | LC_ALL=C sort
+}
+filter_value() {
+  key=$1; shift
+  for arg in "$@"; do [[ "$arg" != "label=$key="* ]] || { printf '%s' "\${arg#label=$key=}"; return; }; done
 }
 arg_after() { target=$1; shift; while (($#)); do [[ "$1" == "$target" ]] && { printf '%s' "$2"; return; }; shift; done; }
 last_arg() { printf '%s' "\${!#}"; }
 case "\${1:-} \${2:-}" in
   "image ls")
-    filter=""; [[ "$*" != *"--filter label=dev.operant.release-gate="* ]] || filter="\${OPERANT_RELEASE_GATE_ID:-}"
-    list_kind images "$filter" ;;
+    filter=$(filter_value dev.operant.release-gate "$@"); project=$(filter_value com.docker.compose.project "$@")
+    list_kind images "$filter" "$project" ;;
   "container ls")
-    filter=""; [[ "$*" != *"--filter label=dev.operant.release-gate="* ]] || filter="\${OPERANT_RELEASE_GATE_ID:-}"
-    list_kind containers "$filter" ;;
+    filter=$(filter_value dev.operant.release-gate "$@"); project=$(filter_value com.docker.compose.project "$@")
+    list_kind containers "$filter" "$project" ;;
   "volume ls")
-    filter=""; [[ "$*" != *"--filter label=dev.operant.release-gate="* ]] || filter="\${OPERANT_RELEASE_GATE_ID:-}"
-    list_kind volumes "$filter" ;;
+    filter=$(filter_value dev.operant.release-gate "$@"); project=$(filter_value com.docker.compose.project "$@")
+    list_kind volumes "$filter" "$project" ;;
   "network ls")
-    filter=""; [[ "$*" != *"--filter label=dev.operant.release-gate="* ]] || filter="\${OPERANT_RELEASE_GATE_ID:-}"
-    list_kind networks "$filter" ;;
+    filter=$(filter_value dev.operant.release-gate "$@"); project=$(filter_value com.docker.compose.project "$@")
+    list_kind networks "$filter" "$project" ;;
   "build --pull=false")
     count=$(<"$FAKE_STATE/build-count"); printf '%s\\n' "$((count+1))" >"$FAKE_STATE/build-count"
     tag=$(arg_after --tag "$@")
@@ -509,7 +726,8 @@ case "\${1:-} \${2:-}" in
     esac ;;
   "image rm")
     identity=$(last_arg "$@"); [[ "$identity" != operant:* ]] || identity=$(<"$FAKE_STATE/tag-image")
-    rm -f -- "$FAKE_STATE/images/$identity" "$FAKE_STATE/tag-image" ;;
+    rm -f -- "$FAKE_STATE/images/$identity"
+    [[ ! -e "$FAKE_STATE/tag-image" || "$(<"$FAKE_STATE/tag-image")" != "$identity" ]] || rm -f -- "$FAKE_STATE/tag-image" ;;
   "container create")
     name=$(arg_after --name "$@"); label=$(arg_after --label "$@"); entry=$(arg_after --entrypoint "$@")
     count=$(find "$FAKE_STATE/containers" -mindepth 1 -maxdepth 1 -type f | wc -l)
@@ -522,6 +740,7 @@ case "\${1:-} \${2:-}" in
     [[ -e "$file" ]] || exit 1
     format=$(last_arg "$@")
     case "$format" in
+      *'{{json .Config.Labels}}'*) printf '{"dev.operant.release-gate":"%s","com.docker.compose.project":"%s"}\\n' "$(value label "$file")" "$(value project "$file")" ;;
       *dev.operant.release-gate*) value label "$file" ;;
       *Mounts*) value mounts "$file" ;;
       *'{{.Id}}'*) printf '%s\\n' "$identity" ;;
@@ -538,11 +757,11 @@ case "\${1:-} \${2:-}" in
     identity=$(last_arg "$@"); rm -f -- "$FAKE_STATE/containers/$identity" ;;
   "volume inspect")
     identity=$3; file="$FAKE_STATE/volumes/$identity"; [[ -e "$file" ]] || exit 1
-    format=$(last_arg "$@"); [[ "$format" != *dev.operant.release-gate* ]] || { value label "$file"; exit; }; printf '%s\\n' "$identity" ;;
+    format=$(last_arg "$@"); [[ "$format" != *'{{json .Labels}}'* ]] || { printf '{"dev.operant.release-gate":"%s","com.docker.compose.project":"%s"}\\n' "$(value label "$file")" "$(value project "$file")"; exit; }; [[ "$format" != *dev.operant.release-gate* ]] || { value label "$file"; exit; }; printf '%s\\n' "$identity" ;;
   "volume rm") identity=$(last_arg "$@"); rm -f -- "$FAKE_STATE/volumes/$identity" ;;
   "network inspect")
     identity=$3; file="$FAKE_STATE/networks/$identity"; [[ -e "$file" ]] || exit 1
-    format=$(last_arg "$@"); [[ "$format" != *dev.operant.release-gate* ]] || { value label "$file"; exit; }; printf '%s\\n' "$identity" ;;
+    format=$(last_arg "$@"); [[ "$format" != *'{{json .Labels}}'* ]] || { printf '{"dev.operant.release-gate":"%s","com.docker.compose.project":"%s"}\\n' "$(value label "$file")" "$(value project "$file")"; exit; }; [[ "$format" != *dev.operant.release-gate* ]] || { value label "$file"; exit; }; printf '%s\\n' "$identity" ;;
   "network rm") identity=$(last_arg "$@"); rm -f -- "$FAKE_STATE/networks/$identity" ;;
   "compose -f") exit 0 ;;
   *) printf 'unexpected fake docker: %s\\n' "$*" >&2; exit 2 ;;
@@ -559,6 +778,115 @@ async function runGate(
     ["bash", "scripts/release-gate.sh"],
     extraEnv,
   );
+}
+
+async function runPidfdAdversary(
+  signalName: "CONT" | "TERM" | "KILL",
+  mode: "mismatch" | "reuse" | "inspect-failure",
+) {
+  const helper = new URL(
+    "../../../scripts/release-pidfd-signal.py",
+    import.meta.url,
+  ).pathname;
+  const source = String.raw`
+import base64, importlib.util, json, os, pathlib, signal, sys, tempfile
+sys.dont_write_bytecode = True
+helper, signal_name, mode = sys.argv[1:]
+spec = importlib.util.spec_from_file_location("release_pidfd_signal", helper)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+root = pathlib.Path(tempfile.mkdtemp(prefix="pidfd-contract-"))
+proc = root / "proc"
+(proc / "sys/kernel/random").mkdir(parents=True)
+(proc / "sys/kernel/random/boot_id").write_text("boot-contract\n")
+
+def write_process(pid, ppid, ticks, run=False):
+    directory = proc / str(pid)
+    directory.mkdir(exist_ok=True)
+    fields = ["S", str(ppid)] + ["0"] * 17 + [str(ticks)] + ["0"] * 5
+    (directory / "stat").write_text(f"{pid} (contract) " + " ".join(fields) + "\n")
+    (directory / "status").write_text("Uid:\t1000\t1000\t1000\t1000\n")
+    (directory / "cmdline").write_bytes(b"worker\0" + (b"r" * 32 if run else b""))
+    os.symlink("/bin/worker", directory / "exe")
+    os.symlink("/tmp/state", directory / "cwd")
+
+write_process(1, 0, 100)
+write_process(42, 1, 200, True)
+identity = module.process_identity(proc, 42)
+record = {
+    **identity,
+    "boot_id": "boot-contract",
+    "run_id": "r" * 32,
+    "data_dir": "/tmp/state",
+}
+if mode == "mismatch":
+    record["start_ticks"] = "199"
+record_path = root / "record.json"
+record_path.write_text(json.dumps(record) + "\n")
+sent = []
+
+def fake_open(pid, flags):
+    assert pid == 42 and flags == 0
+    return os.open("/dev/null", os.O_RDONLY)
+
+def mutate_after_open():
+    if mode == "reuse":
+        fields = ["S", "1"] + ["0"] * 17 + ["999"] + ["0"] * 5
+        (proc / "42/stat").write_text("42 (reused) " + " ".join(fields) + "\n")
+    elif mode == "inspect-failure":
+        (proc / "42/status").unlink()
+
+def fake_send(pidfd, number):
+    sent.append((pidfd, number))
+
+try:
+    module.signal_registered_process(
+        record_path,
+        "/tmp/state",
+        "r" * 32,
+        getattr(signal, "SIG" + signal_name),
+        proc_root=proc,
+        pidfd_open=fake_open,
+        pidfd_send_signal=fake_send,
+        before_revalidate=mutate_after_open,
+    )
+except module.IdentityError:
+    pass
+else:
+    raise SystemExit("unsafe signal was accepted")
+if sent:
+    raise SystemExit(f"unsafe signal callback: {sent!r}")
+print("blocked-without-signal")
+`;
+  const output = await new Deno.Command("python3", {
+    args: ["-c", source, helper, signalName, mode],
+    stdout: "piped",
+    stderr: "piped",
+  }).output();
+  return {
+    code: output.code,
+    stdout: new TextDecoder().decode(output.stdout),
+    stderr: new TextDecoder().decode(output.stderr),
+  };
+}
+
+async function runHarnessEval(
+  fixture: Fixture,
+  source: string,
+  extraEnv: Record<string, string> = {},
+) {
+  const output = await new Deno.Command(Deno.execPath(), {
+    args: ["eval", source],
+    cwd: fixture.root,
+    env: fixtureEnv(fixture, extraEnv),
+    stdout: "piped",
+    stderr: "piped",
+  }).output();
+  return {
+    code: output.code,
+    stdout: new TextDecoder().decode(output.stdout),
+    stderr: new TextDecoder().decode(output.stderr),
+  };
 }
 
 async function runArtifact(
@@ -698,6 +1026,15 @@ async function waitForPath(path: string): Promise<void> {
     }
   }
   throw new Error(`timed out waiting for ${path}`);
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await Deno.lstat(path);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function processExists(pid: number): Promise<boolean> {
