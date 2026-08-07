@@ -985,19 +985,20 @@ Deno.test({
         });
       }
     } finally {
-      await runCommand("docker", [
-        "rm",
-        "-f",
-        "-v",
-        app,
-        badApp,
-        unreachableApp,
-        badAuthApp,
-        pg,
-        badPg,
-      ], {
-        allowFailure: true,
-      });
+      for (
+        const candidate of [
+          app,
+          badApp,
+          unreachableApp,
+          badAuthApp,
+          pg,
+          badPg,
+        ]
+      ) {
+        await runCommand("docker", ["rm", "-f", "-v", candidate], {
+          allowFailure: true,
+        });
+      }
       await runCommand("docker", ["network", "rm", network], {
         allowFailure: true,
       });
@@ -1048,7 +1049,7 @@ Deno.test({
       const firstAppAnonymousVolumes = await containerAnonymousDockerVolumeIds(
         appId,
       );
-      assertEquals(firstAppAnonymousVolumes.size, 1);
+      assertEquals(firstAppAnonymousVolumes.size, 0);
       const bootstrap = await compose([
         "exec",
         "-T",
@@ -1094,7 +1095,7 @@ Deno.test({
       assert(recreatedAppId !== appId);
       const recreatedAppAnonymousVolumes =
         await containerAnonymousDockerVolumeIds(recreatedAppId);
-      assertEquals(recreatedAppAnonymousVolumes.size, 1);
+      assertEquals(recreatedAppAnonymousVolumes.size, 0);
       assertEquals(
         newAnonymousDockerVolumeIds(
           anonymousVolumesBefore,

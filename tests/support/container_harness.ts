@@ -427,7 +427,12 @@ export async function runCommand(
     return await runRegisteredGateCompose(args, options, gateId);
   }
   if (command === "docker" && gateId) {
-    await verifyGateDockerRemoval(args, gateId);
+    try {
+      await verifyGateDockerRemoval(args, gateId);
+    } catch (error) {
+      if (!options.allowFailure) throw error;
+      return { code: 125, stdout: "", stderr: String(error) };
+    }
   }
 
   let effectiveArgs = args;
@@ -860,6 +865,7 @@ async function runCommandRaw(
     await writer.close();
   }
   let timer: ReturnType<typeof setTimeout> | undefined;
+  const outputPromise = child.output();
   try {
     const timeout = new Promise<never>((_, reject) => {
       timer = setTimeout(
@@ -867,7 +873,7 @@ async function runCommandRaw(
         options.timeoutMs ?? 60_000,
       );
     });
-    const output = await Promise.race([child.output(), timeout]);
+    const output = await Promise.race([outputPromise, timeout]);
     const result = {
       code: output.code,
       stdout: bounded(new TextDecoder().decode(output.stdout)),
@@ -880,14 +886,15 @@ async function runCommandRaw(
     }
     return result;
   } catch (error) {
+    // This Deno.ChildProcess is the authoritative launch handle. Never signal
+    // a separately re-inspected numeric PID or a potentially reused group ID.
     try {
-      new Deno.Command("kill", { args: ["-TERM", `-${child.pid}`] })
-        .outputSync();
-      await sleep(500);
-      new Deno.Command("kill", { args: ["-KILL", `-${child.pid}`] })
-        .outputSync();
+      child.kill("SIGTERM");
+      await Promise.race([outputPromise, sleep(500)]);
+      child.kill("SIGKILL");
+      await outputPromise.catch(() => undefined);
     } catch {
-      // Process group already exited.
+      // The authoritative child handle already observed process exit.
     }
     throw error;
   } finally {
