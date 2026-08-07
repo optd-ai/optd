@@ -181,6 +181,150 @@ Deno.test("Docker ownership inspect failure blocks removal before destruction", 
   }
 });
 
+for (
+  const contract of [
+    {
+      kind: "container",
+      registryKind: "containers",
+      command: ["container", "rm"],
+      flags: ["--force"],
+      combined: "-fv",
+    },
+    {
+      kind: "volume",
+      registryKind: "volumes",
+      command: ["volume", "rm"],
+      flags: ["--force"],
+      combined: "-ff",
+    },
+    {
+      kind: "network",
+      registryKind: "networks",
+      command: ["network", "rm"],
+      flags: ["--force"],
+      combined: "-ff",
+    },
+  ] as const
+) {
+  Deno.test(
+    `Docker ${contract.kind} rm parses exact candidates and rejects ambiguous options`,
+    async () => {
+      const fixture = await createFixture();
+      try {
+        const gateId = "e".repeat(32);
+        for (
+          const identity of [
+            "123",
+            "456",
+            "-leading",
+            "unknown-victim",
+            "combined-victim",
+            "missing-value-victim",
+            "multi-one",
+            "multi-two",
+            "multi-live",
+          ]
+        ) {
+          await seedResource(
+            fixture,
+            contract.registryKind,
+            identity,
+            gateId,
+          );
+        }
+        const source = `
+          import { runCommand } from ${
+          JSON.stringify(
+            new URL("../../support/container_harness.ts", import.meta.url).href,
+          )
+        };
+          const prefix = ${
+          JSON.stringify([...contract.command, ...contract.flags])
+        };
+          async function blocked(args) {
+            try {
+              await runCommand("docker", args);
+            } catch {
+              return;
+            }
+            throw new Error("unsafe removal command was accepted: " + args.join(" "));
+          }
+          await runCommand("docker", [...prefix, "123"]);
+          await runCommand("docker", [...prefix, "--", "456"]);
+          await runCommand("docker", [...prefix, "--", "-leading"]);
+          await blocked([...prefix, "--definitely-unknown", "unknown-victim"]);
+          await blocked([...prefix, ${
+          JSON.stringify(contract.combined)
+        }, "combined-victim"]);
+          await blocked([...prefix, "--force=", "missing-value-victim"]);
+          await runCommand("docker", [...prefix, "multi-one", "multi-two"]);
+          await blocked([...prefix, "multi-live", "multi-absent"]);
+        `;
+        const result = await runHarnessEval(fixture, source, {
+          OPERANT_RELEASE_GATE_ID: gateId,
+        });
+        assertEquals(result.code, 0, `${result.stdout}\n${result.stderr}`);
+        const docker = await readLog(fixture, "docker.log");
+        for (
+          const identity of [
+            "123",
+            "456",
+            "-leading",
+            "multi-one",
+            "multi-two",
+            "multi-live",
+            "multi-absent",
+          ]
+        ) {
+          assertStringIncludes(
+            docker,
+            `${contract.kind} inspect ${identity} --format`,
+          );
+        }
+        assertStringIncludes(
+          docker,
+          `${contract.command.join(" ")} ${contract.flags.join(" ")} 123`,
+        );
+        assertStringIncludes(
+          docker,
+          `${contract.command.join(" ")} ${contract.flags.join(" ")} -- 456`,
+        );
+        assertStringIncludes(
+          docker,
+          `${contract.command.join(" ")} ${
+            contract.flags.join(" ")
+          } -- -leading`,
+        );
+        assertStringIncludes(
+          docker,
+          `${contract.command.join(" ")} ${
+            contract.flags.join(" ")
+          } multi-one multi-two`,
+        );
+        for (
+          const rejected of [
+            "--definitely-unknown unknown-victim",
+            `${contract.combined} combined-victim`,
+            "--force= missing-value-victim",
+            "multi-live multi-absent",
+          ]
+        ) {
+          assert(
+            !docker.includes(
+              `${contract.command.join(" ")} ${
+                contract.flags.join(" ")
+              } ${rejected}`,
+            ),
+            docker,
+          );
+        }
+      } finally {
+        await removeFixture(fixture);
+      }
+    },
+  );
+}
+
 Deno.test("Compose down preflights exact resources and never runs after inspect failure", async () => {
   const fixture = await createFixture();
   try {
@@ -301,6 +445,31 @@ for (const signalName of ["CONT", "TERM", "KILL"] as const) {
     );
   }
 }
+
+Deno.test("pidfd rejects untrusted manifest paths and metadata without signaling", async () => {
+  const result = await runPidfdManifestAdversaries();
+  assertEquals(result.code, 0, `${result.stdout}\n${result.stderr}`);
+  for (
+    const adversary of [
+      "mode-0666",
+      "mode-0640",
+      "symlink-final",
+      "symlink-parent",
+      "symlink-state-root",
+      "hardlink",
+      "outside-registry",
+      "directory",
+      "fifo",
+      "unsafe-state-mode",
+      "unsafe-registry-mode",
+      "unsafe-pids-mode",
+      "rename-replacement",
+      "wrong-owner",
+    ]
+  ) {
+    assertStringIncludes(result.stdout, adversary);
+  }
+});
 
 Deno.test("PID identity mismatch is never signaled", async () => {
   const fixture = await createFixture();
@@ -789,13 +958,19 @@ async function runPidfdAdversary(
     import.meta.url,
   ).pathname;
   const source = String.raw`
-import base64, importlib.util, json, os, pathlib, signal, sys, tempfile
+import importlib.util, json, os, pathlib, signal, sys, tempfile
 sys.dont_write_bytecode = True
 helper, signal_name, mode = sys.argv[1:]
 spec = importlib.util.spec_from_file_location("release_pidfd_signal", helper)
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 root = pathlib.Path(tempfile.mkdtemp(prefix="pidfd-contract-"))
+state = root / "state"
+registry = state / "registry"
+pids = registry / "pids"
+pids.mkdir(parents=True)
+for directory in (state, registry, pids):
+    directory.chmod(0o700)
 proc = root / "proc"
 (proc / "sys/kernel/random").mkdir(parents=True)
 (proc / "sys/kernel/random/boot_id").write_text("boot-contract\n")
@@ -805,10 +980,11 @@ def write_process(pid, ppid, ticks, run=False):
     directory.mkdir(exist_ok=True)
     fields = ["S", str(ppid)] + ["0"] * 17 + [str(ticks)] + ["0"] * 5
     (directory / "stat").write_text(f"{pid} (contract) " + " ".join(fields) + "\n")
-    (directory / "status").write_text("Uid:\t1000\t1000\t1000\t1000\n")
+    uid = str(os.geteuid())
+    (directory / "status").write_text(f"Uid:\t{uid}\t{uid}\t{uid}\t{uid}\n")
     (directory / "cmdline").write_bytes(b"worker\0" + (b"r" * 32 if run else b""))
     os.symlink("/bin/worker", directory / "exe")
-    os.symlink("/tmp/state", directory / "cwd")
+    os.symlink(state, directory / "cwd")
 
 write_process(1, 0, 100)
 write_process(42, 1, 200, True)
@@ -817,12 +993,13 @@ record = {
     **identity,
     "boot_id": "boot-contract",
     "run_id": "r" * 32,
-    "data_dir": "/tmp/state",
+    "data_dir": str(state),
 }
 if mode == "mismatch":
     record["start_ticks"] = "199"
-record_path = root / "record.json"
+record_path = pids / "42.json"
 record_path.write_text(json.dumps(record) + "\n")
+record_path.chmod(0o600)
 sent = []
 
 def fake_open(pid, flags):
@@ -842,7 +1019,8 @@ def fake_send(pidfd, number):
 try:
     module.signal_registered_process(
         record_path,
-        "/tmp/state",
+        state,
+        registry,
         "r" * 32,
         getattr(signal, "SIG" + signal_name),
         proc_root=proc,
@@ -860,6 +1038,188 @@ print("blocked-without-signal")
 `;
   const output = await new Deno.Command("python3", {
     args: ["-c", source, helper, signalName, mode],
+    stdout: "piped",
+    stderr: "piped",
+  }).output();
+  return {
+    code: output.code,
+    stdout: new TextDecoder().decode(output.stdout),
+    stderr: new TextDecoder().decode(output.stderr),
+  };
+}
+
+async function runPidfdManifestAdversaries() {
+  const helper = new URL(
+    "../../../scripts/release-pidfd-signal.py",
+    import.meta.url,
+  ).pathname;
+  const source = String.raw`
+import importlib.util, json, os, pathlib, signal, sys, tempfile
+sys.dont_write_bytecode = True
+spec = importlib.util.spec_from_file_location("release_pidfd_signal", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+run_id = "r" * 32
+completed = []
+
+def fixture():
+    root = pathlib.Path(tempfile.mkdtemp(prefix="pidfd-manifest-contract-"))
+    state = root / "state"
+    registry = state / "registry"
+    pids = registry / "pids"
+    pids.mkdir(parents=True)
+    for directory in (state, registry, pids):
+        directory.chmod(0o700)
+    proc = root / "proc"
+    (proc / "sys/kernel/random").mkdir(parents=True)
+    (proc / "sys/kernel/random/boot_id").write_text("boot-contract\n")
+    for pid, ppid, ticks, has_run in ((1, 0, 100, False), (42, 1, 200, True)):
+        directory = proc / str(pid)
+        directory.mkdir()
+        fields = ["S", str(ppid)] + ["0"] * 17 + [str(ticks)] + ["0"] * 5
+        (directory / "stat").write_text(f"{pid} (contract) " + " ".join(fields) + "\n")
+        uid = str(os.geteuid())
+        (directory / "status").write_text(f"Uid:\t{uid}\t{uid}\t{uid}\t{uid}\n")
+        (directory / "cmdline").write_bytes(b"worker\0" + (run_id.encode() if has_run else b""))
+        os.symlink("/bin/worker", directory / "exe")
+        os.symlink(state, directory / "cwd")
+    record = {
+        **module.process_identity(proc, 42),
+        "boot_id": "boot-contract",
+        "run_id": run_id,
+        "data_dir": str(state),
+    }
+    record_path = pids / "42.json"
+    record_path.write_text(json.dumps(record) + "\n")
+    record_path.chmod(0o600)
+    return root, state, registry, pids, proc, record, record_path
+
+def reject(name, mutate, replace_after_open=False):
+    root, state, registry, pids, proc, record, record_path = fixture()
+    record_path, state, registry = mutate(
+        root, state, registry, pids, record, record_path
+    )
+    sent = []
+    opened = []
+    def fake_open(pid, flags):
+        opened.append(pid)
+        return os.open("/dev/null", os.O_RDONLY)
+    def fake_send(pidfd, number):
+        sent.append((pidfd, number))
+    def replace():
+        old = record_path.with_suffix(".old")
+        record_path.rename(old)
+        record_path.write_text(json.dumps(record) + "\n")
+        record_path.chmod(0o600)
+    try:
+        module.signal_registered_process(
+            record_path,
+            state,
+            registry,
+            run_id,
+            signal.SIGTERM,
+            proc_root=proc,
+            pidfd_open=fake_open,
+            pidfd_send_signal=fake_send,
+            before_revalidate=replace if replace_after_open else None,
+        )
+    except module.IdentityError:
+        pass
+    else:
+        raise SystemExit(f"{name}: unsafe manifest was accepted")
+    if sent:
+        raise SystemExit(f"{name}: unsafe signal callback reached: {sent!r}")
+    if replace_after_open and opened != [42]:
+        raise SystemExit(f"{name}: replacement adversary did not run after pidfd_open")
+    if not replace_after_open and opened:
+        raise SystemExit(f"{name}: pidfd_open ran before manifest validation")
+    completed.append(name)
+
+def unchanged(root, state, registry, pids, record, record_path):
+    return record_path, state, registry
+
+def mode(value):
+    def mutate(root, state, registry, pids, record, record_path):
+        record_path.chmod(value)
+        return record_path, state, registry
+    return mutate
+
+reject("mode-0666", mode(0o666))
+reject("mode-0640", mode(0o640))
+
+def final_symlink(root, state, registry, pids, record, record_path):
+    target = root / "outside.json"
+    target.write_text(json.dumps(record) + "\n")
+    target.chmod(0o600)
+    record_path.unlink()
+    record_path.symlink_to(target)
+    return record_path, state, registry
+reject("symlink-final", final_symlink)
+
+def parent_symlink(root, state, registry, pids, record, record_path):
+    real = state / "real-registry"
+    registry.rename(real)
+    registry.symlink_to(real, target_is_directory=True)
+    return registry / "pids" / "42.json", state, registry
+reject("symlink-parent", parent_symlink)
+
+def state_symlink(root, state, registry, pids, record, record_path):
+    alias = root / "state-alias"
+    alias.symlink_to(state, target_is_directory=True)
+    return alias / "registry" / "pids" / "42.json", alias, alias / "registry"
+reject("symlink-state-root", state_symlink)
+
+def hardlink(root, state, registry, pids, record, record_path):
+    os.link(record_path, pids / "second-link.json")
+    return record_path, state, registry
+reject("hardlink", hardlink)
+
+def outside(root, state, registry, pids, record, record_path):
+    path = root / "42.json"
+    path.write_text(json.dumps(record) + "\n")
+    path.chmod(0o600)
+    return path, state, registry
+reject("outside-registry", outside)
+
+def directory(root, state, registry, pids, record, record_path):
+    record_path.unlink()
+    record_path.mkdir(mode=0o700)
+    return record_path, state, registry
+reject("directory", directory)
+
+def fifo(root, state, registry, pids, record, record_path):
+    record_path.unlink()
+    os.mkfifo(record_path, 0o600)
+    record_path.chmod(0o600)
+    return record_path, state, registry
+reject("fifo", fifo)
+
+def state_mode(root, state, registry, pids, record, record_path):
+    state.chmod(0o755)
+    return record_path, state, registry
+reject("unsafe-state-mode", state_mode)
+
+def registry_mode(root, state, registry, pids, record, record_path):
+    registry.chmod(0o755)
+    return record_path, state, registry
+reject("unsafe-registry-mode", registry_mode)
+
+def pids_mode(root, state, registry, pids, record, record_path):
+    pids.chmod(0o755)
+    return record_path, state, registry
+reject("unsafe-pids-mode", pids_mode)
+reject("rename-replacement", unchanged, replace_after_open=True)
+if os.geteuid() == 0:
+    def wrong_owner(root, state, registry, pids, record, record_path):
+        os.chown(record_path, 1, -1)
+        return record_path, state, registry
+    reject("wrong-owner", wrong_owner)
+else:
+    completed.append("wrong-owner-skipped-unprivileged")
+print("blocked-manifest-adversaries=" + ",".join(completed))
+`;
+  const output = await new Deno.Command("python3", {
+    args: ["-c", source, helper],
     stdout: "piped",
     stderr: "piped",
   }).output();
