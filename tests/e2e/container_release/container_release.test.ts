@@ -328,14 +328,14 @@ Deno.test({
       }]);
       assertEquals(queuedStage.raw.code, 0, queuedStage.raw.stderr);
       await ok(["--json", "changeset", "commit", queuedStage.data.id]);
-      const queued = await waitOutboxStatus(launcher, "queued");
+      const queued = await waitOutboxStatus(launcher, "pending");
       const queuedEvidence = await ok([
         "--json",
         "outbox",
         "inspect",
         String(queued.id),
       ]);
-      assertEquals(queuedEvidence.status, "queued");
+      assertEquals(queuedEvidence.status, "pending");
       assertEquals(queuedEvidence.total_attempts, 0);
       await harness.docker(["kill", harness.container]);
       await launcher.close().catch(() => undefined);
