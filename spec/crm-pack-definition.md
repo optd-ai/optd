@@ -1,8 +1,21 @@
+<!-- generated-by: pi-dag-workflow/project-model; view: view-disposition-crm-pack-definition; contract: 1; input: sha256:ab92e06a2ce6baf2f8d26fde23598980ccffff990a442dbd848597d9d884148a -->
+
 # Historical CRM Pack Definition
 
-> **Status:** detailed pre-auth design history. The repository CRM fixture is the
-> executable proof pack, while frozen pack identity, hook, operation, policy,
-> staging, and acceptance specs override conflicting namespace/preview examples. Prototype
+Generated non-normative disposition view preserving the complete reviewed legacy source for auditability.
+
+## Migration disposition
+
+<a id="obj-com-disposition-crm-pack-definition"></a>
+
+### Disposition — Historical CRM Pack Definition
+
+**Migration disposition.** This source is preserved literally below for auditability at `sha256:3ef4c870a442175cfa2794af8d6dd8542fb493a53bd4ef48cb8e9f7acd3511b4`, but remains non-normative historical, supporting research, prototype evidence, roadmap, or superseded planning material. Only separately accepted current project-model objects carry product authority.
+
+> **Status:** detailed pre-auth design history. The repository CRM fixture is
+> the executable proof pack, while frozen pack identity, hook, operation,
+> policy, staging, and acceptance specs override conflicting namespace/preview
+> examples. Prototype
 
 ## Status
 

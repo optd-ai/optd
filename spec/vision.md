@@ -1,4 +1,16 @@
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-vision; contract: 1; input: sha256:3ac5930a89c1847155766d1c13e19d2e2c49053fc9ebf7953ba1068b77385c51 -->
+
 # Vision
+
+Generated exact-contract projection imported into project-model/model.json from the reviewed vision.md source.
+
+## Exact migrated contract
+
+<a id="obj-com-exact-vision-v1"></a>
+
+### Exact v1 contract — Vision
+
+**Migration provenance.** Exact normative contract imported from `spec/vision.md` at `sha256:bd3cdd1fa8dcea21ec6368fd83aa7fa5d85a0ac37bc7282d0bfca8f4f8c73556`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
 
 ## One-Line Vision
 

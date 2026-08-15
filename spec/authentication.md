@@ -1,12 +1,23 @@
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-authentication; contract: 1; input: sha256:c7bb8f6260829a48f90e7d27fae0fef3ee5217877febcacef9409c8b236e5761 -->
+
 # Authentication and Local Agent Grants
+
+Generated exact-contract projection imported into project-model/model.json from the reviewed authentication.md source.
+
+## Exact migrated contract
+
+<a id="obj-com-exact-authentication-v1"></a>
+
+### Exact v1 contract — Authentication and Local Agent Grants
+
+**Migration provenance.** Exact normative contract imported from `spec/authentication.md` at `sha256:907cbfed4b2bd8237c2d423f8bbde8e829966e7d7706cb44009a85c2b73eb839`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
 
 ## Status
 
-Brainstorm-backed target spec. Not yet implemented.
-
-Operant currently has authorization/policy enforcement, but current dev/test
-flows still trust caller-supplied actor context. This spec defines the desired
-authentication model for human users and agent users.
+Implemented and frozen for the current single-tenant local-first contract.
+Production requests use opaque server-issued credentials and server-derived
+principal, human-anchor, role, session, and authorization-context facts; caller-
+supplied actor or role authority is rejected.
 
 ## Goals
 
@@ -352,11 +363,13 @@ A forgotten-password user creates a reset request without a session:
 optctl auth password-reset request --username jordan
 ```
 
-The client generates an idempotency key and private redemption nonce and sends
-only its hash. The public response does not reveal whether the username exists,
-but returns a random unenumerable request id (at least 128 bits) to send to a
-super-admin through a trusted channel. There is no endpoint/CLI command to list
-pending reset requests; a super-admin must provide the exact id:
+The client generates an idempotency key and a private redemption nonce with at
+least 128 bits of cryptographic entropy, and sends only the nonce hash. The
+server returns an opaque UUIDv7 request ID. The ID is a public workflow
+identity, not proof of possession; non-enumeration and redemption security come
+from the uniform response, exact-ID lookup, throttling, and the separate private
+nonce. There is no endpoint/CLI command to list pending reset requests; a
+super-admin must provide the exact ID:
 
 ```bash
 optctl auth password-reset inspect reset_<random-id>
@@ -553,9 +566,10 @@ for that role set should not create churn. It should report that the agent is
 already authorized for those roles and show the local binding plus authorization
 session summary.
 
-Pending requests last indefinitely until approved, denied, or invalidated by
-cleanup/revocation of the associated authorization-request credential. A
-cancellation command is not required for the MVP.
+Pending requests last indefinitely until approved, denied, cancelled by the
+requester, or invalidated by cleanup/revocation of the associated
+authorization-request credential. Requester cancellation is terminal, audited,
+and wakes connected waiters through the same Postgres-backed status path.
 
 Agents may wait for approval:
 
@@ -1548,8 +1562,9 @@ making the now-deactivated superseded authorization its own parent.
   exact role assignments, preserve conditional labels, and combine authored role
   `axi` guidance without turning role definitions into permission lists.
 - Auth storage uses the normalized records/table shapes defined throughout this
-  spec and [Authorization Definitions and Assignments](authorization-assignments.md).
-  The implementation plan must order migrations by foreign-key dependency:
+  spec and
+  [Authorization Definitions and Assignments](authorization-assignments.md). The
+  implementation plan must order migrations by foreign-key dependency:
   principals/users and roles/policies, credentials/sessions, assignments,
   authorization chains/tokens, requests/decisions/watch tickets, auth contexts,
   then reset/recovery records. No old database compatibility is required.

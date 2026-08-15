@@ -75,7 +75,7 @@ const CODE_STATUS = new Map<string, number>([
   ["constraint_conflict", 409],
   ["commit_retry_exhausted", 409],
   ["commit_busy", 423],
-  ["commit_lock_timeout", 423],
+  ["pack_install_busy", 423],
   ["rate_limited", 429],
   ["internal_error", 500],
   ["unavailable", 503],
@@ -87,7 +87,7 @@ export function toHttpStatus(error: StableError): number {
   if (registered !== undefined) return registered;
   switch (error.severity) {
     case "validation":
-      return 400;
+      return 422;
     case "authentication":
       return 401;
     case "authorization":

@@ -1,8 +1,20 @@
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-mvp-policy-schema; contract: 1; input: sha256:0b15a355d4c706689ef10c249d931e944da744dcb40343d46be2e98c4f2db293 -->
+
 # MVP Policy Schema v1
 
+Generated exact-contract projection imported into project-model/model.json from the reviewed mvp-policy-schema.md source.
+
+## Exact migrated contract
+
+<a id="obj-com-exact-mvp-policy-schema-v1"></a>
+
+### Exact v1 contract — MVP Policy Schema v1
+
+**Migration provenance.** Exact normative contract imported from `spec/mvp-policy-schema.md` at `sha256:f5d3922c71d77bf62224e1b45836b3c3d6793b9b68fa65df05892252fb61e51b`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
+
 Policy uses structured YAML plus the frozen SQL-lowerable CEL subset. Rego/OPA,
-arbitrary SQL, caller-supplied roles, and pack-defined permission vocabularies are
-not supported.
+arbitrary SQL, caller-supplied roles, and pack-defined permission vocabularies
+are not supported.
 
 ## Policy document
 
@@ -48,8 +60,8 @@ policy definitions contain only publisher-qualified identities.
 
 `spec.default_assignment` is required and is `none|all_projects`. Pack policies
 cannot default-activate at `system` or one project. `all_projects` activation is
-security-relevant, shown in preview, and atomically tied to the exact active pack
-revision. It grants no role by itself.
+security-relevant, shown in preview, and atomically tied to the exact active
+pack revision. It grants no role by itself.
 
 ## Rule fields
 
@@ -61,8 +73,8 @@ revision. It grants no role by itself.
   built-in super-admin policy mechanics.
 - `resources`: canonical resource identities. `*` is allowed only where the
   active system policy schema explicitly permits it.
-- `where`: optional frozen CEL-subset predicate evaluated against declared object
-  and actor fields.
+- `where`: optional frozen CEL-subset predicate evaluated against declared
+  object and actor fields.
 - `relation`: optional one-hop ReBAC clause.
 - `axi.summary`: optional explanation used in boundary capability summaries;
   explanatory only.
@@ -171,9 +183,9 @@ Conceptually, policy evaluation receives:
 CEL exposes only curated immutable principal aliases in v1: `actor.id`,
 `actor.principal_type`, and nullable `actor.human_user_id`; the transport object
 above is not caller input. Arbitrary assignment/user metadata arrays are not
-policy attributes. Role and policy
-assignments use exactly one `project`, `all_projects`, or `system` boundary as
-defined in [Authorization Definitions and Assignments](authorization-assignments.md).
+policy attributes. Role and policy assignments use exactly one `project`,
+`all_projects`, or `system` boundary as defined in
+[Authorization Definitions and Assignments](authorization-assignments.md).
 
 `system:super_admin` is a built-in policy bypass, not an ordinary pack rule. It
 still requires valid authentication/authorization chain, structural validation,
@@ -209,8 +221,8 @@ for one explicit boundary.
 
 Authenticated denial uses the shared error envelope and references the immutable
 auth context. It reports current principal, boundary, exact failed action and
-resource, and safe matched/checked policy identities/rules. It does not recommend
-roles, auth requests, grant commands, or escalation steps.
+resource, and safe matched/checked policy identities/rules. It does not
+recommend roles, auth requests, grant commands, or escalation steps.
 
 ```json
 {
@@ -221,7 +233,7 @@ roles, auth requests, grant commands, or escalation steps.
     "details": {
       "auth_context_id": "019b...",
       "principal_id": "019a...",
-      "boundary": {"project_id": "019c..."},
+      "boundary": { "project_id": "019c..." },
       "resource": "operant/crm:lead",
       "action": "update",
       "checked_policies": ["operant/crm:sales_access"],

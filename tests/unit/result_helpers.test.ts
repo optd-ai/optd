@@ -18,6 +18,6 @@ Deno.test("stable error helpers map to deterministic HTTP statuses", () => {
   const result = err(error);
   assertEquals(result.ok, false);
   assertEquals(result.error.code, "bad_input");
-  assertEquals(toHttpStatus(error), 400);
+  assertEquals(toHttpStatus(error), 422);
   assertThrows(() => unwrapOrThrow(result), Error, "bad_input: Bad input");
 });

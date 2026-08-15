@@ -83,7 +83,7 @@ const ResourceAxiGuidance = Type.Object({
     created: Type.Optional(Help),
     primaryAction: Type.Optional(Help),
     updated: Type.Optional(Help),
-    deleted: Type.Optional(Help),
+    archived: Type.Optional(Help),
     validation_failed: Type.Optional(Help),
     not_found: Type.Optional(Help),
   }, { additionalProperties: false }),

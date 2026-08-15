@@ -1,4 +1,16 @@
+<!-- generated-by: pi-dag-workflow/project-model; view: view-disposition-local-postgres-options; contract: 1; input: sha256:166be8960c22dc6eb15bae5f5991353732e49aa829c219305a6c3663fd91fa4b -->
+
 # Historical Local Postgres Options Research
+
+Generated non-normative disposition view preserving the complete reviewed legacy source for auditability.
+
+## Migration disposition
+
+<a id="obj-com-disposition-local-postgres-options"></a>
+
+### Disposition — Historical Local Postgres Options Research
+
+**Migration disposition.** This source is preserved literally below for auditability at `sha256:20910c3ab5084bb1f0939a2cf117b0a04cf422e5ce3647b1b41d0ab93cb5c580`, but remains non-normative historical, supporting research, prototype evidence, roadmap, or superseded planning material. Only separately accepted current project-model objects carry product authority.
 
 > **Status:** supporting research only. The frozen target is real external or
 > app-managed Postgres in `deployment.md`/`storage-postgres.md`; PGlite is

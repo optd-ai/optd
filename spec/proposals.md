@@ -1,11 +1,23 @@
+<!-- generated-by: pi-dag-workflow/project-model; view: view-disposition-proposals; contract: 1; input: sha256:2a168a5c0a82558ff9902167e47c05e12c5d267c8eae872efebe6d7270587ee8 -->
+
 # Historical Design Proposals
+
+Generated non-normative disposition view preserving the complete reviewed legacy source for auditability.
+
+## Migration disposition
+
+<a id="obj-com-disposition-proposals"></a>
+
+### Disposition — Historical Design Proposals
+
+**Migration disposition.** This source is preserved literally below for auditability at `sha256:75f1128fe56fe6bc203abfaa503d8593ec9b343e40eda9e8a55d093dfa1ca947`, but remains non-normative historical, supporting research, prototype evidence, roadmap, or superseded planning material. Only separately accepted current project-model objects carry product authority.
 
 > **Status:** supporting design history only. Frozen topic-specific specs and
 > `spec/README.md` take precedence. Implementers must not treat examples or open
 > wording here as the current contract.
 
-This file captures proposals that emerged while designing
-packs, hooks, resources, changesets, and `optctl`.
+This file captures proposals that emerged while designing packs, hooks,
+resources, changesets, and `optctl`.
 
 ## 1. Pack Authoring Format
 

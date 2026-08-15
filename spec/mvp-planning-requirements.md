@@ -1,4 +1,16 @@
+<!-- generated-by: pi-dag-workflow/project-model; view: view-disposition-mvp-planning-requirements; contract: 1; input: sha256:eeaf733f1dffe6e18a018eee47fa2ba41297fa3dd27031b23a648440594cced8 -->
+
 # Historical MVP Planning Requirements
+
+Generated non-normative disposition view preserving the complete reviewed legacy source for auditability.
+
+## Migration disposition
+
+<a id="obj-com-disposition-mvp-planning-requirements"></a>
+
+### Disposition — Historical MVP Planning Requirements
+
+**Migration disposition.** This source is preserved literally below for auditability at `sha256:84ac1192657cecd3fddce2e05b11ea7d53330648e1511ce78942d63dd2f6fb02`, but remains non-normative historical, supporting research, prototype evidence, roadmap, or superseded planning material. Only separately accepted current project-model objects carry product authority.
 
 > **Status:** requirements used for the completed pre-auth MVP planning pass.
 > Current frozen specs and acceptance criteria supersede conflicting commands,

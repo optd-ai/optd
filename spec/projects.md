@@ -1,4 +1,16 @@
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-projects; contract: 1; input: sha256:a14c31515dee7469398c387053112ce5ed3dbbb4771086e032e3efa039385340 -->
+
 # Platform Projects
+
+Generated exact-contract projection imported into project-model/model.json from the reviewed projects.md source.
+
+## Exact migrated contract
+
+<a id="obj-com-exact-projects-v1"></a>
+
+### Exact v1 contract — Platform Projects
+
+**Migration provenance.** Exact normative contract imported from `spec/projects.md` at `sha256:28c4f76c1ab344d7cff1f0a36fcf5adee19095466087d726190e917fd81dc38e`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
 
 ## Decision
 
@@ -42,9 +54,10 @@ projects
   without a second state transition.
 
 Reading/listing/creating/updating/archiving uses exact audited system actions
-`project.read`, `project.create`, `project.update`, or `project.archive`, not domain changeset operations. List only
-returns projects visible under current assignments/policy. It uses the shared auth-context and error contracts.
-The final useful project is not specially protected; the last-human-super-admin
+`project.read`, `project.create`, `project.update`, or `project.archive`, not
+domain changeset operations. List only returns projects visible under current
+assignments/policy. It uses the shared auth-context and error contracts. The
+final useful project is not specially protected; the last-human-super-admin
 invariant remains independent.
 
 ## Runtime behavior
@@ -95,9 +108,9 @@ At least one mutable field must be present; unknown fields fail.
 ```
 
 List defaults to active projects and accepts strict
-`status=active|archived|all`, optional exact `slug`, and cursor pagination. Exact
-slug lookup returns zero/one item and is how CLI resolves project context. Callers never provide owner/principal/role fields in
-project DTOs.
+`status=active|archived|all`, optional exact `slug`, and cursor pagination.
+Exact slug lookup returns zero/one item and is how CLI resolves project context.
+Callers never provide owner/principal/role fields in project DTOs.
 
 ## CLI
 

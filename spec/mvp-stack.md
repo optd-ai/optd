@@ -1,4 +1,16 @@
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-mvp-stack; contract: 1; input: sha256:feac99aff9a1fa2b2aa004c8bada14bab9a69bfee5942cf5e87d0b9624fe66e6 -->
+
 # MVP Stack Decisions
+
+Generated exact-contract projection imported into project-model/model.json from the reviewed mvp-stack.md source.
+
+## Exact migrated contract
+
+<a id="obj-com-exact-mvp-stack-v1"></a>
+
+### Exact v1 contract — MVP Stack Decisions
+
+**Migration provenance.** Exact normative contract imported from `spec/mvp-stack.md` at `sha256:f6ab86b71ab4d5b95612ba408f014ae2b61513a74387eae71d836dacefcb4fdd`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
 
 ## Decisions
 

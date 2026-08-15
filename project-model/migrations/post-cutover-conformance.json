@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-15T00:20:00.000Z",
+  "head": "7640287c1bf1ad11879b88dac36b81e092923ba4",
+  "mode": "authoritative",
+  "revision": 14,
+  "modelHash": "sha256:38ff405f90ae181ca5bebccf85f4ba3b56a5c53e394477a8e96fabd6236ef07f",
+  "approvedCandidateManifestHash": "sha256:46120d55b3ce71869c196451f0bb8ce8d341cee55c76f853afffdc9dc22b2244",
+  "cutoverBatchRef": "sha256:7d2620ba662747da2b06352c336e6aa7f9ffab5983e91a9457cc7eb558ff88fe",
+  "counts": {
+    "objects": 220,
+    "governing": 155,
+    "views": 62,
+    "generatedFiles": 62,
+    "acceptanceModes": {
+      "migration_cutover": 155
+    }
+  },
+  "checks": [
+    {
+      "id": "isolated-cutover",
+      "status": "passed",
+      "result": "exact approved candidate hash accepted; revision 14 authoritative; 62 generated paths; 0 stale paths"
+    },
+    {
+      "id": "installed-model-schema",
+      "status": "passed",
+      "result": "revision 14 authoritative; 220 objects; 155 accepted governing objects; zero validator errors"
+    },
+    {
+      "id": "projection-drift",
+      "status": "passed",
+      "result": "62 generated paths; zero drift paths; zero stale paths"
+    },
+    {
+      "id": "generated-output",
+      "status": "passed",
+      "result": "62 files, 194 Markdown links, 155 object anchors, 0 candidate banners, 0 empty accepted sections"
+    },
+    {
+      "id": "source-reference-resolution",
+      "status": "passed",
+      "result": "386/386 total source references resolve, including all 213 spec/document references"
+    },
+    {
+      "id": "focused-contracts",
+      "status": "passed",
+      "result": "57 passed, 0 failed after cutover"
+    },
+    {
+      "id": "deno-task-check",
+      "status": "passed",
+      "result": "typecheck passed after cutover"
+    },
+    {
+      "id": "format",
+      "status": "passed",
+      "result": "359 non-generated source/model files passed; generated spec formatting is owned by deterministic projector and checked for drift"
+    },
+    {
+      "id": "git-diff-check",
+      "status": "passed",
+      "result": "no whitespace errors"
+    },
+    {
+      "id": "generated-format-ownership",
+      "status": "passed",
+      "result": "spec is excluded from deno fmt because projector owns exact bytes; deno fmt checks 361 source/test/docs/model/config files and projector drift check validates all 62 generated specs"
+    }
+  ],
+  "historicalValidation": {
+    "defaultTestAttempt": "incomplete after 20-minute timeout during container suite with no observed failures; exact owned resources removed",
+    "sameHeadReleaseGate": "424 passed, 0 failed, 0 ignored before model migration"
+  },
+  "dockerStateAfterValidation": {
+    "containers": 0,
+    "imagesIncludingIntermediateIds": 20,
+    "volumes": 36,
+    "networks": 6,
+    "releaseOwnedResidue": 0,
+    "note": "No broad cleanup performed; image-count change is unrelated host activity and diagnostic only."
+  }
+}

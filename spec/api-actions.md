@@ -1,4 +1,16 @@
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-api-actions; contract: 1; input: sha256:56df6468e42dd9c8a471a8656757b20c935048d9153563a7ff87615f86ddf600 -->
+
 # API Actions
+
+Generated exact-contract projection imported into project-model/model.json from the reviewed api-actions.md source.
+
+## Exact migrated contract
+
+<a id="obj-com-exact-api-actions-v1"></a>
+
+### Exact v1 contract — API Actions
+
+**Migration provenance.** Exact normative contract imported from `spec/api-actions.md` at `sha256:4461056e2011d334fff22d1f33c83c3fd1fdfa64bf25584a5e0d6824755183a2`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
 
 ## Philosophy
 
@@ -38,9 +50,10 @@ An AI agent should be able to ask:
 ## REST boundary
 
 Canonical paths are exclusively [MVP API Routes](mvp-api-routes.md). Structured
-query/list/search uses `POST /queries` with [Query and Object Read API](query-api.md),
-not GET bodies or a second search endpoint. Domain mutation is operation/action
-staging; no public raw table or mutable resource-definition CRUD route exists.
+query/list/search uses `POST /queries` with
+[Query and Object Read API](query-api.md), not GET bodies or a second search
+endpoint. Domain mutation is operation/action staging; no public raw table or
+mutable resource-definition CRUD route exists.
 
 ## Frozen interface boundary
 
@@ -53,5 +66,5 @@ staging; no public raw table or mutable resource-definition CRUD route exists.
 ## Error/explanation contract
 
 Query, staging, commit, pack/migration, hook, and outbox routes share
-[API Response and Error Contract](api-errors.md). Policy denials additionally use
-the safe no-escalation explanation fields frozen in the policy spec.
+[API Response and Error Contract](api-errors.md). Policy denials additionally
+use the safe no-escalation explanation fields frozen in the policy spec.

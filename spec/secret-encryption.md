@@ -1,4 +1,16 @@
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-secret-encryption; contract: 1; input: sha256:b73742f9927dc3e927ae13090d1cf7bad0f21d65d56380b37aff5f19a5dfdcf4 -->
+
 # Secret Encryption Model
+
+Generated exact-contract projection imported into project-model/model.json from the reviewed secret-encryption.md source.
+
+## Exact migrated contract
+
+<a id="obj-com-exact-secret-encryption-v1"></a>
+
+### Exact v1 contract — Secret Encryption Model
+
+**Migration provenance.** Exact normative contract imported from `spec/secret-encryption.md` at `sha256:245fc34ad2f90fef04c5a023d2dc626a70315d38c44ddd31a49860e81b7d15f7`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
 
 Secrets are encrypted at the application layer before they are written to
 Postgres. Do not rely only on Postgres/database-level encryption at rest.
@@ -58,8 +70,8 @@ create table platform_secrets(
 ## MVP key behavior
 
 - `OPERANT_SECRET_MASTER_KEY` is base64 for exactly 32 random bytes. Encryption
-  is AES-256-GCM with a fresh 96-bit cryptographic nonce per value; `key_id` is a
-  non-secret SHA-256 fingerprint of the key and algorithm/version.
+  is AES-256-GCM with a fresh 96-bit cryptographic nonce per value; `key_id` is
+  a non-secret SHA-256 fingerprint of the key and algorithm/version.
 - The key is required before secret create/rotate/decrypt. If no secret rows
   exist, the server may start without it and secret mutation/resolution returns
   `secret_key_unavailable` (503).
@@ -67,9 +79,9 @@ create table platform_secrets(
   a fatal startup/readiness error. The server never starts a partially usable
   secret subsystem and never guesses another key.
 - AES-GCM additional authenticated data is canonical UTF-8 JSON containing
-  `schema: secret.value.v1`, secret UUID, value version, and key ID. This prevents
-  ciphertext/nonce swapping between rows or versions; authentication failure
-  fails closed and is audited without plaintext.
+  `schema: secret.value.v1`, secret UUID, value version, and key ID. This
+  prevents ciphertext/nonce swapping between rows or versions; authentication
+  failure fails closed and is audited without plaintext.
 - Master-key rotation is deferred; a mismatched key fails rather than rewriting
   ciphertext. The schema retains `key_id` for explicit future rotation.
 - Credential rotation atomically replaces ciphertext/nonce and increments

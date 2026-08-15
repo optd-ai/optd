@@ -1,4 +1,16 @@
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-storage-postgres; contract: 1; input: sha256:01e172372c7d7cab4e00d8acb91a327b66b00ad7e3bcf01847f2c6d7562c3478 -->
+
 # Postgres Storage
+
+Generated exact-contract projection imported into project-model/model.json from the reviewed storage-postgres.md source.
+
+## Exact migrated contract
+
+<a id="obj-com-exact-storage-postgres-v1"></a>
+
+### Exact v1 contract — Postgres Storage
+
+**Migration provenance.** Exact normative contract imported from `spec/storage-postgres.md` at `sha256:a2f52223ed5d041effc941d16d361f1a0b3bac4283d5fb1c0348f33699d6cffb`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
 
 ## Direction
 
@@ -42,8 +54,7 @@ Initial MVP table families:
   committed `events` from `events-audit.md`
 - normalized users/credentials/sessions/requests/authorizations/assignments from
   `authentication.md` and `authorization-assignments.md`
-- durable outbox deliveries/attempts/retry generations from
-  `outbox-delivery.md`
+- durable outbox deliveries/attempts/retry generations from `outbox-delivery.md`
 - global encrypted secrets and revision-specific hook-secret grants
 - immutable migration plans, append-only validations/apply attempts, and one
   atomic active-revision application record per successful plan
@@ -76,15 +87,14 @@ SQL constraints.
 
 ## JSONB and indexing
 
-Extension payloads can use JSONB. Declared extension fields need explicit
-indexing strategy and migration/reindex workflows.
+PostgreSQL may use JSONB internally for fields declared by strict Resource
+schemas and for closed platform metadata records. This physical representation
+does not create a public undeclared extension bag. Queryable fields and indexes
+remain explicit pack definitions with reviewed migration/reindex behavior.
 
-Expected Postgres tools:
-
-- JSONB columns for flexible extension payloads and metadata.
-- GIN indexes where justified.
-- Generated columns or side tables for high-value queryable extension fields.
-- Partial indexes from SQL-lowerable expressions when safe.
+Expected Postgres tools include justified GIN indexes, generated columns or side
+tables for high-value declared fields, and partial indexes from safely
+SQL-lowerable expressions.
 
 ## Single-tenant implication
 

@@ -1,4 +1,16 @@
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-pack-structure; contract: 1; input: sha256:8da2025694ed19c2759ed01527f299772eb5c88dc7cf231fac131a6ce7e282a6 -->
+
 # Pack Structure
+
+Generated exact-contract projection imported into project-model/model.json from the reviewed pack-structure.md source.
+
+## Exact migrated contract
+
+<a id="obj-com-exact-pack-structure-v1"></a>
+
+### Exact v1 contract — Pack Structure
+
+**Migration provenance.** Exact normative contract imported from `spec/pack-structure.md` at `sha256:b785675a461bf23b8d7df58836f85457d20a46ecc2a9b5bc7cdea1dc3006be38`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
 
 ## Decisions
 
@@ -167,14 +179,10 @@ Rules:
 
 Pack child definitions are global definition templates and omit runtime project
 identity. Applying a pack installs exactly one active server-wide revision; it
-does not materialize definitions or seed objects into a selected project. Runtime
-objects and explicit seed application carry project IDs separately. The pack
-`publisher` is global definition identity/provenance, not a runtime project. See
-[Pack Publishers and Projects](pack-publishers-and-projects.md).
-
-The current MVP loader still calls this field `namespace` and defaults child
-objects from it. That behavior requires migration and must not be treated as the
-target identity model.
+does not materialize definitions or seed objects into a selected project.
+Runtime objects and explicit seed application carry project IDs separately. The
+pack `publisher` is global definition identity/provenance, not a runtime
+project. See [Pack Publishers and Projects](pack-publishers-and-projects.md).
 
 Every child YAML file must include `metadata.name`. The file basename must match
 `metadata.name`. The platform must not infer names from file paths because packs
@@ -204,8 +212,8 @@ spec:
     write: false
     run: false
   secrets: []
-  effects: {operations: []}
-  output: {schema: validation.v1}
+  effects: { operations: [] }
+  output: { schema: validation.v1 }
   attachments:
     - phase: changeset.validate
       resource: lead
@@ -285,8 +293,8 @@ seed effect manifest (`create|update` on its one resource). The invoking caller
 must have exact `seed:<publisher>/<pack>:<seed>` permission in the request
 project; the invocation-bound internal seed runner receives only that manifest.
 Ordinary schema/hooks still apply, and seed definitions are not a privileged
-bypass. Concurrent creation/update is caught by normal commit
-revalidation and constraints.
+bypass. Concurrent creation/update is caught by normal commit revalidation and
+constraints.
 
 CLI `optctl --project <slug> seed stage <publisher>/<pack> --all` returns a
 stage, while `seed commit` is the client-side stage-then-commit convenience;
@@ -311,13 +319,13 @@ Even when using CLI, pack preview uses HTTP multipart.
 3. Build a manifest of discovered files.
 4. Submit multipart upload to server.
 
-`POST /api/v1/packs/preview` uses `multipart/form-data`. Every part has form name
-`file`, a UTF-8 `filename` equal to one normalized relative pack path, and bytes
-as the body (`text/yaml` or `application/typescript`; MIME is advisory). There
-are no parallel manifest/identity fields: `pack.yaml` is authoritative. Duplicate
-filenames, empty parts, backslashes, absolute/`.`/`..` segments, symlinks, and
-unknown form names fail. Configurable total/file/count guardrails are checked
-before parsing.
+`POST /api/v1/packs/preview` uses `multipart/form-data`. Every part has form
+name `file`, a UTF-8 `filename` equal to one normalized relative pack path, and
+bytes as the body (`text/yaml` or `application/typescript`; MIME is advisory).
+There are no parallel manifest/identity fields: `pack.yaml` is authoritative.
+Duplicate filenames, empty parts, backslashes, absolute/`.`/`..` segments,
+symlinks, and unknown form names fail. Configurable total/file/count guardrails
+are checked before parsing.
 
 Multipart filenames preserve paths:
 

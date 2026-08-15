@@ -1,4 +1,16 @@
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-staged-changeset-storage; contract: 1; input: sha256:abffa3ed3c0497e53eab9bd103c660ae1a5f50775467ba22a6418e39a23c5e55 -->
+
 # Immutable Staged Changeset Storage
+
+Generated exact-contract projection imported into project-model/model.json from the reviewed staged-changeset-storage.md source.
+
+## Exact migrated contract
+
+<a id="obj-com-exact-staged-changeset-storage-v1"></a>
+
+### Exact v1 contract — Immutable Staged Changeset Storage
+
+**Migration provenance.** Exact normative contract imported from `spec/staged-changeset-storage.md` at `sha256:c0079bec9f3da11cde8df6a5bc6cebfbe092630ff6a0293a45d01e074793b691`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
 
 ## Decision
 
@@ -124,8 +136,8 @@ changeset_commits                         # append-only, exactly once per stage
 
 Approval decisions follow [Changeset Approval Contract](changeset-approvals.md)
 and never update operation/evidence rows. The lifecycle row is coordination
-metadata, not part of the immutable stage digest. Stage,
-approval/rejection, cancellation, and commit transitions are audited.
+metadata, not part of the immutable stage digest. Stage, approval/rejection,
+cancellation, and commit transitions are audited.
 
 ## Atomic stage persistence
 
@@ -134,9 +146,9 @@ and graph digesting happen before persistence. On any failure, none of the above
 stage rows exist. On success, all immutable rows, approval requirements, and the
 initial lifecycle row are inserted in one transaction.
 
-Database protections must reject UPDATE/DELETE on immutable and append-only
-rows through the application role. Development migrations may invalidate old
-pre-auth data; no compatibility layer or mutable-record backfill is required.
+Database protections must reject UPDATE/DELETE on immutable and append-only rows
+through the application role. Development migrations may invalidate old pre-auth
+data; no compatibility layer or mutable-record backfill is required.
 
 ## Representation
 
@@ -157,10 +169,10 @@ facts are outside `stage_digest`. The stage digest is RFC 8785/SHA-256 over a
 versioned object containing operation graph digest, canonical dependencies,
 pinned project/pack/resource/hook/policy revisions and security digests, staged
 policy decisions, required capabilities/effects, approval requirements, and
-planned event/delivery
-identities. It excludes auth/request/timestamps, warnings, stderr/durations, and
-later lifecycle facts. `operation_graph_digest` covers exactly the normalized
-operation graph specified in `changeset-operation-schema.md`.
+planned event/delivery identities. It excludes auth/request/timestamps,
+warnings, stderr/durations, and later lifecycle facts. `operation_graph_digest`
+covers exactly the normalized operation graph specified in
+`changeset-operation-schema.md`.
 
 Secrets, secret values, bearer credentials, initiating tokens, request headers,
 process evidence, and unredacted hook environment are never persisted in this

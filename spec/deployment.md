@@ -1,4 +1,16 @@
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-deployment; contract: 1; input: sha256:cf5ecf83b3f90f66316947fcc83e7deec1c0c4094adb549433b2667ec1f1c14b -->
+
 # Deployment
+
+Generated exact-contract projection imported into project-model/model.json from the reviewed deployment.md source.
+
+## Exact migrated contract
+
+<a id="obj-com-exact-deployment-v1"></a>
+
+### Exact v1 contract — Deployment
+
+**Migration provenance.** Exact normative contract imported from `spec/deployment.md` at `sha256:d90ebb1594b51611916f48f816badf8aeaa81cd1142c357ba0b45c58786baa25`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
 
 ## Direction
 
@@ -26,59 +38,27 @@ MVP storage is Postgres only. Supported modes are:
 SQLite is out of MVP scope. PGlite is permitted for focused prototypes only and
 must not be treated as production-equivalent.
 
-### Postgres Mode
+### External Postgres Mode
 
-Best for:
+When `OPERANT_DATABASE_URL` is present, Operant uses that exact PostgreSQL
+database for all persistence and coordination. App nodes are stateless aside
+from disposable caches; each main server runs one in-process outbox polling loop
+that coordinates through PostgreSQL locks. Startup never falls back to a local
+database after selecting this mode.
 
-- Higher concurrency.
-- Horizontal scaling.
-- Larger data volumes.
-- More robust indexing and queue/outbox claiming.
+### App-Managed Postgres Mode
 
-Properties:
+When `OPERANT_DATABASE_URL` is absent, Operant initializes and owns an official
+PostgreSQL process under `OPERANT_DATA_DIR`. The server connects over loopback
+TCP using `OPERANT_PG_PORT` (`0` selects a free port). The Operant server arms
+signal handling before readiness, supervises the exact managed child, and uses
+bounded PostgreSQL-native smart/fast/immediate shutdown escalation.
 
-- Postgres remains the only required coordination point.
-- App nodes are stateless aside from local caches.
-- MVP runs one outbox polling loop inside the main server process/container;
-  it claims rows through Postgres locks. Separate worker containers are a future
-  scaling option, not a deployment requirement.
-- Can run against external Postgres or a bundled/sidecar Postgres profile.
-
-### Local Postgres Options
-
-There is no official SQLite-style in-process Postgres library. Postgres is
-designed as a server with its own process model and data directory. Practical
-local options are:
-
-1. **Bundled Postgres process:** ship or depend on Postgres binaries, run
-   `initdb`/`postgres` beside the app, connect over localhost or Unix socket.
-2. **Single-container profile:** one image launches both the app and a local
-   Postgres process under a lightweight supervisor. Data lives under the mounted
-   volume.
-3. **Compose/sidecar profile:** app container plus official Postgres container,
-   still one command with Docker Compose.
-4. **PGlite / WASM Postgres:** prototype-only convenience backend. See
-   [Local Postgres Options](local-postgres-options.md).
-
-**Decision:** use bundled local Postgres as the default simple deployment path.
-The product should prefer the official Postgres engine for any mode that
-promises full Postgres semantics. PGlite-like options can be explored as a
-convenience backend, but should not be assumed equivalent to server Postgres for
-locking, extensions, durability, concurrency, or operational maturity.
-
-### Single-Container Postgres Profile
-
-Recommended simple Postgres path:
-
-- One image launches both the app and a local Postgres process under a
-  lightweight supervisor.
-- Data lives under the mounted volume.
-- App connects over Unix socket where possible.
-- Health checks cover both app and Postgres.
-- Backups use `pg_dump`/base backup tooling.
-- This trades container orthodoxy for self-hosting simplicity.
-- A cleaner alternative is Docker Compose with app + Postgres sidecar, but the
-  product should still aim for a one-command path.
+The default image runs the Operant server under `tini`; there is no separate
+worker, database sidecar, or generic process supervisor. One mounted data volume
+contains the managed database and required runtime state. Health checks cover
+both application and managed-database readiness; backup/restore uses normal
+PostgreSQL tooling. PGlite remains prototype evidence only.
 
 ## Horizontal Scaling
 
@@ -99,7 +79,7 @@ correctness.
 OPERANT_DATA_DIR=/data
 OPERANT_DATABASE_URL=postgres://... # if set, use external Postgres
 OPERANT_PG_BIN_DIR=/opt/operant/postgres/bin # optional override; container supplies a default
-OPERANT_PG_PORT=0 # app-managed mode; 0 chooses a free port/socket
+OPERANT_PG_PORT=0 # app-managed mode; 0 chooses a free loopback TCP port
 OPERANT_SECRET_MASTER_KEY=<base64-32-bytes> # required once encrypted secrets exist
 OPERANT_HOOK_NET_ALLOW=<comma-separated-host[:port]-ceiling> # optional narrowing
 OPERANT_HOOK_ENV_ALLOW=<comma-separated-nonsecret-env-names> # absent means none
@@ -128,10 +108,10 @@ The repository includes production-style examples:
 - `docs/runtime.md` documents runtime env, data directory behavior,
   health/readiness, backup/restore guidance, and no-PGlite guardrails.
 
-## Remaining Operational Questions
+## Operational follow-up
 
-- Exact bundled Postgres binary layout inside the production image.
-- Safe local Postgres binary upgrades inside app-managed deployments.
-- Backup/restore command details.
-- How migrations coordinate across multiple app nodes in external Postgres mode.
-- How much filesystem state scripts/hooks need beyond the database volume.
+The two runtime modes, image layout, hook filesystem denial, migration locking,
+and backup/restore procedure are frozen in `docs/runtime.md` and executable
+release/runtime tests. Future PostgreSQL major-version upgrade automation and
+optional horizontal scaling remain deployment enhancements, not alternate MVP
+runtime modes.

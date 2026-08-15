@@ -2,7 +2,14 @@
 import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert";
 
 Deno.test("public API source contains canonical routes and no superseded aliases", async () => {
-  const app = await Deno.readTextFile("src/adapters/inbound/http-hono/app.ts");
+  const files = await Promise.all([
+    "app.ts",
+    "auth_routes.ts",
+    "authorization_routes.ts",
+    "project_routes.ts",
+  ].map((file) => Deno.readTextFile(`src/adapters/inbound/http-hono/${file}`)));
+  const app = files[0];
+  const source = files.join("\n");
   for (
     const route of [
       "/api/v1/metadata/home",
@@ -11,8 +18,12 @@ Deno.test("public API source contains canonical routes and no superseded aliases
       "/api/v1/queries",
       "/api/v1/changesets/stage",
       "/api/v1/actions/:publisher/:pack/:action/stage",
+      "/api/v1/authorization/authority",
+      "/api/v1/authorization/roles",
+      "/api/v1/expressions/help",
+      "/api/v1/expressions/validate",
     ]
-  ) assertStringIncludes(app, route);
+  ) assertStringIncludes(source, route);
   for (
     const legacy of [
       "/api/v1/health",

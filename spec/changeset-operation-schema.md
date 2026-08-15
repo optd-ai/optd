@@ -1,4 +1,16 @@
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-changeset-operation-schema; contract: 1; input: sha256:3e4e65b49a10b2fbc9d04c3f8c37d2a43f31d94a4b0031a6ff9e97e3e17e03ed -->
+
 # Changeset Operation Schemas v1
+
+Generated exact-contract projection imported into project-model/model.json from the reviewed changeset-operation-schema.md source.
+
+## Exact migrated contract
+
+<a id="obj-com-exact-changeset-operation-schema-v1"></a>
+
+### Exact v1 contract — Changeset Operation Schemas v1
+
+**Migration provenance.** Exact normative contract imported from `spec/changeset-operation-schema.md` at `sha256:b927be34a2e2a4d1bc9ee9881cd720262d59d75bdb142f923231eab0c9d52fdf`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
 
 ## Purpose
 
@@ -160,10 +172,9 @@ Rules:
   "object_id": "019bef41-7d8e-7abc-8def-0123456789ab",
   "expected_version": 7,
   "set": {
-    "score": 42,
-    "phone": null
+    "score": 42
   },
-  "unset": ["temporary_note"]
+  "unset": ["phone", "temporary_note"]
 }
 ```
 
@@ -175,7 +186,8 @@ Rules:
   Staging records the actual immutable base object-version dependency even when
   this property is omitted.
 - At least one effective `set` or `unset` is required.
-- Explicit `null` in `set` sets a nullable field to null.
+- Values in `set` must be non-null and validate against their declared field
+  types. JSON `null` is rejected.
 - `unset` removes/resets an optional field; it cannot target required fields.
 - A field cannot occur in both `set` and `unset`.
 - Platform-managed metadata cannot be updated through these maps.
@@ -232,8 +244,8 @@ Authored:
   "key": "contact-company",
   "project_id": "019b7a2e-7c10-7000-8000-000000000001",
   "relationship": "operant/crm:contact_company",
-  "from": {"$ref": "contact.object_id"},
-  "to": {"$ref": "company.object_id"},
+  "from": { "$ref": "contact.object_id" },
+  "to": { "$ref": "company.object_id" },
   "fields": {
     "role": "buyer",
     "primary": true
@@ -247,9 +259,9 @@ both endpoints to UUIDs.
 Rules:
 
 - `relationship`, `from`, and `to` are required.
-- `from`/`to` accept existing endpoint UUIDv7 values or structured references.
-  A `system:principal` endpoint accepts only an existing active principal UUID
-  and cannot be a create reference.
+- `from`/`to` accept existing endpoint UUIDv7 values or structured references. A
+  `system:principal` endpoint accepts only an existing active principal UUID and
+  cannot be a create reference.
 - `relationship_id` is forbidden in authored links and generated at staging.
 - `fields` contains only fields declared by the relationship definition.
 - Active-duplicate behavior follows relationship uniqueness constraints.
@@ -301,7 +313,7 @@ Rules:
 References are exact one-property JSON objects:
 
 ```json
-{"$ref": "company.object_id"}
+{ "$ref": "company.object_id" }
 ```
 
 Rules:
@@ -309,8 +321,8 @@ Rules:
 - The left side names an explicit operation `key`.
 - V1 result properties are `object_id` from create, `relationship_id` from link,
   and `comment_id` from comment.
-- References may appear recursively in resource/relationship field values and
-  in operation target/endpoint properties that permit them.
+- References may appear recursively in resource/relationship field values and in
+  operation target/endpoint properties that permit them.
 - Forward references are allowed. The engine allocates all generated IDs before
   resolving references.
 - Unknown keys/properties fail staging.
@@ -322,9 +334,9 @@ Rules:
 ## Combining authored mutations
 
 Callers and independent hooks may emit compatible operations against the same
-object. Normalization groups them by resolved `(project_id, resource, object_id)`
-and produces at most one canonical create/update/transition/archive mutation per
-object.
+object. Normalization groups them by resolved
+`(project_id, resource, object_id)` and produces at most one canonical
+create/update/transition/archive mutation per object.
 
 Merge rules:
 
@@ -350,10 +362,10 @@ pack-defined resource data document:
 ```json
 {
   "patches": [
-    {"op": "replace", "path": "/email", "value": "a@example.com"},
-    {"op": "add", "path": "/address/country", "value": "CA"},
-    {"op": "remove", "path": "/temporary_note"},
-    {"op": "test", "path": "/status", "value": "new"}
+    { "op": "replace", "path": "/email", "value": "a@example.com" },
+    { "op": "add", "path": "/address/country", "value": "CA" },
+    { "op": "remove", "path": "/temporary_note" },
+    { "op": "test", "path": "/status", "value": "new" }
   ],
   "warnings": []
 }
@@ -367,13 +379,13 @@ Rules:
 - The first path segment must name a mutable pack-defined resource field.
 - Nested object/array paths follow RFC 6902 semantics.
 - Pack-defined fields named `metadata` are ordinary patchable data. Platform
-  identity/version/project/actor/timestamp/archive metadata is outside the
-  patch document and cannot be reached.
+  identity/version/project/actor/timestamp/archive metadata is outside the patch
+  document and cannot be reached.
 - Duplicate paths within one hook output are rejected.
 - Later ordered normalization hooks may patch a path changed by an earlier hook.
 - Failed `test` or invalid path/application fails staging.
-- A patch cannot change operation kind, resource, project ID, target ID, expected
-  version, relationship endpoints, or any platform-managed metadata.
+- A patch cannot change operation kind, resource, project ID, target ID,
+  expected version, relationship endpoints, or any platform-managed metadata.
 - The engine recompiles the final proposed state into canonical operation
   `fields`, `set`, and `unset` properties.
 
@@ -401,7 +413,8 @@ The staging engine:
 
 1. Validates operation-specific schemas and rejects unknown properties.
 2. Resolves hook-local component identities against the pinned pack revision.
-3. Inherits/resolves a single-project request context and writes explicit `project_id`.
+3. Inherits/resolves a single-project request context and writes explicit
+   `project_id`.
 4. Assigns missing ordinal operation labels.
 5. Generates all new entity IDs as UUIDv7.
 6. Resolves every structured reference.
@@ -434,8 +447,9 @@ It hashes this fully resolved document:
 
 Canonicalization follows RFC 8785 JSON Canonicalization Scheme. Operation array
 order remains semantic; object keys and JSON numbers follow RFC 8785. The graph
-contains no unresolved references or compatibility aliases. Explicit null is
-distinct from omission.
+contains no unresolved references or compatibility aliases. Omission leaves an
+existing value unchanged; `unset` removes an optional value; JSON `null` is
+invalid.
 
 The graph digest excludes logs, warnings, policy decisions, approvals,
 dependencies, and timestamps. The larger stage digest defined with commit

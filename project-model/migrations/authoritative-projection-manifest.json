@@ -1,0 +1,326 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-15T00:20:00.000Z",
+  "modelRevision": 14,
+  "modelHash": "sha256:38ff405f90ae181ca5bebccf85f4ba3b56a5c53e394477a8e96fabd6236ef07f",
+  "approvedCandidateManifestHash": "sha256:46120d55b3ce71869c196451f0bb8ce8d341cee55c76f853afffdc9dc22b2244",
+  "files": [
+    {
+      "path": "spec/README.md",
+      "sha256": "sha256:a056caf3c7f3c77b30ae96c93bca9d897e19f483d5fbf2fb02299bca4e9e0cf6",
+      "bytes": 20359
+    },
+    {
+      "path": "spec/api-actions.md",
+      "sha256": "sha256:8359d32b059a1b665bc3b7bd222bfe4226ab4bf4d1455282abada81a556dae4d",
+      "bytes": 2936
+    },
+    {
+      "path": "spec/api-errors.md",
+      "sha256": "sha256:0151e23c173cd587ab0f33a0869487f5de8802b5846227f5adb3292e9f16d265",
+      "bytes": 6259
+    },
+    {
+      "path": "spec/auth-api.md",
+      "sha256": "sha256:8ef8e1fc0c41e0922f5cba38760143dbbca81a5eb29b1e1b3c609042872e516b",
+      "bytes": 13967
+    },
+    {
+      "path": "spec/authentication.md",
+      "sha256": "sha256:cc939b830acab4bf7da2c55cb6c5d5f938d46b55318833513b632e72bf865475",
+      "bytes": 67774
+    },
+    {
+      "path": "spec/authorization-assignments.md",
+      "sha256": "sha256:a9db29b9cb45cc7d8bfa60fbd7627f0ebc7ee16b8fc2477908d8c36cd05ace08",
+      "bytes": 16384
+    },
+    {
+      "path": "spec/cel-sql-partial-indexes.md",
+      "sha256": "sha256:7a27bc77028852bb50f4b237001a0927d77fca822d7be02b28f66e4baad73668",
+      "bytes": 11897
+    },
+    {
+      "path": "spec/changeset-approvals.md",
+      "sha256": "sha256:fda38f4ee0bfa7d629e66c2d829248cb1afe14a2f071bf4c0aec7aa7c8785a9f",
+      "bytes": 5368
+    },
+    {
+      "path": "spec/changeset-operation-schema.md",
+      "sha256": "sha256:90924b3c8390862c127cd0afa82218fccce59b10d2f32bf788e5e629db3e4542",
+      "bytes": 15397
+    },
+    {
+      "path": "spec/changesets.md",
+      "sha256": "sha256:89ec4224295d08951340a568662caa3b961887aaa38659b22054d059a6852c0c",
+      "bytes": 12630
+    },
+    {
+      "path": "spec/commit-revalidation.md",
+      "sha256": "sha256:fb7a958b376958a19b864ae20c5f1a95ef4daf124b864e7a236e20995a5c8def",
+      "bytes": 13735
+    },
+    {
+      "path": "spec/crm-migration-prototype.md",
+      "sha256": "sha256:d4de9d9dd5021b4d4da7aa382a292d7a15fcae7b06eea27a56cf2fb0db7cc6c0",
+      "bytes": 19532
+    },
+    {
+      "path": "spec/crm-pack-definition.md",
+      "sha256": "sha256:7f78a6479d0b623b67bf5aa92919b846a62144d193a005da4e9dcfaa4715595d",
+      "bytes": 25924
+    },
+    {
+      "path": "spec/crm-prototype-flow.md",
+      "sha256": "sha256:dc88d4a01d69204a1039720b02523c9a813ae35b80bac40359d80efd08e2f25c",
+      "bytes": 9784
+    },
+    {
+      "path": "spec/crm-workflows.md",
+      "sha256": "sha256:e680617196727704b418c703e4a973f08817dbff475a27f00598a9c5181e4a2d",
+      "bytes": 4722
+    },
+    {
+      "path": "spec/deployment.md",
+      "sha256": "sha256:6e0b8c9c91f9aa84748009b0451ba0381c2c915b9df015b60cce864203552233",
+      "bytes": 5150
+    },
+    {
+      "path": "spec/events-audit.md",
+      "sha256": "sha256:cdfcde45119cb1a849a6597a6c5fb0c4106c9a4459e51fe3ce88a5e7371c0488",
+      "bytes": 16808
+    },
+    {
+      "path": "spec/expression-language.md",
+      "sha256": "sha256:8abc2e1124a64226a4fbc12e7c210d7cc542e5a45b15c9edeb0f9bb7f4a43b68",
+      "bytes": 9376
+    },
+    {
+      "path": "spec/extensions.md",
+      "sha256": "sha256:96db363567496aff6058aa9c7748e5be10dac8b27df6ec6b3f0730ed9d6239e4",
+      "bytes": 1863
+    },
+    {
+      "path": "spec/hook-secret-grants.md",
+      "sha256": "sha256:3dbacc2a300d1c15e20e55eb3709011b347e63398387b4fb30eec823cd0ecdd7",
+      "bytes": 14483
+    },
+    {
+      "path": "spec/hooks-and-scripts.md",
+      "sha256": "sha256:9cd6eed21c054ff16c13ea9b7dbf2e4be0a2b94c6412adadd482e0f0de938dc6",
+      "bytes": 20355
+    },
+    {
+      "path": "spec/hooks-secrets-outbox.md",
+      "sha256": "sha256:2beea5405db3e12bc01d9a014f5779ccfa19023a59ddef78dff8f8e5bb094af9",
+      "bytes": 5669
+    },
+    {
+      "path": "spec/identity-auth.md",
+      "sha256": "sha256:7bbe97cad8a6ddd3dd0bdb9c54aa95a349f2a2d8b7caa531642e7d79a899c3c2",
+      "bytes": 8245
+    },
+    {
+      "path": "spec/local-postgres-options.md",
+      "sha256": "sha256:2864437e32479c5bf9fe3c3fd8df1cddc50ea515c57b479058611a7e9387fef5",
+      "bytes": 6725
+    },
+    {
+      "path": "spec/migration-classification.md",
+      "sha256": "sha256:1437d4730afc14088a58a9d56fc460768875160e376a878897a52e3d927b1498",
+      "bytes": 10125
+    },
+    {
+      "path": "spec/migrations.md",
+      "sha256": "sha256:8d57dda7fcba6bfe1330d1233dd754ac2ba0a24f90e8701b669f3597af6bd205",
+      "bytes": 16368
+    },
+    {
+      "path": "spec/model-governance.md",
+      "sha256": "sha256:c971f4286438b780ee2e3a9e37908f3898ded9a66844d942cf11d5330002c88e",
+      "bytes": 1791
+    },
+    {
+      "path": "spec/mvp-acceptance-criteria.md",
+      "sha256": "sha256:8ded6973b4b7dea9b4950d3de3995ea3e9169a89969ee10a1463f40f3e3db815",
+      "bytes": 13148
+    },
+    {
+      "path": "spec/mvp-api-routes.md",
+      "sha256": "sha256:1294980fe85d45d3941952103a9094af1a240e13f827ccba86c7b9a39db9293b",
+      "bytes": 9612
+    },
+    {
+      "path": "spec/mvp-hook-schema.md",
+      "sha256": "sha256:f433145e57482d7ceef0a3b224258fe82ae079da75d22c6322909f19c03eaf03",
+      "bytes": 14914
+    },
+    {
+      "path": "spec/mvp-implementation-boundaries.md",
+      "sha256": "sha256:f4a6bbf5eb1e2629d1a5a7864c534b106dff3aa944e420e715463e3e420f7057",
+      "bytes": 8887
+    },
+    {
+      "path": "spec/mvp-migration-integration.md",
+      "sha256": "sha256:1ca7217b805d256fd990ef619d1b673090d8cda66c51404dd4d36f7bb8402f99",
+      "bytes": 6295
+    },
+    {
+      "path": "spec/mvp-planning-requirements.md",
+      "sha256": "sha256:1bf54649eb964be18b6c81bbf85c45e86757ca88c30d3a14611cf5dad696605f",
+      "bytes": 10095
+    },
+    {
+      "path": "spec/mvp-policy-schema.md",
+      "sha256": "sha256:31f55090759a5c84e2fb597b1a098180a3d2f89466d009a17546afa29dd38992",
+      "bytes": 8269
+    },
+    {
+      "path": "spec/mvp-roadmap.md",
+      "sha256": "sha256:1d7decbdd1cf075472ca51616edbc8212175f709026e02b074cbee9c415b354b",
+      "bytes": 5841
+    },
+    {
+      "path": "spec/mvp-stack.md",
+      "sha256": "sha256:39b605d32880ec4b0d375fca84e50799f93ecef73f77bfca094d2c6c86125ddf",
+      "bytes": 4945
+    },
+    {
+      "path": "spec/object-model.md",
+      "sha256": "sha256:4639a281ae2491249e9dcb1b9c063e3f3872e388c0c02eda60f2243cbf99d596",
+      "bytes": 5006
+    },
+    {
+      "path": "spec/odoo-object-map.md",
+      "sha256": "sha256:bb68bdb0088fb923fab19392591681c5332d749f74c7b480bf744bda2f0f660b",
+      "bytes": 4522
+    },
+    {
+      "path": "spec/optctl-axi.md",
+      "sha256": "sha256:bb65caabfc9a049e3ff288965e4041225c37bff0568841fe6cdc22195d1c5c62",
+      "bytes": 15858
+    },
+    {
+      "path": "spec/outbox-delivery.md",
+      "sha256": "sha256:6793f60e45049e0e569e2b3abd9fb1bd0a92557b88098fd5a86c4448d0d29b8f",
+      "bytes": 15743
+    },
+    {
+      "path": "spec/pack-definition-schemas.md",
+      "sha256": "sha256:e5c6bfeb1ead7b2d96734f4b9316d989c0c3b17278c73d09f738eaf6f3c9016c",
+      "bytes": 10047
+    },
+    {
+      "path": "spec/pack-publishers-and-projects.md",
+      "sha256": "sha256:66c1b6872d8ca79e687a5cbfe4bb97dc8626a2ba36e794a65b95cdbdc407b632",
+      "bytes": 5251
+    },
+    {
+      "path": "spec/pack-structure.md",
+      "sha256": "sha256:a5b7174ad399b7b089a10b6fb277dee722beb2bc46832a31e1031c92cb832fbc",
+      "bytes": 13832
+    },
+    {
+      "path": "spec/packs-projects.md",
+      "sha256": "sha256:60f129e0837d6e95d7fdeeaca18d97e3fe5caf9c3eaf7362b0a3ed1c439f099d",
+      "bytes": 6862
+    },
+    {
+      "path": "spec/planning-readiness-audit.md",
+      "sha256": "sha256:8fca3ebd86a4e32cdae43676e579a09558066bcb354cca723b7eb7cc38456de6",
+      "bytes": 12925
+    },
+    {
+      "path": "spec/policies.md",
+      "sha256": "sha256:2d56f236eac302068d6cba87d9731a12bf0eb60842cf6cf0b3a30792e558ec4c",
+      "bytes": 8420
+    },
+    {
+      "path": "spec/pre-mvp-open-questions.md",
+      "sha256": "sha256:492bef378c35579adaff9847965a31d81080789a820a71df18b3335d31ecf374",
+      "bytes": 16064
+    },
+    {
+      "path": "spec/product.md",
+      "sha256": "sha256:d34275bc99071405a91c43ab1832583cf6eb527912cf5cff8a75d62b29521ad1",
+      "bytes": 2570
+    },
+    {
+      "path": "spec/project-management-pack.md",
+      "sha256": "sha256:6e5400675009a1a11accfc7f7a3835cecbe46ede1fcfc2f5e7ef8d98c16b8a68",
+      "bytes": 7573
+    },
+    {
+      "path": "spec/projects.md",
+      "sha256": "sha256:49d8cf416de129af7df0a6124a84b461103a7a19c915c3e7108459339ec51912",
+      "bytes": 4754
+    },
+    {
+      "path": "spec/proof-acceptance.md",
+      "sha256": "sha256:cf5e55a4a1cab7e813097907a9e30c1b34f018a471796bb9c94a96bbb106acc5",
+      "bytes": 3028
+    },
+    {
+      "path": "spec/proposals.md",
+      "sha256": "sha256:d904b7de79f1baa5b2b5cf80af05808f810303040068a1cb9281facb2e371239",
+      "bytes": 19159
+    },
+    {
+      "path": "spec/queries-policy-history.md",
+      "sha256": "sha256:6fb8c84fc39d05639956fcc52a824130626db3657f7b9b036e615d19a4b16e5a",
+      "bytes": 1659
+    },
+    {
+      "path": "spec/query-api.md",
+      "sha256": "sha256:11a00452e8dc09377cd0357a3034e3f2f9907efccfb8f1f00542f83cce00383a",
+      "bytes": 6713
+    },
+    {
+      "path": "spec/resource-configuration.md",
+      "sha256": "sha256:ec336983e9468651904bafb021393fcffe6f1975c7e8282c4568f375b345231c",
+      "bytes": 6636
+    },
+    {
+      "path": "spec/runtime-release.md",
+      "sha256": "sha256:00005fe4863d6afa633107dc6263364ebbf7df5a72a5afeecd0cc9c8047a4d5f",
+      "bytes": 6109
+    },
+    {
+      "path": "spec/secret-encryption.md",
+      "sha256": "sha256:1440584b03808be034c269b3655b8a4eee16c5a7e8e9fee104166e8833e65e07",
+      "bytes": 4642
+    },
+    {
+      "path": "spec/staged-changeset-storage.md",
+      "sha256": "sha256:a5c8518ceb475e8c6c03850668d1b09a10c1d7551cbae4dceacf8571e9179e4b",
+      "bytes": 8681
+    },
+    {
+      "path": "spec/state-machines.md",
+      "sha256": "sha256:95fe30689a0ab804136504118d2c37fd71b663007ceaef6587dc0ed42e476d5f",
+      "bytes": 2463
+    },
+    {
+      "path": "spec/storage-postgres.md",
+      "sha256": "sha256:613d1cc5e56ffce87917ed9a3fa9d7317df3eb98f516eb0eda52e6ff15286a41",
+      "bytes": 4663
+    },
+    {
+      "path": "spec/vision.md",
+      "sha256": "sha256:49106d0b8ce022aadea0c55c969b765609de29170d5bbe1d675430f2f4fc5bf0",
+      "bytes": 3632
+    },
+    {
+      "path": "spec/writes-actions.md",
+      "sha256": "sha256:3ecbfee78806d2df3be24ed3c194d2f23f2474967e82aca024b84321e1bb194f",
+      "bytes": 6124
+    }
+  ],
+  "summary": {
+    "files": 62,
+    "objectAnchors": 155,
+    "markdownLinks": 194,
+    "candidateBanners": 0,
+    "emptyAcceptedSections": 0
+  }
+}

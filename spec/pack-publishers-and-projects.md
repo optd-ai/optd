@@ -1,4 +1,16 @@
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-pack-publishers-and-projects; contract: 1; input: sha256:b650c6cccc895820a09bca23118d2d5e30d5621bb4c70b843b0cd8c05b2b4b04 -->
+
 # Pack Publishers and Projects
+
+Generated exact-contract projection imported into project-model/model.json from the reviewed pack-publishers-and-projects.md source.
+
+## Exact migrated contract
+
+<a id="obj-com-exact-pack-publishers-and-projects-v1"></a>
+
+### Exact v1 contract — Pack Publishers and Projects
+
+**Migration provenance.** Exact normative contract imported from `spec/pack-publishers-and-projects.md` at `sha256:b959a489f0bc16f34c39c859442006ba9827b778937d478a5a32eb72e139987d`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
 
 ## Decision
 

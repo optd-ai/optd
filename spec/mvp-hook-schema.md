@@ -1,8 +1,21 @@
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-mvp-hook-schema; contract: 1; input: sha256:8744c8a0b09ebc7a477c4a33c15984b9461864a7466f981b802926e27407623b -->
+
 # MVP Hook Schema v1
 
+Generated exact-contract projection imported into project-model/model.json from the reviewed mvp-hook-schema.md source.
+
+## Exact migrated contract
+
+<a id="obj-com-exact-mvp-hook-schema-v1"></a>
+
+### Exact v1 contract — MVP Hook Schema v1
+
+**Migration provenance.** Exact normative contract imported from `spec/mvp-hook-schema.md` at `sha256:e19d1ee99064a0cf27392f7a809a234796b63346a9cf306bd2e3430f99e1ee83`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
+
 Hooks are trusted pack-provided Deno/TypeScript scripts executed by the platform
-runner. They receive curated context as one JSON envelope on stdin, write exactly
-one JSON object to stdout, and write human/agent-readable logs to stderr.
+runner. They receive curated context as one JSON envelope on stdin, write
+exactly one JSON object to stdout, and write human/agent-readable logs to
+stderr.
 
 A pack author may use declared network access for stage-time validation and data
 acquisition. Stage hooks must not intentionally create external side effects:
@@ -137,6 +150,17 @@ $event
 $object_version
 ```
 
+`$actor` is available only when the phase permits it and the Hook explicitly
+maps it:
+
+- `action.stage`: `{id, principal_type}`, where `principal_type` is
+  `human_user|agent_user`;
+- `event.after_commit`: `{id, human_user_id, auth_context_id}`;
+- `changeset.before_stage` and `changeset.validate`: unavailable.
+
+These are server-derived identity DTOs, not authority grants. They never contain
+roles, bearer credentials, authorization tokens, or caller-provided actor data.
+
 The hook envelope has invocation input; the immutable stage does not retain a
 second raw request/input payload or a generic external-response payload. It
 stores the canonical operations being staged plus required dependency,
@@ -158,20 +182,16 @@ spec:
   reads:
     lead:
       resource: operant/crm:lead
-      idFrom: $action.input.lead_id
-      fields: [id, status, company_id]
+      id_from: $action.input.lead_id
+      fields: [status, company_id]
       required: true
-    company:
-      resource: operant/crm:company
-      idFrom: $current.company_id
-      fields: [id, name]
-      required: false
 ```
 
 MVP rules:
 
-- Reads resolve one object by an explicit id obtained from action input or the
-  current/proposed object context.
+- Reads resolve one object by an explicit id obtained from
+  `$action.input.<field>`. Semantic Actions have no implicit `$current` or
+  `$proposed` object.
 - Arbitrary collection queries and reads derived from another declared read are
   deferred.
 - Only declared fields enter `$reads.<name>`; absent optional objects omit that
@@ -201,9 +221,9 @@ permissions:
 Every network connection, including a redirect destination, must satisfy the
 Deno permission check. Unrestricted `--allow-net` is not emitted for pack hooks.
 Operators may narrow all pack networking with `OPERANT_HOOK_NET_ALLOW`, a
-comma-separated exact host[:port] ceiling with no wildcards. When unset, declared
-endpoints are eligible; when set (including empty), every declared endpoint must
-be included or invocation fails `hook_capability_denied`.
+comma-separated exact host[:port] ceiling with no wildcards. When unset,
+declared endpoints are eligible; when set (including empty), every declared
+endpoint must be included or invocation fails `hook_capability_denied`.
 
 Environment access is explicit-only:
 
@@ -212,8 +232,7 @@ Environment access is explicit-only:
 - Operator configuration `OPERANT_HOOK_ENV_ALLOW` is a comma-separated exact
   allowlist; absent/empty allows no non-secret names. At invocation, only names
   declared by the hook, present in this allowlist, and present in the server
-  process environment are copied into the
-  child environment.
+  process environment are copied into the child environment.
 - Names beginning `OPERANT_`, `DENO_`, `LD_`, or `DYLD_` are reserved and cannot
   be declared/allowed. Values have a configurable size guardrail. Confidential
   values must use required secret slots/grants instead.
@@ -225,8 +244,8 @@ Environment access is explicit-only:
   names and grants narrow `--allow-env` access to their union. Pack hooks never
   inherit the server environment.
 
-Filesystem and subprocess capabilities are permanently unavailable to every
-pack hook:
+Filesystem and subprocess capabilities are permanently unavailable to every pack
+hook:
 
 ```text
 read: false
@@ -260,8 +279,8 @@ Rules:
 
 - Secrets are global built-in system resources, not pack or project resources.
 - Every declared slot is required; optional secret slots are not supported.
-- A separate hook-secret grant maps one pinned hook revision slot to one concrete
-  global secret.
+- A separate hook-secret grant maps one pinned hook revision slot to one
+  concrete global secret.
 - Missing/revoked grants or unavailable secrets fail before execution.
 - Initiating users need semantic operation/action permission, not permission to
   read hook secret values.
@@ -323,8 +342,8 @@ classification are normative in [Durable Outbox Delivery](outbox-delivery.md).
 
 Stdout must contain exactly one JSON object and is schema-checked. Stderr is
 arbitrary UTF-8 hook log text; there is no structured `external_checks` output.
-Authors may log where external validation data came from, while every value
-that affects a write must be represented in canonical staged operations.
+Authors may log where external validation data came from, while every value that
+affects a write must be represented in canonical staged operations.
 
 For a successful stage, each invocation's redacted stderr, script/input/output
 digests, duration, and truncation marker are retained in that stage aggregate
@@ -332,11 +351,11 @@ and returned by both stage and inspect. For a failed attempt, bounded redacted
 logs are returned with the error and retained with the failed-attempt audit
 record; no stage is created.
 
-The **current global hook runtime policy** means these permanent denials plus the
-current operator net/env ceilings and configured resource guardrail maxima. It
-is platform/deployment policy, not initiating-user role policy. Stage invocation
-and outbox delivery both fail closed when a pinned declaration exceeds it;
-outbox follows its permanent-failure classification.
+The **current global hook runtime policy** means these permanent denials plus
+the current operator net/env ceilings and configured resource guardrail maxima.
+It is platform/deployment policy, not initiating-user role policy. Stage
+invocation and outbox delivery both fail closed when a pinned declaration
+exceeds it; outbox follows its permanent-failure classification.
 
 ## Runtime guardrails
 
@@ -348,8 +367,8 @@ application model:
   deployment defaults are 30 seconds and 10 minutes; operators may raise them.
 - Stdout and retained stderr byte limits are configurable. Suggested defaults
   are 16 MiB stdout and 4 MiB stderr per invocation.
-- Stdout overflow fails staging. Stderr overflow truncates retained logs and sets
-  `logs_truncated: true`; it does not fail otherwise successful logic.
+- Stdout overflow fails staging. Stderr overflow truncates retained logs and
+  sets `logs_truncated: true`; it does not fail otherwise successful logic.
 - Timeout kills the process, returns `hook_timeout`, and creates no stage.
 - Concurrency and memory are controlled by server/container operational limits,
   not pack-portability rules.
@@ -366,6 +385,6 @@ Hooks that produce operations declare their maximum reviewed effects as sorted
 unique `{resource, ops[]}` entries under `effects.operations`. Undeclared
 resource/operation pairs fail staging. Users authorize the semantic action plus
 its reviewed effect manifest; the invocation-bound runner capability is internal
-and cannot call Operant's API. Pack hooks permanently receive no initiating token
-or self-API capability. Exact operation names/schemas are defined in
+and cannot call Operant's API. Pack hooks permanently receive no initiating
+token or self-API capability. Exact operation names/schemas are defined in
 [Changeset Operation Schemas](changeset-operation-schema.md).

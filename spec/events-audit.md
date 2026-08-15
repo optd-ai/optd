@@ -1,4 +1,16 @@
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-events-audit; contract: 1; input: sha256:560816641c3a0b29a808cc564e7be4692adbe82f7ae75dd2b0f9e11cd09b9a5a -->
+
 # Events, Audit, History, and Outbox
+
+Generated exact-contract projection imported into project-model/model.json from the reviewed events-audit.md source.
+
+## Exact migrated contract
+
+<a id="obj-com-exact-events-audit-v1"></a>
+
+### Exact v1 contract — Events, Audit, History, and Outbox
+
+**Migration provenance.** Exact normative contract imported from `spec/events-audit.md` at `sha256:35dd1d329c316114cffc9641d5b4fd892bb1d1ec59dc2d256b2420fc115c9cc0`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
 
 ## Status
 
@@ -154,8 +166,9 @@ and history display.
 not need to be a full structural diff. Agents can inspect adjacent snapshots
 when they need exact before/after values.
 
-History is immutable through the API. The only supported destructive operation
-is purging an object and all of its history, which should be special/admin-only.
+History is immutable through the API. MVP exposes archive and compensating
+changesets, not object/history purge. Any future administrative purge design
+must preserve or tombstone referential audit/event provenance explicitly.
 Signed/tamper-evident digests can be added later if needed; they are not
 required for v1.
 
@@ -250,9 +263,9 @@ and `executor_id` identify a system actor such as `system:outbox_worker`.
 
 `staged_changesets.created_auth_context_id` and
 `changeset_commits.committed_auth_context_id` are separate because stage and
-commit are different requests. Object versions and comments reference the committing auth context.
-Hook executions reference the initiating auth context plus their system executor
-and causation record.
+commit are different requests. Object versions and comments reference the
+committing auth context. Hook executions reference the initiating auth context
+plus their system executor and causation record.
 
 ## `events`
 
@@ -323,10 +336,10 @@ Examples powered by outbox hook work:
 
 The normative schema and lifecycle are frozen in
 [Durable Outbox Delivery](outbox-delivery.md). One mutable delivery aggregate
-owns status, pinned execution identity, stable idempotency key, retry generation,
-availability, and fixed lease. Append-only attempt rows own each claim's timing,
-worker identity, outcome, and redacted error. Hook executions own logs/digests
-and secret-version evidence.
+owns status, pinned execution identity, stable idempotency key, retry
+generation, availability, and fixed lease. Append-only attempt rows own each
+claim's timing, worker identity, outcome, and redacted error. Hook executions
+own logs/digests and secret-version evidence.
 
 The main server runs one in-process polling loop and claims ready rows using
 `FOR UPDATE SKIP LOCKED`; no Redis/Kafka, daemon, LISTEN/NOTIFY dependency, or
@@ -376,8 +389,8 @@ current resource rows.
 ## Frozen v1 retention/versioning
 
 - Every event stores `schema_version: 1`; event type plus schema version defines
-  its minimal payload contract. Outbox rows pin their envelope schema separately.
-  Incompatible future event payloads use a new integer version.
+  its minimal payload contract. Outbox rows pin their envelope schema
+  separately. Incompatible future event payloads use a new integer version.
 - MVP retains audit events, committed events, and object versions indefinitely.
   Operational outbox detail follows its own retain-all MVP contract.
 - Object/history hard purge is not exposed in MVP. Archive plus compensating

@@ -1,4 +1,16 @@
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-migrations; contract: 1; input: sha256:42e0810cb89113694efbbb8c84111f055809cae81b4f510dbdf9e7b221bb5c8d -->
+
 # Migrations
+
+Generated exact-contract projection imported into project-model/model.json from the reviewed migrations.md source.
+
+## Exact migrated contract
+
+<a id="obj-com-exact-migrations-v1"></a>
+
+### Exact v1 contract — Migrations
+
+**Migration provenance.** Exact normative contract imported from `spec/migrations.md` at `sha256:b9a579733be1c15e4cf2bc1004586f4105b34bf41ca7b06715df32253f71f8de`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
 
 ## Status
 
@@ -29,8 +41,8 @@ status: whether it can proceed right now
 ### Statuses
 
 - `ready`: the complete plan can be applied atomically according to its class.
-- `blocked`: the complete plan cannot apply until data/config issues are resolved
-  or an explicit intermediate pack revision is applied first.
+- `blocked`: the complete plan cannot apply until data/config issues are
+  resolved or an explicit intermediate pack revision is applied first.
 - `applied`: the whole plan completed in one transaction.
 
 Failed apply attempts are append-only attempt/audit records, not plan statuses.
@@ -65,15 +77,15 @@ candidate_source_digest: sha256:...
 plan_digest: sha256:...
 class: destructive
 status: blocked
-summary: {safe: 2, risky: 3, destructive: 4, blocked: 3}
+summary: { safe: 2, risky: 3, destructive: 4, blocked: 3 }
 changes:
   - id: 019b7a2e-7c10-7000-8000-000000000004
     class: destructive
     status: blocked
     kind: remove_field
-    target: {resource: operant/crm:lead, field: company_name}
+    target: { resource: operant/crm:lead, field: company_name }
     reason: field removed from desired config
-    facts: {present_values: 700, references: [operant/crm:convert_lead]}
+    facts: { present_values: 700, references: [operant/crm:convert_lead] }
     hazard_codes: [DATA_LOSS]
     intermediate_revision_guidance: add replacement field and block/dual-write old field
     cleanup_required: export_or_clear_values
@@ -152,9 +164,9 @@ spec:
 ## Type Changes
 
 Every field `type` change is destructive/API-breaking and blocked as an in-place
-MVP change. Increasing a string `maxLength` without changing type is semantically
-compatible but classed risky when generated constraint DDL scans/locks,
-otherwise safe.
+MVP change. Increasing a string `maxLength` without changing type is
+semantically compatible but classed risky when generated constraint DDL
+scans/locks, otherwise safe.
 
 Type conversion uses explicit revisions: add a new field with the desired type
 in an atomic intermediate revision, populate it with ordinary changesets or an
@@ -187,8 +199,8 @@ previewed, not a different plan produced after config/data changed.
 
 The opaque token binds to migration ID, plan digest, live-facts digest,
 destructive change IDs, issuing principal/authorization root, and the configured
-expiry exactly as frozen below. It is not a human-constructed digest string.
-If plan/data facts/destructive steps change, the old token is invalid.
+expiry exactly as frozen below. It is not a human-constructed digest string. If
+plan/data facts/destructive steps change, the old token is invalid.
 
 ## Hazard Codes
 
@@ -334,14 +346,15 @@ live_facts_digest, last_validation|null, application|null
 - `changes[]`: ordered by canonical target then kind and contains UUID `id`,
   `kind`, `class`, `status`, structured target identity, reason, facts,
   hazard-code references, intermediate-revision guidance, cleanup requirement,
-  and destructive action. Inapplicable fields are explicit `null`, not omitted aliases.
-- `hazards[]`: ordered objects with stable uppercase `code`,
-  `warning|blocking` severity, change ID, and safe message.
+  and destructive action. Inapplicable fields are explicit `null`, not omitted
+  aliases.
+- `hazards[]`: ordered objects with stable uppercase `code`, `warning|blocking`
+  severity, change ID, and safe message.
 - `blockers[]`: ordered objects with change ID, stable uppercase code, current
   count/fact value, and safe message.
-- `steps[]`: canonically ordered SQL/metadata step descriptors for the one atomic
-  transaction. SQL text is served only by the authorized `/sql` route, not
-  duplicated throughout the plan.
+- `steps[]`: canonically ordered SQL/metadata step descriptors for the one
+  atomic transaction. SQL text is served only by the authorized `/sql` route,
+  not duplicated throughout the plan.
 - `live_facts_digest`: SHA-256 over canonical planner-visible live facts.
 - `last_validation` and `application` are projections from append-only records,
   so inspect APIs return one complete current representation.
@@ -354,10 +367,11 @@ in `plan_digest` using RFC 8785 JSON and SHA-256.
 There is no migration-specific cleanup/backfill mutation command. The migration
 inspection/violations endpoints expose structured blockers and suggested
 ordinary operation templates; agents author normal changeset stage/commit input.
-After cleanup under the same active pack revision, `optctl migration validate
-<id>` refreshes live facts/readiness. If cleanup required an intermediate pack
-revision, the old plan's `from_pack_revision_id` is stale and the final desired
-revision must be previewed into a new plan.
+After cleanup under the same active pack revision,
+`optctl migration validate
+<id>` refreshes live facts/readiness. If cleanup
+required an intermediate pack revision, the old plan's `from_pack_revision_id`
+is stale and the final desired revision must be previewed into a new plan.
 
 ## Operational hazard size
 
@@ -405,9 +419,9 @@ single-use confirmation token. Only its hash is stored. The token binds:
 - issuing principal and authorization root;
 - issuance and expiry, default 15 minutes and server-configurable.
 
-`POST /migrations/{id}/apply` must include that token for destructive work. Apply
-rechecks current authority and live facts under the pack/runtime locks; any
-binding mismatch, expiry, prior use, or facts/plan change rejects it. Token use
-and successful activation occur atomically. Safe/risky apply uses explicit
+`POST /migrations/{id}/apply` must include that token for destructive work.
+Apply rechecks current authority and live facts under the pack/runtime locks;
+any binding mismatch, expiry, prior use, or facts/plan change rejects it. Token
+use and successful activation occur atomically. Safe/risky apply uses explicit
 class-aware CLI flags but no confirmation token. Repeated apply after successful
 activation returns the existing application result.

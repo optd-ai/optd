@@ -1,4 +1,16 @@
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-object-model; contract: 1; input: sha256:2cf4212837d2207c1323aa5cc66fdd282f54e91d198b79f599af9f31e4a6ca7f -->
+
 # Object Model
+
+Generated exact-contract projection imported into project-model/model.json from the reviewed object-model.md source.
+
+## Exact migrated contract
+
+<a id="obj-com-exact-object-model-v1"></a>
+
+### Exact v1 contract — Object Model
+
+**Migration provenance.** Exact normative contract imported from `spec/object-model.md` at `sha256:68b5ab4f4405cd14db257a7ad8946a4d78b195786c973609fe03fd11a649737c`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
 
 ## Summary
 
@@ -55,26 +67,20 @@ strings are not competing platform aliases.
 
 ### AI/API
 
-- Semantic search, permission-filtered.
-- Summaries, permission-filtered and auditable.
-- MCP tools.
-- REST API.
-- CLI.
+- Strict permission-filtered query and object/history reads.
+- REST API and compiled CLI.
+- Semantic/vector search, generated summaries, and MCP tools are deferred until
+  they have explicit schemas, authorization behavior, storage, and acceptance
+  tests.
 
 ## Relationships
 
 Relationships should be first-class objects or rows rather than ad hoc
 foreign-key fields when they need audit/history/policy.
 
-Candidate relationship features:
-
-- Source object
-- Target object
-- Relationship type, e.g. `blocks`, `belongs_to`, `mentions`, `duplicates`,
-  `relates_to`
-- Creator/timestamps
-- Optional metadata/extensions
-- Optional lifecycle or validation rules
+Relationship definitions and runtime edges use the strict versioned schemas in
+[Pack Definition Schemas](pack-definition-schemas.md). They do not admit an
+undeclared metadata/extension bag or relationship-local lifecycle rules.
 
 ## Domain Packs vs Platform Core
 

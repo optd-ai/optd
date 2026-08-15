@@ -1,0 +1,448 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-15T00:14:25.635Z",
+  "modelRevision": 13,
+  "modelHash": "sha256:5a7b171a4ea96de7ffa4cea075cc6970ab0711a23e6b96934fc0fd83efa09263",
+  "candidateManifestHash": "sha256:46120d55b3ce71869c196451f0bb8ce8d341cee55c76f853afffdc9dc22b2244",
+  "paths": [
+    {
+      "path": "spec/README.md",
+      "operation": "replace",
+      "oldSha256": "sha256:7d079f4667b6bd58906c698b3434a92a1783a59f6a64cfee4009d80a9da6f7c2",
+      "generatedSha256": "sha256:777e841e17321982f5c502b730151e35852f3b5df1d9c0204fb9b9f7a8d95cf8",
+      "viewId": "view-index"
+    },
+    {
+      "path": "spec/api-actions.md",
+      "operation": "replace",
+      "oldSha256": "sha256:4461056e2011d334fff22d1f33c83c3fd1fdfa64bf25584a5e0d6824755183a2",
+      "generatedSha256": "sha256:11bc6f11f0d1cbb06974f8432a62bb583e363a44b84cbda7556d2f557730c856",
+      "viewId": "view-exact-api-actions"
+    },
+    {
+      "path": "spec/api-errors.md",
+      "operation": "replace",
+      "oldSha256": "sha256:bd20733688be80787078a03a14648af699713c688331bc4d51465fcb1c65587f",
+      "generatedSha256": "sha256:0c950d0bde6b12bfe75cddd26508d79d0a10112aea54ecbb2f6ac10963ea55f4",
+      "viewId": "view-exact-api-errors"
+    },
+    {
+      "path": "spec/auth-api.md",
+      "operation": "replace",
+      "oldSha256": "sha256:a9b136238ba6711eb61dd2d432cac032e55e7fb6af42f5e3519192a2c002dabc",
+      "generatedSha256": "sha256:5f86b1e625d7980222efe93e07b249e938558ba19ebe490d339d7faa05eb4b1a",
+      "viewId": "view-exact-auth-api"
+    },
+    {
+      "path": "spec/authentication.md",
+      "operation": "replace",
+      "oldSha256": "sha256:907cbfed4b2bd8237c2d423f8bbde8e829966e7d7706cb44009a85c2b73eb839",
+      "generatedSha256": "sha256:483e5ddb57644c437eb18f00b1d7b1df703816be230a0fba02478931695ac0ff",
+      "viewId": "view-exact-authentication"
+    },
+    {
+      "path": "spec/authorization-assignments.md",
+      "operation": "replace",
+      "oldSha256": "sha256:1808e5907a6c5526e46999d2f512cb52231a5986a1e418ae7274142cddcb48a5",
+      "generatedSha256": "sha256:4b60d0a966f4c582b2215d4d606967aebdc48751b39f493df12f09ddd21fbe4b",
+      "viewId": "view-exact-authorization-assignments"
+    },
+    {
+      "path": "spec/cel-sql-partial-indexes.md",
+      "operation": "replace",
+      "oldSha256": "sha256:f782a2b70469350cf6f138a6a5d627a6c21f1e889b3bd943ef28d4513da1d512",
+      "generatedSha256": "sha256:80fd4166bd7737b482c61e0436765ee5eec2efcd430624ba27415b7fa864c444",
+      "viewId": "view-disposition-cel-sql-partial-indexes"
+    },
+    {
+      "path": "spec/changeset-approvals.md",
+      "operation": "replace",
+      "oldSha256": "sha256:d8a9b5c262e9a96e972c58e3a06a342ba528e331e09d148093435f298b9bb14c",
+      "generatedSha256": "sha256:acedc24124e5ad39a6594e0119f75d52a50e473b9460acec5f9d85429bb1a0ec",
+      "viewId": "view-exact-changeset-approvals"
+    },
+    {
+      "path": "spec/changeset-operation-schema.md",
+      "operation": "replace",
+      "oldSha256": "sha256:b927be34a2e2a4d1bc9ee9881cd720262d59d75bdb142f923231eab0c9d52fdf",
+      "generatedSha256": "sha256:9290f00bdc038902a5745dd9de10d401d4e17da7b6072df868dee57e94b26bb1",
+      "viewId": "view-exact-changeset-operation-schema"
+    },
+    {
+      "path": "spec/changesets.md",
+      "operation": "replace",
+      "oldSha256": "sha256:0ac9a09a27188a26cf9f243fc61911109a5c5a884c8dd7482c93e33df27f162d",
+      "generatedSha256": "sha256:eb8de45113b4b88492535a231b39d5cec485cb427bad254c9ea6cd8f79b01c77",
+      "viewId": "view-exact-changesets"
+    },
+    {
+      "path": "spec/commit-revalidation.md",
+      "operation": "replace",
+      "oldSha256": "sha256:28578f4b4f2d89784f9818d21d9dc2938f6b4a0a6a15622285aac6b1ec54d715",
+      "generatedSha256": "sha256:4eb4dfbe936341a54a4fac3f2b4d519b2166c23dec4b0f11f154d3c0defb8f14",
+      "viewId": "view-exact-commit-revalidation"
+    },
+    {
+      "path": "spec/crm-migration-prototype.md",
+      "operation": "replace",
+      "oldSha256": "sha256:63ebbba102e821aab22b4831ff1eb483c4e750427d23c7e3f712599eb47dd830",
+      "generatedSha256": "sha256:6b7b7075437b122eeace918f1d2e9f35ab06890294f2d82d96dd3ee198ba5470",
+      "viewId": "view-disposition-crm-migration-prototype"
+    },
+    {
+      "path": "spec/crm-pack-definition.md",
+      "operation": "replace",
+      "oldSha256": "sha256:3ef4c870a442175cfa2794af8d6dd8542fb493a53bd4ef48cb8e9f7acd3511b4",
+      "generatedSha256": "sha256:583f0381ce5bb77a8a6db69ac93065a804f9ef84d0056f7a69bef18becc66a13",
+      "viewId": "view-disposition-crm-pack-definition"
+    },
+    {
+      "path": "spec/crm-prototype-flow.md",
+      "operation": "replace",
+      "oldSha256": "sha256:0f4533085e2fb1c1e4f26b0f1b0f08068ea97abb3b7f75c3e43f2e0d866f54ff",
+      "generatedSha256": "sha256:c2a246bb5c0bab43f12e31f229f904a8860814293f63eeaf8c2fd25098f2b893",
+      "viewId": "view-disposition-crm-prototype-flow"
+    },
+    {
+      "path": "spec/crm-workflows.md",
+      "operation": "replace",
+      "oldSha256": "sha256:5175f46c78a9306567fd8cec586f09e8982c45167021752190a91ae8fc2a3597",
+      "generatedSha256": "sha256:c0caca918362c948db60a991dd120dc30ff4ec75999822e283c36858a5433b45",
+      "viewId": "view-exact-crm-workflows"
+    },
+    {
+      "path": "spec/deployment.md",
+      "operation": "replace",
+      "oldSha256": "sha256:d90ebb1594b51611916f48f816badf8aeaa81cd1142c357ba0b45c58786baa25",
+      "generatedSha256": "sha256:9fb480bb2fd7956fd5dae097c4398772be267264e15fa6e68d7bdbdeead7c1d3",
+      "viewId": "view-exact-deployment"
+    },
+    {
+      "path": "spec/events-audit.md",
+      "operation": "replace",
+      "oldSha256": "sha256:35dd1d329c316114cffc9641d5b4fd892bb1d1ec59dc2d256b2420fc115c9cc0",
+      "generatedSha256": "sha256:5b9393d8d1e853c1b7f587d12dbbfdf71d0a7e3cde7a7ead2e76e0e4df48a527",
+      "viewId": "view-exact-events-audit"
+    },
+    {
+      "path": "spec/expression-language.md",
+      "operation": "replace",
+      "oldSha256": "sha256:4f7ffb261098a1ab28b4d6157bdbb7e6eb8b0d08b288a453a0a222086e0841f2",
+      "generatedSha256": "sha256:a0b01be2d30be4532adbe4a52b0b64a777060a09bcace91cd1f8b0f43ab4f336",
+      "viewId": "view-exact-expression-language"
+    },
+    {
+      "path": "spec/extensions.md",
+      "operation": "replace",
+      "oldSha256": "sha256:9cf20279f696e6631047dee3a8905d6e1f2c2dd2fae76553dbf0811a52e5b167",
+      "generatedSha256": "sha256:9e94d3945eecae856abdbb098ee86c839cc96bc532746f47e655282846c3717d",
+      "viewId": "view-exact-extensions"
+    },
+    {
+      "path": "spec/hook-secret-grants.md",
+      "operation": "replace",
+      "oldSha256": "sha256:01bf907b075a9d39da058f808bee555c449e498ae92add60b4898fdeff0bd666",
+      "generatedSha256": "sha256:2d3a441450c4d9ad30ee446cdedc1c1be9286c1ea691972a068fa3ba96104316",
+      "viewId": "view-exact-hook-secret-grants"
+    },
+    {
+      "path": "spec/hooks-and-scripts.md",
+      "operation": "replace",
+      "oldSha256": "sha256:b371e08514baf02ac6628f871dcbe24ab57b0bdd97cc6f1b4c47661bb78458db",
+      "generatedSha256": "sha256:56378007c706b4a0010fe6382839ae0c322a971de8abba85fdc0c66ac735d869",
+      "viewId": "view-exact-hooks-and-scripts"
+    },
+    {
+      "path": "spec/hooks-secrets-outbox.md",
+      "operation": "add",
+      "oldSha256": null,
+      "generatedSha256": "sha256:a3b395d0a55f8b62aa382dc90f9db0d42d90e7c923629d4733d44338a3202961",
+      "viewId": "view-hooks-secrets-outbox"
+    },
+    {
+      "path": "spec/identity-auth.md",
+      "operation": "add",
+      "oldSha256": null,
+      "generatedSha256": "sha256:4ff2dfcf21d0cd62f55d57ab2c1601262fc401a3df84357ba644fae6a6748bd1",
+      "viewId": "view-identity-auth"
+    },
+    {
+      "path": "spec/local-postgres-options.md",
+      "operation": "replace",
+      "oldSha256": "sha256:20910c3ab5084bb1f0939a2cf117b0a04cf422e5ce3647b1b41d0ab93cb5c580",
+      "generatedSha256": "sha256:a634c045e1f2d663ca54b37e1e2b83528b9a9469219edbcd867665439dee7e83",
+      "viewId": "view-disposition-local-postgres-options"
+    },
+    {
+      "path": "spec/migration-classification.md",
+      "operation": "replace",
+      "oldSha256": "sha256:8ae2a4d42f2e975867343802a8096d95b797c8486f5bf1662a174b33737ddb3d",
+      "generatedSha256": "sha256:abf27289bc122bfd30cb59763e6d6ecc571b4e79f2aaf4678f5fb1a36775c87c",
+      "viewId": "view-exact-migration-classification"
+    },
+    {
+      "path": "spec/migrations.md",
+      "operation": "replace",
+      "oldSha256": "sha256:b9a579733be1c15e4cf2bc1004586f4105b34bf41ca7b06715df32253f71f8de",
+      "generatedSha256": "sha256:f8ab5dfeeaa8efa316c66b3797a396e39ccd249a60465ec566aa4406e28ab8e3",
+      "viewId": "view-exact-migrations"
+    },
+    {
+      "path": "spec/model-governance.md",
+      "operation": "add",
+      "oldSha256": null,
+      "generatedSha256": "sha256:d69acbcc812b8763d891571dd2c39277d5eac471be0e7941f9fe322344d8b721",
+      "viewId": "view-model-governance"
+    },
+    {
+      "path": "spec/mvp-acceptance-criteria.md",
+      "operation": "replace",
+      "oldSha256": "sha256:840d58390cc1a42d98a05c02c4d3cf73eeacc2dd7f391e90352ea70fa4f30c7b",
+      "generatedSha256": "sha256:987f34ccb13b6e57e1113a3d22e8661410ca1d0e6c5d2e5985cf56c67a97c4e7",
+      "viewId": "view-exact-mvp-acceptance-criteria"
+    },
+    {
+      "path": "spec/mvp-api-routes.md",
+      "operation": "replace",
+      "oldSha256": "sha256:b6b7896c05a6ad08e8d376ba91956fa19a2c598d31017cff005bda479f0e17d6",
+      "generatedSha256": "sha256:34be7d7450b0a78030f65561079a944df5ee352653812566a70cbd3dfa81242d",
+      "viewId": "view-exact-mvp-api-routes"
+    },
+    {
+      "path": "spec/mvp-hook-schema.md",
+      "operation": "replace",
+      "oldSha256": "sha256:e19d1ee99064a0cf27392f7a809a234796b63346a9cf306bd2e3430f99e1ee83",
+      "generatedSha256": "sha256:ed007ca4b14f711300e06be258941fbe9b1039c19423cb7cf36e6be860b7cdf7",
+      "viewId": "view-exact-mvp-hook-schema"
+    },
+    {
+      "path": "spec/mvp-implementation-boundaries.md",
+      "operation": "replace",
+      "oldSha256": "sha256:1f4ab3155924d47d299805e18feec4a05b86c1d266be558b3f3f26c716635a72",
+      "generatedSha256": "sha256:c3748bfda39a3cd39068322ec70648c82234b7113e3e075df7b25673977b6655",
+      "viewId": "view-exact-mvp-implementation-boundaries"
+    },
+    {
+      "path": "spec/mvp-migration-integration.md",
+      "operation": "replace",
+      "oldSha256": "sha256:515d481385fc87bb369053ab259fb8df0e254b3aa43cca112c83068977576a7a",
+      "generatedSha256": "sha256:217d7fc2aaa49e2d98c23f980c1171e7321252c6d783cc69d3a61b6c2c46b8da",
+      "viewId": "view-exact-mvp-migration-integration"
+    },
+    {
+      "path": "spec/mvp-planning-requirements.md",
+      "operation": "replace",
+      "oldSha256": "sha256:84ac1192657cecd3fddce2e05b11ea7d53330648e1511ce78942d63dd2f6fb02",
+      "generatedSha256": "sha256:6ba3d8d5b5159a08f4aad2efaeb578460f79df8a2f2c17d1db3070641f797118",
+      "viewId": "view-disposition-mvp-planning-requirements"
+    },
+    {
+      "path": "spec/mvp-policy-schema.md",
+      "operation": "replace",
+      "oldSha256": "sha256:f5d3922c71d77bf62224e1b45836b3c3d6793b9b68fa65df05892252fb61e51b",
+      "generatedSha256": "sha256:5fad586dd77fd3fb2b2640f730a707a78857defca10018e4344c0f402af8e190",
+      "viewId": "view-exact-mvp-policy-schema"
+    },
+    {
+      "path": "spec/mvp-roadmap.md",
+      "operation": "replace",
+      "oldSha256": "sha256:6288554dafb7da5e95dfea5ed1cab5c7e022755fbc001810e38d5f868735d45b",
+      "generatedSha256": "sha256:f71782202802649a6cd6d3d1443edb7201bb37102462c0da0b849ddf905b80f4",
+      "viewId": "view-disposition-mvp-roadmap"
+    },
+    {
+      "path": "spec/mvp-stack.md",
+      "operation": "replace",
+      "oldSha256": "sha256:f6ab86b71ab4d5b95612ba408f014ae2b61513a74387eae71d836dacefcb4fdd",
+      "generatedSha256": "sha256:3ded12b85ad699ccc4307b84a3d093a7f5631e1350208c2dd84686710db5ba35",
+      "viewId": "view-exact-mvp-stack"
+    },
+    {
+      "path": "spec/object-model.md",
+      "operation": "replace",
+      "oldSha256": "sha256:68b5ab4f4405cd14db257a7ad8946a4d78b195786c973609fe03fd11a649737c",
+      "generatedSha256": "sha256:918a25efd0e6f7092209ab78fda370cfa1e25ba87c2856beec9790722de7481b",
+      "viewId": "view-exact-object-model"
+    },
+    {
+      "path": "spec/odoo-object-map.md",
+      "operation": "replace",
+      "oldSha256": "sha256:bf02c38cf56fa814b483a26b333c80e685e5d36cedf40fe4d9a3c672bf482260",
+      "generatedSha256": "sha256:43d72dcfdb87fafc33e4809a38c046d34a21cd3b62ded50d198e206798af193b",
+      "viewId": "view-disposition-odoo-object-map"
+    },
+    {
+      "path": "spec/optctl-axi.md",
+      "operation": "replace",
+      "oldSha256": "sha256:a0c0d6181e6a8bbc378c0ee893b0c34e267c2e1133fd3e3242c41681c2dd41aa",
+      "generatedSha256": "sha256:80cb30fb3241b76f0e272c8c1308acdec43f4e56cd3f177208e5dbafd0f55bf5",
+      "viewId": "view-exact-optctl-axi"
+    },
+    {
+      "path": "spec/outbox-delivery.md",
+      "operation": "replace",
+      "oldSha256": "sha256:37566cb3182a77dd82ec69c54d040b96568e5754693af48a79504cc76db16124",
+      "generatedSha256": "sha256:46542d035452faf84b36daac389620f76e308031ed631aa39d40460ef01f2815",
+      "viewId": "view-exact-outbox-delivery"
+    },
+    {
+      "path": "spec/pack-definition-schemas.md",
+      "operation": "replace",
+      "oldSha256": "sha256:5d461390125e4a9b76a4ecf1038a2cdbdeec465f096febf7d736f18d876cd751",
+      "generatedSha256": "sha256:3aa06b150c33e17a37baa10811e50eae93764c36b9780f453d67da27a5fe049d",
+      "viewId": "view-exact-pack-definition-schemas"
+    },
+    {
+      "path": "spec/pack-publishers-and-projects.md",
+      "operation": "replace",
+      "oldSha256": "sha256:b959a489f0bc16f34c39c859442006ba9827b778937d478a5a32eb72e139987d",
+      "generatedSha256": "sha256:d739541bb5873cab587688cc7e1a0a4bcac63b6358fcdadb8dcb93039286957a",
+      "viewId": "view-exact-pack-publishers-and-projects"
+    },
+    {
+      "path": "spec/pack-structure.md",
+      "operation": "replace",
+      "oldSha256": "sha256:b785675a461bf23b8d7df58836f85457d20a46ecc2a9b5bc7cdea1dc3006be38",
+      "generatedSha256": "sha256:73faf27578365a14ba427037727ea0cc285872b9da3f2b0edd63bd1c7e9698b1",
+      "viewId": "view-exact-pack-structure"
+    },
+    {
+      "path": "spec/packs-projects.md",
+      "operation": "add",
+      "oldSha256": null,
+      "generatedSha256": "sha256:636f9d7a180253727df174db60e3ebd3f6a23c8f5f54379b66f93516defdce7d",
+      "viewId": "view-packs-projects"
+    },
+    {
+      "path": "spec/planning-readiness-audit.md",
+      "operation": "replace",
+      "oldSha256": "sha256:7f66e9379d2a6e2c8e8ecf09907dc92f1923fbe8a8a03ab819877116271dd339",
+      "generatedSha256": "sha256:5c16df0eb1765f16e64ac8abc99bc3143fd6f2e0e2d3e3e5a70b93816d6dbdee",
+      "viewId": "view-disposition-planning-readiness-audit"
+    },
+    {
+      "path": "spec/policies.md",
+      "operation": "replace",
+      "oldSha256": "sha256:2dd369390e59a5c850d73bc49fd9ecbbcbbcf17823aaba91ba08d67cc320f520",
+      "generatedSha256": "sha256:8478a6b010b45938cb9712d2c11d5b906a45131a42b73bf3a1b7e4b90ed3ecea",
+      "viewId": "view-exact-policies"
+    },
+    {
+      "path": "spec/pre-mvp-open-questions.md",
+      "operation": "replace",
+      "oldSha256": "sha256:5a6c055370f5dec43e900095e537e07d90b48e974178a2e8cecb6acc8faa5ab7",
+      "generatedSha256": "sha256:e122ee3df0ca09129ccc7bd258ddd729eb48c6fe3e86de807dad480c1ce54679",
+      "viewId": "view-disposition-pre-mvp-open-questions"
+    },
+    {
+      "path": "spec/product.md",
+      "operation": "add",
+      "oldSha256": null,
+      "generatedSha256": "sha256:ba0fbe7f178ba07b0af5e72542709babe2c7545a2e2ae755fea7e130c334e001",
+      "viewId": "view-product"
+    },
+    {
+      "path": "spec/project-management-pack.md",
+      "operation": "replace",
+      "oldSha256": "sha256:899349a5c143cd03d41de97f390ed218a90aabd0197c6d22905566367dc140d3",
+      "generatedSha256": "sha256:3be0696272572eab6602957cda0502a9cd1c442a2b83b8e82bff6cca5e70d4c5",
+      "viewId": "view-exact-project-management-pack"
+    },
+    {
+      "path": "spec/projects.md",
+      "operation": "replace",
+      "oldSha256": "sha256:28c4f76c1ab344d7cff1f0a36fcf5adee19095466087d726190e917fd81dc38e",
+      "generatedSha256": "sha256:88dfd547d836d64c5f687768b89a71b68abb3948c5ca66bcd4461e313a52fab4",
+      "viewId": "view-exact-projects"
+    },
+    {
+      "path": "spec/proof-acceptance.md",
+      "operation": "add",
+      "oldSha256": null,
+      "generatedSha256": "sha256:88faded4bdeb5c2ffa4dafb0da18695a36e1cd5c9028724b98250ecb855d5135",
+      "viewId": "view-proof-acceptance"
+    },
+    {
+      "path": "spec/proposals.md",
+      "operation": "replace",
+      "oldSha256": "sha256:75f1128fe56fe6bc203abfaa503d8593ec9b343e40eda9e8a55d093dfa1ca947",
+      "generatedSha256": "sha256:44b42d42a259c8e3ad38b41b7d62d120fdc3e774f8ca1972ddfe89c7d2e8f20a",
+      "viewId": "view-disposition-proposals"
+    },
+    {
+      "path": "spec/queries-policy-history.md",
+      "operation": "add",
+      "oldSha256": null,
+      "generatedSha256": "sha256:d616316b15c1f6c4f6b04d2af310fdcef49cefa37bdafd894222af2a50d2c986",
+      "viewId": "view-queries-policy-history"
+    },
+    {
+      "path": "spec/query-api.md",
+      "operation": "replace",
+      "oldSha256": "sha256:551ee5b8c344c7624e274adc5034e804cd8676349e562a16e12217a660e439d9",
+      "generatedSha256": "sha256:71dcefa266c8b0052507bbb8d557fe1be84ff3f67d9ae49246bad8a50bb13dfb",
+      "viewId": "view-exact-query-api"
+    },
+    {
+      "path": "spec/resource-configuration.md",
+      "operation": "replace",
+      "oldSha256": "sha256:f4c5f9b83e394d586a518df842041043e1bcb9bdc1cec45eb39a7c5f3ea8bd7a",
+      "generatedSha256": "sha256:4f2d0b6e8f0fbd4306d68cd7b4ca7c4917f979c6b97f5d6ac316cf6827db1e97",
+      "viewId": "view-exact-resource-configuration"
+    },
+    {
+      "path": "spec/runtime-release.md",
+      "operation": "add",
+      "oldSha256": null,
+      "generatedSha256": "sha256:7350a418bc30ca3c8ae894e116e4caabf98680d7c198756e1d506d4451f0bbc0",
+      "viewId": "view-runtime-release"
+    },
+    {
+      "path": "spec/secret-encryption.md",
+      "operation": "replace",
+      "oldSha256": "sha256:245fc34ad2f90fef04c5a023d2dc626a70315d38c44ddd31a49860e81b7d15f7",
+      "generatedSha256": "sha256:b6ab5a503a543078b9429f0becc32bb50b18fe237e494a4de42a0955da800afb",
+      "viewId": "view-exact-secret-encryption"
+    },
+    {
+      "path": "spec/staged-changeset-storage.md",
+      "operation": "replace",
+      "oldSha256": "sha256:c0079bec9f3da11cde8df6a5bc6cebfbe092630ff6a0293a45d01e074793b691",
+      "generatedSha256": "sha256:f5076bdb02be1e7720b6a6dd47fa6010851df69acefd082b9bddd4c95db028a3",
+      "viewId": "view-exact-staged-changeset-storage"
+    },
+    {
+      "path": "spec/state-machines.md",
+      "operation": "replace",
+      "oldSha256": "sha256:746fe79ad8db6c42a7420ed6e9b345dfd6abb6f59cc9e4c29eea2dd280ca83c9",
+      "generatedSha256": "sha256:0f97260dd9a623f7af0dfc200c4486a695acd28df18a5a5bfa424dc435bd9371",
+      "viewId": "view-exact-state-machines"
+    },
+    {
+      "path": "spec/storage-postgres.md",
+      "operation": "replace",
+      "oldSha256": "sha256:a2f52223ed5d041effc941d16d361f1a0b3bac4283d5fb1c0348f33699d6cffb",
+      "generatedSha256": "sha256:812e75a95816c51841e495a3db9eb9281dbab829759ae7e9b2d81cd0ab514964",
+      "viewId": "view-exact-storage-postgres"
+    },
+    {
+      "path": "spec/vision.md",
+      "operation": "replace",
+      "oldSha256": "sha256:bd3cdd1fa8dcea21ec6368fd83aa7fa5d85a0ac37bc7282d0bfca8f4f8c73556",
+      "generatedSha256": "sha256:628a0763a5297bcde65efec8e30e8685968b831561a33ca81d7e294fc470b709",
+      "viewId": "view-exact-vision"
+    },
+    {
+      "path": "spec/writes-actions.md",
+      "operation": "add",
+      "oldSha256": null,
+      "generatedSha256": "sha256:5e3faab375f79958d03cd6b0ec6ce72a9e81434914f5335101549f96689f86f5",
+      "viewId": "view-writes-actions"
+    }
+  ],
+  "summary": {
+    "replace": 53,
+    "add": 9,
+    "delete": 0
+  }
+}

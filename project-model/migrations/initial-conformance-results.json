@@ -1,0 +1,273 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-15T00:14:25.635Z",
+  "head": "7640287c1bf1ad11879b88dac36b81e092923ba4",
+  "candidateMode": "candidate",
+  "modelHash": "sha256:5a7b171a4ea96de7ffa4cea075cc6970ab0711a23e6b96934fc0fd83efa09263",
+  "candidateManifestHash": "sha256:46120d55b3ce71869c196451f0bb8ce8d341cee55c76f853afffdc9dc22b2244",
+  "checks": [
+    {
+      "id": "model-schema",
+      "status": "passed",
+      "result": "220 objects; zero installed-validator errors; all IDs, states, relationships, scopes, timestamps, acceptance receipts, projections, and type shapes valid"
+    },
+    {
+      "id": "model-provenance",
+      "status": "passed",
+      "result": "213/213 spec/document source references and all structured repository/test/history/session-entry/Git references resolve; final pre-cutover corpus hashes match"
+    },
+    {
+      "id": "focused-source-conformance",
+      "status": "passed",
+      "result": "57 passed, 0 failed in latest affected contract suite; earlier conflict suite 97 passed, 0 failed"
+    },
+    {
+      "id": "medium-drift-contracts",
+      "status": "passed",
+      "result": "12 passed, 0 failed: route inventory, CLI contract, error classification, and runtime artifacts"
+    },
+    {
+      "id": "final-documentation-contracts",
+      "status": "passed",
+      "result": "25 passed, 0 failed: pack schema, errors, route inventory, runtime artifacts, and proof-pack fixtures"
+    },
+    {
+      "id": "deno-task-check",
+      "status": "passed",
+      "result": "typecheck passed",
+      "logSha256": "sha256:a0311c95e6d148c9b2007fd28f178fe6eaaf93db01329b955b209641be97a121"
+    },
+    {
+      "id": "project-model-format",
+      "status": "passed",
+      "result": "deno fmt --check project-model and current spec corpus passed"
+    },
+    {
+      "id": "git-diff-check",
+      "status": "passed",
+      "result": "no whitespace errors"
+    },
+    {
+      "id": "generated-projections",
+      "status": "passed",
+      "result": "62 deterministic preview views; 155 governing objects exactly once; 42 normative and 11 non-normative bodies preserved literally; authoritative-state simulation has zero errors"
+    },
+    {
+      "id": "first-independent-completeness-audit",
+      "status": "historical_failure_repaired",
+      "result": "NO PASS: broad model summaries omitted exact contracts; repaired by literal exact-contract and disposition imports"
+    },
+    {
+      "id": "second-independent-completeness-audit",
+      "status": "historical_failure_repaired",
+      "result": "NO PASS: migration classification authority and preservation manifests incomplete; repaired by normative exact import, literal historical preservation, loopback wording, and refreshed manifests"
+    },
+    {
+      "id": "default-test-attempt",
+      "status": "incomplete",
+      "result": "20-minute harness timeout during long container suite; no observed test failure; exact owned container, volume, image, and 13-image parent chain removed without prune"
+    },
+    {
+      "id": "latest-focused-contracts",
+      "status": "passed",
+      "result": "57 passed, 0 failed under shell.nix with Deno 2.9.4 and PostgreSQL 18.4"
+    },
+    {
+      "id": "section-disposition",
+      "status": "passed",
+      "result": "53 files, 890 headings, 42 normative exact, 11 explicitly non-normative exact, 0 unresolved"
+    },
+    {
+      "id": "replacement-preview",
+      "status": "passed",
+      "result": "53 replace, 9 add, 0 delete; all 194 local Markdown links and 62 generated paths safe"
+    },
+    {
+      "id": "third-independent-integrity-audit",
+      "status": "historical_failure_repaired",
+      "result": "NO PASS: README disposition ID, frozen session-prefix evidence, and link count stale; repaired in revision 13 before retry"
+    },
+    {
+      "id": "final-independent-cutover-audit-r13",
+      "status": "passed",
+      "result": "PASS: revision 13 is information-loss-safe; exact bodies/hashes, 53-file/890-heading dispositions, 213 source refs, 194 links, 155 placements, 62 safe paths, manifests, and authoritative simulation verified"
+    }
+  ],
+  "resolved": [
+    {
+      "modelObjectId": "Q-auth-routes",
+      "decisionObjectId": "DEC-auth-admin-routes",
+      "summary": "Spec aligned to the implemented list/PATCH/POST-disable lifecycle API with expected-version concurrency"
+    },
+    {
+      "modelObjectId": "Q-projects-timesheet-name",
+      "decisionObjectId": "DEC-projects-timesheet-identity",
+      "summary": "Project and acceptance specs aligned to the executable operant/projects:timesheet identity"
+    },
+    {
+      "modelObjectId": "Q-field-null",
+      "decisionObjectId": "DEC-field-null-contract",
+      "summary": "Operation prose aligned to non-null set values, omission as no change, and explicit unset for optional-field clearing"
+    },
+    {
+      "modelObjectId": "Q-action-read-schema",
+      "decisionObjectId": "DEC-action-read-schema",
+      "summary": "Both specs aligned to strict input-derived id_from, fields, and required Action reads"
+    },
+    {
+      "modelObjectId": "Q-hook-actor",
+      "decisionObjectId": "DEC-hook-actor-dto",
+      "summary": "Hook prose aligned to explicit phase-specific curated actor DTOs without roles or credentials"
+    },
+    {
+      "modelObjectId": "Q-error-registry",
+      "decisionObjectId": "DEC-error-registry",
+      "summary": "Source and prose aligned to 400 malformed transport, 422 semantic validation, and emitted busy/423 codes"
+    },
+    {
+      "modelObjectId": "Q-auth-cancel",
+      "decisionObjectId": "DEC-agent-request-cancellation",
+      "summary": "Main authentication prose aligned to the implemented terminal requester-cancellation lifecycle"
+    },
+    {
+      "modelObjectId": "Q-semantic-search",
+      "decisionObjectId": "DEC-semantic-search-deferred",
+      "summary": "Semantic/vector search explicitly deferred pending complete contracts and implementation"
+    },
+    {
+      "modelObjectId": "DISC-route-inventory",
+      "decisionObjectId": "DEC-route-inventory",
+      "summary": "Authorization and expression routes added to inventory and split-module source contract test"
+    },
+    {
+      "modelObjectId": "DISC-cli-test-excluded",
+      "decisionObjectId": "DEC-cli-test-registration",
+      "summary": "Current CLI contract included in default unit test discovery"
+    },
+    {
+      "modelObjectId": "DISC-release-format-scope",
+      "decisionObjectId": "DEC-release-format-authority",
+      "summary": "Release formatting now checks the selected future project-model authority"
+    },
+    {
+      "modelObjectId": "DISC-reset-id-entropy",
+      "decisionObjectId": "DEC-reset-id-nonce",
+      "summary": "Reset request identity separated from private nonce proof-of-possession entropy"
+    },
+    {
+      "modelObjectId": "DISC-approval-wording",
+      "decisionObjectId": "DEC-frozen-approval-revalidation",
+      "summary": "Commit wording aligned to revalidation of frozen approval requirements"
+    },
+    {
+      "modelObjectId": "DISC-hook-includes",
+      "decisionObjectId": "DEC-hook-source-pairing",
+      "summary": "Hook prose aligned to strict paired YAML/TypeScript basenames"
+    },
+    {
+      "modelObjectId": "DISC-deployment-doc",
+      "decisionObjectId": "DEC-runtime-modes",
+      "summary": "Deployment prose aligned to exact external and app-managed PostgreSQL modes"
+    },
+    {
+      "modelObjectId": "DISC-purge-wording",
+      "decisionObjectId": "DEC-no-purge-v1",
+      "summary": "History prose aligned to archive/compensation with no MVP purge"
+    },
+    {
+      "modelObjectId": "DISC-project-member-rationale",
+      "decisionObjectId": "DEC-project-member-resource",
+      "summary": "Projects membership rationale aligned to rich domain-resource semantics"
+    },
+    {
+      "modelObjectId": "DISC-outbox-counter-wording",
+      "decisionObjectId": "DEC-outbox-attempt-counters",
+      "summary": "Outbox claim counters separated from manual retry generations"
+    },
+    {
+      "modelObjectId": "DISC-axi-drift",
+      "decisionObjectId": "DEC-axi-query-contract",
+      "summary": "AXI examples/schema aligned to executable list and field-search vocabulary"
+    },
+    {
+      "modelObjectId": "DISC-readiness-stale",
+      "decisionObjectId": "DEC-readiness-status",
+      "summary": "Old planning-readiness result marked historical for current model cutover"
+    }
+  ],
+  "inconsistencies": [],
+  "sameHeadExternalEvidence": {
+    "releaseGate": "424 passed, 0 failed, 0 ignored",
+    "source": "history:.ai/history/2026-08-13-00-13-fix-operant-correctness-architecture-release.md",
+    "note": "not rerun during model-only audit"
+  },
+  "projectionLayout": {
+    "decisionObjectId": "DEC-generated-spec-layout",
+    "previewDirectory": "/tmp/operant-project-model-preview",
+    "generatedPaths": [
+      "spec/README.md",
+      "spec/product.md",
+      "spec/identity-auth.md",
+      "spec/packs-projects.md",
+      "spec/queries-policy-history.md",
+      "spec/writes-actions.md",
+      "spec/hooks-secrets-outbox.md",
+      "spec/runtime-release.md",
+      "spec/proof-acceptance.md",
+      "spec/model-governance.md",
+      "spec/api-actions.md",
+      "spec/api-errors.md",
+      "spec/auth-api.md",
+      "spec/authentication.md",
+      "spec/authorization-assignments.md",
+      "spec/cel-sql-partial-indexes.md",
+      "spec/changeset-approvals.md",
+      "spec/changeset-operation-schema.md",
+      "spec/changesets.md",
+      "spec/commit-revalidation.md",
+      "spec/crm-migration-prototype.md",
+      "spec/crm-pack-definition.md",
+      "spec/crm-prototype-flow.md",
+      "spec/crm-workflows.md",
+      "spec/deployment.md",
+      "spec/events-audit.md",
+      "spec/expression-language.md",
+      "spec/extensions.md",
+      "spec/hook-secret-grants.md",
+      "spec/hooks-and-scripts.md",
+      "spec/local-postgres-options.md",
+      "spec/migration-classification.md",
+      "spec/migrations.md",
+      "spec/mvp-acceptance-criteria.md",
+      "spec/mvp-api-routes.md",
+      "spec/mvp-hook-schema.md",
+      "spec/mvp-implementation-boundaries.md",
+      "spec/mvp-migration-integration.md",
+      "spec/mvp-planning-requirements.md",
+      "spec/mvp-policy-schema.md",
+      "spec/mvp-roadmap.md",
+      "spec/mvp-stack.md",
+      "spec/object-model.md",
+      "spec/odoo-object-map.md",
+      "spec/optctl-axi.md",
+      "spec/outbox-delivery.md",
+      "spec/pack-definition-schemas.md",
+      "spec/pack-publishers-and-projects.md",
+      "spec/pack-structure.md",
+      "spec/planning-readiness-audit.md",
+      "spec/policies.md",
+      "spec/pre-mvp-open-questions.md",
+      "spec/project-management-pack.md",
+      "spec/projects.md",
+      "spec/proposals.md",
+      "spec/query-api.md",
+      "spec/resource-configuration.md",
+      "spec/secret-encryption.md",
+      "spec/staged-changeset-storage.md",
+      "spec/state-machines.md",
+      "spec/storage-postgres.md",
+      "spec/vision.md"
+    ],
+    "status": "ready_for_explicit_hash_bound_cutover_approval"
+  }
+}

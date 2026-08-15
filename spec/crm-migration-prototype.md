@@ -1,4 +1,16 @@
+<!-- generated-by: pi-dag-workflow/project-model; view: view-disposition-crm-migration-prototype; contract: 1; input: sha256:dbb02ef76c72d219b6bf7da0f14f4af677b749876989053cb1a10adcfe920891 -->
+
 # CRM Migration Prototype Evidence
+
+Generated non-normative disposition view preserving the complete reviewed legacy source for auditability.
+
+## Migration disposition
+
+<a id="obj-com-disposition-crm-migration-prototype"></a>
+
+### Disposition — CRM Migration Prototype Evidence
+
+**Migration disposition.** This source is preserved literally below for auditability at `sha256:63ebbba102e821aab22b4831ff1eb483c4e750427d23c7e3f712599eb47dd830`, but remains non-normative historical, supporting research, prototype evidence, roadmap, or superseded planning material. Only separately accepted current project-model objects carry product authority.
 
 > **Status:** supporting prototype evidence. Open questions and old CLI examples
 > here do not override the frozen migration, staging, and pack identity specs.

@@ -638,7 +638,7 @@ export function makeHttpApp(
           c,
           err(
             validationError(
-              "bad_request",
+              "validation_failed",
               "current object reads do not accept query parameters",
             ),
           ),
@@ -658,7 +658,7 @@ export function makeHttpApp(
           c,
           err(
             validationError(
-              "bad_request",
+              "validation_failed",
               `unknown history query parameter ${unknown[0]}`,
             ),
           ),
@@ -696,7 +696,7 @@ export function makeHttpApp(
         c,
         err(
           validationError(
-            "bad_request",
+            "validation_failed",
             `unknown outbox query parameter ${unknown}`,
           ),
         ),
@@ -707,7 +707,10 @@ export function makeHttpApp(
   app.post("/api/v1/outbox/drain", async (c) => {
     const body = await requestJson(c);
     if (Object.keys(body).some((key) => key !== "limit")) {
-      throw new SyntaxError("request body contains unknown fields");
+      throw new RequestValidationError(
+        "request body contains unknown fields",
+        "unknown_field",
+      );
     }
     return resultJson(
       c,
@@ -735,7 +738,7 @@ export function makeHttpApp(
         c,
         err(
           validationError(
-            "bad_request",
+            "validation_failed",
             `unknown attempts query parameter ${unknown}`,
           ),
         ),
@@ -751,7 +754,12 @@ export function makeHttpApp(
     if (
       Object.keys(body).some((key) => key !== "reason") ||
       (body.reason !== undefined && typeof body.reason !== "string")
-    ) throw new SyntaxError("request body contains unknown fields");
+    ) {
+      throw new RequestValidationError(
+        "request body failed validation",
+        "invalid_value",
+      );
+    }
     return resultJson(
       c,
       await deps.outbox.retry(
@@ -766,7 +774,12 @@ export function makeHttpApp(
     if (
       Object.keys(body).some((key) => key !== "reason") ||
       (body.reason !== undefined && typeof body.reason !== "string")
-    ) throw new SyntaxError("request body contains unknown fields");
+    ) {
+      throw new RequestValidationError(
+        "request body failed validation",
+        "invalid_value",
+      );
+    }
     return resultJson(
       c,
       await deps.outbox.cancel(
@@ -857,19 +870,43 @@ export function makeHttpApp(
   app.onError((error, c) => {
     console.error(error);
     const invalidJson = error instanceof SyntaxError;
+    const invalidRequest = error instanceof RequestValidationError;
     return c.json(
       errorEnvelope({
-        code: invalidJson ? "invalid_json" : "internal_error",
+        code: invalidJson
+          ? "invalid_json"
+          : invalidRequest
+          ? "validation_failed"
+          : "internal_error",
         message: invalidJson
           ? "request body is not valid JSON"
+          : invalidRequest
+          ? "request validation failed"
           : "unexpected server error",
-        details: {},
+        details: invalidRequest
+          ? {
+            issues: [{
+              path: "/",
+              code: error.issueCode,
+              message: error.message,
+            }],
+          }
+          : {},
       }),
-      invalidJson ? 400 : 500,
+      invalidJson ? 400 : invalidRequest ? 422 : 500,
     );
   });
 
   return app;
+}
+
+class RequestValidationError extends Error {
+  constructor(
+    message: string,
+    readonly issueCode: "unknown_field" | "invalid_value",
+  ) {
+    super(message);
+  }
 }
 
 async function requestJson(c: {
@@ -893,7 +930,10 @@ async function strictAuthenticatedJson(c: {
   const input = stripAuthority(body) as Record<string, unknown>;
   const keys = Object.keys(input);
   if (keys.some((key) => !allowed.includes(key))) {
-    throw new SyntaxError("request body contains unknown fields");
+    throw new RequestValidationError(
+      "request body contains unknown fields",
+      "unknown_field",
+    );
   }
   return { ...input, auth: c.get("auth") };
 }
@@ -940,7 +980,7 @@ function metadataOptions(c: {
   if (unknown.length) {
     return err(
       validationError(
-        "bad_request",
+        "validation_failed",
         `unknown metadata query parameter ${unknown[0]}`,
       ),
     );
@@ -949,7 +989,7 @@ function metadataOptions(c: {
   if (include !== undefined && include !== "true") {
     return err(
       validationError(
-        "bad_request",
+        "validation_failed",
         "include_security accepts only the exact value true",
       ),
     );
@@ -959,7 +999,7 @@ function metadataOptions(c: {
   if (projects.length > 1 || includes.length > 1) {
     return err(
       validationError(
-        "bad_request",
+        "validation_failed",
         "metadata query parameters may appear only once",
       ),
     );

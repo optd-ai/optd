@@ -1,4 +1,16 @@
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-commit-revalidation; contract: 1; input: sha256:4204b1b51b491e6830b8c4b72cc821782231cca8655507a590d2643e46c1d8de -->
+
 # Race-Free Commit Revalidation
+
+Generated exact-contract projection imported into project-model/model.json from the reviewed commit-revalidation.md source.
+
+## Exact migrated contract
+
+<a id="obj-com-exact-commit-revalidation-v1"></a>
+
+### Exact v1 contract — Race-Free Commit Revalidation
+
+**Migration provenance.** Exact normative contract imported from `spec/commit-revalidation.md` at `sha256:28578f4b4f2d89784f9818d21d9dc2938f6b4a0a6a15622285aac6b1ec54d715`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
 
 ## Purpose
 
@@ -22,8 +34,8 @@ and row locks. Authorization has one decision statement snapshot:
   aborts an already-running commit.
 
 Pack installation and domain commits are ordered through the pack-owned runtime
-tables themselves. Ordinary write-intent locks are mutually compatible; the
-rare pack installation acquires stronger locks and bears the disruption.
+tables themselves. Ordinary write-intent locks are mutually compatible; the rare
+pack installation acquires stronger locks and bears the disruption.
 
 ## Conservative pack invalidation
 
@@ -83,9 +95,9 @@ LOCK TABLE res_lead IN SHARE ROW EXCLUSIVE MODE;
 ```
 
 This simple rule covers metadata-only changes without maintaining a fragile list
-of which changes might affect writes. Ordinary `ACCESS SHARE` reads may continue.
-Pack apply waits for in-flight writers and blocks new writers while activation
-is in progress.
+of which changes might affect writes. Ordinary `ACCESS SHARE` reads may
+continue. Pack apply waits for in-flight writers and blocks new writers while
+activation is in progress.
 
 DDL acquires stronger modes such as `ACCESS EXCLUSIVE` where Postgres requires
 them. New tables have no active writers and are created before activation.
@@ -115,8 +127,8 @@ that is both read and mutated is locked once using the stronger mode.
 
 Pack apply uses exactly the same runtime-table ordering. It must not lock,
 cancel, or mutate stage lifecycle/approval rows while holding runtime-table
-locks;
-stages become stale through revision comparison. This prevents the known cycle:
+locks; stages become stale through revision comparison. This prevents the known
+cycle:
 
 ```text
 commit: stage → table
@@ -141,12 +153,13 @@ One commit attempt performs:
 8. Re-read active pack metadata after waiting and compare every referenced exact
    pack revision.
 9. Lock affected project rows `FOR SHARE` in UUID order and verify active state.
-10. Lock all staged object/relationship dependencies in canonical order:
-    mutated rows `FOR UPDATE`, read-only rows `FOR SHARE`.
+10. Lock all staged object/relationship dependencies in canonical order: mutated
+    rows `FOR UPDATE`, read-only rows `FOR SHARE`.
 11. Evaluate all operation/project authorization boundaries in one SQL statement
     snapshot using current auth/session/ancestor/role/policy state.
-12. Recompute current approval requirements and verify decisions bound to the
-    exact `stage_id + stage_digest`.
+12. Revalidate the frozen staged approval requirements, current requirement
+    validity, authority, quorum, expiry, and decisions bound to the exact
+    `stage_id + stage_digest`; never derive a different requirement set.
 13. Compare current object-version pointers and relationship versions with the
     stage dependencies.
 14. Revalidate schema, lifecycle, relationships, constraints, and canonical
@@ -187,7 +200,8 @@ guarantee. Staleness is derived and never mutates the immutable stage document.
 - A duplicated row is locked once with the strongest mode.
 
 After locking, commit compares immutable staged dependency IDs/versions to
-current pointers. A mismatch returns `stage_stale` and writes no committed facts.
+current pointers. A mismatch returns `stage_stale` and writes no committed
+facts.
 
 Creates have no row to lock. UUIDv7 generation avoids practical identity
 collision; database unique constraints are authoritative for field and
@@ -211,8 +225,8 @@ revision. Pack activation and metadata/DDL updates occur in one transaction.
 
 ## Authorization and policy
 
-Authorization is recomputed at commit; staging decisions are evidence only.
-One SQL statement evaluates every operation/project boundary so `READ COMMITTED`
+Authorization is recomputed at commit; staging decisions are evidence only. One
+SQL statement evaluates every operation/project boundary so `READ COMMITTED`
 does not mix policy snapshots across separate decisions.
 
 A current denial returns `authorization_changed` or the more specific

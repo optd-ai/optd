@@ -1,8 +1,22 @@
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-migration-classification; contract: 1; input: sha256:6fc972e0e071e82ad5bce11cb5c8221a5dcdd32eaa440fd2cf4510c9749687e3 -->
+
 # Migration Classification
+
+Generated exact-contract projection imported into project-model/model.json from the reviewed migration-classification.md source.
+
+## Exact migrated contract
+
+<a id="obj-com-exact-migration-classification-v1"></a>
+
+### Exact v1 contract — Migration Classification
+
+**Migration provenance.** Exact normative contract imported from `spec/migration-classification.md` at `sha256:8ae2a4d42f2e975867343802a8096d95b797c8486f5bf1662a174b33737ddb3d`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
 
 ## Status
 
-Supporting research for the canonical [Migrations](migrations.md) spec.
+Normative for the canonical classification algorithm and frozen MVP decisions
+referenced by [Migrations](migrations.md). The comparative tool survey remains
+supporting research rather than product authority.
 
 ## Purpose
 

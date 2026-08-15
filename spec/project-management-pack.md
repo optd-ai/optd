@@ -1,8 +1,20 @@
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-project-management-pack; contract: 1; input: sha256:f86f4f3d780f227e6f3da1addabc0f8af9a47eb94cabfd0058786be7f2c4c816 -->
+
 # Project Management Proof-Pack Requirements
 
-> **Status:** normative proof-pack domain requirements. Runtime platform projects
-> remain separate from the pack resource `operant/projects:project`; every pack
-> object also carries an explicit platform project ID.
+Generated exact-contract projection imported into project-model/model.json from the reviewed project-management-pack.md source.
+
+## Exact migrated contract
+
+<a id="obj-com-exact-project-management-pack-v1"></a>
+
+### Exact v1 contract — Project Management Proof-Pack Requirements
+
+**Migration provenance.** Exact normative contract imported from `spec/project-management-pack.md` at `sha256:899349a5c143cd03d41de97f390ed218a90aabd0197c6d22905566367dc140d3`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
+
+> **Status:** normative proof-pack domain requirements. Runtime platform
+> projects remain separate from the pack resource `operant/projects:project`;
+> every pack object also carries an explicit platform project ID.
 
 ## Purpose
 
@@ -113,7 +125,7 @@ Fields:
 A project-scoped composite unique constraint covers
 `work_project_id + principal_id`.
 
-### `operant/projects:timesheet_entry`
+### `operant/projects:timesheet`
 
 Fields:
 
@@ -133,8 +145,10 @@ Minimum relationships:
 
 Project-to-task uses the required direct `task.work_project_id`; it is not also
 duplicated as a relationship row. Membership is the explicit
-`operant/projects:project_member` resource because relationship endpoints cannot
-target undeclared platform principals.
+`operant/projects:project_member` resource because membership carries domain
+role, uniqueness, object history, and policy-visible lifecycle. The generic
+relationship schema can target read-only `system:principal`; that capability is
+not used as a substitute for this richer membership resource.
 
 Use direct reference fields for required ownership links. Use relationship
 tables when the link needs metadata, history, or policy.
@@ -159,9 +173,10 @@ Done requires an absent `blocked_reason`, enforced by validation.
 Minimum one action is required; preferred set:
 
 - `operant/projects:start_task`: moves a task from Todo/Blocked to In Progress.
-- `operant/projects:block_task`: moves a task to Blocked and requires `blocked_reason`.
-- `operant/projects:complete_task`: moves a task to Done and can optionally write
-  spent-hours summary.
+- `operant/projects:block_task`: moves a task to Blocked and requires
+  `blocked_reason`.
+- `operant/projects:complete_task`: moves a task to Done and can optionally
+  write spent-hours summary.
 
 Actions use `action.stage`, are policy-checked/hook-validated, and commit only
 through the returned immutable stage.
@@ -170,8 +185,8 @@ through the returned immutable stage.
 
 Minimum hooks:
 
-- `validate_task`: `changeset.validate`. Rejects invalid state
-  transitions, missing block reasons, or impossible timesheet hours.
+- `validate_task`: `changeset.validate`. Rejects invalid state transitions,
+  missing block reasons, or impossible timesheet hours.
 - `notify_project_change`: `event.after_commit`. It returns `delivery.v1`
   success without network in deterministic tests, proving outbox execution.
 
@@ -206,8 +221,8 @@ Seeds use the exact changeset-backed reconcile route and
 The project-management pack is accepted when:
 
 1. It applies on a fresh MVP server without special-case code.
-2. `optctl metadata resource operant/projects:task` exposes fields, lifecycle, policy
-   hints, and AXI guidance.
+2. `optctl metadata resource operant/projects:task` exposes fields, lifecycle,
+   policy hints, and AXI guidance.
 3. A test creates a project, creates a task, starts it, blocks it, unblocks it,
    completes it, logs a timesheet entry, and reads history.
 4. Policy prevents a non-member/non-assignee from updating the task.

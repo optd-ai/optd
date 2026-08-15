@@ -1,4 +1,16 @@
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-mvp-acceptance-criteria; contract: 1; input: sha256:ae31aabaf73233fc108543ab0a3ad1b5fb04358f2f80b4395968ebadebd92b50 -->
+
 # MVP Acceptance Criteria
+
+Generated exact-contract projection imported into project-model/model.json from the reviewed mvp-acceptance-criteria.md source.
+
+## Exact migrated contract
+
+<a id="obj-com-exact-mvp-acceptance-criteria-v1"></a>
+
+### Exact v1 contract — MVP Acceptance Criteria
+
+**Migration provenance.** Exact normative contract imported from `spec/mvp-acceptance-criteria.md` at `sha256:840d58390cc1a42d98a05c02c4d3cf73eeacc2dd7f391e90352ea70fa4f30c7b`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
 
 ## MVP definition
 
@@ -35,16 +47,16 @@ setup:
    client-side stage/changeset-commit reconcile path; a repeated run returns
    unchanged without creating object versions.
 10. `optctl metadata resource operant/crm:lead` and
-   `optctl metadata action operant/crm:convert_lead` expose AXI guidance and
-   schema metadata.
+    `optctl metadata action operant/crm:convert_lead` expose AXI guidance and
+    schema metadata.
 11. `optctl changeset stage/inspect/commit` can create, update, archive, link,
     unlink, transition, and comment on objects; stage output already contains
     the complete inspect representation.
 12. `optctl --project sales query operant/crm:lead ...` filters through
     SQL-lowered expressions, policy pushdown, projection, and cursor pagination.
-13. `optctl --project sales action stage/commit operant/crm:convert_lead ...` runs the
-    configured action/hook path; direct commit is a client-side stage followed
-    by commit.
+13. `optctl --project sales action stage/commit operant/crm:convert_lead ...`
+    runs the configured action/hook path; direct commit is a client-side stage
+    followed by commit.
 14. Object and first-class relationship read/query/history show immutable
     versions; comments appear as typed history timeline entries.
 15. After-commit hooks enqueue outbox work; the main server's in-process polling
@@ -76,9 +88,10 @@ setup:
   it, including interrupted-delivery retry.
 - The nearest process binding always supplies one current authorization token;
   `optctl` never credential-shops by role/project or falls back after denial.
-- On Linux, PID/start-time/user/boot-marker ancestry selects the nearest binding,
-  rejects PID reuse/stale/mismatched identity, and survives compiled CLI tests.
-  Unimplemented OS adapters fail `process_inspection_unsupported`, never PID-only.
+- On Linux, PID/start-time/user/boot-marker ancestry selects the nearest
+  binding, rejects PID reuse/stale/mismatched identity, and survives compiled
+  CLI tests. Unimplemented OS adapters fail `process_inspection_unsupported`,
+  never PID-only.
 - `auth isolate` starts an agent with request-only authority; `auth doctor`
   validates/repairs local filesystem/context state in interactive and
   noninteractive modes.
@@ -100,9 +113,9 @@ setup:
 - Commit applies the exact immutable stage without rerunning hooks and returns
   structured stale/change errors when authorization, policy, code, approval, or
   object versions change. It does not recheck synchronous hook-secret grants.
-- Stage hooks may use declared host/port network access and explicit env/secrets,
-  but pack authors must not intentionally cause external effects. All pack
-  hooks permanently lack filesystem and subprocess access.
+- Stage hooks may use declared host/port network access and explicit
+  env/secrets, but pack authors must not intentionally cause external effects.
+  All pack hooks permanently lack filesystem and subprocess access.
 - Semantic action permission covers reviewed declared hook effects; internal
   hook capabilities are invocation-bound and never imply super-admin.
 - After-commit delivery is separately observable and may retry/dead-letter
@@ -162,7 +175,7 @@ Minimum resources:
 - `operant/projects:project_milestone`
 - `operant/projects:task_tag`
 - `operant/projects:project_member`
-- `operant/projects:timesheet_entry`
+- `operant/projects:timesheet`
 
 Minimum behaviors:
 
@@ -195,8 +208,8 @@ Minimum behaviors:
 
 - Secret values are encrypted before storage in Postgres.
 - `OPERANT_SECRET_MASTER_KEY` is base64 for 32 bytes; AES-256-GCM uses fresh
-  nonces and row/version AAD. Existing encrypted rows plus missing/mismatched key
-  fail startup.
+  nonces and row/version AAD. Existing encrypted rows plus missing/mismatched
+  key fail startup.
 - Secret APIs and hook injection are policy controlled through global,
   revision-and-slot-specific hook-secret grants. Every declared slot is
   required; grant mutation requires both `secret.grant` and
@@ -214,8 +227,9 @@ Minimum behaviors:
   outbox administration. Hooks have no self-API capability.
 - One-hop ReBAC is proven by CRM `opportunity_viewer` relationships directly to
   `system:principal`; no actor-supplied arrays or deep traversal are accepted.
-- `system:super_admin` can bootstrap and bypass policy checks, but bypass remains
-  authenticated, structurally validated, invariant-protected, and audited.
+- `system:super_admin` can bootstrap and bypass policy checks, but bypass
+  remains authenticated, structurally validated, invariant-protected, and
+  audited.
 
 ## Output/API acceptance
 

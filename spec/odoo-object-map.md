@@ -1,4 +1,16 @@
+<!-- generated-by: pi-dag-workflow/project-model; view: view-disposition-odoo-object-map; contract: 1; input: sha256:42c8c2dec4caa9c901557d4d3dc3a2299a790bd94a9b8758bd05a2e2c3eaed98 -->
+
 # Odoo-Inspired Object Map
+
+Generated non-normative disposition view preserving the complete reviewed legacy source for auditability.
+
+## Migration disposition
+
+<a id="obj-com-disposition-odoo-object-map"></a>
+
+### Disposition — Odoo-Inspired Object Map
+
+**Migration disposition.** This source is preserved literally below for auditability at `sha256:bf02c38cf56fa814b483a26b333c80e685e5d36cedf40fe4d9a3c672bf482260`, but remains non-normative historical, supporting research, prototype evidence, roadmap, or superseded planning material. Only separately accepted current project-model objects carry product authority.
 
 ## Purpose
 

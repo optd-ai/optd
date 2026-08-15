@@ -1,4 +1,16 @@
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-changesets; contract: 1; input: sha256:ba9dc91a02f93761f479858024119dc1a7de5264433c5d160e8081f797026355 -->
+
 # Changesets
+
+Generated exact-contract projection imported into project-model/model.json from the reviewed changesets.md source.
+
+## Exact migrated contract
+
+<a id="obj-com-exact-changesets-v1"></a>
+
+### Exact v1 contract — Changesets
+
+**Migration provenance.** Exact normative contract imported from `spec/changesets.md` at `sha256:0ac9a09a27188a26cf9f243fc61911109a5c5a884c8dd7482c93e33df27f162d`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
 
 ## Summary
 
@@ -6,8 +18,9 @@ Objects are not modified through raw CRUD. Every write is submitted as an
 intention and processed through the same changeset engine.
 
 Historical prototype evidence lives in `prototypes/changesets/`. It uses the old
-preview/commit/PGlite vocabulary and is retained only as early parser/transaction
-evidence; the immutable stage contracts in this spec are normative.
+preview/commit/PGlite vocabulary and is retained only as early
+parser/transaction evidence; the immutable stage contracts in this spec are
+normative.
 
 ## Canonical Write Path
 
@@ -31,8 +44,8 @@ evidence; the immutable stage contracts in this spec are normative.
 
 The normative operation and patch vocabulary is frozen in
 [Changeset Operation Schemas](changeset-operation-schema.md). Race-free commit
-locking, current-state revalidation, timeout, retry, and pack-activation ordering
-are frozen in [Commit Revalidation](commit-revalidation.md).
+locking, current-state revalidation, timeout, retry, and pack-activation
+ordering are frozen in [Commit Revalidation](commit-revalidation.md).
 
 ## Intentions
 
@@ -63,10 +76,10 @@ external API responses supplied only for hook validation. Hook invocation input
 is ephemeral. External values that affect writes appear in canonical operations;
 explanatory external-validation details may appear in persisted hook stderr.
 
-`stage` returns the same complete staged-changeset DTO/rendering as `inspect`, so
-an agent never needs a second command merely to see what it just staged. Inspect
-may additionally reflect later lifecycle facts such as approval, cancellation,
-staleness, or commit.
+`stage` returns the same complete staged-changeset DTO/rendering as `inspect`,
+so an agent never needs a second command merely to see what it just staged.
+Inspect may additionally reflect later lifecycle facts such as approval,
+cancellation, staleness, or commit.
 
 Hook execution failure, validation denial, policy denial, schema failure, or
 missing capability/secret returns a structured error/result and creates no
@@ -77,39 +90,41 @@ success.
 ## Stage access and route authority
 
 The creating principal may inspect/cancel its stage while authenticated and
-active. Another principal needs exact `changeset.inspect` or
-`changeset.cancel` system capability respectively and boundary visibility for
-every affected project. Safe `not_found` hides stages outside visibility.
-Approval reviewers receive only the stage representation/redactions authorized
-by `changeset.approval.decide` and the exact requirement role.
+active. Another principal needs exact `changeset.inspect` or `changeset.cancel`
+system capability respectively and boundary visibility for every affected
+project. Safe `not_found` hides stages outside visibility. Approval reviewers
+receive only the stage representation/redactions authorized by
+`changeset.approval.decide` and the exact requirement role.
 
 Authorization follows the frozen stage source. Direct graphs require every exact
 operation/resource/project permission. Semantic action stages require the exact
 `action:<publisher>/<pack>:<action>` permission in their one request project and
 revalidated reviewed effect manifest, not separate caller permission for each
 internal emitted operation. Seed stages analogously require exact
-`seed:<publisher>/<pack>:<seed>` permission and reviewed seed effects. Action and
-seed staging cannot emit into another project; direct graphs may span projects.
-The creating principal needs no extra generic commit permission. Another principal
-additionally needs exact `changeset.commit_others` system capability and stage
-visibility; `system:super_admin` remains the audited built-in bypass. Cancellation never
-undoes a commit and does not cancel claimed outbox work.
+`seed:<publisher>/<pack>:<seed>` permission and reviewed seed effects. Action
+and seed staging cannot emit into another project; direct graphs may span
+projects. The creating principal needs no extra generic commit permission.
+Another principal additionally needs exact `changeset.commit_others` system
+capability and stage visibility; `system:super_admin` remains the audited
+built-in bypass. Cancellation never undoes a commit and does not cancel claimed
+outbox work.
 
 ## Commit equivalence and revalidation
 
 Commit uses current authorization and applies exactly one persisted immutable
 stage. It never runs normalization, action-expansion, or validation hooks and
-never discovers unseen effects. It revalidates current authorization, object/read
-versions, exact referenced pack/resource revision identities, current
-policy/assignment decisions, approvals, operation-graph digest, and stage
-digest. It does not recheck synchronous
-hook-secret grants because no hook or plaintext access occurs at commit.
+never discovers unseen effects. It revalidates current authorization,
+object/read versions, exact referenced pack/resource revision identities,
+current policy/assignment decisions, approvals, operation-graph digest, and
+stage digest. It does not recheck synchronous hook-secret grants because no hook
+or plaintext access occurs at commit.
 
 A material dependency change returns `stage_stale`; it does not generate a
 replacement stage automatically. Other structured causes include
 `authorization_changed`, `authorization_ancestor_invalid`, `policy_changed`,
-`hook_revision_changed`, `approval_changed`, and `object_version_conflict`. The agent explicitly creates a new stage when needed.
-Authorization errors explain current authority but do not suggest escalation.
+`hook_revision_changed`, `approval_changed`, and `object_version_conflict`. The
+agent explicitly creates a new stage when needed. Authorization errors explain
+current authority but do not suggest escalation.
 
 Stage and commit may use different auth contexts, but commit defaults to the
 same principal that created the stage; another principal requires explicit
@@ -124,8 +139,9 @@ cost is only duplicate/abandoned stage storage and repeated validation/network
 work; stage hooks must not intentionally create external side effects.
 
 A stage can commit successfully at most once, enforced by a unique database
-constraint on `changeset_commits.stage_id`. Retrying commit for an existing stage
-returns the existing success or safely resumes/fails without rerunning hooks.
+constraint on `changeset_commits.stage_id`. Retrying commit for an existing
+stage returns the existing success or safely resumes/fails without rerunning
+hooks.
 
 There is no combined server `stage-and-commit` endpoint. CLI direct commit is a
 convenience sequence: create a stage, retain its id, then commit that id. A lost
@@ -146,10 +162,11 @@ when any expected version is stale.
 
 ## Approval Flow
 
-A valid stage may begin `awaiting_approval`. Requirement schema, distinct quorum,
-decision authority, lifecycle transitions, expiration, and commit revalidation
-are frozen in [Changeset Approval Contract](changeset-approvals.md). Approval
-facts are append-only and never mutate the operation graph.
+A valid stage may begin `awaiting_approval`. Requirement schema, distinct
+quorum, decision authority, lifecycle transitions, expiration, and commit
+revalidation are frozen in
+[Changeset Approval Contract](changeset-approvals.md). Approval facts are
+append-only and never mutate the operation graph.
 
 ## Undo and Recovery
 
@@ -171,9 +188,9 @@ Changesets integrate executable behavior through the stage contract:
   outbox.
 
 Stage scripts are trusted pack code, audited, configurable in duration, and fail
-closed. They may perform declared external reads but must not intentionally cause
-external effects. Filesystem, subprocess, direct database, and self-API access
-are unavailable. The normative contract is
+closed. They may perform declared external reads but must not intentionally
+cause external effects. Filesystem, subprocess, direct database, and self-API
+access are unavailable. The normative contract is
 [MVP Hook Schema](mvp-hook-schema.md).
 
 ## Prototype Evidence
@@ -204,11 +221,12 @@ deno test --allow-read --allow-write --allow-env --allow-net prototypes/changese
 
 ## Error shape
 
-All staging/commit failures use [API Response and Error Contract](api-errors.md).
-Well-formed domain/schema/hook validation failures are HTTP 422 with
-`error.details.issues[]`; state/version/staleness conflicts use HTTP 409 and
-their stable specific code. A failed request never returns HTTP 2xx with
-`ok: false`. Warnings belong only to successful stage data.
+All staging/commit failures use
+[API Response and Error Contract](api-errors.md). Well-formed domain/schema/hook
+validation failures are HTTP 422 with `error.details.issues[]`;
+state/version/staleness conflicts use HTTP 409 and their stable specific code. A
+failed request never returns HTTP 2xx with `ok: false`. Warnings belong only to
+successful stage data.
 
 ## Archive Behavior
 

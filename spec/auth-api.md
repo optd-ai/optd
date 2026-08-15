@@ -1,10 +1,21 @@
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-auth-api; contract: 1; input: sha256:62ad00434a4df225c802345b5b03761d9e79b29a9e2befe2cc022ef06bf5c615 -->
+
 # Authentication API and CLI Contract
+
+Generated exact-contract projection imported into project-model/model.json from the reviewed auth-api.md source.
+
+## Exact migrated contract
+
+<a id="obj-com-exact-auth-api-v1"></a>
+
+### Exact v1 contract — Authentication API and CLI Contract
+
+**Migration provenance.** Exact normative contract imported from `spec/auth-api.md` at `sha256:a9b136238ba6711eb61dd2d432cac032e55e7fb6af42f5e3519192a2c002dabc`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
 
 ## Conventions
 
 All auth HTTP routes use `/api/v1/auth`. Responses use
-[API Response and Error Contract](api-errors.md), including
-`meta.request_id`:
+[API Response and Error Contract](api-errors.md), including `meta.request_id`:
 
 ```json
 { "ok": true, "data": {}, "meta": { "request_id": "019b..." } }
@@ -49,7 +60,10 @@ Role assignment:
 ```json
 {
   "role": "operant/crm:sales_manager",
-  "boundary": { "type": "project", "project_id": "019b7a2e-7c10-7000-8000-000000000001" }
+  "boundary": {
+    "type": "project",
+    "project_id": "019b7a2e-7c10-7000-8000-000000000001"
+  }
 }
 ```
 
@@ -132,7 +146,10 @@ Creation requires `Idempotency-Key` plus a request or agent bearer credential:
 ```json
 {
   "roles": ["operant/crm:sales_manager", "operant/crm:sales_rep"],
-  "boundary": { "type": "project", "project_id": "019b7a2e-7c10-7000-8000-000000000001" },
+  "boundary": {
+    "type": "project",
+    "project_id": "019b7a2e-7c10-7000-8000-000000000001"
+  },
   "reason": "Need to qualify CRM leads",
   "redemption_nonce_hash": "...",
   "agent": {
@@ -260,19 +277,20 @@ Completion uses `Operant-Recovery` authorization and the targeted workflow in
 ### Human users and role assignments
 
 ```text
-GET    /api/v1/auth/users
-POST   /api/v1/auth/users
-GET    /api/v1/auth/users/:user_id
-PATCH  /api/v1/auth/users/:user_id
-GET    /api/v1/auth/users/:user_id/role-assignments
-POST   /api/v1/auth/users/:user_id/role-assignments
-DELETE /api/v1/auth/users/:user_id/role-assignments/:assignment_id
+GET   /api/v1/auth/users
+POST  /api/v1/auth/users
+PATCH /api/v1/auth/users/:user_id
+GET   /api/v1/auth/users/:user_id/role-assignments
+POST  /api/v1/auth/users/:user_id/role-assignments
+POST  /api/v1/auth/users/:user_id/role-assignments/:assignment_id/disable
 ```
 
 `optctl auth user create --username <name>` prompts admin for the initial
-password. Domain role assignment is separate. `DELETE` deactivates assignment
-lifecycle while retaining immutable/audit evidence; it does not physically
-delete. Last-active-human-super-admin invariants apply.
+password. Domain role assignment is separate. Assignment disable accepts the
+current positive integer `expected_version` and advances the lifecycle while
+retaining immutable/audit evidence; it does not physically delete. There is no
+single-user read route in v1; callers list users and use returned IDs for status
+or assignment operations. Last-active-human-super-admin invariants apply.
 
 ## Route authorization mapping
 
@@ -301,10 +319,11 @@ explicitly permits broader administration. Every route remains audited.
 
 ## Stable HTTP errors
 
-HTTP classification/envelope follows [API Response and Error Contract](api-errors.md).
-Auth validation uses 400 only for malformed transport and 422 for well-formed
-contract/domain validation. Expired one-time recovery/redemption resources use
-410; throttling uses 429 and hash/dependency saturation uses 503.
+HTTP classification/envelope follows
+[API Response and Error Contract](api-errors.md). Auth validation uses 400 only
+for malformed transport and 422 for well-formed contract/domain validation.
+Expired one-time recovery/redemption resources use 410; throttling uses 429 and
+hash/dependency saturation uses 503.
 
 Stable codes include:
 

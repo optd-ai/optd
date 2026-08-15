@@ -1,4 +1,16 @@
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-policies; contract: 1; input: sha256:94de6130f5a9685967f4086cad4da739bace34b8c14de55a968acff1ac9838a0 -->
+
 # Policies and Authorization
+
+Generated exact-contract projection imported into project-model/model.json from the reviewed policies.md source.
+
+## Exact migrated contract
+
+<a id="obj-com-exact-policies-v1"></a>
+
+### Exact v1 contract — Policies and Authorization
+
+**Migration provenance.** Exact normative contract imported from `spec/policies.md` at `sha256:2dd369390e59a5c850d73bc49fd9ecbbcbbcf17823aaba91ba08d67cc320f520`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
 
 ## Definition and assignment model
 
@@ -153,8 +165,8 @@ internal policy evaluator:
 
 - RBAC selects exact role/action/resource candidates from active definitions and
   assignments in the target boundary.
-- ABAC constrains candidates through the frozen CEL subset over object fields and
-  immutable `actor.id|principal_type|human_user_id`.
+- ABAC constrains candidates through the frozen CEL subset over object fields
+  and immutable `actor.id|principal_type|human_user_id`.
 - ReBAC adds at most one direct typed relationship from the protected object to
   built-in `system:principal` matched by actor/human ID.
 

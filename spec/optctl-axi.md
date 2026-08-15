@@ -1,4 +1,16 @@
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-optctl-axi; contract: 1; input: sha256:4823a39172e67b1449f213044343b6d5c2b0384ea2911e3ca3cb6cf1cac4aa43 -->
+
 # optctl AXI Guidance Model
+
+Generated exact-contract projection imported into project-model/model.json from the reviewed optctl-axi.md source.
+
+## Exact migrated contract
+
+<a id="obj-com-exact-optctl-axi-v1"></a>
+
+### Exact v1 contract — optctl AXI Guidance Model
+
+**Migration provenance.** Exact normative contract imported from `spec/optctl-axi.md` at `sha256:a0c0d6181e6a8bbc378c0ee893b0c34e267c2e1133fd3e3242c41681c2dd41aa`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
 
 ## Purpose
 
@@ -109,12 +121,12 @@ spec:
         - title: Relationships
           fields: [company_id, owner_id]
       help:
-        - optctl action stage operant/crm:contact.merge --input merge.json
+        - optctl action stage operant/crm:merge_contact --input merge.json
         - optctl --project ${project} list operant/crm:opportunity --where primary_contact_id=${id}
     search:
       fields: [first_name, last_name, email, phone]
       examples:
-        - optctl --project ${project} search operant/crm:contact alice@example.com
+        - optctl --project ${project} search operant/crm:contact --text alice@example.com
     help:
       list:
         - optctl --project ${project} view operant/crm:contact <id>
@@ -176,6 +188,10 @@ How to search the resource:
 - result fields
 - disambiguation behavior
 
+V1 `optctl search` requires `--text` and lowers exact equality across the
+declared fields into the ordinary permission-filtered query API. It is not
+semantic, vector, fuzzy, or full-text search.
+
 ### `actions`
 
 Optional resource-local description of important actions. The action definition
@@ -202,7 +218,7 @@ Contextual help templates keyed by command/result context:
 - `view`
 - `created`
 - `updated`
-- `deleted`
+- `archived`
 - `validation_failed`
 - `not_found`
 
@@ -267,7 +283,7 @@ spec:
       help:
         - optctl --project ${project} list operant/crm:lead
         - optctl --project ${project} list operant/crm:opportunity
-        - optctl --project ${project} search operant/crm:contact <email-or-name>
+        - optctl --project ${project} search operant/crm:contact --text <email-or-name>
 ```
 
 ## Authentication and context UX
@@ -305,7 +321,7 @@ optctl resources          # configured resource kinds with purposes
 optctl metadata resource operant/crm:lead
 optctl --project sales list operant/crm:lead [--fields ...] [--where ...]
 optctl --project sales view operant/crm:lead <id> [--full]
-optctl --project sales search operant/crm:contact <query>
+optctl --project sales search operant/crm:contact --text <query>
 optctl --project sales create operant/crm:lead --input lead.json --stage
 optctl --project sales create operant/crm:lead --input lead.json --commit
 optctl --project sales update operant/crm:lead <id> --input update.json --stage
@@ -379,7 +395,7 @@ Example:
 spec:
   axi:
     list:
-      fields: [id, name, status, updated_at]
+      defaultFields: [id, name, status, updated_at]
       help:
         - optctl --project ${project} view operant/crm:lead <id>
         - optctl --project ${project} query operant/crm:lead --where 'status == "qualified"'
@@ -427,9 +443,10 @@ they are seeing.
   traversal, function calls, or environment expansion is allowed. Unknown
   placeholders fail pack preview.
 - An agent-ready resource requires non-empty `purpose`, at least one
-  `whenToUse`, identity/title fields, compact list default fields, explicit empty
-  state, and concrete list/view/create-or-primary-action help. An agent-ready
-  action requires `purpose`, input schema, one example, and success guidance.
-  Pack preview reports missing readiness guidance; bundled proof packs must pass.
+  `whenToUse`, identity/title fields, compact list default fields, explicit
+  empty state, and concrete list/view/create-or-primary-action help. An
+  agent-ready action requires `purpose`, input schema, one example, and success
+  guidance. Pack preview reports missing readiness guidance; bundled proof packs
+  must pass.
 - Compiling `axi.whenToUse` into an installable Agent Skill is deferred and is
   not an MVP pack-apply or CLI requirement.

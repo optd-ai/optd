@@ -1,19 +1,35 @@
+<!-- generated-by: pi-dag-workflow/project-model; view: view-disposition-planning-readiness-audit; contract: 1; input: sha256:3b0e1f1e58f59bd11cd7f912ff4971c44349ecdc949823610a0b2346ae9d2241 -->
+
 # Specification Planning-Readiness Audit
+
+Generated non-normative disposition view preserving the complete reviewed legacy source for auditability.
+
+## Migration disposition
+
+<a id="obj-com-disposition-planning-readiness-audit"></a>
+
+### Disposition — Specification Planning-Readiness Audit
+
+**Migration disposition.** This source is preserved literally below for auditability at `sha256:7f66e9379d2a6e2c8e8ecf09907dc92f1923fbe8a8a03ab819877116271dd339`, but remains non-normative historical, supporting research, prototype evidence, roadmap, or superseded planning material. Only separately accepted current project-model objects carry product authority.
 
 **Reviewed:** 2026-07-14
 
 **Scope:** every Markdown file under `spec/`
 
-**Result:** ready to produce a tight next implementation plan; no unresolved
-normative design question remains. Current implementation/fixtures are knowingly
-behind the target and require a deliberate reset/migration workstream.
+**Historical result (2026-07-14):** ready to produce the implementation plan.
+
+**Current reconciliation (2026-08-14):** implementation is complete and the
+subsequent repository project-model audit found contract drift that this review
+resolved explicitly. The project-model candidate is not yet authority-cutover
+ready: exact projection/omission coverage and replacement of the hand-authored
+`spec/` corpus still require validation and user approval.
 
 ## Severity-ordered findings and resolution
 
 ### P0 — conflicting pack/project/namespace identity
 
-Older docs/routes/fixtures mixed `default.lead`, namespace, selected project, and
-pack installation. Resolved to:
+Older docs/routes/fixtures mixed `default.lead`, namespace, selected project,
+and pack installation. Resolved to:
 
 - one global active `publisher/pack@version` revision;
 - child identity `publisher/pack:name`;
@@ -62,12 +78,11 @@ local auth modes, and OIDC/JWT. Resolved to:
   assignments;
 - exact role/policy assignment administration authority;
 - policy actor fields limited to immutable server-derived ID/type/human anchor;
-- one-hop ReBAC only through direct relationship to built-in
-  `system:principal`;
+- one-hop ReBAC only through direct relationship to built-in `system:principal`;
 - no caller-supplied role/attribute arrays or second auth mode.
 
-Authorities: `authentication.md`, `auth-api.md`,
-`authorization-assignments.md`, `mvp-policy-schema.md`, `policies.md`.
+Authorities: `authentication.md`, `auth-api.md`, `authorization-assignments.md`,
+`mvp-policy-schema.md`, `policies.md`.
 
 ### P0 — incomplete API/error/query contract
 
@@ -86,12 +101,13 @@ Authorities: `mvp-api-routes.md`, `api-errors.md`, `query-api.md`,
 
 ### P0 — provisional migration lifecycle
 
-Old integration text had incompatible statuses/commands, constructed confirmation
-strings, size-dependent classes, and unclear plan persistence. Resolved to durable
-`migration.plan.v1`, conservative intrinsic hazards, real-Postgres validation,
-explicit class acknowledgement, short-lived opaque destructive confirmation,
-and one all-or-nothing locked global pack activation per plan. Complex upgrades
-use explicit intermediate pack revisions rather than partial plan state.
+Old integration text had incompatible statuses/commands, constructed
+confirmation strings, size-dependent classes, and unclear plan persistence.
+Resolved to durable `migration.plan.v1`, conservative intrinsic hazards,
+real-Postgres validation, explicit class acknowledgement, short-lived opaque
+destructive confirmation, and one all-or-nothing locked global pack activation
+per plan. Complex upgrades use explicit intermediate pack revisions rather than
+partial plan state.
 
 Authorities: `migrations.md`, `migration-classification.md`,
 `mvp-migration-integration.md`, `commit-revalidation.md`.
@@ -100,8 +116,9 @@ Authorities: `migrations.md`, `migration-classification.md`,
 
 The storage sketch still listed mutable previews/idempotency/artifacts/
 attachments and object versions lacked explicit project/commit structure.
-Resolved table families, UUIDv7/project scoping, resource/relationship snapshots,
-typed comment history, and removal of undeclared attachment/extension storage.
+Resolved table families, UUIDv7/project scoping, resource/relationship
+snapshots, typed comment history, and removal of undeclared attachment/extension
+storage.
 
 Authorities: `storage-postgres.md`, `events-audit.md`,
 `staged-changeset-storage.md`, `object-model.md`.
@@ -109,19 +126,19 @@ Authorities: `storage-postgres.md`, `events-audit.md`,
 ### P1 — seed behavior and duplicate application
 
 Acceptance required auditable seeds but did not define existing-row behavior.
-Resolved deterministic project-scoped reconcile by required unique key:
-create missing, update declared differing fields, preserve unspecified fields,
-never archive removed rows, return unchanged without a stage, and authorize exact
+Resolved deterministic project-scoped reconcile by required unique key: create
+missing, update declared differing fields, preserve unspecified fields, never
+archive removed rows, return unchanged without a stage, and authorize exact
 semantic seed effect.
 
 Authority: `pack-structure.md` and seed route in `mvp-api-routes.md`.
 
 ### P1 — approval authority/lifecycle
 
-Approval was listed without a schema or race semantics. Resolved exact requirement
-shape, role/boundary/quorum/principal/initiator/expiry checks, append-only
-per-principal decisions, rejection/ready transitions, stage-row serialization,
-and commit-time current approver revalidation.
+Approval was listed without a schema or race semantics. Resolved exact
+requirement shape, role/boundary/quorum/principal/initiator/expiry checks,
+append-only per-principal decisions, rejection/ready transitions, stage-row
+serialization, and commit-time current approver revalidation.
 
 Authority: `changeset-approvals.md`.
 
@@ -156,25 +173,25 @@ Authorities: `project-management-pack.md`, `mvp-acceptance-criteria.md`.
 ### P2 — historical material looked normative
 
 Proposal/roadmap/prototype files contained open questions and old commands.
-Explicit historical/supporting status banners and README authority rules now keep
-them as evidence without allowing them to drive implementation.
+Explicit historical/supporting status banners and README authority rules now
+keep them as evidence without allowing them to drive implementation.
 
 ## Normative authority map
 
-| Topic | Primary authority |
-|---|---|
-| identity/projects | `pack-publishers-and-projects.md`, `projects.md` |
-| strict pack source | `pack-definition-schemas.md`, `pack-structure.md` |
-| auth/process binding | `authentication.md`, `auth-api.md` |
-| assignments/policy | `authorization-assignments.md`, `mvp-policy-schema.md` |
-| expressions/query | `expression-language.md`, `query-api.md` |
-| changeset graph/storage | `changeset-operation-schema.md`, `staged-changeset-storage.md` |
-| approvals/commit races | `changeset-approvals.md`, `commit-revalidation.md` |
-| hooks/secrets | `mvp-hook-schema.md`, `hook-secret-grants.md`, `secret-encryption.md` |
-| migrations | `migrations.md`, `mvp-migration-integration.md` |
-| history/events/outbox | `events-audit.md`, `outbox-delivery.md` |
-| HTTP/errors/CLI | `mvp-api-routes.md`, `api-errors.md`, `optctl-axi.md` |
-| architecture/tests | `mvp-implementation-boundaries.md`, `mvp-acceptance-criteria.md` |
+| Topic                   | Primary authority                                                     |
+| ----------------------- | --------------------------------------------------------------------- |
+| identity/projects       | `pack-publishers-and-projects.md`, `projects.md`                      |
+| strict pack source      | `pack-definition-schemas.md`, `pack-structure.md`                     |
+| auth/process binding    | `authentication.md`, `auth-api.md`                                    |
+| assignments/policy      | `authorization-assignments.md`, `mvp-policy-schema.md`                |
+| expressions/query       | `expression-language.md`, `query-api.md`                              |
+| changeset graph/storage | `changeset-operation-schema.md`, `staged-changeset-storage.md`        |
+| approvals/commit races  | `changeset-approvals.md`, `commit-revalidation.md`                    |
+| hooks/secrets           | `mvp-hook-schema.md`, `hook-secret-grants.md`, `secret-encryption.md` |
+| migrations              | `migrations.md`, `mvp-migration-integration.md`                       |
+| history/events/outbox   | `events-audit.md`, `outbox-delivery.md`                               |
+| HTTP/errors/CLI         | `mvp-api-routes.md`, `api-errors.md`, `optctl-axi.md`                 |
+| architecture/tests      | `mvp-implementation-boundaries.md`, `mvp-acceptance-criteria.md`      |
 
 ## Explicitly deferred, non-blocking scope
 
@@ -204,7 +221,8 @@ must explicitly replace rather than wrap:
 - legacy Pack/Resource/Action/Policy/Relationship/Lifecycle schemas and inline
   resource lifecycle/action-hook aliases;
 - preview-era/mutable changeset records and operation aliases;
-- trust-actor/public role assumptions with full opaque-token auth/context tables;
+- trust-actor/public role assumptions with full opaque-token auth/context
+  tables;
 - unscoped generated runtime rows/object versions with explicit projects;
 - old policy actor arrays/generic action permissions;
 - current secret crypto/resolver with AAD, global grants, env/net ceilings;
@@ -226,14 +244,14 @@ A tight DAG/plan should order work by dependency, not by old feature files:
 3. strict global pack definitions and migration planning/apply;
 4. policy/expression/query/object/history contracts;
 5. immutable operation staging, trusted hook sandbox, secrets/grants/approvals;
-6. all-or-nothing locked pack migration apply, changeset commit,
-   history/events, and durable outbox;
+6. all-or-nothing locked pack migration apply, changeset commit, history/events,
+   and durable outbox;
 7. CLI completion, target CRM/project fixtures, real-Postgres concurrency,
    compiled CLI, container, and public E2E acceptance.
 
-Parallel work is safe only behind frozen ports/schemas; Postgres migration files,
-central route composition, shared TypeBox registries, and CLI root command should
-have single owners to avoid merge collisions.
+Parallel work is safe only behind frozen ports/schemas; Postgres migration
+files, central route composition, shared TypeBox registries, and CLI root
+command should have single owners to avoid merge collisions.
 
 ## Mechanical audit evidence
 

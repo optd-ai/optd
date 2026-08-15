@@ -1,4 +1,16 @@
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-hook-secret-grants; contract: 1; input: sha256:3c733fdb5fee19cd04abb1fb353816bf3f8517312a6982757d077348e458cd7b -->
+
 # Hook-Secret Grants
+
+Generated exact-contract projection imported into project-model/model.json from the reviewed hook-secret-grants.md source.
+
+## Exact migrated contract
+
+<a id="obj-com-exact-hook-secret-grants-v1"></a>
+
+### Exact v1 contract — Hook-Secret Grants
+
+**Migration provenance.** Exact normative contract imported from `spec/hook-secret-grants.md` at `sha256:01bf907b075a9d39da058f808bee555c449e498ae92add60b4898fdeff0bd666`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
 
 ## Purpose
 
@@ -149,9 +161,9 @@ The security digest includes security-relevant normalized hook behavior:
 AXI guidance, display text, unrelated pack definitions, and runtime timeout
 adjustments do not alter this digest.
 
-A carried-forward grant is a new append-only row for the new revision and records
-`inherited_from_grant_id` plus the pack-apply auth context. Any security-relevant
-change requires explicit authorization for the new revision.
+A carried-forward grant is a new append-only row for the new revision and
+records `inherited_from_grant_id` plus the pack-apply auth context. Any
+security-relevant change requires explicit authorization for the new revision.
 
 Pack preview/apply reports:
 
@@ -275,10 +287,10 @@ automatically revoke old revision grants. New events use the active revision;
 already queued work may execute only its pinned old revision.
 
 Pinned old execution uses the stable granted secret identity's current
-`value_version`, not retained historical plaintext. Current global runtime policy,
-secret status, grant revocation, and explicit old-revision disablement still
-apply. Operators may revoke old grants. Retry/cancellation/dead-letter behavior
-is frozen in [Durable Outbox Delivery](outbox-delivery.md).
+`value_version`, not retained historical plaintext. Current global runtime
+policy, secret status, grant revocation, and explicit old-revision disablement
+still apply. Operators may revoke old grants. Retry/cancellation/dead-letter
+behavior is frozen in [Durable Outbox Delivery](outbox-delivery.md).
 
 ## Shared scripts and multiple environments
 
@@ -289,9 +301,9 @@ validate_salesforce_sandbox + salesforce_token → salesforce-sandbox
 validate_salesforce_production + salesforce_token → salesforce-production
 ```
 
-Actions name the destination explicitly, and production actions may have stricter
-policy. Each hook gets only its own slot grant even when script content is
-identical. Domain data should record external environment alongside external
+Actions name the destination explicitly, and production actions may have
+stricter policy. Each hook gets only its own slot grant even when script content
+is identical. Domain data should record external environment alongside external
 IDs. Automatic project-based selection is intentionally not inferred.
 
 ## Logs and redaction
@@ -360,9 +372,9 @@ Secret values are accepted through stdin or an interactive no-echo prompt, never
 as positional arguments or ordinary flags. Noninteractive use without stdin
 fails rather than prompting.
 
-Before grant confirmation, CLI output displays secret name/status, hook identity,
-revision/security/script digests, slot/env, phases, network hosts, reads, and
-effects. It never displays the value.
+Before grant confirmation, CLI output displays secret name/status, hook
+identity, revision/security/script digests, slot/env, phases, network hosts,
+reads, and effects. It never displays the value.
 
 ## Listing DTOs
 

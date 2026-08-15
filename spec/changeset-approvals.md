@@ -1,4 +1,16 @@
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-changeset-approvals; contract: 1; input: sha256:04b377416f7b9c03ed321064e29d3daa8b7ca348e49056b552c62557df66a936 -->
+
 # Changeset Approval Contract
+
+Generated exact-contract projection imported into project-model/model.json from the reviewed changeset-approvals.md source.
+
+## Exact migrated contract
+
+<a id="obj-com-exact-changeset-approvals-v1"></a>
+
+### Exact v1 contract — Changeset Approval Contract
+
+**Migration provenance.** Exact normative contract imported from `spec/changeset-approvals.md` at `sha256:d8a9b5c262e9a96e972c58e3a06a342ba528e331e09d148093435f298b9bb14c`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
 
 ## Decision
 
@@ -60,8 +72,8 @@ authenticated principal must:
 5. act before requirement expiration.
 
 `system:super_admin` may bypass policy/role possession but not authentication,
-principal-type, initiator, expiration, structural, or audit rules. Caller-supplied
-roles are never accepted.
+principal-type, initiator, expiration, structural, or audit rules.
+Caller-supplied roles are never accepted.
 
 One principal may record at most one decision per requirement. A decision is
 immutable. A mistaken decision requires a new stage; there is no approval

@@ -1,4 +1,16 @@
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-mvp-migration-integration; contract: 1; input: sha256:d8b6cc4791f1de7e89c1902773c7346616c1608dcf729d84aba8f7f89253f60a -->
+
 # MVP Pack-Migration Integration
+
+Generated exact-contract projection imported into project-model/model.json from the reviewed mvp-migration-integration.md source.
+
+## Exact migrated contract
+
+<a id="obj-com-exact-mvp-migration-integration-v1"></a>
+
+### Exact v1 contract — MVP Pack-Migration Integration
+
+**Migration provenance.** Exact normative contract imported from `spec/mvp-migration-integration.md` at `sha256:515d481385fc87bb369053ab259fb8df0e254b3aa43cca112c83068977576a7a`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
 
 ## Decision
 
@@ -97,9 +109,9 @@ small, inspectable, and recoverable.
 3. Preview/validate the final desired revision against current live facts.
 4. Validation issues a short-lived opaque confirmation token only for a ready
    destructive whole plan.
-5. Apply the exact whole plan with token; under locks, any plan, active-revision,
-   facts, identity, authority, expiry, or prior-use mismatch writes no DDL or
-   activation.
+5. Apply the exact whole plan with token; under locks, any plan,
+   active-revision, facts, identity, authority, expiry, or prior-use mismatch
+   writes no DDL or activation.
 
 ## Honest operational limits
 
@@ -111,7 +123,7 @@ hitch-free online migration guarantee.
 
 ## Implementation evidence boundary
 
-PGlite migration prototypes remain algorithm/evidence references only. Production
-logic belongs behind application services and real-Postgres adapters and must be
-verified against real Postgres lock/DDL behavior; prototype route/status/ID
-spellings are not compatibility contracts.
+PGlite migration prototypes remain algorithm/evidence references only.
+Production logic belongs behind application services and real-Postgres adapters
+and must be verified against real Postgres lock/DDL behavior; prototype
+route/status/ID spellings are not compatibility contracts.

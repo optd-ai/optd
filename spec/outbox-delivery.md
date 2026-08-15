@@ -1,17 +1,29 @@
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-outbox-delivery; contract: 1; input: sha256:c18fc1d675001dae4022bcbb2f2408b65b1fd409e085789a1f28556069aeeee7 -->
+
 # Durable Outbox Delivery
+
+Generated exact-contract projection imported into project-model/model.json from the reviewed outbox-delivery.md source.
+
+## Exact migrated contract
+
+<a id="obj-com-exact-outbox-delivery-v1"></a>
+
+### Exact v1 contract — Durable Outbox Delivery
+
+**Migration provenance.** Exact normative contract imported from `spec/outbox-delivery.md` at `sha256:37566cb3182a77dd82ec69c54d040b96568e5754693af48a79504cc76db16124`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
 
 ## Purpose and guarantee
 
-Intentional external effects run only after the domain transaction commits.
-That transaction atomically inserts immutable events and durable outbox delivery
+Intentional external effects run only after the domain transaction commits. That
+transaction atomically inserts immutable events and durable outbox delivery
 rows. The main Operant server then runs one asynchronous polling loop in the
 same process/container to claim and execute after-commit hooks.
 
-The MVP guarantee is **durable at-least-once delivery attempts**, not exactly-once
-external effects. A hook may complete an external request and the server may
-crash before recording success. Recovery repeats the attempt. Operant supplies a
-stable idempotency key, but exactly-once provider behavior requires the pack hook
-to pass that key to an external API that honors it.
+The MVP guarantee is **durable at-least-once delivery attempts**, not
+exactly-once external effects. A hook may complete an external request and the
+server may crash before recording success. Recovery repeats the attempt. Operant
+supplies a stable idempotency key, but exactly-once provider behavior requires
+the pack hook to pass that key to an external API that honors it.
 
 There is no Redis, Kafka, daemon, separate worker container, or LISTEN/NOTIFY
 correctness dependency. Future server replicas or Kubernetes worker containers
@@ -209,16 +221,17 @@ A short transaction:
    to `pending`;
 2. selects ready `pending`/`retry_wait` rows ordered by `available_at,id` using
    `FOR UPDATE SKIP LOCKED`;
-3. increments generation and total attempt counters;
+3. increments `attempts_in_generation` and `total_attempts` without changing
+   `retry_generation`; only an authorized manual retry starts a new generation;
 4. inserts an append-only `running` attempt;
 5. writes `lease_owner`, `lease_attempt_id`, and `lease_expires_at`;
 6. commits before any hook or network call.
 
-The fixed lease duration is the pinned hook execution timeout plus a configurable
-server margin (suggested 30 seconds). There is no heartbeat in MVP. The runner
-must kill a timed-out hook before its normal lease expires. Server/process crash
-leaves the row running until expiry, then polling creates a new attempt with the
-same delivery/idempotency key.
+The fixed lease duration is the pinned hook execution timeout plus a
+configurable server margin (suggested 30 seconds). There is no heartbeat in MVP.
+The runner must kill a timed-out hook before its normal lease expires.
+Server/process crash leaves the row running until expiry, then polling creates a
+new attempt with the same delivery/idempotency key.
 
 Completing an attempt updates the delivery only when its `attempt_id` still owns
 the active lease. A late result after expiry is retained as `late_succeeded` or
@@ -328,7 +341,8 @@ These failures may be repaired and manually retried.
 
 ## Manual retry generations
 
-Authorized manual retry applies only to `dead_letter`. It locks the delivery and:
+Authorized manual retry applies only to `dead_letter`. It locks the delivery
+and:
 
 - increments `retry_generation`;
 - resets only `attempts_in_generation`;
@@ -435,7 +449,8 @@ delivery_retry_exhausted
 
 ## Prototype evidence
 
-`prototypes/outbox-delivery/outbox_delivery.ts` and its real-Postgres test prove:
+`prototypes/outbox-delivery/outbox_delivery.ts` and its real-Postgres test
+prove:
 
 - concurrent `SKIP LOCKED` claims execute one row once at a time;
 - fixed-lease crash recovery and append-only attempts;

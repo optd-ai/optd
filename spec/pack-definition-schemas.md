@@ -1,14 +1,26 @@
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-pack-definition-schemas; contract: 1; input: sha256:77d19d899e9886d89f4fbba8a5876aa21e9fc69b50d36c76b158e0a70cad9991 -->
+
 # Pack Definition Schemas v1
+
+Generated exact-contract projection imported into project-model/model.json from the reviewed pack-definition-schemas.md source.
+
+## Exact migrated contract
+
+<a id="obj-com-exact-pack-definition-schemas-v1"></a>
+
+### Exact v1 contract — Pack Definition Schemas v1
+
+**Migration provenance.** Exact normative contract imported from `spec/pack-definition-schemas.md` at `sha256:5d461390125e4a9b76a4ecf1038a2cdbdeec465f096febf7d736f18d876cd751`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
 
 ## Decision
 
-This file freezes the strict top-level/component vocabulary used by pack preview.
-TypeBox schemas must set `additionalProperties: false` at every modeled object.
-Custom tags, non-string mapping keys, duplicate keys, non-finite numbers, and
-implicit timestamps are rejected before canonical JSON validation. Anchors,
-aliases, and merge keys are allowed only as bounded authoring sugar and are fully
-expanded before canonical validation as defined in `pack-structure.md`; cycles
-and expansion beyond configured guardrails fail.
+This file freezes the strict top-level/component vocabulary used by pack
+preview. TypeBox schemas must set `additionalProperties: false` at every modeled
+object. Custom tags, non-string mapping keys, duplicate keys, non-finite
+numbers, and implicit timestamps are rejected before canonical JSON validation.
+Anchors, aliases, and merge keys are allowed only as bounded authoring sugar and
+are fully expanded before canonical validation as defined in
+`pack-structure.md`; cycles and expansion beyond configured guardrails fail.
 
 Every file has exactly:
 
@@ -47,14 +59,14 @@ are discovered from the strict directory tree and are never listed here.
 Resource fields, relationship payload fields, and action input fields use one
 strict descriptor with required `type`:
 
-| type | allowed properties |
-|---|---|
-| `string` | `required`, `enum`, `minLength`, `maxLength`, `format`, `ref`, `unique` |
-| `integer` | `required`, `minimum`, `maximum`, `unique` |
-| `decimal` | `required`, `minimum`, `maximum`, `precision`, `scale`, `unique` |
-| `boolean` | `required` |
-| `date` | `required`, `minimum`, `maximum`, `unique` |
-| `timestamp` | `required`, `minimum`, `maximum`, `unique` |
+| type        | allowed properties                                                      |
+| ----------- | ----------------------------------------------------------------------- |
+| `string`    | `required`, `enum`, `minLength`, `maxLength`, `format`, `ref`, `unique` |
+| `integer`   | `required`, `minimum`, `maximum`, `unique`                              |
+| `decimal`   | `required`, `minimum`, `maximum`, `precision`, `scale`, `unique`        |
+| `boolean`   | `required`                                                              |
+| `date`      | `required`, `minimum`, `maximum`, `unique`                              |
+| `timestamp` | `required`, `minimum`, `maximum`, `unique`                              |
 
 - `required` is boolean and defaults false; there is no nullable value type.
   Optional means omitted. JSON `null` is rejected as a stored field value.
@@ -62,8 +74,8 @@ strict descriptor with required `type`:
   `string`.
 - `format` is one of `email|uri|uuid` and only valid for `string`.
 - `ref` is a pack-local or publisher-qualified resource identity. A reference is
-  stored as UUID, must target an object in the same project, and cannot also have
-  `enum`/`format`.
+  stored as UUID, must target an object in the same project, and cannot also
+  have `enum`/`format`.
 - `unique: true` creates a project-scoped unique constraint including archived
   rows. Active-only or multi-field uniqueness uses a named `unique` constraint
   with `where: active()` below.
@@ -73,7 +85,8 @@ strict descriptor with required `type`:
   integers only. Decimal values are canonical base-10 strings (no exponent or
   leading plus/zeroes) so Deno/JSON/RFC 8785 never round financial values;
   minimum/maximum are the same string form and Postgres `numeric` enforces
-  precision/scale. Date is `YYYY-MM-DD`; timestamp is RFC 3339 normalized to UTC.
+  precision/scale. Date is `YYYY-MM-DD`; timestamp is RFC 3339 normalized to
+  UTC.
 
 Platform fields (`id`, `project_id`, version/current-version, created/updated/
 archive/auth metadata) are reserved and cannot be pack fields.
@@ -82,7 +95,7 @@ archive/auth metadata) are reserved and cannot be pack fields.
 
 ```yaml
 spec:
-  fields: {name: {type: string, required: true}}
+  fields: { name: { type: string, required: true } }
   constraints:
     - name: customer_number_unique
       kind: unique
@@ -92,7 +105,7 @@ spec:
     - name: active_owner_idx
       fields: [owner_id, updated_at]
       where: "active()"
-  search: {fields: [name, email]}
+  search: { fields: [name, email] }
   axi: {}
 ```
 
@@ -105,8 +118,8 @@ spec:
 - `indexes` defaults empty and supports ordered field lists plus optional CEL
   `where`; pack index fields may include platform `updated_at|archived_at`.
   Expression indexes/arbitrary SQL are forbidden.
-- `search.fields` is a unique list of string fields. Postgres-native full-text is
-  used; semantic/vector configuration is absent.
+- `search.fields` is a unique list of string fields. Postgres-native full-text
+  is used; semantic/vector configuration is absent.
 - `axi` follows `optctl-axi.md` and is required for bundled proof resources.
 - Lifecycle/actions/hooks/policies are separate files and cannot be inline.
 
@@ -114,27 +127,27 @@ spec:
 
 ```yaml
 spec:
-  from: {resource: contact}
-  to: {resource: company}
-  fields: {role: {type: string}}
+  from: { resource: contact }
+  to: { resource: company }
+  fields: { role: { type: string } }
   unique: [from, to]
   axi: {}
 ```
 
 `from`/`to` contain exactly one resource identity. An endpoint may be a pack
-resource or read-only built-in `system:principal`; the latter validates an active
-principal UUID and enables direct one-hop ReBAC but is never created/updated by
-pack operations. Pack-resource endpoints and the relationship row belong to one
-project; cross-project links/references are forbidden even inside a
-multi-project changeset. Cardinality is expressed by
-`unique`: `[from]`, `[to]`, or `[from, to]`, avoiding ambiguous endpoint labels.
+resource or read-only built-in `system:principal`; the latter validates an
+active principal UUID and enables direct one-hop ReBAC but is never
+created/updated by pack operations. Pack-resource endpoints and the relationship
+row belong to one project; cross-project links/references are forbidden even
+inside a multi-project changeset. Cardinality is expressed by `unique`:
+`[from]`, `[to]`, or `[from, to]`, avoiding ambiguous endpoint labels.
 Relationship uniqueness is project-scoped and active-row-only
 (`archived_at IS NULL`) so an explicitly unlinked row may later be relinked with
-a new UUID/history. `fields` defaults empty
-and cannot use names `from|to|from_id|to_id`. `unique` is optional and may contain
-`from`, `to`, and relationship payload fields. Relationships are first-class
-project rows with generated UUIDv7/history/policy; they do not point at arbitrary
-resource field names.
+a new UUID/history. `fields` defaults empty and cannot use names
+`from|to|from_id|to_id`. `unique` is optional and may contain `from`, `to`, and
+relationship payload fields. Relationships are first-class project rows with
+generated UUIDv7/history/policy; they do not point at arbitrary resource field
+names.
 
 ## `Lifecycle`
 
@@ -153,7 +166,7 @@ spec:
       from: [proposal]
       to: won
       condition: "amount > 0"
-      set: {probability: "100"}
+      set: { probability: "100" }
       unset: []
   axi: {}
 ```
@@ -170,11 +183,12 @@ Hook attachments provide dynamic transition behavior/validation.
 ```yaml
 spec:
   input:
-    lead_id: {type: string, required: true, format: uuid}
+    lead_id: { type: string, required: true, format: uuid }
   reads:
     lead:
       resource: lead
-      id_from: input.lead_id
+      id_from: $action.input.lead_id
+      fields: [name, company_name, email]
       required: true
   availability:
     resource: lead
@@ -184,9 +198,10 @@ spec:
 ```
 
 - `input` is a field-descriptor map and defaults empty.
-- `reads` is a unique-name map. Each read has exact resource, `id_from` limited
-  to `input.<field>`, and required boolean. MVP reads one object by UUID only;
-  arbitrary query/list reads are forbidden.
+- `reads` is a unique-name map. Each read has exact resource, snake-case
+  `id_from` limited to `$action.input.<field>`, a nonempty unique `fields`
+  projection, and explicit `required` boolean. MVP reads one object by UUID
+  only; arbitrary query/list reads are forbidden.
 - `availability` is optional. Resource/states must align with its lifecycle;
   condition uses the frozen CEL subset.
 - `axi` is required for bundled proof actions.
@@ -209,8 +224,8 @@ spec:
   resource: lead_status
   key: name
   mode: changeset
-  rows: [{name: new, label: New}]
-  axi: {purpose: Seed lead statuses.}
+  rows: [{ name: new, label: New }]
+  axi: { purpose: Seed lead statuses. }
 ```
 
 Only these fields are allowed. Resource/key/row/reconcile behavior is frozen in
@@ -228,5 +243,5 @@ and security digests.
 The target implementation intentionally rejects current prototype aliases such
 as pack `metadata.namespace`, dotted `default.*` IDs, inline resource lifecycle,
 action `hook`, action `input` string arrays, policy `allow` arrays, relationship
-endpoint `field`, and missing `apiVersion`. Fixtures must be migrated; no deployed
-compatibility layer is required.
+endpoint `field`, and missing `apiVersion`. Fixtures must be migrated; no
+deployed compatibility layer is required.

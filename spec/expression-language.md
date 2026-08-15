@@ -1,4 +1,16 @@
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-expression-language; contract: 1; input: sha256:00aaf9cdc07b6cff6d3ad79eea340b9d29ede192c1bbb15fef3639a0363528ea -->
+
 # Expression Language
+
+Generated exact-contract projection imported into project-model/model.json from the reviewed expression-language.md source.
+
+## Exact migrated contract
+
+<a id="obj-com-exact-expression-language-v1"></a>
+
+### Exact v1 contract — Expression Language
+
+**Migration provenance.** Exact normative contract imported from `spec/expression-language.md` at `sha256:4f7ffb261098a1ab28b4d6157bdbb7e6eb8b0d08b288a453a0a222086e0841f2`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
 
 ## Decision
 
@@ -167,10 +179,10 @@ compiled separately and ANDed by the server.
 ### Policy predicates
 
 Policy `where` exposes the same protected-object row fields plus exactly
-`actor.id`, `actor.principal_type`, and nullable `actor.human_user_id`. Roles and
-assignments select rules outside CEL; `actor.role`, arbitrary metadata, arrays,
-environment, and relationship traversal are not CEL variables. One-hop ReBAC is
-the structured policy `relation` clause, not expression traversal.
+`actor.id`, `actor.principal_type`, and nullable `actor.human_user_id`. Roles
+and assignments select rules outside CEL; `actor.role`, arbitrary metadata,
+arrays, environment, and relationship traversal are not CEL variables. One-hop
+ReBAC is the structured policy `relation` clause, not expression traversal.
 
 ### Variables
 
@@ -256,11 +268,12 @@ false
 ```
 
 There are no null or fractional numeric literals in v1. Optionality uses
-`present`. Decimal fields (stored/input as canonical decimal strings) may compare
-to safe integer literals or another compatible decimal field; lowering casts the
-integer to Postgres numeric and targeted stage/policy evaluation uses Postgres,
-never IEEE-754 arithmetic. Date/timestamp fields compare to validated string
-literals coerced to their declared type. `in` requires a type-compatible array.
+`present`. Decimal fields (stored/input as canonical decimal strings) may
+compare to safe integer literals or another compatible decimal field; lowering
+casts the integer to Postgres numeric and targeted stage/policy evaluation uses
+Postgres, never IEEE-754 arithmetic. Date/timestamp fields compare to validated
+string literals coerced to their declared type. `in` requires a type-compatible
+array.
 
 Disallowed initially:
 
@@ -362,6 +375,6 @@ Run `optctl expression validate operant/crm:lead --context partial-index '<expr>
   to server validation and exposes server-authored subset help/examples.
 - Bare fields are canonical and `self.<field>` is an accepted alias. Actor
   values use `actor.<field>` only in contexts that declare actor fields.
-- Resource constraints, partial indexes, lifecycle/action/hook conditions,
-  query filters, and policy `where` clauses share this exact subset with
+- Resource constraints, partial indexes, lifecycle/action/hook conditions, query
+  filters, and policy `where` clauses share this exact subset with
   context-specific fields/functions. Packs cannot extend it.

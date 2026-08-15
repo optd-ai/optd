@@ -1,22 +1,96 @@
+<!-- generated-by: pi-dag-workflow/project-model; view: view-index; contract: 1; input: sha256:63951db4efce1ea55e424432d3e72759cfe0f3677c33fbc014885edb63fc3397 -->
+
 # Specifications
 
-This directory is the organized, durable product specification for the
-operational data platform. It should be updated whenever brainstorms produce
-meaningful decisions.
+Generated canonical views of the reviewed Operant project model. model.json remains the structured source of truth.
 
-`.ai/project.md` remains the research notebook and sensemaking log. `spec/` is
-the cleaner product contract.
+## Contents
+
+- [Product direction](product.md) — Canonical product direction decisions and contracts projected from project-model/model.json.
+- [Identity, authentication, and authorization](identity-auth.md) — Canonical identity, authentication, and authorization decisions and contracts projected from project-model/model.json.
+- [Packs, Projects, and resources](packs-projects.md) — Canonical packs, projects, and resources decisions and contracts projected from project-model/model.json.
+- [Queries, policy, and history](queries-policy-history.md) — Canonical queries, policy, and history decisions and contracts projected from project-model/model.json.
+- [Immutable writes, Actions, and approvals](writes-actions.md) — Canonical immutable writes, actions, and approvals decisions and contracts projected from project-model/model.json.
+- [Hooks, secrets, and outbox](hooks-secrets-outbox.md) — Canonical hooks, secrets, and outbox decisions and contracts projected from project-model/model.json.
+- [Runtime, architecture, and release](runtime-release.md) — Canonical runtime, architecture, and release decisions and contracts projected from project-model/model.json.
+- [Proof packs and acceptance](proof-acceptance.md) — Canonical proof packs and acceptance decisions and contracts projected from project-model/model.json.
+- [Project-model governance and cutover](model-governance.md) — Canonical project-model governance and cutover decisions and contracts projected from project-model/model.json.
+- [API Actions](api-actions.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed api-actions.md source.
+- [API Response and Error Contract](api-errors.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed api-errors.md source.
+- [Authentication API and CLI Contract](auth-api.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed auth-api.md source.
+- [Authentication and Local Agent Grants](authentication.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed authentication.md source.
+- [Authorization Definitions and Assignments](authorization-assignments.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed authorization-assignments.md source.
+- [CEL-to-SQL Partial-Index Prototype Evidence](cel-sql-partial-indexes.md) — Generated non-normative disposition view preserving the complete reviewed legacy source for auditability.
+- [Changeset Approval Contract](changeset-approvals.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed changeset-approvals.md source.
+- [Changeset Operation Schemas v1](changeset-operation-schema.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed changeset-operation-schema.md source.
+- [Changesets](changesets.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed changesets.md source.
+- [Race-Free Commit Revalidation](commit-revalidation.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed commit-revalidation.md source.
+- [CRM Migration Prototype Evidence](crm-migration-prototype.md) — Generated non-normative disposition view preserving the complete reviewed legacy source for auditability.
+- [Historical CRM Pack Definition](crm-pack-definition.md) — Generated non-normative disposition view preserving the complete reviewed legacy source for auditability.
+- [Historical CRM Prototype Flow](crm-prototype-flow.md) — Generated non-normative disposition view preserving the complete reviewed legacy source for auditability.
+- [Headless CRM Workflows](crm-workflows.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed crm-workflows.md source.
+- [Deployment](deployment.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed deployment.md source.
+- [Events, Audit, History, and Outbox](events-audit.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed events-audit.md source.
+- [Expression Language](expression-language.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed expression-language.md source.
+- [Extensions](extensions.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed extensions.md source.
+- [Hook-Secret Grants](hook-secret-grants.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed hook-secret-grants.md source.
+- [Hooks, Scripts, and Runtime Behavior](hooks-and-scripts.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed hooks-and-scripts.md source.
+- [Historical Local Postgres Options Research](local-postgres-options.md) — Generated non-normative disposition view preserving the complete reviewed legacy source for auditability.
+- [Migration Classification](migration-classification.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed migration-classification.md source.
+- [Migrations](migrations.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed migrations.md source.
+- [MVP Acceptance Criteria](mvp-acceptance-criteria.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed mvp-acceptance-criteria.md source.
+- [MVP API Routes](mvp-api-routes.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed mvp-api-routes.md source.
+- [MVP Hook Schema v1](mvp-hook-schema.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed mvp-hook-schema.md source.
+- [MVP Implementation Boundaries](mvp-implementation-boundaries.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed mvp-implementation-boundaries.md source.
+- [MVP Pack-Migration Integration](mvp-migration-integration.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed mvp-migration-integration.md source.
+- [Historical MVP Planning Requirements](mvp-planning-requirements.md) — Generated non-normative disposition view preserving the complete reviewed legacy source for auditability.
+- [MVP Policy Schema v1](mvp-policy-schema.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed mvp-policy-schema.md source.
+- [Historical MVP Roadmap](mvp-roadmap.md) — Generated non-normative disposition view preserving the complete reviewed legacy source for auditability.
+- [MVP Stack Decisions](mvp-stack.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed mvp-stack.md source.
+- [Object Model](object-model.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed object-model.md source.
+- [Odoo-Inspired Object Map](odoo-object-map.md) — Generated non-normative disposition view preserving the complete reviewed legacy source for auditability.
+- [optctl AXI Guidance Model](optctl-axi.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed optctl-axi.md source.
+- [Durable Outbox Delivery](outbox-delivery.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed outbox-delivery.md source.
+- [Pack Definition Schemas v1](pack-definition-schemas.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed pack-definition-schemas.md source.
+- [Pack Publishers and Projects](pack-publishers-and-projects.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed pack-publishers-and-projects.md source.
+- [Pack Structure](pack-structure.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed pack-structure.md source.
+- [Specification Planning-Readiness Audit](planning-readiness-audit.md) — Generated non-normative disposition view preserving the complete reviewed legacy source for auditability.
+- [Policies and Authorization](policies.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed policies.md source.
+- [Historical Pre-MVP Questions and Proposals](pre-mvp-open-questions.md) — Generated non-normative disposition view preserving the complete reviewed legacy source for auditability.
+- [Project Management Proof-Pack Requirements](project-management-pack.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed project-management-pack.md source.
+- [Platform Projects](projects.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed projects.md source.
+- [Historical Design Proposals](proposals.md) — Generated non-normative disposition view preserving the complete reviewed legacy source for auditability.
+- [Query and Object Read API v1](query-api.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed query-api.md source.
+- [Resource Configuration](resource-configuration.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed resource-configuration.md source.
+- [Secret Encryption Model](secret-encryption.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed secret-encryption.md source.
+- [Immutable Staged Changeset Storage](staged-changeset-storage.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed staged-changeset-storage.md source.
+- [State Machines](state-machines.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed state-machines.md source.
+- [Postgres Storage](storage-postgres.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed storage-postgres.md source.
+- [Vision](vision.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed vision.md source.
+
+## Exact migrated contract
+
+<a id="obj-com-exact-readme-v1"></a>
+
+### Exact v1 contract — Specifications
+
+**Migration provenance.** Exact normative contract imported from `spec/README.md` at `sha256:7d079f4667b6bd58906c698b3434a92a1783a59f6a64cfee4009d80a9da6f7c2`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
+
+This directory is the deterministic human-readable projection of
+`project-model/model.json`, the structured semantic source of truth for the
+operational data platform. After project-model cutover, every file here is
+generated and must not be edited by hand.
 
 ## Authority and status
 
-Topic-specific files labeled **Decision**, **Decisions**, **frozen**, or
-**canonical** are normative. When they conflict, the more specific/newer frozen
-contract wins and this index should be corrected. Files explicitly labeled
-historical, prototype evidence, research, roadmap, or open-question history are
-non-normative and must not drive implementation tasks.
+Accepted, non-superseded project-model intents, concepts, scenarios, decisions,
+and commitments are normative. Generated exact-contract views preserve the
+literal v1 protocol and schema detail selected during migration. Generated
+historical disposition views are non-normative and must not drive implementation
+tasks.
 
-The completed consistency review is recorded in
-[Planning Readiness Audit](planning-readiness-audit.md).
+The migration and consistency review is recorded under
+`project-model/migrations/`.
 
 ## Current Spec Set
 
@@ -31,8 +105,8 @@ The completed consistency review is recorded in
   partial index config, CEL lowering, and security/breakage tests.
 - [Object Model](object-model.md): object types, identity, collaboration,
   governance, AI capabilities, relationships.
-- [Platform Projects](projects.md): built-in UUIDv7 project boundary,
-  lifecycle, routes, locking, and CLI behavior.
+- [Platform Projects](projects.md): built-in UUIDv7 project boundary, lifecycle,
+  routes, locking, and CLI behavior.
 - [Changesets](changesets.md): immutable staging, validation, commit, and
   conflict behavior.
 - [Immutable Staged Changeset Storage](staged-changeset-storage.md): normalized
@@ -49,9 +123,9 @@ The completed consistency review is recorded in
   retries, and real concurrency evidence.
 - [Migrations](migrations.md): atomic plan lifecycle, explicit intermediate
   revisions, hazard codes, confirmation tokens, and dependency graph purpose.
-- [Migration Classification](migration-classification.md): supporting research
-  for safe/risky/destructive schema change classification grounded in existing
-  migration tooling patterns.
+- [Migration Classification](migration-classification.md): normative
+  safe/risky/destructive classification algorithm and frozen decisions, with a
+  supporting migration-tool research survey.
 - [CRM Migration Prototype](crm-migration-prototype.md): non-normative
   executable evidence for migration detection and breaking-migration flows.
 - [Policies](policies.md): SQL-lowerable RBAC/ABAC/one-level ReBAC authorization
@@ -89,8 +163,8 @@ The completed consistency review is recorded in
   scriptable automations.
 - [Historical CRM Prototype Flow](crm-prototype-flow.md): non-normative
   walkthrough evidence.
-- [Historical CRM Pack Definition](crm-pack-definition.md): detailed
-  pre-auth design history; frozen subsystem specs and fixtures take precedence.
+- [Historical CRM Pack Definition](crm-pack-definition.md): detailed pre-auth
+  design history; frozen subsystem specs and fixtures take precedence.
 - [Events and Audit](events-audit.md): canonical object version history, audit
   events, committed events, and undo/compensation boundaries.
 - [Durable Outbox Delivery](outbox-delivery.md): single-container in-process

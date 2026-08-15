@@ -1,4 +1,16 @@
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-query-api; contract: 1; input: sha256:4f5228e68335c682044ea800e86e64c148a1cd02e9a89533e417f8a9154e6064 -->
+
 # Query and Object Read API v1
+
+Generated exact-contract projection imported into project-model/model.json from the reviewed query-api.md source.
+
+## Exact migrated contract
+
+<a id="obj-com-exact-query-api-v1"></a>
+
+### Exact v1 contract — Query and Object Read API v1
+
+**Migration provenance.** Exact normative contract imported from `spec/query-api.md` at `sha256:551ee5b8c344c7624e274adc5034e804cd8676349e562a16e12217a660e439d9`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
 
 ## Read DTOs
 
@@ -17,7 +29,7 @@ A resource object uses:
   },
   "version": 4,
   "object_version_id": "019b7a2e-7c10-7000-8000-000000000004",
-  "data": {"name": "Acme", "status": "qualified"},
+  "data": { "name": "Acme", "status": "qualified" },
   "archived_at": null,
   "created_at": "2026-07-14T12:00:00.000Z",
   "updated_at": "2026-07-14T13:00:00.000Z"
@@ -43,7 +55,7 @@ A relationship row uses:
   "object_version_id": "019e...",
   "from": "019f...",
   "to": "019a...",
-  "fields": {"role": "buyer"},
+  "fields": { "role": "buyer" },
   "archived_at": null,
   "created_at": "2026-07-14T12:00:00.000Z",
   "updated_at": "2026-07-14T13:00:00.000Z"
@@ -69,7 +81,7 @@ A relationship row uses:
   "where": "status == 'qualified' && active()",
   "fields": ["name", "status", "owner_id"],
   "sort": [
-    {"field": "updated_at", "direction": "desc"}
+    { "field": "updated_at", "direction": "desc" }
   ],
   "limit": 50,
   "cursor": null,
@@ -82,24 +94,25 @@ A relationship row uses:
   `resource|relationship`.
 - `where` is optional and defaults `true`; it uses the frozen CEL query subset.
   Relationship context exposes payload fields plus `from` and `to` UUID fields.
-- `fields` is optional. If absent, server resolves the definition AXI list fields;
-  if AXI has none it uses a bounded platform default. Unknown or duplicate
-  fields fail. Field-level policy is not an MVP feature. Platform identity/version/timestamps are always in
-  the outer DTO and are not projection names.
+- `fields` is optional. If absent, server resolves the definition AXI list
+  fields; if AXI has none it uses a bounded platform default. Unknown or
+  duplicate fields fail. Field-level policy is not an MVP feature. Platform
+  identity/version/timestamps are always in the outer DTO and are not projection
+  names.
 - `sort` is optional and resolves AXI default then `updated_at desc`. It is a
   non-empty bounded array of declared scalar pack fields (plus relationship
-  `from|to`) or `created_at|updated_at|archived_at`; direction is `asc|desc`. The server always
-  appends `id` in the final direction as a unique tie-breaker and reports the
-  resolved sort.
+  `from|to`) or `created_at|updated_at|archived_at`; direction is `asc|desc`.
+  The server always appends `id` in the final direction as a unique tie-breaker
+  and reports the resolved sort.
 - `limit` defaults 50, minimum 1, configurable maximum default 500.
 - `cursor` is null/omitted on the first page.
 - `include_archived` defaults false and adds an implicit active-row predicate
   regardless of `where`. True removes only that implicit predicate and requires
   exact `read_archived` in addition to `read`; explicit `active()` still filters
   active rows. Single-object archived reads require the same.
-- `include_total` defaults false. True returns a policy-filtered exact count from
-  the same single SQL statement/CTE snapshot as the page, including empty pages;
-  it never counts hidden rows.
+- `include_total` defaults false. True returns a policy-filtered exact count
+  from the same single SQL statement/CTE snapshot as the page, including empty
+  pages; it never counts hidden rows.
 - Unknown request properties fail `bad_request`.
 
 ## Response
@@ -111,8 +124,8 @@ A relationship row uses:
     "items": [],
     "resolved_fields": ["name", "status", "owner_id"],
     "resolved_sort": [
-      {"field": "updated_at", "direction": "desc"},
-      {"field": "id", "direction": "desc"}
+      { "field": "updated_at", "direction": "desc" },
+      { "field": "id", "direction": "desc" }
     ]
   },
   "meta": {
@@ -126,8 +139,9 @@ A relationship row uses:
 ```
 
 `items` use the matching object/relationship DTO with projected `data`/`fields`.
-Relationship endpoint UUIDs remain present regardless of projection. Empty pages are successful and
-explicit. `total` is integer only when requested, otherwise null.
+Relationship endpoint UUIDs remain present regardless of projection. Empty pages
+are successful and explicit. `total` is integer only when requested, otherwise
+null.
 
 ## Policy and pagination ordering
 
@@ -153,8 +167,8 @@ inserts/updates may appear according to ordinary keyset semantics.
 
 Object and relationship GET routes resolve explicit project/definition/row ID
 and apply `read` (and `read_archived` when needed) before returning the matching
-DTO. Definition or project mismatch returns safe
-`not_found`/`project_conflict` without existence leak.
+DTO. Definition or project mismatch returns safe `not_found`/`project_conflict`
+without existence leak.
 
 History GET returns one cursor-paginated timeline newest first by
 `created_at,id`. Entries have discriminator `object_version|comment`.

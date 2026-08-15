@@ -1,10 +1,22 @@
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-mvp-implementation-boundaries; contract: 1; input: sha256:3a3237bbad85c5815e4f63ee6769f23a38f453b4fd979295db60d9cb3f21c3b3 -->
+
 # MVP Implementation Boundaries
+
+Generated exact-contract projection imported into project-model/model.json from the reviewed mvp-implementation-boundaries.md source.
+
+## Exact migrated contract
+
+<a id="obj-com-exact-mvp-implementation-boundaries-v1"></a>
+
+### Exact v1 contract — MVP Implementation Boundaries
+
+**Migration provenance.** Exact normative contract imported from `spec/mvp-implementation-boundaries.md` at `sha256:1f4ab3155924d47d299805e18feec4a05b86c1d266be558b3f3f26c716635a72`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
 
 ## Decision
 
 This file freezes dependency/module boundaries for the next implementation plan.
-Exact filenames may remain small/use-case-oriented, but responsibilities must not
-collapse across these layers.
+Exact filenames may remain small/use-case-oriented, but responsibilities must
+not collapse across these layers.
 
 ## Source layout
 
@@ -61,14 +73,16 @@ src/
 
 ## Dependency rules
 
-- `domain/` contains pure types/invariants/transitions/stable error codes and has
-  no Hono, Cliffy, Postgres, Deno subprocess, YAML, TOON, or filesystem imports.
+- `domain/` contains pure types/invariants/transitions/stable error codes and
+  has no Hono, Cliffy, Postgres, Deno subprocess, YAML, TOON, or filesystem
+  imports.
 - `application/` orchestrates use cases/transactions through ports. It never
   parses public transport shapes or emits CLI text.
-- Inbound adapters validate TypeBox/Ajv DTOs, authenticate, create immutable auth
-  context, invoke one application service, and wrap the shared API envelope.
-- Outbound adapters own raw SQL, process startup/inspection, hook spawning, YAML,
-  cryptography, local auth files, and TOON encoding.
+- Inbound adapters validate TypeBox/Ajv DTOs, authenticate, create immutable
+  auth context, invoke one application service, and wrap the shared API
+  envelope.
+- Outbound adapters own raw SQL, process startup/inspection, hook spawning,
+  YAML, cryptography, local auth files, and TOON encoding.
 - Hono/Cliffy/Postgres client/hook spawn/process-inspection imports stay inside
   their named adapters.
 - TypeBox schemas are the executable external contract and correspond to the
@@ -119,14 +133,14 @@ Postgres `SKIP LOCKED`; horizontally scaled loops share the same protocol.
 ## Pack/migration boundary
 
 - CLI scans one strict local directory and submits multipart preview.
-- Server repeats path/layout/YAML/TypeBox/cross-reference/static hook validation,
-  canonicalizes source, stores/reuses immutable candidate revision, and creates
-  a durable migration plan.
+- Server repeats path/layout/YAML/TypeBox/cross-reference/static hook
+  validation, canonicalizes source, stores/reuses immutable candidate revision,
+  and creates a durable migration plan.
 - Pack apply is not another upload/parser path. It applies one exact ready
   migration plan and activates the reviewed revision in the same all-or-nothing
   transaction.
-- Generated SQL and physical table identifiers are produced only in the
-  Postgres pack/migration adapter through safe identifier helpers.
+- Generated SQL and physical table identifiers are produced only in the Postgres
+  pack/migration adapter through safe identifier helpers.
 
 ## Changeset/action/seed boundary
 
@@ -142,9 +156,11 @@ Postgres `SKIP LOCKED`; horizontally scaled loops share the same protocol.
 
 ## Query/policy boundary
 
-- CEL parsing/lowering is one shared service with context-specific symbol tables.
-- Query and policy predicates are lowered to parameterized SQL and applied before
-  sort/keyset/limit/count. No application post-filter pagination is permitted.
+- CEL parsing/lowering is one shared service with context-specific symbol
+  tables.
+- Query and policy predicates are lowered to parameterized SQL and applied
+  before sort/keyset/limit/count. No application post-filter pagination is
+  permitted.
 - Route/CLI adapters pass the same strict query DTO; CLI only resolves local
   project context and renders DTOs.
 - Policy definitions/assignments and current authorization are loaded by ports;
@@ -173,10 +189,11 @@ Postgres `SKIP LOCKED`; horizontally scaled loops share the same protocol.
 
 ## Verification boundary
 
-- Unit tests cover pure invariants/services with fakes only where concurrency/SQL
-  semantics are irrelevant.
-- TypeBox route contracts, Cliffy parsing/exit status, YAML strictness, TOON
-  golden output, process binding, crypto, and hook sandbox have adapter tests.
+- Unit tests cover pure invariants/services with fakes only where
+  concurrency/SQL semantics are irrelevant.
+- TypeBox route contracts, Cliffy command/help construction, CLI argument
+  parsing/exit status, YAML strictness, TOON golden output, process binding,
+  crypto, and hook sandbox have adapter tests.
 - Real Postgres integration tests cover migrations, auth state, policy SQL,
   staging persistence, lock races, exactly-once commit, history/events, secrets,
   and outbox leases/retries.

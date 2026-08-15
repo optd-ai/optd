@@ -1,4 +1,16 @@
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-authorization-assignments; contract: 1; input: sha256:86ac18f2b2cf08d3114718ee0efa864e817823969eb868453c208d0e8f404f18 -->
+
 # Authorization Definitions and Assignments
+
+Generated exact-contract projection imported into project-model/model.json from the reviewed authorization-assignments.md source.
+
+## Exact migrated contract
+
+<a id="obj-com-exact-authorization-assignments-v1"></a>
+
+### Exact v1 contract — Authorization Definitions and Assignments
+
+**Migration provenance.** Exact normative contract imported from `spec/authorization-assignments.md` at `sha256:1808e5907a6c5526e46999d2f512cb52231a5986a1e418ae7274142cddcb48a5`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
 
 ## Decision
 
@@ -144,16 +156,17 @@ project; all-project authority does not imply system authority and vice versa.
 The server creates a UUIDv7 assignment with immutable principal/role/boundary/
 creator content and separate active/disabled lifecycle. Deactivation retains
 audit evidence. Role definitions must be currently active and boundary type must
-be compatible with the role/policy model. Agent role assignments are embedded
-in immutable authorization records created/replaced only by the auth request
-flow, not these human-user administration routes.
+be compatible with the role/policy model. Agent role assignments are embedded in
+immutable authorization records created/replaced only by the auth request flow,
+not these human-user administration routes.
 
 Human assignment create/deactivate requires `role.assignment.manage` in the
 assignment boundary and the exact target role currently effective for the
 administrator in that boundary, preventing authority creation.
-`system:super_admin` bypasses role-possession policy but remains subject to the final-active-human
-super-admin invariant. Assigning/removing `system:super_admin` itself requires an
-active super-admin; the transactional final-active-human invariant still applies.
+`system:super_admin` bypasses role-possession policy but remains subject to the
+final-active-human super-admin invariant. Assigning/removing
+`system:super_admin` itself requires an active super-admin; the transactional
+final-active-human invariant still applies.
 
 ## Grant permission
 
@@ -269,17 +282,18 @@ security-relevant change.
 
 The generated assignment uses a UUIDv7, canonical `{type: all_projects}`
 boundary, source pack/policy revision UUIDs, activation auth context, and active
-timestamps. This does not grant any principal a role. Project-specific role assignments
-still determine who has CRM authority in each project. Explicit project policy
-assignments may configure exceptions/additional policy but never install another
-pack copy or version.
+timestamps. This does not grant any principal a role. Project-specific role
+assignments still determine who has CRM authority in each project. Explicit
+project policy assignments may configure exceptions/additional policy but never
+install another pack copy or version.
 
 ### System policy assignment
 
 Built-in `system:*` policy definitions/assignments are created by platform
 migrations. Additional explicit system assignments use the administrative API
 below and an exact `{type: system}` boundary. Global activation is possible only
-through explicit `all_projects` or `system` assignments. Missing boundary data must fail validation.
+through explicit `all_projects` or `system` assignments. Missing boundary data
+must fail validation.
 
 ## Authorization evaluation
 
@@ -323,8 +337,8 @@ cannot silently imply all-project access.
 Previewing local source for `operant/crm@0.1.0` creates the exact durable
 migration plan/candidate revision; applying that plan transactionally activates
 server-wide resource/action/hook/lifecycle, role, policy, seed, and default
-policy-assignment definitions. It must not automatically
-assign domain roles to principals.
+policy-assignment definitions. It must not automatically assign domain roles to
+principals.
 
 Exactly one revision of a pack is active globally. Definitions are
 versioned/content-addressed for audit and preview equivalence, but projects
@@ -339,11 +353,11 @@ detect dependent active role assignments, and never redirect authority.
 ## Policy-assignment administration
 
 Pack-declared default policy assignments are activated/deactivated atomically
-with their exact pack revision. Additional operator assignments have immutable UUIDv7 identity/content (exact
-policy-definition revision, one boundary, creator auth context/time) plus a
-separate active/disabled lifecycle projection and append-only disable audit.
-Policy/boundary never change in place; disable the old assignment and create
-another.
+with their exact pack revision. Additional operator assignments have immutable
+UUIDv7 identity/content (exact policy-definition revision, one boundary, creator
+auth context/time) plus a separate active/disabled lifecycle projection and
+append-only disable audit. Policy/boundary never change in place; disable the
+old assignment and create another.
 
 ```text
 GET  /api/v1/policy-assignments

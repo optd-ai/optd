@@ -1,4 +1,16 @@
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-hooks-and-scripts; contract: 1; input: sha256:7ca5927f3387ff4282d56543dfc092cac0072124d9dd577f612ee85c89181e4d -->
+
 # Hooks, Scripts, and Runtime Behavior
+
+Generated exact-contract projection imported into project-model/model.json from the reviewed hooks-and-scripts.md source.
+
+## Exact migrated contract
+
+<a id="obj-com-exact-hooks-and-scripts-v1"></a>
+
+### Exact v1 contract — Hooks, Scripts, and Runtime Behavior
+
+**Migration provenance.** Exact normative contract imported from `spec/hooks-and-scripts.md` at `sha256:b371e08514baf02ac6628f871dcbe24ab57b0bdd97cc6f1b4c47661bb78458db`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
 
 ## Summary
 
@@ -59,66 +71,48 @@ Recommended rule:
 
 ## Including Scripts in Packs
 
-Behavior scripts should live inside the pack directory and be referenced by
-relative path from hook definitions or pack includes.
-
-Example layout:
+Every Hook uses exactly one paired metadata/script basename under `hooks/`:
 
 ```text
-packs/crm/
-  pack.yaml
-  resources/lead.yaml
-  actions/convert-lead.yaml
-  hooks/validate-lead.ts
-  hooks/normalize-email.ts
-  hooks/convert-lead.ts
-  seeds/pipeline-stages.yaml
+hooks/validate_lead.yaml
+hooks/validate_lead.ts
 ```
 
-Hook identity comes from the owning pack plus `metadata.name`. Pack source may
-use an unambiguous local reference, while persisted/cross-pack references are
-publisher-qualified:
-
-```yaml
-metadata:
-  name: validate_lead
-```
-
-```yaml
-ref: operant/crm:validate_lead
-```
-
-The platform stores structured `(publisher, pack, name)` identity; dotted
-namespace aliases are not part of the target contract.
+The Hook YAML declares `metadata.name: validate_lead` and
+`spec.script: validate_lead.ts`. Script values are basenames only: absolute
+paths, parent traversal, nested paths, pack includes, inline scripts, and
+script-only Hooks are rejected. Hook identity is the owning publisher/pack plus
+`metadata.name`; persisted references are publisher-qualified and dotted aliases
+are invalid.
 
 During multipart pack preview/candidate-revision creation, the server must:
 
-1. Resolve script paths relative to the validated uploaded pack root.
-2. Validate hook metadata and Deno-compatible script text.
+1. Pair each Hook YAML with the same-basename TypeScript part in `hooks/`.
+2. Validate Hook metadata and Deno-compatible script text.
 3. Hash script content.
 4. Store the script content and digest with the applied config revision.
-5. Record the digest in hook execution audit records.
+5. Record the digest in Hook execution audit records.
 
-The editable pack file remains the source during development. The applied config
-revision stored by the platform is the source for execution, audit, and
+The editable paired files remain the source during development. The applied
+config revision stored by the platform is the source for execution, audit, and
 reproducibility.
 
 ## Pack Preview Upload, Storage, and Execution
 
 ### Upload Transport
 
-Decision: pack source preview uses **HTTP multipart** as the canonical transport;
-migration-plan apply uses JSON with no repeated source upload.
-Local pack directories use the strict layout defined in
+Decision: pack source preview uses **HTTP multipart** as the canonical
+transport; migration-plan apply uses JSON with no repeated source upload. Local
+pack directories use the strict layout defined in
 [Pack Structure](pack-structure.md).
 
 MVP CLI accepts one local directory (`optctl pack apply ./packs/crm`), packages
 its regular files, and submits the same multipart preview request any future
 UI/client uses. Archive input is deferred to avoid a second extraction/security
-contract. `optctl pack apply` then applies the
-returned exact migration ID through the JSON migration route. This lets the
-server validate that every referenced hook script/resource file is present
-before candidate revision creation.
+contract. `optctl pack apply` then applies the returned exact migration ID
+through the JSON migration route. This lets the server validate that every
+referenced hook script/resource file is present before candidate revision
+creation.
 
 Multipart shape:
 
@@ -227,8 +221,9 @@ stage command again is a new attempt, not a platform retry operation.
   normalize data, generate changeset operations, send notification.
 
 Actions define input schema, availability, declared reads/context, policy,
-stage/commit semantics, documentation, and events. Hooks define code path or stored script
-artifact, timeout, permissions, input schema, output schema, and failure mode.
+stage/commit semantics, documentation, and events. Hooks define code path or
+stored script artifact, timeout, permissions, input schema, output schema, and
+failure mode.
 
 A complex action may be implemented by one or more hooks, but hooks are not
 themselves the public business API.
@@ -252,10 +247,10 @@ metadata:
 spec:
   script: require_primary_contact.ts
   timeout: 2s
-  permissions: {net: false, env: false, read: false, write: false, run: false}
+  permissions: { net: false, env: false, read: false, write: false, run: false }
   secrets: []
-  effects: {operations: []}
-  output: {schema: validation.v1}
+  effects: { operations: [] }
+  output: { schema: validation.v1 }
   attachments:
     - phase: changeset.validate
       resource: opportunity
@@ -266,8 +261,8 @@ spec:
 ```
 
 The owning action/resource definition must declare any `$reads.<name>` object
-read. Missing optional reads omit that input key; empty string/list/object values
-remain present values. Exact sources and phase availability are frozen in
+read. Missing optional reads omit that input key; empty string/list/object
+values remain present values. Exact sources and phase availability are frozen in
 `mvp-hook-schema.md`.
 
 ## Canonical Parameter Transport
@@ -295,10 +290,12 @@ Canonical execution contract:
 - Non-zero exit means hook execution failure.
 
 The envelope contains exactly the version, phase, validated curated `input`, and
-bounded non-secret invocation metadata frozen in `mvp-hook-schema.md`. It does
-not include actor identity/roles, raw context, initiating credentials, process
-information, secret references/values, or ambient environment. Secret values
-exist only in exact granted child env names.
+bounded non-secret invocation metadata frozen in `mvp-hook-schema.md`. When a
+permitted phase explicitly maps `$actor`, `input` may contain that phase's
+minimal server-derived actor DTO. The envelope never includes ambient actor
+roles, raw auth context, initiating credentials, bearer/authorization tokens,
+process information, secret references/values, or ambient environment. Secret
+values exist only in exact granted child env names.
 
 Deno example:
 
@@ -372,8 +369,8 @@ Unrestricted network permission is never emitted. Operators may further narrow
 network/environment policy. Redirect destinations must independently satisfy
 Deno's network permission check.
 
-Filesystem read/write and subprocess execution are permanently forbidden for
-all pack hooks. Subprocesses are forbidden because they would bypass filesystem
+Filesystem read/write and subprocess execution are permanently forbidden for all
+pack hooks. Subprocesses are forbidden because they would bypass filesystem
 hygiene. Hooks also receive no system-information, FFI, direct database,
 initiating bearer token, or remote-import permission. Internal materialization
 of the applied entry script does not grant script filesystem access.
@@ -442,11 +439,11 @@ or receive the initiating human/agent bearer token; Operant objects are supplied
 through current/proposed context and declared object-by-id reads whose immutable
 versions become stage dependencies. Arbitrary collection queries are deferred.
 
-The immutable stage contains the canonical operations being staged, not a
-second raw request payload or a generic bag of external API responses supplied
-only for validation. A hook may write explanatory external-validation details
-to stderr. Any external value that affects a write must be present in the
-canonical operation graph.
+The immutable stage contains the canonical operations being staged, not a second
+raw request payload or a generic bag of external API responses supplied only for
+validation. A hook may write explanatory external-validation details to stderr.
+Any external value that affects a write must be present in the canonical
+operation graph.
 
 Secrets use a built-in platform resource type, not normal pack resources. Hook
 configs reference secrets by name and map them to explicit environment variable
