@@ -2862,14 +2862,14 @@
     },
     {
       "acceptance": {
-        "acceptedAt": "2026-08-15T15:37:02.499Z",
+        "acceptedAt": "2026-09-09T16:05:58.716Z",
         "actor": "user",
-        "batchRef": "sha256:7d2620ba662747da2b06352c336e6aa7f9ffab5983e91a9457cc7eb558ff88fe",
-        "contentHash": "sha256:5b58e1c9e0dbdc228ce54c84130e8efab2aa191881a676e923672985a84d2595",
-        "interactionRef": "question:approve-exact-cutover:sha256-46120d55b3ce71869c196451f0bb8ce8d341cee55c76f853afffdc9dc22b2244",
-        "mode": "migration_cutover"
+        "batchRef": "sha256:8d4200550718c19ba7da1ce527d30a6d14fafa5216ad512a4d588c484b87537d",
+        "contentHash": "sha256:08de33dd9d2e30f2f6a15894340cadf324e0a2328916d3da9199db6c5bc8a745",
+        "interactionRef": "pi-input:019f6baa-af86-725a-81a8-3ce65a3f5155:1788969782534",
+        "mode": "accepted_existing"
       },
-      "body": "After completeness review, delete every hand-authored spec file and replace the directory with deterministic project-model-generated Markdown projections. project-model/model.json is the structured semantic source of truth; generated spec views are the compatible human-readable projection required by pi-dag-workflow. No hand-authored contract remains in spec.",
+      "body": "After completeness review, delete every hand-authored spec file and replace the directory with deterministic project-model-generated Markdown projections. project-model/model.json is the structured semantic source of truth; generated spec views are the compatible human-readable projection required by pi-dag-workflow. No hand-authored contract remains in spec. Retained model-contract and external-readiness outputs from a cancelled historical DAG are evidence rather than authority: independently inspect their exact local Git lineage and rerun current authoritative-model, deterministic-projection, source, and release checks before selectively adopting them into successor work.",
       "createdAt": "2026-08-14T23:29:08.945Z",
       "id": "DEC-generated-spec-layout",
       "introducedBy": "user",
@@ -2887,7 +2887,7 @@
       ],
       "state": "accepted",
       "title": "Keep spec only as generated project-model projections",
-      "updatedAt": "2026-08-15T15:37:02.499Z"
+      "updatedAt": "2026-09-09T16:05:58.716Z"
     },
     {
       "acceptance": {
@@ -3249,14 +3249,14 @@
     },
     {
       "acceptance": {
-        "acceptedAt": "2026-08-15T22:09:12.740Z",
+        "acceptedAt": "2026-09-09T16:05:58.715Z",
         "actor": "user",
-        "batchRef": "sha256:f1c52de6a997c3301b4659dadee191ad8bea53da37676b101b3e06d7ea1663e3",
-        "contentHash": "sha256:3fe7440600232a3806c749c844e4191d12ca068b4a09ffacc3772cec158526a9",
-        "interactionRef": "lavish-feedback:review-optd-release-identity:sha256:88c4d002d973d498d73eb80374283d9ce11f7247d4c5a2112dbb944ffabb3912",
+        "batchRef": "sha256:8d4200550718c19ba7da1ce527d30a6d14fafa5216ad512a4d588c484b87537d",
+        "contentHash": "sha256:4ab936aab58431e971da26d99e36bd2909c337237cb3da28f0f082eb561538cb",
+        "interactionRef": "pi-input:019f6baa-af86-725a-81a8-3ce65a3f5155:1788969782534",
         "mode": "accepted_existing"
       },
-      "body": "Strict optd Pack documents use apiVersion optd.dev/v1. Control of the optd.dev DNS namespace is a release prerequisite. operant.dev/v1 is rejected rather than accepted as an alias; historical evidence may retain it only when explicitly non-normative.",
+      "body": "Strict optd Pack documents use apiVersion optd.dev/v1. The user controls optd.dev, and current successor-planning evidence observes TXT _optd-control.optd.dev exactly as pi-dag-workflow=b1c0895ca2a37f9b592044e84c7e75ad. Release readiness requires this separately supplied Cloudflare TXT challenge to be freshly observed at both authoritative nameservers and at least two independent validating resolvers; missing, stale, inconsistent, or ambiguous evidence fails closed. operant.dev/v1 is rejected rather than accepted as an alias; historical evidence may retain it only when explicitly non-normative.",
       "createdAt": "2026-08-15T22:07:47.059Z",
       "id": "DEC-optd-api-namespace",
       "introducedBy": "user",
@@ -3289,7 +3289,7 @@
       ],
       "state": "accepted",
       "title": "Use optd.dev/v1 as the Pack API namespace",
-      "updatedAt": "2026-08-15T22:09:12.740Z"
+      "updatedAt": "2026-09-09T16:05:58.715Z"
     },
     {
       "acceptance": {
@@ -3335,12 +3335,12 @@
     },
     {
       "acceptance": {
-        "acceptedAt": "2026-08-15T16:43:48.327Z",
+        "acceptedAt": "2026-09-09T16:05:58.713Z",
         "actor": "user",
-        "batchRef": "sha256:01416deb184e1beafc8d3f86b94668dadc6ce6eaf844cbf16a903f39176f9646",
-        "contentHash": "sha256:d71c5c9a15988a65a0d7c118b0c90e3f810b00339e01f3abfda6c6a0593e7dc2",
-        "interactionRef": "lavish-feedback:review-optd-preplanning-boundaries:sha256-3e2ded7f687585c56795f3d1a80126b7bcb16f73371ea2e8fe3a05434ecacd6c",
-        "mode": "direct_direction"
+        "batchRef": "sha256:8d4200550718c19ba7da1ce527d30a6d14fafa5216ad512a4d588c484b87537d",
+        "contentHash": "sha256:c9963d2594012358f7fe97132b8a65174c747181ec88ebc0ca715d2075854f0e",
+        "interactionRef": "pi-input:019f6baa-af86-725a-81a8-3ce65a3f5155:1788969782534",
+        "mode": "accepted_existing"
       },
       "body": "After the rename branch is validated and source/destination administration is verified, transfer the existing GitHub repository to organization optd-ai and canonical name optd. Preserve Git history and repository metadata through transfer; do not rely on old-URL redirects as canonical configuration. Rebind and verify organization rules, Actions permissions, environments, secrets/variables, runners, Apps, webhooks, deploy keys, CODEOWNERS teams, OIDC subjects, Pages, and GHCR before release. Bind the local origin to the new canonical URL.",
       "createdAt": "2026-08-15T16:43:48.327Z",
@@ -3365,20 +3365,20 @@
         ]
       },
       "sourceRefs": [],
-      "state": "accepted",
+      "state": "superseded",
       "title": "Transfer the existing repository to optd-ai/optd",
-      "updatedAt": "2026-08-15T16:43:48.327Z"
+      "updatedAt": "2026-09-09T16:05:58.713Z"
     },
     {
       "acceptance": {
-        "acceptedAt": "2026-08-15T16:43:48.326Z",
+        "acceptedAt": "2026-09-09T16:05:58.715Z",
         "actor": "user",
-        "batchRef": "sha256:01416deb184e1beafc8d3f86b94668dadc6ce6eaf844cbf16a903f39176f9646",
-        "contentHash": "sha256:3551249b011b68cd0446577a565935abdfa85d1bb7d1c093b07105b18aaa6e96",
-        "interactionRef": "lavish-feedback:review-optd-preplanning-boundaries:sha256-3e2ded7f687585c56795f3d1a80126b7bcb16f73371ea2e8fe3a05434ecacd6c",
-        "mode": "direct_direction"
+        "batchRef": "sha256:8d4200550718c19ba7da1ce527d30a6d14fafa5216ad512a4d588c484b87537d",
+        "contentHash": "sha256:762a77fa303c7979997367ef12cc674df7c52416307f9751642cef1c660a77d6",
+        "interactionRef": "pi-input:019f6baa-af86-725a-81a8-3ce65a3f5155:1788969782534",
+        "mode": "accepted_existing"
       },
-      "body": "The canonical product and repository are optd and optd-ai/optd. The server executable is optd; optctl and /api/v1 remain unchanged. Runtime configuration uses OPTD_*; filesystem/XDG, PostgreSQL defaults and internal product-owned symbols/channels, Docker/Compose/Kubernetes resources, release ownership labels, source metadata, and image identity use optd. Built-in proof packs use publisher identities optd/crm and optd/projects. Old Operant spellings remain only where explicitly classified as historical evidence or adversarial rejected input; there are no runtime compatibility aliases.",
+      "body": "The canonical product and repository are optd and optd-ai/optd. The server executable is optd; optctl and /api/v1 remain unchanged. Runtime configuration uses OPTD_*; filesystem/XDG, PostgreSQL defaults and internal product-owned symbols/channels, Docker/Compose/Kubernetes resources, release ownership labels, source metadata, and image identity use optd. Built-in proof packs use publisher identities optd/crm and optd/projects. Old Operant spellings remain only where explicitly classified as historical evidence or adversarial rejected input; there are no runtime compatibility aliases. The canonical hosted repository is created new and public in optd-ai from the complete validated local Git history rather than transferred from an existing hosted repository. Active optd-ai administration and destination absence must be reverified immediately before creation.",
       "createdAt": "2026-08-15T16:43:48.326Z",
       "id": "DEC-optd-identity-matrix",
       "introducedBy": "user",
@@ -3426,7 +3426,7 @@
       ],
       "state": "accepted",
       "title": "Use one complete optd identity before the first release",
-      "updatedAt": "2026-08-15T16:43:48.326Z"
+      "updatedAt": "2026-09-09T16:05:58.715Z"
     },
     {
       "acceptance": {
@@ -3707,14 +3707,14 @@
     },
     {
       "acceptance": {
-        "acceptedAt": "2026-08-15T15:37:02.503Z",
+        "acceptedAt": "2026-09-09T16:05:58.716Z",
         "actor": "user",
-        "batchRef": "sha256:7d2620ba662747da2b06352c336e6aa7f9ffab5983e91a9457cc7eb558ff88fe",
-        "contentHash": "sha256:db280e3893fb7727a38eb762a5b3335e92e979c1e75ce963fc2be7f41c39f498",
-        "interactionRef": "question:approve-exact-cutover:sha256-46120d55b3ce71869c196451f0bb8ce8d341cee55c76f853afffdc9dc22b2244",
-        "mode": "migration_cutover"
+        "batchRef": "sha256:8d4200550718c19ba7da1ce527d30a6d14fafa5216ad512a4d588c484b87537d",
+        "contentHash": "sha256:a05d60fe6bd1f4cf6a83db3a89c7c6235e85ef47211a2d7a94b5b5beec5aa48c",
+        "interactionRef": "pi-input:019f6baa-af86-725a-81a8-3ce65a3f5155:1788969782534",
+        "mode": "accepted_existing"
       },
-      "body": "The gate freezes an explicit-base exact-HEAD archive and full image ID, publishes exact artifacts, runs one complete suite, never prunes, restores global Docker sets byte-for-byte, and removes only durably proven owned processes/temp roots.",
+      "body": "The gate freezes an explicit-base exact-HEAD archive and full image ID, publishes exact artifacts, runs one complete suite, never prunes, restores global Docker sets byte-for-byte, and removes only durably proven owned processes/temp roots. Successor planning may include the external release path, but repository creation, local or hosted remote mutation, source push, release-tag creation or push, GHCR publication, and GitHub release publication each remain blocked until the user grants explicit later authorization bound to the exact destination, source commit, artifact identity, and effect. Planning, plan approval, and general implementation authority do not authorize those effects.",
       "createdAt": "2026-08-14T21:18:48.689Z",
       "id": "DEC-release-integrity",
       "introducedBy": "migration",
@@ -3732,7 +3732,7 @@
       ],
       "state": "accepted",
       "title": "Build once and clean only exact proven release ownership",
-      "updatedAt": "2026-08-15T15:37:02.503Z"
+      "updatedAt": "2026-09-09T16:05:58.716Z"
     },
     {
       "acceptance": {
@@ -4949,6 +4949,59 @@
       "updatedAt": "2026-08-14T21:18:48.689Z"
     },
     {
+      "body": "Fresh external verification reports TXT _optd-control.optd.dev returns exactly \"pi-dag-workflow=b1c0895ca2a37f9b592044e84c7e75ad\" at both authoritative Cloudflare nameservers selah.ns.cloudflare.com and quentin.ns.cloudflare.com and at independent validating resolvers 1.1.1.1 and 8.8.8.8. Treat this as current optd.dev control evidence for successor planning; release execution must revalidate freshness at the effect boundary.",
+      "createdAt": "2026-09-09T16:05:58.717Z",
+      "id": "EV-optd-domain-control-txt",
+      "introducedBy": "agent",
+      "relationships": [
+        {
+          "kind": "addresses",
+          "targetId": "Q-optd-cloudflare-txt-proof"
+        },
+        {
+          "kind": "supports",
+          "targetId": "DEC-optd-api-namespace"
+        }
+      ],
+      "scope": {
+        "kind": "workstreams",
+        "workstreamIds": [
+          "WS-packs",
+          "WS-product",
+          "WS-runtime"
+        ]
+      },
+      "sourceRefs": [],
+      "state": "current",
+      "title": "Current optd.dev TXT control challenge resolves exactly",
+      "updatedAt": "2026-09-09T16:09:35.189Z"
+    },
+    {
+      "body": "Read-only inspection found clean master at da0d3a1, no configured Git remote, retained model-contract lineage 2f749e5 -> ef65f23 -> 570b807, and separate external-readiness commit 0707795. These commits are evidence requiring revalidation before selective adoption.",
+      "createdAt": "2026-09-08T21:11:04.042Z",
+      "id": "EV-optd-local-successor-lineage",
+      "introducedBy": "agent",
+      "relationships": [
+        {
+          "kind": "supports",
+          "targetId": "PROP-optd-successor-public-release"
+        }
+      ],
+      "scope": {
+        "kind": "workstreams",
+        "workstreamIds": [
+          "WS-model",
+          "WS-runtime"
+        ]
+      },
+      "sourceRefs": [
+        "source:project-model/model.json"
+      ],
+      "state": "current",
+      "title": "Retained successor commits exist only in current local Git history",
+      "updatedAt": "2026-09-08T21:11:04.042Z"
+    },
+    {
       "body": "The 8-node repair completed at current HEAD; final exact release gate reported 424 passed, 0 failed, 0 ignored and exact Docker restoration.",
       "confidence": "high",
       "createdAt": "2026-08-14T21:18:48.689Z",
@@ -5352,48 +5405,44 @@
   "project": {
     "createdAt": "2026-08-14T21:18:48.689Z",
     "currentUnderstanding": {
-      "body": "The optd migration is ready for implementation planning once operational prerequisites are verified. Accepted boundaries: one complete clean break; fresh state with no Operant migration aliases; transfer the existing repository to optd-ai/optd; Pack apiVersion optd.dev/v1 with control of optd.dev required before release; Apache License 2.0; optctl and /api/v1 remain stable. The plan must begin from a committed authoritative baseline, update project-model semantics before regenerating specs, inventory every brand/protocol/persistence/release identity, preserve old spellings only as historical or adversarial rejection evidence, add root README and LICENSE, explicitly disposition other community/CI files, verify GitHub organization integrations, and finish with exact host/container/release validation from fresh optd state.",
-      "generatedAt": "2026-08-15T22:09:12.741Z",
+      "body": "The accepted optd successor scope retains the complete clean-break identity, fresh-state boundary, optctl and /api/v1 stability, optd.dev/v1 Pack namespace, Apache License 2.0, and exact release-integrity requirements. The prior transfer decision is superseded: successor work creates a new public optd-ai/optd repository from complete validated local history after revalidating retained cancelled-run outputs. Fresh TXT _optd-control.optd.dev evidence exactly matches pi-dag-workflow=b1c0895ca2a37f9b592044e84c7e75ad at authoritative nameservers selah.ns.cloudflare.com and quentin.ns.cloudflare.com and validating resolvers 1.1.1.1 and 8.8.8.8. Repository creation, remote mutation, push, tag, GHCR publication, and GitHub release publication each require explicit later authorization. No external effect is authorized by this review, local commit, or plan preparation.",
+      "generatedAt": "2026-09-09T16:09:35.190Z",
       "sourceObjects": [
         {
           "id": "DEC-optd-identity-matrix",
-          "semanticHash": "sha256:3551249b011b68cd0446577a565935abdfa85d1bb7d1c093b07105b18aaa6e96"
+          "semanticHash": "sha256:762a77fa303c7979997367ef12cc674df7c52416307f9751642cef1c660a77d6"
         },
         {
           "id": "DEC-optd-development-state",
           "semanticHash": "sha256:0b025a2cc34b5fdd14914434898a3be5761a88f7a89a074e21a468c622559a7e"
         },
         {
-          "id": "DEC-optd-github-transfer",
-          "semanticHash": "sha256:d71c5c9a15988a65a0d7c118b0c90e3f810b00339e01f3abfda6c6a0593e7dc2"
-        },
-        {
           "id": "DEC-optd-api-namespace",
-          "semanticHash": "sha256:3fe7440600232a3806c749c844e4191d12ca068b4a09ffacc3772cec158526a9"
+          "semanticHash": "sha256:4ab936aab58431e971da26d99e36bd2909c337237cb3da28f0f082eb561538cb"
         },
         {
           "id": "DEC-optd-license",
           "semanticHash": "sha256:54ec8d2785edca9fe902cc817e2ae248d33ba973c883390891d66b8a4b390cdf"
         },
         {
-          "id": "PROP-optd-clean-break-before-release",
-          "semanticHash": "sha256:725636dac46bac664a30254b81e1cc631d68eb69578ff85c19aa34972e33278d"
-        },
-        {
-          "id": "DISC-optd-protocol-domains",
-          "semanticHash": "sha256:55576ccaf03f129d00eeb6c210cd76cd55c85e9db4db06f9c5b2ee10eb17b361"
-        },
-        {
-          "id": "DISC-optd-release-community-files",
-          "semanticHash": "sha256:19781524a4d44ddf0314497078c77e19f7558710b4b4c2e77566ef09afa36723"
-        },
-        {
-          "id": "DISC-optd-generated-spec-constraint",
-          "semanticHash": "sha256:ef7f73cc17c8f7d1c1139a4d562de86bc7f68ff17866ea8fe7a474fcdfde03c2"
-        },
-        {
           "id": "DEC-release-integrity",
-          "semanticHash": "sha256:db280e3893fb7727a38eb762a5b3335e92e979c1e75ce963fc2be7f41c39f498"
+          "semanticHash": "sha256:a05d60fe6bd1f4cf6a83db3a89c7c6235e85ef47211a2d7a94b5b5beec5aa48c"
+        },
+        {
+          "id": "DEC-generated-spec-layout",
+          "semanticHash": "sha256:08de33dd9d2e30f2f6a15894340cadf324e0a2328916d3da9199db6c5bc8a745"
+        },
+        {
+          "id": "DEC-optd-github-transfer",
+          "semanticHash": "sha256:c9963d2594012358f7fe97132b8a65174c747181ec88ebc0ca715d2075854f0e"
+        },
+        {
+          "id": "EV-optd-local-successor-lineage",
+          "semanticHash": "sha256:59e2db85d787c925d4dab6a2b4c784c755d8a5d58433f71161dd44d35186dcb1"
+        },
+        {
+          "id": "EV-optd-domain-control-txt",
+          "semanticHash": "sha256:da9c83e3f5d786bdef03ca8c0542be70114f4b6f5f3dbb9ede8183796364b506"
         }
       ]
     },
@@ -6713,9 +6762,9 @@
         }
       ]
     },
-    "revision": 21,
+    "revision": 24,
     "title": "Operant",
-    "updatedAt": "2026-08-15T22:09:12.741Z"
+    "updatedAt": "2026-09-09T16:09:35.191Z"
   },
   "proposals": [
     {
@@ -6819,6 +6868,40 @@
         "Avoids permanent compatibility code and a mixed-brand public contract"
       ],
       "updatedAt": "2026-08-15T16:44:57.923Z"
+    },
+    {
+      "body": "Revalidate retained local outputs; supersede the transfer premise with creation of a new public optd-ai/optd repository from complete local history; prove optd.dev control using a separately supplied fresh Cloudflare TXT record; complete local host/image release validation; and keep repository creation, remote mutation, push, tag, GHCR publication, and GitHub release publication behind explicit later authority.",
+      "createdAt": "2026-09-08T21:11:04.042Z",
+      "id": "PROP-optd-successor-public-release",
+      "introducedBy": "agent",
+      "relationships": [
+        {
+          "kind": "addresses",
+          "targetId": "DEC-optd-github-transfer"
+        },
+        {
+          "kind": "supports",
+          "targetId": "DEC-optd-identity-matrix"
+        },
+        {
+          "kind": "supports",
+          "targetId": "DEC-release-integrity"
+        }
+      ],
+      "scope": {
+        "kind": "workstreams",
+        "workstreamIds": [
+          "WS-acceptance",
+          "WS-model",
+          "WS-packs",
+          "WS-product",
+          "WS-runtime"
+        ]
+      },
+      "sourceRefs": [],
+      "state": "candidate",
+      "title": "Prepare a successor optd release through new repository creation",
+      "updatedAt": "2026-09-08T21:11:04.042Z"
     }
   ],
   "questions": [
@@ -7124,6 +7207,34 @@
       "state": "answered",
       "title": "Which controlled namespace replaces operant.dev/v1?",
       "updatedAt": "2026-08-15T22:09:12.740Z"
+    },
+    {
+      "answerObjectIds": [
+        "EV-optd-domain-control-txt"
+      ],
+      "body": "Resolved for successor planning: TXT _optd-control.optd.dev returns exactly \"pi-dag-workflow=b1c0895ca2a37f9b592044e84c7e75ad\". Release execution still requires fresh authoritative and independent resolver observations at the effect boundary.",
+      "createdAt": "2026-09-08T21:11:04.043Z",
+      "id": "Q-optd-cloudflare-txt-proof",
+      "introducedBy": "agent",
+      "kind": "uncertainty",
+      "relationships": [
+        {
+          "kind": "affects",
+          "targetId": "DEC-optd-api-namespace"
+        }
+      ],
+      "scope": {
+        "kind": "workstreams",
+        "workstreamIds": [
+          "WS-packs",
+          "WS-product",
+          "WS-runtime"
+        ]
+      },
+      "sourceRefs": [],
+      "state": "answered",
+      "title": "What fresh Cloudflare TXT challenge will prove optd.dev control?",
+      "updatedAt": "2026-09-09T16:05:58.717Z"
     },
     {
       "answerObjectIds": [

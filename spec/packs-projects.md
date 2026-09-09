@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-packs-projects; contract: 1; input: sha256:77ea51299d07fe5ed728724af453b62c4b80cbbac908afb9c35e856a3f51db41 -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-packs-projects; contract: 1; input: sha256:10ebba6220b7eae39f64777db793dfdbbb1a72629a4499d372a606715bc75b31 -->
 
 # Packs, Projects, and resources
 
@@ -146,7 +146,7 @@ operant/projects:project_member remains an explicit resource because membership 
 
 ### Use optd.dev/v1 as the Pack API namespace
 
-Strict optd Pack documents use apiVersion optd.dev/v1. Control of the optd.dev DNS namespace is a release prerequisite. operant.dev/v1 is rejected rather than accepted as an alias; historical evidence may retain it only when explicitly non-normative.
+Strict optd Pack documents use apiVersion optd.dev/v1. The user controls optd.dev, and current successor-planning evidence observes TXT _optd-control.optd.dev exactly as pi-dag-workflow=b1c0895ca2a37f9b592044e84c7e75ad. Release readiness requires this separately supplied Cloudflare TXT challenge to be freshly observed at both authoritative nameservers and at least two independent validating resolvers; missing, stale, inconsistent, or ambiguous evidence fails closed. operant.dev/v1 is rejected rather than accepted as an alias; historical evidence may retain it only when explicitly non-normative.
 
 **Rationale.** The user selected optd.dev/v1 and made control of optd.dev a release prerequisite.
 

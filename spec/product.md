@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-product; contract: 1; input: sha256:da5a62ff6ca9131fcf66d4d365c52ee29c45695dd74f6481f8e92fc1e13b67a1 -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-product; contract: 1; input: sha256:0281cf56da4ebbaf51910e0344b7b1625319cfa4e776fecf2e74e98c3406706e -->
 
 # Product direction
 
@@ -54,7 +54,7 @@ The canonical route inventory includes current authorization authority/roles and
 
 ### Use one complete optd identity before the first release
 
-The canonical product and repository are optd and optd-ai/optd. The server executable is optd; optctl and /api/v1 remain unchanged. Runtime configuration uses OPTD_*; filesystem/XDG, PostgreSQL defaults and internal product-owned symbols/channels, Docker/Compose/Kubernetes resources, release ownership labels, source metadata, and image identity use optd. Built-in proof packs use publisher identities optd/crm and optd/projects. Old Operant spellings remain only where explicitly classified as historical evidence or adversarial rejected input; there are no runtime compatibility aliases.
+The canonical product and repository are optd and optd-ai/optd. The server executable is optd; optctl and /api/v1 remain unchanged. Runtime configuration uses OPTD_*; filesystem/XDG, PostgreSQL defaults and internal product-owned symbols/channels, Docker/Compose/Kubernetes resources, release ownership labels, source metadata, and image identity use optd. Built-in proof packs use publisher identities optd/crm and optd/projects. Old Operant spellings remain only where explicitly classified as historical evidence or adversarial rejected input; there are no runtime compatibility aliases. The canonical hosted repository is created new and public in optd-ai from the complete validated local Git history rather than transferred from an existing hosted repository. Active optd-ai administration and destination absence must be reverified immediately before creation.
 
 **Rationale.** One pre-release identity avoids compatibility code and mixed branding while preserving stable API and CLI concepts.
 

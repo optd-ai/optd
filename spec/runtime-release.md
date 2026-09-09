@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-runtime-release; contract: 1; input: sha256:a5e09aeb134c1ff417a8f79889add12803456333452896ae236df4a43579a304 -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-runtime-release; contract: 1; input: sha256:eeb36e6cf9dd060ab9ea43194770fecdab60f439742aad5265ffb74d99b34e89 -->
 
 # Runtime, architecture, and release
 
@@ -70,7 +70,7 @@ Application code depends on domain/application ports, adapters own physical/atom
 
 ### Build once and clean only exact proven release ownership
 
-The gate freezes an explicit-base exact-HEAD archive and full image ID, publishes exact artifacts, runs one complete suite, never prunes, restores global Docker sets byte-for-byte, and removes only durably proven owned processes/temp roots.
+The gate freezes an explicit-base exact-HEAD archive and full image ID, publishes exact artifacts, runs one complete suite, never prunes, restores global Docker sets byte-for-byte, and removes only durably proven owned processes/temp roots. Successor planning may include the external release path, but repository creation, local or hosted remote mutation, source push, release-tag creation or push, GHCR publication, and GitHub release publication each remain blocked until the user grants explicit later authorization bound to the exact destination, source commit, artifact identity, and effect. Planning, plan approval, and general implementation authority do not authorize those effects.
 
 <a id="obj-dec-release-format-authority"></a>
 
@@ -107,14 +107,6 @@ Existing Operant development databases, local credentials and contexts, process 
 **Related cross-domain objects**
 
 - supports: [Do not build development-era compatibility](packs-projects.md#obj-int-no-compat)
-
-<a id="obj-dec-optd-github-transfer"></a>
-
-### Transfer the existing repository to optd-ai/optd
-
-After the rename branch is validated and source/destination administration is verified, transfer the existing GitHub repository to organization optd-ai and canonical name optd. Preserve Git history and repository metadata through transfer; do not rely on old-URL redirects as canonical configuration. Rebind and verify organization rules, Actions permissions, environments, secrets/variables, runners, Apps, webhooks, deploy keys, CODEOWNERS teams, OIDC subjects, Pages, and GHCR before release. Bind the local origin to the new canonical URL.
-
-**Rationale.** A GitHub transfer best preserves repository continuity while allowing canonical ownership under optd-ai.
 
 ## Commitments
 

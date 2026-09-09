@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-model-governance; contract: 1; input: sha256:c06add9628c42dfc8fa46b8e2bbe9f7b9ff6bd74e37e85619d793dea82e7138f -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-model-governance; contract: 1; input: sha256:76ce7eac17661a59327285b9d90e41ae1946e1cc42e34cc13af01da420c5f470 -->
 
 # Project-model governance and cutover
 
@@ -18,7 +18,7 @@ The 2026-07-14 readiness result justified the completed implementation plan. Cur
 
 ### Keep spec only as generated project-model projections
 
-After completeness review, delete every hand-authored spec file and replace the directory with deterministic project-model-generated Markdown projections. project-model/model.json is the structured semantic source of truth; generated spec views are the compatible human-readable projection required by pi-dag-workflow. No hand-authored contract remains in spec.
+After completeness review, delete every hand-authored spec file and replace the directory with deterministic project-model-generated Markdown projections. project-model/model.json is the structured semantic source of truth; generated spec views are the compatible human-readable projection required by pi-dag-workflow. No hand-authored contract remains in spec. Retained model-contract and external-readiness outputs from a cancelled historical DAG are evidence rather than authority: independently inspect their exact local Git lineage and rerun current authoritative-model, deterministic-projection, source, and release checks before selectively adopting them into successor work.
 
 **Rationale.** This eliminates dual authority while preserving authoritative workflow validation and generated-spec placement invariants.
 
