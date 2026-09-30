@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-index; contract: 1; input: sha256:63951db4efce1ea55e424432d3e72759cfe0f3677c33fbc014885edb63fc3397 -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-index; contract: 1; input: sha256:85ce4a4f715d4d7e965e15e9fe74b37198a1552eeea940c25f7854f7ce7a4302 -->
 
 # Specifications
 
@@ -74,7 +74,7 @@ Generated canonical views of the reviewed Operant project model. model.json rema
 
 ### Exact v1 contract — Specifications
 
-**Migration provenance.** Exact normative contract imported from `spec/README.md` at `sha256:7d079f4667b6bd58906c698b3434a92a1783a59f6a64cfee4009d80a9da6f7c2`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
+**Migration provenance.** Exact normative contract imported from `spec/README.md` at `sha256:7d079f4667b6bd58906c698b3434a92a1783a59f6a64cfee4009d80a9da6f7c2`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
 
 This directory is the deterministic human-readable projection of
 `project-model/model.json`, the structured semantic source of truth for the
@@ -201,7 +201,7 @@ The migration and consistency review is recorded under
 - [MVP Hook Schema](mvp-hook-schema.md): frozen hook attachment/input/secrets
   schema v1.
 - [Project Management Proof-Pack Requirements](project-management-pack.md):
-  normative `operant/projects` second-pack domain requirements.
+  normative `optd/projects` second-pack domain requirements.
 - [Secret Encryption](secret-encryption.md): application-level encryption and
   master-key behavior.
 - [Hook-Secret Grants](hook-secret-grants.md): global secret slots, revision
@@ -227,7 +227,7 @@ The migration and consistency review is recorded under
 ## Current MVP Decisions
 
 - MVP storage/runtime is Postgres only: external Postgres via
-  `OPERANT_DATABASE_URL` or app-managed local Postgres when the URL is absent.
+  `OPTD_DATABASE_URL` or app-managed local Postgres when the URL is absent.
 - PGlite is allowed for focused prototypes but is not the MVP runtime or
   integration-test default.
 - SQLite is out of MVP scope unless a later planning cycle deliberately revives

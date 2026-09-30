@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-mvp-hook-schema; contract: 1; input: sha256:8744c8a0b09ebc7a477c4a33c15984b9461864a7466f981b802926e27407623b -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-mvp-hook-schema; contract: 1; input: sha256:c670f3b634a17538e3833325d8c3fd01d635b8f227574cfcaec9834bf4bab7f0 -->
 
 # MVP Hook Schema v1
 
@@ -10,7 +10,7 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — MVP Hook Schema v1
 
-**Migration provenance.** Exact normative contract imported from `spec/mvp-hook-schema.md` at `sha256:e19d1ee99064a0cf27392f7a809a234796b63346a9cf306bd2e3430f99e1ee83`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
+**Migration provenance.** Exact normative contract imported from `spec/mvp-hook-schema.md` at `sha256:e19d1ee99064a0cf27392f7a809a234796b63346a9cf306bd2e3430f99e1ee83`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
 
 Hooks are trusted pack-provided Deno/TypeScript scripts executed by the platform
 runner. They receive curated context as one JSON envelope on stdin, write
@@ -26,7 +26,7 @@ belong in `event.after_commit` hooks.
 
 ```yaml
 kind: Hook
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: validate_lead
 spec:
@@ -49,7 +49,7 @@ spec:
     schema: validation.v1
   attachments:
     - phase: changeset.validate
-      resource: operant/crm:lead
+      resource: optd/crm:lead
       order: 100
       condition: "active()"
       input:
@@ -61,14 +61,14 @@ spec:
 `effects.operations` is a sorted unique array of:
 
 ```yaml
-- resource: operant/crm:lead
+- resource: optd/crm:lead
   ops: [create, update]
 ```
 
 `ops` is a non-empty unique subset of the seven frozen operation kinds. Local
 resource identities are qualified at preview. Hooks that emit no operations use
 `[]`; after-commit network effects are bounded by declared host/port and do not
-claim Operant operation/API capability.
+claim optd operation/API capability.
 
 ## Attachment phases
 
@@ -171,7 +171,7 @@ writes explanatory text to stderr.
 Constants are allowed as JSON scalars/objects/arrays. No caller may append an
 opaque hook-validation context to a staging request.
 
-## Declared Operant reads
+## Declared optd reads
 
 Resource operation hooks automatically receive the current operation,
 `$current`, and `$proposed` when applicable. Action definitions may declare
@@ -181,7 +181,7 @@ object reads needed by their stage hooks:
 spec:
   reads:
     lead:
-      resource: operant/crm:lead
+      resource: optd/crm:lead
       id_from: $action.input.lead_id
       fields: [status, company_id]
       required: true
@@ -202,7 +202,7 @@ MVP rules:
   `stage_stale` and never reruns hooks.
 - The semantic action's reviewed internal capability authorizes declared reads;
   the initiating user does not receive general read authority from a hook.
-- Stage hooks cannot call Operant's own HTTP API, receive the initiating bearer
+- Stage hooks cannot call optd's own HTTP API, receive the initiating bearer
   token, or connect directly to Postgres. This prevents recursive writes and
   bypasses of changeset/policy invariants.
 
@@ -220,7 +220,7 @@ permissions:
 
 Every network connection, including a redirect destination, must satisfy the
 Deno permission check. Unrestricted `--allow-net` is not emitted for pack hooks.
-Operators may narrow all pack networking with `OPERANT_HOOK_NET_ALLOW`, a
+Operators may narrow all pack networking with `OPTD_HOOK_NET_ALLOW`, a
 comma-separated exact host[:port] ceiling with no wildcards. When unset,
 declared endpoints are eligible; when set (including empty), every declared
 endpoint must be included or invocation fails `hook_capability_denied`.
@@ -229,11 +229,11 @@ Environment access is explicit-only:
 
 - `permissions.env` is `false` or a sorted unique list of uppercase non-secret
   names matching `[A-Z][A-Z0-9_]{0,127}`.
-- Operator configuration `OPERANT_HOOK_ENV_ALLOW` is a comma-separated exact
+- Operator configuration `OPTD_HOOK_ENV_ALLOW` is a comma-separated exact
   allowlist; absent/empty allows no non-secret names. At invocation, only names
   declared by the hook, present in this allowlist, and present in the server
   process environment are copied into the child environment.
-- Names beginning `OPERANT_`, `DENO_`, `LD_`, or `DYLD_` are reserved and cannot
+- Names beginning `OPTD_`, `DENO_`, `LD_`, or `DYLD_` are reserved and cannot
   be declared/allowed. Values have a configurable size guardrail. Confidential
   values must use required secret slots/grants instead.
 - A declared name that is not operator-allowed/present fails stage with
@@ -297,11 +297,11 @@ Rules:
 
 ```json
 {
-  "hook": "operant/crm:validate_lead",
+  "hook": "optd/crm:validate_lead",
   "phase": "changeset.validate",
   "input": {},
   "metadata": {
-    "pack_revision": "operant/crm@0.1.0:abc",
+    "pack_revision": "optd/crm@0.1.0:abc",
     "script_digest": "sha256:...",
     "attachment_id": "..."
   }
@@ -385,6 +385,6 @@ Hooks that produce operations declare their maximum reviewed effects as sorted
 unique `{resource, ops[]}` entries under `effects.operations`. Undeclared
 resource/operation pairs fail staging. Users authorize the semantic action plus
 its reviewed effect manifest; the invocation-bound runner capability is internal
-and cannot call Operant's API. Pack hooks permanently receive no initiating
+and cannot call optd's API. Pack hooks permanently receive no initiating
 token or self-API capability. Exact operation names/schemas are defined in
 [Changeset Operation Schemas](changeset-operation-schema.md).

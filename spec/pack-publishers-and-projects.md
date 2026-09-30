@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-pack-publishers-and-projects; contract: 1; input: sha256:b650c6cccc895820a09bca23118d2d5e30d5621bb4c70b843b0cd8c05b2b4b04 -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-pack-publishers-and-projects; contract: 1; input: sha256:b876ee9e8f44e9cb322c23fa3e44a4495eeb5ddb0cc91ba2af0cd3ad0762b720 -->
 
 # Pack Publishers and Projects
 
@@ -10,11 +10,11 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — Pack Publishers and Projects
 
-**Migration provenance.** Exact normative contract imported from `spec/pack-publishers-and-projects.md` at `sha256:b959a489f0bc16f34c39c859442006ba9827b778937d478a5a32eb72e139987d`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
+**Migration provenance.** Exact normative contract imported from `spec/pack-publishers-and-projects.md` at `sha256:b959a489f0bc16f34c39c859442006ba9827b778937d478a5a32eb72e139987d`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
 
 ## Decision
 
-Operant separates distributable pack identity from runtime data/authorization
+optd separates distributable pack identity from runtime data/authorization
 boundaries:
 
 - **publisher** identifies who makes the pack, analogous to an npm package owner
@@ -23,31 +23,31 @@ boundaries:
   policy evaluation, and CLI context, analogous to a Kubernetes namespace.
 - **namespace** is not a user-facing synonym for either concept.
 
-Packs are installed globally on one Operant server. They are not installed once
+Packs are installed globally on one optd server. They are not installed once
 per project. A project scopes use of globally installed definitions.
 
 ## Pack identity and source
 
 ```yaml
 kind: Pack
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
-  publisher: operant
+  publisher: optd
   name: crm
   version: 0.1.0
 spec:
   purpose: Headless CRM operating resources.
   axi:
     home:
-      resources: [operant/crm:lead, operant/crm:opportunity]
-      help: ["optctl --project ${project} list operant/crm:lead"]
+      resources: [optd/crm:lead, optd/crm:opportunity]
+      help: ["optctl --project ${project} list optd/crm:lead"]
 ```
 
 Canonical identities:
 
 ```text
-operant/crm
-operant/crm@0.1.0
+optd/crm
+optd/crm@0.1.0
 acme/revenue_ops@2.3.0
 ```
 
@@ -57,7 +57,7 @@ For this version packs come only from local directories/uploads through
 ```bash
 optctl pack preview ./packs/crm
 optctl pack apply ./packs/crm
-optctl pack inspect operant/crm
+optctl pack inspect optd/crm
 ```
 
 There is no pack registry, publisher-account claiming, remote publishing, trust
@@ -73,20 +73,20 @@ migration lifecycle. Different projects cannot select different pack versions.
 
 Projects are built-in UUIDv7 system records with immutable slug and explicit
 lifecycle as frozen in [Platform Projects](projects.md). They are not pack YAML
-or pack installation targets. Projects do not imply separate tenants; Operant
+or pack installation targets. Projects do not imply separate tenants; optd
 remains single-tenant and projects scope data/authority within the installation.
 
 A global resource definition may have object instances in many projects:
 
 ```text
-resource definition: operant/crm:lead
+resource definition: optd/crm:lead
 runtime object scope: project UUID (CLI may resolve slug `sales`)
 ```
 
 The database/API store structured `project_id`, resource-definition identity,
 and object ID fields. Dotted project/resource aliases are rejected.
 
-Installing `operant/crm` once globally makes its resource/action/hook/lifecycle,
+Installing `optd/crm` once globally makes its resource/action/hook/lifecycle,
 role, and policy definitions available server-wide. Creating or operating on a
 lead still requires an explicit project boundary and matching role/policy
 authority.
@@ -96,8 +96,8 @@ authority.
 Role and policy definitions are globally registered and publisher-qualified:
 
 ```text
-operant/crm:sales_manager
-operant/crm:sales_access
+optd/crm:sales_manager
+optd/crm:sales_access
 ```
 
 Roles contain identity/guidance, not `allow` lists. Policies define permissions
@@ -116,11 +116,11 @@ See [Authorization Definitions and Assignments](authorization-assignments.md).
 ## API and CLI addressing
 
 ```text
-optctl --project sales list operant/crm:lead
+optctl --project sales list optd/crm:lead
 ```
 
 The CLI resolves `sales` to a project UUID and sends it separately from global
-resource definition `operant/crm:lead`. An explicit request project and selected
+resource definition `optd/crm:lead`. An explicit request project and selected
 context/flag must agree or return `project_conflict`.
 
 Pack lifecycle commands do not take a project:
@@ -128,7 +128,7 @@ Pack lifecycle commands do not take a project:
 ```bash
 optctl pack preview ./packs/crm
 optctl pack apply ./packs/crm
-optctl pack inspect operant/crm
+optctl pack inspect optd/crm
 ```
 
 ## Current implementation transition

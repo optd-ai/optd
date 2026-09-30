@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-runtime-release; contract: 1; input: sha256:eeb36e6cf9dd060ab9ea43194770fecdab60f439742aad5265ffb74d99b34e89 -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-runtime-release; contract: 1; input: sha256:0cd32066e0b3b99cbb9cdc042b1e7f219eef28f3a378e9125d92ca28c40673c6 -->
 
 # Runtime, architecture, and release
 
@@ -58,7 +58,7 @@ The server runs on Deno with Hono; optctl uses Cliffy and is freshly compilable;
 
 ### Use PostgreSQL as the production data and coordination layer
 
-Production supports external PostgreSQL through OPERANT_DATABASE_URL or app-managed PostgreSQL under OPERANT_DATA_DIR. PGlite is prototype evidence only and SQLite is out of scope.
+Production supports external PostgreSQL through OPTD_DATABASE_URL or app-managed PostgreSQL under OPTD_DATA_DIR. PGlite is prototype evidence only and SQLite is out of scope.
 
 <a id="obj-dec-hexagonal"></a>
 
@@ -84,7 +84,7 @@ Release validation format-checks project-model alongside source, tests, docs, an
 
 ### Use exactly external or app-managed PostgreSQL runtime modes
 
-OPERANT_DATABASE_URL selects exact external PostgreSQL with no fallback. Otherwise Operant owns official PostgreSQL under OPERANT_DATA_DIR over loopback TCP. The default image runs the server under tini with one in-process outbox loop and no database/worker sidecars or generic supervisor.
+OPTD_DATABASE_URL selects exact external PostgreSQL with no fallback. Otherwise optd owns official PostgreSQL under OPTD_DATA_DIR over loopback TCP. The default image runs the server under tini with one in-process outbox loop and no database/worker sidecars or generic supervisor.
 
 **Rationale.** These are the two implemented and release-tested modes.
 
@@ -120,7 +120,7 @@ Readiness is published only after signal handlers are armed. Shutdown uses bound
 
 ### Support exactly app-managed and external PostgreSQL container modes
 
-Without OPERANT_DATABASE_URL the app owns PostgreSQL under OPERANT_DATA_DIR. With it, the app validates and uses external PostgreSQL and never falls back. PostgreSQL 17+ is the documented runtime minimum; acceptance uses 18.4.
+Without OPTD_DATABASE_URL the app owns PostgreSQL under OPTD_DATA_DIR. With it, the app validates and uses external PostgreSQL and never falls back. PostgreSQL 17+ is the documented runtime minimum; acceptance uses 18.4.
 
 <a id="obj-com-release-cleanup"></a>
 

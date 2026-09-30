@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-storage-postgres; contract: 1; input: sha256:01e172372c7d7cab4e00d8acb91a327b66b00ad7e3bcf01847f2c6d7562c3478 -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-storage-postgres; contract: 1; input: sha256:13cf5e06dfec61cecc705ecf1bc817af5748415d12fe40a02cd5a58e73e1ab24 -->
 
 # Postgres Storage
 
@@ -10,15 +10,15 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — Postgres Storage
 
-**Migration provenance.** Exact normative contract imported from `spec/storage-postgres.md` at `sha256:a2f52223ed5d041effc941d16d361f1a0b3bac4283d5fb1c0348f33699d6cffb`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
+**Migration provenance.** Exact normative contract imported from `spec/storage-postgres.md` at `sha256:a2f52223ed5d041effc941d16d361f1a0b3bac4283d5fb1c0348f33699d6cffb`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
 
 ## Direction
 
 The project is open-source and single-tenant by default. MVP storage is Postgres
 only, either:
 
-1. external Postgres via `OPERANT_DATABASE_URL`, or
-2. app-managed local Postgres when `OPERANT_DATABASE_URL` is absent.
+1. external Postgres via `OPTD_DATABASE_URL`, or
+2. app-managed local Postgres when `OPTD_DATABASE_URL` is absent.
 
 PGlite remains useful for focused prototypes. SQLite is out of MVP scope unless
 a later planning cycle deliberately revives it.

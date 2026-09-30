@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-events-audit; contract: 1; input: sha256:560816641c3a0b29a808cc564e7be4692adbe82f7ae75dd2b0f9e11cd09b9a5a -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-events-audit; contract: 1; input: sha256:ca0d415962cf39e8bcedf88c77e75bfddc6502bf05687b2de27455b95a6392af -->
 
 # Events, Audit, History, and Outbox
 
@@ -10,7 +10,7 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — Events, Audit, History, and Outbox
 
-**Migration provenance.** Exact normative contract imported from `spec/events-audit.md` at `sha256:35dd1d329c316114cffc9641d5b4fd892bb1d1ec59dc2d256b2420fc115c9cc0`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
+**Migration provenance.** Exact normative contract imported from `spec/events-audit.md` at `sha256:35dd1d329c316114cffc9641d5b4fd892bb1d1ec59dc2d256b2420fc115c9cc0`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
 
 ## Status
 
@@ -93,7 +93,7 @@ and causation provenance cannot be rewritten. There is no special provenance
 redaction workflow for MVP; intentionally supplied auth-request reason/friendly
 name live on auth workflow records rather than auth contexts.
 
-Pre-auth databases may be invalidated when this schema is introduced. Operant
+Pre-auth databases may be invalidated when this schema is introduced. optd
 has no deployed auth users requiring `actor_id` backfill or compatibility. New
 code moves directly to `auth_context_id`; legacy `actor_id` is not a second
 authoritative identity source.
@@ -219,7 +219,7 @@ audit_events
 - resource_identity       text null
 - object_id               uuid null
 - action                  text null
-  -- read | create | update | archive | transition | action:operant/crm:convert_lead
+  -- read | create | update | archive | transition | action:optd/crm:convert_lead
 - decision                 text null
   -- allowed | denied | warning | committed | failed
 - policy_summary_json      jsonb null

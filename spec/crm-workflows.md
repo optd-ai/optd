@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-crm-workflows; contract: 1; input: sha256:7fc7beff76872a2c1ea8663228d0e97465fb6c0042ecd03fb9718913223a0120 -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-crm-workflows; contract: 1; input: sha256:af535560f08ab6decc73dd3d2dd6c323794f3579b7bfb83a5e55dc30eb987199 -->
 
 # Headless CRM Workflows
 
@@ -10,7 +10,7 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — Headless CRM Workflows
 
-**Migration provenance.** Exact normative contract imported from `spec/crm-workflows.md` at `sha256:5175f46c78a9306567fd8cec586f09e8982c45167021752190a91ae8fc2a3597`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
+**Migration provenance.** Exact normative contract imported from `spec/crm-workflows.md` at `sha256:5175f46c78a9306567fd8cec586f09e8982c45167021752190a91ae8fc2a3597`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
 
 ## Research Summary
 
@@ -103,7 +103,7 @@ Example rules:
 ## Relationships and authorization proof
 
 Use first-class relationships for domain links needing metadata/history. The
-proof pack also includes `operant/crm:opportunity_viewer` from opportunity to
+proof pack also includes `optd/crm:opportunity_viewer` from opportunity to
 built-in `system:principal`, unique by active `(from,to)`, so one-hop ReBAC can
 be exercised without actor-supplied arrays or deep team traversal. Ownership
 ABAC uses UUID-formatted `owner_id == actor.id`.

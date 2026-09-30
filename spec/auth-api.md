@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-auth-api; contract: 1; input: sha256:62ad00434a4df225c802345b5b03761d9e79b29a9e2befe2cc022ef06bf5c615 -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-auth-api; contract: 1; input: sha256:7fe1a508225610a192cd58791124d3ccbe364cb29f6ac7a93489aa3b4040f270 -->
 
 # Authentication API and CLI Contract
 
@@ -10,7 +10,7 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — Authentication API and CLI Contract
 
-**Migration provenance.** Exact normative contract imported from `spec/auth-api.md` at `sha256:a9b136238ba6711eb61dd2d432cac032e55e7fb6af42f5e3519192a2c002dabc`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
+**Migration provenance.** Exact normative contract imported from `spec/auth-api.md` at `sha256:a9b136238ba6711eb61dd2d432cac032e55e7fb6af42f5e3519192a2c002dabc`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
 
 ## Conventions
 
@@ -33,8 +33,8 @@ Authentication headers:
 
 ```http
 Authorization: Bearer <token>
-Authorization: Operant-Bootstrap <token>
-Authorization: Operant-Recovery <token>
+Authorization: optd-Bootstrap <token>
+Authorization: optd-Recovery <token>
 ```
 
 Passwords/tokens never appear in URL parameters or ordinary CLI arguments.
@@ -59,7 +59,7 @@ Role assignment:
 
 ```json
 {
-  "role": "operant/crm:sales_manager",
+  "role": "optd/crm:sales_manager",
   "boundary": {
     "type": "project",
     "project_id": "019b7a2e-7c10-7000-8000-000000000001"
@@ -145,7 +145,7 @@ Creation requires `Idempotency-Key` plus a request or agent bearer credential:
 
 ```json
 {
-  "roles": ["operant/crm:sales_manager", "operant/crm:sales_rep"],
+  "roles": ["optd/crm:sales_manager", "optd/crm:sales_rep"],
   "boundary": {
     "type": "project",
     "project_id": "019b7a2e-7c10-7000-8000-000000000001"
@@ -261,8 +261,8 @@ password reauthentication plus confirmation.
 Host-only initiation/cancellation:
 
 ```text
-operant auth recovery begin
-operant auth recovery cancel
+optd auth recovery begin
+optd auth recovery cancel
 ```
 
 Public completion:
@@ -271,7 +271,7 @@ Public completion:
 POST /api/v1/auth/recovery/complete
 ```
 
-Completion uses `Operant-Recovery` authorization and the targeted workflow in
+Completion uses `optd-Recovery` authorization and the targeted workflow in
 [Authentication](authentication.md).
 
 ### Human users and role assignments
@@ -385,7 +385,7 @@ Global noninteractive controls:
 
 ```text
 --non-interactive
-OPERANT_NON_INTERACTIVE=1
+OPTD_NON_INTERACTIVE=1
 ```
 
 Passwords use prompts or `--password-stdin`; no password-value argument exists.

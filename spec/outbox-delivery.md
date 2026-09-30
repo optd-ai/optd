@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-outbox-delivery; contract: 1; input: sha256:c18fc1d675001dae4022bcbb2f2408b65b1fd409e085789a1f28556069aeeee7 -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-outbox-delivery; contract: 1; input: sha256:df4688e7ec7b5827d7b7bb4c3d009ed1f2f38ac1dfa591fc433571b825d5af2f -->
 
 # Durable Outbox Delivery
 
@@ -10,18 +10,18 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — Durable Outbox Delivery
 
-**Migration provenance.** Exact normative contract imported from `spec/outbox-delivery.md` at `sha256:37566cb3182a77dd82ec69c54d040b96568e5754693af48a79504cc76db16124`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
+**Migration provenance.** Exact normative contract imported from `spec/outbox-delivery.md` at `sha256:37566cb3182a77dd82ec69c54d040b96568e5754693af48a79504cc76db16124`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
 
 ## Purpose and guarantee
 
 Intentional external effects run only after the domain transaction commits. That
 transaction atomically inserts immutable events and durable outbox delivery
-rows. The main Operant server then runs one asynchronous polling loop in the
+rows. The main optd server then runs one asynchronous polling loop in the
 same process/container to claim and execute after-commit hooks.
 
 The MVP guarantee is **durable at-least-once delivery attempts**, not
 exactly-once external effects. A hook may complete an external request and the
-server may crash before recording success. Recovery repeats the attempt. Operant
+server may crash before recording success. Recovery repeats the attempt. optd
 supplies a stable idempotency key, but exactly-once provider behavior requires
 the pack hook to pass that key to an external API that honors it.
 
@@ -96,7 +96,7 @@ The hook envelope includes:
 ```
 
 Pack authors must pass `idempotency_key` to providers that support idempotency.
-Operant cannot enforce provider behavior.
+optd cannot enforce provider behavior.
 
 ## Delivery and attempt records
 
@@ -199,7 +199,7 @@ changing delivery identity.
 
 ## In-process polling loop
 
-The main Operant server starts one asynchronous delivery loop after database
+The main optd server starts one asynchronous delivery loop after database
 readiness. It polls Postgres on a short configurable interval (suggested default
 one second), drains ready rows, and sleeps when idle. Server shutdown stops
 claiming new work and allows a bounded graceful period for the current hook.

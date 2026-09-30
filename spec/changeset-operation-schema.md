@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-changeset-operation-schema; contract: 1; input: sha256:3e4e65b49a10b2fbc9d04c3f8c37d2a43f31d94a4b0031a6ff9e97e3e17e03ed -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-changeset-operation-schema; contract: 1; input: sha256:7bc83f01b50fa69be3d5f72dbb66e1a3d22dc2815b1f1f0daecabc96b1fe0498 -->
 
 # Changeset Operation Schemas v1
 
@@ -10,11 +10,11 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — Changeset Operation Schemas v1
 
-**Migration provenance.** Exact normative contract imported from `spec/changeset-operation-schema.md` at `sha256:b927be34a2e2a4d1bc9ee9881cd720262d59d75bdb142f923231eab0c9d52fdf`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
+**Migration provenance.** Exact normative contract imported from `spec/changeset-operation-schema.md` at `sha256:b927be34a2e2a4d1bc9ee9881cd720262d59d75bdb142f923231eab0c9d52fdf`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
 
 ## Purpose
 
-`changeset.operations.v1` is Operant's single declarative write language for
+`changeset.operations.v1` is optd's single declarative write language for
 public changeset requests, action-stage hook output, CLI commands, and future
 agent protocols. `patch.v1` is the normalization-hook language applied to one
 proposed resource data document.
@@ -98,7 +98,7 @@ and exist only for graph authoring/provenance. Unkeyed operations receive stable
 ordinal labels such as `op_000001` during normalization.
 
 Public requests use publisher/pack-qualified component identities such as
-`operant/crm:lead`. A hook may use a local component name such as `lead`; the
+`optd/crm:lead`. A hook may use a local component name such as `lead`; the
 engine resolves it relative to the hook's pinned owning pack revision. The
 persisted stage always uses qualified identities. Pack identity and project
 identity are independent.
@@ -129,7 +129,7 @@ Authored:
   "op": "create",
   "key": "company",
   "project_id": "019b7a2e-7c10-7000-8000-000000000001",
-  "resource": "operant/crm:company",
+  "resource": "optd/crm:company",
   "fields": {
     "name": "Acme",
     "customer_number": "ACME-001"
@@ -144,7 +144,7 @@ Canonical staged form:
   "op": "create",
   "key": "company",
   "project_id": "019b7a2e-7c10-7000-8000-000000000001",
-  "resource": "operant/crm:company",
+  "resource": "optd/crm:company",
   "object_id": "019bef41-7d8e-7abc-8def-0123456789ab",
   "fields": {
     "name": "Acme",
@@ -168,7 +168,7 @@ Rules:
 {
   "op": "update",
   "project_id": "019b7a2e-7c10-7000-8000-000000000001",
-  "resource": "operant/crm:lead",
+  "resource": "optd/crm:lead",
   "object_id": "019bef41-7d8e-7abc-8def-0123456789ab",
   "expected_version": 7,
   "set": {
@@ -198,7 +198,7 @@ Rules:
 {
   "op": "transition",
   "project_id": "019b7a2e-7c10-7000-8000-000000000001",
-  "resource": "operant/crm:opportunity",
+  "resource": "optd/crm:opportunity",
   "object_id": "019bef41-7d8e-7abc-8def-0123456789ab",
   "expected_version": 4,
   "to": "won",
@@ -225,7 +225,7 @@ Rules:
 {
   "op": "archive",
   "project_id": "019b7a2e-7c10-7000-8000-000000000001",
-  "resource": "operant/crm:lead",
+  "resource": "optd/crm:lead",
   "object_id": "019bef41-7d8e-7abc-8def-0123456789ab",
   "expected_version": 3
 }
@@ -243,7 +243,7 @@ Authored:
   "op": "link",
   "key": "contact-company",
   "project_id": "019b7a2e-7c10-7000-8000-000000000001",
-  "relationship": "operant/crm:contact_company",
+  "relationship": "optd/crm:contact_company",
   "from": { "$ref": "contact.object_id" },
   "to": { "$ref": "company.object_id" },
   "fields": {
@@ -272,7 +272,7 @@ Rules:
 {
   "op": "unlink",
   "project_id": "019b7a2e-7c10-7000-8000-000000000001",
-  "relationship": "operant/crm:contact_company",
+  "relationship": "optd/crm:contact_company",
   "relationship_id": "019bef41-7d8e-7abc-8def-0123456789ab",
   "expected_version": 2
 }
@@ -290,7 +290,7 @@ Authored:
   "op": "comment",
   "key": "follow-up-comment",
   "project_id": "019b7a2e-7c10-7000-8000-000000000001",
-  "resource": "operant/crm:lead",
+  "resource": "optd/crm:lead",
   "object_id": "019bef41-7d8e-7abc-8def-0123456789ab",
   "body": "Called and agreed on next steps."
 }

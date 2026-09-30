@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-pack-structure; contract: 1; input: sha256:8da2025694ed19c2759ed01527f299772eb5c88dc7cf231fac131a6ce7e282a6 -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-pack-structure; contract: 1; input: sha256:c6027a9d36ebda8ce6603be74e0935e9d47547b391b36f111aed3d59078f0ea4 -->
 
 # Pack Structure
 
@@ -10,7 +10,7 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — Pack Structure
 
-**Migration provenance.** Exact normative contract imported from `spec/pack-structure.md` at `sha256:b785675a461bf23b8d7df58836f85457d20a46ecc2a9b5bc7cdea1dc3006be38`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
+**Migration provenance.** Exact normative contract imported from `spec/pack-structure.md` at `sha256:b785675a461bf23b8d7df58836f85457d20a46ecc2a9b5bc7cdea1dc3006be38`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
 
 ## Decisions
 
@@ -119,9 +119,9 @@ AXI guidance. Pack-level AXI belongs in `pack.yaml`; do not introduce a separate
 
 ```yaml
 kind: Pack
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
-  publisher: operant
+  publisher: optd
   name: crm
   version: 0.1.0
 spec:
@@ -129,14 +129,14 @@ spec:
   axi:
     home:
       resources:
-        - operant/crm:lead
-        - operant/crm:opportunity
-        - operant/crm:contact
-        - operant/crm:company
+        - optd/crm:lead
+        - optd/crm:opportunity
+        - optd/crm:contact
+        - optd/crm:company
       help:
-        - optctl --project ${project} list operant/crm:lead
-        - optctl --project ${project} list operant/crm:opportunity
-        - optctl --project ${project} search operant/crm:contact <email-or-name>
+        - optctl --project ${project} list optd/crm:lead
+        - optctl --project ${project} list optd/crm:opportunity
+        - optctl --project ${project} search optd/crm:contact <email-or-name>
 ```
 
 No `includes:` block. No file paths.
@@ -199,7 +199,7 @@ hooks/validate_lead.ts
 
 ```yaml
 kind: Hook
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: validate_lead
 spec:

@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-policies; contract: 1; input: sha256:94de6130f5a9685967f4086cad4da739bace34b8c14de55a968acff1ac9838a0 -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-policies; contract: 1; input: sha256:76174b92d7472c76c88cf8238db30422f98cdef84844a37fc771312bf09f6fd1 -->
 
 # Policies and Authorization
 
@@ -10,7 +10,7 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — Policies and Authorization
 
-**Migration provenance.** Exact normative contract imported from `spec/policies.md` at `sha256:2dd369390e59a5c850d73bc49fd9ecbbcbbcf17823aaba91ba08d67cc320f520`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
+**Migration provenance.** Exact normative contract imported from `spec/policies.md` at `sha256:2dd369390e59a5c850d73bc49fd9ecbbcbbcf17823aaba91ba08d67cc320f520`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
 
 ## Definition and assignment model
 
@@ -154,10 +154,10 @@ authorization infrastructure unless scale or sharing complexity demands it.
 
 ## Frozen implementation direction
 
-Operant does not require Ory, OAuth/OIDC/JWT validation, an identity proxy, or a
+optd does not require Ory, OAuth/OIDC/JWT validation, an identity proxy, or a
 separate graph/policy service in MVP. All environments use the same built-in
 opaque-token authentication contract. Future identity-provider integration must
-exchange into server-issued Operant sessions rather than creating a second route
+exchange into server-issued optd sessions rather than creating a second route
 auth mode.
 
 RBAC, ABAC, and one-hop ReBAC are complementary inputs to one deterministic

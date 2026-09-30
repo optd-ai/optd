@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-changeset-approvals; contract: 1; input: sha256:04b377416f7b9c03ed321064e29d3daa8b7ca348e49056b552c62557df66a936 -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-changeset-approvals; contract: 1; input: sha256:87f633a25584aa5c71626f972a54cb77bf8c0a41ac5b4a7110057fd9d107a644 -->
 
 # Changeset Approval Contract
 
@@ -10,7 +10,7 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — Changeset Approval Contract
 
-**Migration provenance.** Exact normative contract imported from `spec/changeset-approvals.md` at `sha256:d8a9b5c262e9a96e972c58e3a06a342ba528e331e09d148093435f298b9bb14c`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
+**Migration provenance.** Exact normative contract imported from `spec/changeset-approvals.md` at `sha256:d8a9b5c262e9a96e972c58e3a06a342ba528e331e09d148093435f298b9bb14c`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
 
 ## Decision
 
@@ -25,7 +25,7 @@ A trusted stage hook may emit `required_approvals[]`:
 ```json
 {
   "key": "manager_discount",
-  "role": "operant/crm:sales_manager",
+  "role": "optd/crm:sales_manager",
   "boundary": {
     "type": "project",
     "project_id": "019b7a2e-7c10-7000-8000-000000000001"

@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-pack-definition-schemas; contract: 1; input: sha256:77d19d899e9886d89f4fbba8a5876aa21e9fc69b50d36c76b158e0a70cad9991 -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-pack-definition-schemas; contract: 1; input: sha256:ba24690264dafae8ef9d6ffd77685009eee05b411c490818825a1e76b89bb6eb -->
 
 # Pack Definition Schemas v1
 
@@ -10,7 +10,7 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — Pack Definition Schemas v1
 
-**Migration provenance.** Exact normative contract imported from `spec/pack-definition-schemas.md` at `sha256:5d461390125e4a9b76a4ecf1038a2cdbdeec465f096febf7d736f18d876cd751`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
+**Migration provenance.** Exact normative contract imported from `spec/pack-definition-schemas.md` at `sha256:5d461390125e4a9b76a4ecf1038a2cdbdeec465f096febf7d736f18d876cd751`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
 
 ## Decision
 
@@ -26,7 +26,7 @@ Every file has exactly:
 
 ```yaml
 kind: <allowed kind>
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: <lowercase snake_case child name>
 spec: {}
@@ -43,7 +43,7 @@ Child and pack names match `[a-z][a-z0-9_]{0,62}`. Publisher names match
 
 ```yaml
 metadata:
-  publisher: operant
+  publisher: optd
   name: crm
   version: 0.1.0
 spec:

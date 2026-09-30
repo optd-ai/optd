@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-hooks-secrets-outbox; contract: 1; input: sha256:013ca3f2c12856290b856b31b73c4a264c8094cb7cd5aa2b27d16556a8fef4e9 -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-hooks-secrets-outbox; contract: 1; input: sha256:2afe48beea1bf4ca2b70feb7bf0bf6c9a9d9181d16dfa634c98456a7a28ec287 -->
 
 # Hooks, secrets, and outbox
 
@@ -42,11 +42,11 @@ A pack hook tries filesystem, subprocess, import, DB, self-API, undeclared envir
 
 ### Recover delivery across container recreation
 
-Deliveries are pending, retry_wait, or leased/running when Operant is recreated. Only the Operant container is recreated while PostgreSQL persists. Pending/retry work resumes; running work is not reclaimed before lease expiry; stable idempotency and attempt evidence are preserved.
+Deliveries are pending, retry_wait, or leased/running when optd is recreated. Only the optd container is recreated while PostgreSQL persists. Pending/retry work resumes; running work is not reclaimed before lease expiry; stable idempotency and attempt evidence are preserved.
 
-**Context.** Deliveries are pending, retry_wait, or leased/running when Operant is recreated.
+**Context.** Deliveries are pending, retry_wait, or leased/running when optd is recreated.
 
-**Action.** Only the Operant container is recreated while PostgreSQL persists.
+**Action.** Only the optd container is recreated while PostgreSQL persists.
 
 **Expected outcome.** Pending/retry work resumes; running work is not reclaimed before lease expiry; stable idempotency and attempt evidence are preserved.
 

@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-mvp-api-routes; contract: 1; input: sha256:39469eb0b528c0281b8d3d68ba0ffe5e7018c59b492350b9422fcab85d55b1e5 -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-mvp-api-routes; contract: 1; input: sha256:0aabb5bcfd77e2df616ffd9d01579b8b11d63f611678f8a81f00b55bed36fb11 -->
 
 # MVP API Routes
 
@@ -10,7 +10,7 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — MVP API Routes
 
-**Migration provenance.** Exact normative contract imported from `spec/mvp-api-routes.md` at `sha256:b6b7896c05a6ad08e8d376ba91956fa19a2c598d31017cff005bda479f0e17d6`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
+**Migration provenance.** Exact normative contract imported from `spec/mvp-api-routes.md` at `sha256:b6b7896c05a6ad08e8d376ba91956fa19a2c598d31017cff005bda479f0e17d6`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
 
 ## Decision
 
@@ -40,7 +40,7 @@ GET  /authorization/roles
 GET  /expressions/help
 POST /expressions/validate
 
-# Platform projects (not operant/projects:project domain objects)
+# Platform projects (not optd/projects:project domain objects)
 GET  /projects
 POST /projects
 GET  /projects/{project_id}
@@ -218,12 +218,12 @@ projections evaluate current authority in that boundary.
 ## CLI mapping examples
 
 ```text
-optctl --project sales view operant/crm:lead 019b...
+optctl --project sales view optd/crm:lead 019b...
   -> resolve project `sales` to UUID
-  -> GET /api/v1/projects/{project_id}/objects/operant/crm/lead/{object_id}
+  -> GET /api/v1/projects/{project_id}/objects/optd/crm/lead/{object_id}
 
-optctl --project sales action stage operant/crm:convert_lead --input action.json
-  -> POST /api/v1/actions/operant/crm/convert_lead/stage
+optctl --project sales action stage optd/crm:convert_lead --input action.json
+  -> POST /api/v1/actions/optd/crm/convert_lead/stage
 
 optctl changeset commit 019c...
   -> POST /api/v1/changesets/{stage_id}/commit

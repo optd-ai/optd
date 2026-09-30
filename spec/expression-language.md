@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-expression-language; contract: 1; input: sha256:00aaf9cdc07b6cff6d3ad79eea340b9d29ede192c1bbb15fef3639a0363528ea -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-expression-language; contract: 1; input: sha256:6d956ab318da44290053eb3ec18bdd4272f2d528707df14487a73b3e96dfb8e7 -->
 
 # Expression Language
 
@@ -10,7 +10,7 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — Expression Language
 
-**Migration provenance.** Exact normative contract imported from `spec/expression-language.md` at `sha256:4f7ffb261098a1ab28b4d6157bdbb7e6eb8b0d08b288a453a0a222086e0841f2`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
+**Migration provenance.** Exact normative contract imported from `spec/expression-language.md` at `sha256:4f7ffb261098a1ab28b4d6157bdbb7e6eb8b0d08b288a453a0a222086e0841f2`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
 
 ## Decision
 
@@ -330,7 +330,7 @@ Commands:
 ```text
 optctl expression help
 optctl expression help partial-index
-optctl expression validate operant/crm:lead --context partial-index 'status == "open" && active()'
+optctl expression validate optd/crm:lead --context partial-index 'status == "open" && active()'
 ```
 
 `optctl expression help` should show:
@@ -363,13 +363,13 @@ code: EXPRESSION_UNSUPPORTED
 help[3]:
 Run `optctl expression help partial-index`
 Use only supported helpers: present(field), active(), archived()
-Run `optctl expression validate operant/crm:lead --context partial-index '<expr>'`
+Run `optctl expression validate optd/crm:lead --context partial-index '<expr>'`
 ```
 
 ## Frozen implementation decisions
 
 - The server parses CEL with `@bufbuild/cel` and lowers the hardcoded supported
-  AST subset through Operant's auditable typed SQL lowerer. Unsupported AST
+  AST subset through optd's auditable typed SQL lowerer. Unsupported AST
   forms fail closed; no general third-party CEL-to-SQL compiler is used.
 - `optctl` does not maintain a competing CEL evaluator/parser. It sends source
   to server validation and exposes server-authored subset help/examples.

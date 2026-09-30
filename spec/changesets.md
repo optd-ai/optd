@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-changesets; contract: 1; input: sha256:ba9dc91a02f93761f479858024119dc1a7de5264433c5d160e8081f797026355 -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-changesets; contract: 1; input: sha256:a0e65eb503a3787b8edfe0979422223001a5f641cb029ac9d8b2ee30bd54de3e -->
 
 # Changesets
 
@@ -10,7 +10,7 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — Changesets
 
-**Migration provenance.** Exact normative contract imported from `spec/changesets.md` at `sha256:0ac9a09a27188a26cf9f243fc61911109a5c5a884c8dd7482c93e33df27f162d`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
+**Migration provenance.** Exact normative contract imported from `spec/changesets.md` at `sha256:0ac9a09a27188a26cf9f243fc61911109a5c5a884c8dd7482c93e33df27f162d`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
 
 ## Summary
 
@@ -26,7 +26,7 @@ normative.
 
 1. Receive an intention.
 2. Build and normalize the complete operation graph.
-3. Resolve declared Operant reads and record their object versions.
+3. Resolve declared optd reads and record their object versions.
 4. Run stage/action/validation hooks once.
 5. Validate schema, constraints, lifecycle, policy, effects, and approvals.
 6. On any execution or validation denial, return the error/result without

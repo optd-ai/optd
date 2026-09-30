@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-packs-projects; contract: 1; input: sha256:10ebba6220b7eae39f64777db793dfdbbb1a72629a4499d372a606715bc75b31 -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-packs-projects; contract: 1; input: sha256:822c1f26be504f5b3678cb497c954b0c837b71c02b06d42dc55faa3c81f13c4e -->
 
 # Packs, Projects, and resources
 
@@ -128,9 +128,9 @@ Safe, risky, and destructive classification is intrinsic; a whole immutable plan
 
 <a id="obj-dec-projects-timesheet-identity"></a>
 
-### Use operant/projects:timesheet as the canonical proof-pack resource
+### Use optd/projects:timesheet as the canonical proof-pack resource
 
-The Projects proof pack uses the publisher-qualified resource identity operant/projects:timesheet. The timesheet_entry variant is not canonical and no compatibility alias is provided.
+The Projects proof pack uses the publisher-qualified resource identity optd/projects:timesheet. The timesheet_entry variant is not canonical and no compatibility alias is provided.
 
 **Rationale.** Pack YAML, policies, AXI metadata, shared host/container flows, and E2E already agree on timesheet. Aligning prose avoids a broad rename and preserves the no-alias rule.
 
@@ -138,7 +138,7 @@ The Projects proof pack uses the publisher-qualified resource identity operant/p
 
 ### Model Projects membership as a domain resource
 
-operant/projects:project_member remains an explicit resource because membership carries role, active uniqueness, history, and policy-visible lifecycle. Generic relationships may target read-only system:principal, but that does not replace the richer membership object.
+optd/projects:project_member remains an explicit resource because membership carries role, active uniqueness, history, and policy-visible lifecycle. Generic relationships may target read-only system:principal, but that does not replace the richer membership object.
 
 **Rationale.** This corrects the rationale while preserving the implemented proof-pack model.
 

@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-migrations; contract: 1; input: sha256:42e0810cb89113694efbbb8c84111f055809cae81b4f510dbdf9e7b221bb5c8d -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-migrations; contract: 1; input: sha256:af8bb58c97d2af30cdf2daba69d79e05245b77dfca7b8013d1c63e4a7b58622e -->
 
 # Migrations
 
@@ -10,7 +10,7 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — Migrations
 
-**Migration provenance.** Exact normative contract imported from `spec/migrations.md` at `sha256:b9a579733be1c15e4cf2bc1004586f4105b34bf41ca7b06715df32253f71f8de`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
+**Migration provenance.** Exact normative contract imported from `spec/migrations.md` at `sha256:b9a579733be1c15e4cf2bc1004586f4105b34bf41ca7b06715df32253f71f8de`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
 
 ## Status
 
@@ -69,7 +69,7 @@ The exact top-level shape is frozen below. Illustrative fragment:
 ```yaml
 schema_version: migration.plan.v1
 id: 019b7a2e-7c10-7000-8000-000000000001
-publisher: operant
+publisher: optd
 pack: crm
 from_pack_revision_id: 019b7a2e-7c10-7000-8000-000000000002
 to_pack_revision_id: 019b7a2e-7c10-7000-8000-000000000003
@@ -83,9 +83,9 @@ changes:
     class: destructive
     status: blocked
     kind: remove_field
-    target: { resource: operant/crm:lead, field: company_name }
+    target: { resource: optd/crm:lead, field: company_name }
     reason: field removed from desired config
-    facts: { present_values: 700, references: [operant/crm:convert_lead] }
+    facts: { present_values: 700, references: [optd/crm:convert_lead] }
     hazard_codes: [DATA_LOSS]
     intermediate_revision_guidance: add replacement field and block/dual-write old field
     cleanup_required: export_or_clear_values

@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-mvp-policy-schema; contract: 1; input: sha256:0b15a355d4c706689ef10c249d931e944da744dcb40343d46be2e98c4f2db293 -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-mvp-policy-schema; contract: 1; input: sha256:ceebccffb053352dd5df0fb3040e74919073e7261cc138dabc6c5cf747c4ae3b -->
 
 # MVP Policy Schema v1
 
@@ -10,7 +10,7 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — MVP Policy Schema v1
 
-**Migration provenance.** Exact normative contract imported from `spec/mvp-policy-schema.md` at `sha256:f5d3922c71d77bf62224e1b45836b3c3d6793b9b68fa65df05892252fb61e51b`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
+**Migration provenance.** Exact normative contract imported from `spec/mvp-policy-schema.md` at `sha256:f5d3922c71d77bf62224e1b45836b3c3d6793b9b68fa65df05892252fb61e51b`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
 
 Policy uses structured YAML plus the frozen SQL-lowerable CEL subset. Rego/OPA,
 arbitrary SQL, caller-supplied roles, and pack-defined permission vocabularies
@@ -20,7 +20,7 @@ are not supported.
 
 ```yaml
 kind: Policy
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: sales_access
 spec:
@@ -28,29 +28,29 @@ spec:
   rules:
     - name: sales_rep_own_leads
       effect: allow
-      roles: [operant/crm:sales_rep]
+      roles: [optd/crm:sales_rep]
       actions: [read, create, update, archive, transition, comment]
-      resources: [operant/crm:lead]
+      resources: [optd/crm:lead]
       where: "owner_id == actor.id"
       axi:
         summary: Work leads owned by the actor or assigned to the actor's sales teams.
 
     - name: explicit_opportunity_viewer
       effect: allow
-      roles: [operant/crm:sales_rep]
+      roles: [optd/crm:sales_rep]
       actions: [read]
-      resources: [operant/crm:opportunity]
+      resources: [optd/crm:opportunity]
       relation:
-        relationship: operant/crm:opportunity_viewer
+        relationship: optd/crm:opportunity_viewer
         object_side: from
         subject_side: to
         subject: actor.id
 
     - name: convert_qualified_lead
       effect: allow
-      roles: [operant/crm:sales_rep]
-      actions: [action:operant/crm:convert_lead]
-      resources: [operant/crm:lead]
+      roles: [optd/crm:sales_rep]
+      actions: [action:optd/crm:convert_lead]
+      resources: [optd/crm:lead]
       where: "status == 'qualified'"
 ```
 
@@ -99,9 +99,9 @@ comment
 Semantic pack action/seed permissions are exact qualified strings:
 
 ```text
-action:operant/crm:convert_lead
-action:operant/projects:start_task
-seed:operant/crm:lead_statuses
+action:optd/crm:convert_lead
+action:optd/projects:start_task
+seed:optd/crm:lead_statuses
 ```
 
 Semantic action/seed permission covers only its reviewed declared/generated
@@ -171,7 +171,7 @@ Conceptually, policy evaluation receives:
     "type": "project",
     "project_id": "019c..."
   },
-  "roles": ["operant/crm:sales_rep"],
+  "roles": ["optd/crm:sales_rep"],
   "attributes": {
     "id": "019b...",
     "principal_type": "agent_user",
@@ -229,14 +229,14 @@ recommend roles, auth requests, grant commands, or escalation steps.
   "ok": false,
   "error": {
     "code": "policy_denied",
-    "message": "current authority does not allow update on operant/crm:lead",
+    "message": "current authority does not allow update on optd/crm:lead",
     "details": {
       "auth_context_id": "019b...",
       "principal_id": "019a...",
       "boundary": { "project_id": "019c..." },
-      "resource": "operant/crm:lead",
+      "resource": "optd/crm:lead",
       "action": "update",
-      "checked_policies": ["operant/crm:sales_access"],
+      "checked_policies": ["optd/crm:sales_access"],
       "checked_rules": ["sales_rep_own_leads"]
     }
   }

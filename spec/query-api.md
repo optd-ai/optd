@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-query-api; contract: 1; input: sha256:4f5228e68335c682044ea800e86e64c148a1cd02e9a89533e417f8a9154e6064 -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-query-api; contract: 1; input: sha256:1da2a74f1147e72dbaf6744486ed9ea07aaffc9e4e70035433b6db2354c3cb86 -->
 
 # Query and Object Read API v1
 
@@ -10,7 +10,7 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — Query and Object Read API v1
 
-**Migration provenance.** Exact normative contract imported from `spec/query-api.md` at `sha256:551ee5b8c344c7624e274adc5034e804cd8676349e562a16e12217a660e439d9`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
+**Migration provenance.** Exact normative contract imported from `spec/query-api.md` at `sha256:551ee5b8c344c7624e274adc5034e804cd8676349e562a16e12217a660e439d9`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
 
 ## Read DTOs
 
@@ -22,7 +22,7 @@ A resource object uses:
   "id": "019b7a2e-7c10-7000-8000-000000000001",
   "project_id": "019b7a2e-7c10-7000-8000-000000000002",
   "resource": {
-    "publisher": "operant",
+    "publisher": "optd",
     "pack": "crm",
     "name": "lead",
     "revision_id": "019b7a2e-7c10-7000-8000-000000000003"
@@ -46,7 +46,7 @@ A relationship row uses:
   "id": "019b...",
   "project_id": "019c...",
   "relationship": {
-    "publisher": "operant",
+    "publisher": "optd",
     "pack": "crm",
     "name": "contact_company",
     "revision_id": "019d..."
@@ -74,7 +74,7 @@ A relationship row uses:
   "project_id": "019b7a2e-7c10-7000-8000-000000000002",
   "definition": {
     "kind": "resource",
-    "publisher": "operant",
+    "publisher": "optd",
     "pack": "crm",
     "name": "lead"
   },

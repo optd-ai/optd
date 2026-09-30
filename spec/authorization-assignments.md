@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-authorization-assignments; contract: 1; input: sha256:86ac18f2b2cf08d3114718ee0efa864e817823969eb868453c208d0e8f404f18 -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-authorization-assignments; contract: 1; input: sha256:52d16d579d672386b81370c1cda075c2df97e3f55da8c3106a6c5969712de115 -->
 
 # Authorization Definitions and Assignments
 
@@ -10,11 +10,11 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — Authorization Definitions and Assignments
 
-**Migration provenance.** Exact normative contract imported from `spec/authorization-assignments.md` at `sha256:1808e5907a6c5526e46999d2f512cb52231a5986a1e418ae7274142cddcb48a5`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
+**Migration provenance.** Exact normative contract imported from `spec/authorization-assignments.md` at `sha256:1808e5907a6c5526e46999d2f512cb52231a5986a1e418ae7274142cddcb48a5`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
 
 ## Decision
 
-Operant separates reusable authorization definitions from the boundaries where
+optd separates reusable authorization definitions from the boundaries where
 they apply:
 
 1. Role definitions are globally registered.
@@ -65,7 +65,7 @@ does not contain an `allow` list and does not grant authority by itself.
 
 ```yaml
 kind: Role
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: sales_manager
 spec:
@@ -78,7 +78,7 @@ spec:
 Canonical pack role identity:
 
 ```text
-operant/crm:sales_manager
+optd/crm:sales_manager
 ```
 
 Built-in platform roles use a reserved system identity:
@@ -99,7 +99,7 @@ installation.
 
 ```yaml
 kind: Policy
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: sales_access
 spec:
@@ -107,23 +107,23 @@ spec:
   rules:
     - name: manager_access
       effect: allow
-      roles: ["operant/crm:sales_manager"]
+      roles: ["optd/crm:sales_manager"]
       actions: [read, create, update, transition]
       resources:
-        - "operant/crm:lead"
-        - "operant/crm:opportunity"
+        - "optd/crm:lead"
+        - "optd/crm:opportunity"
       where: "true"
     - name: manager_convert
       effect: allow
-      roles: ["operant/crm:sales_manager"]
-      actions: ["action:operant/crm:convert_lead"]
-      resources: ["operant/crm:lead"]
+      roles: ["optd/crm:sales_manager"]
+      actions: ["action:optd/crm:convert_lead"]
+      resources: ["optd/crm:lead"]
 ```
 
 Canonical policy identity:
 
 ```text
-operant/crm:sales_access
+optd/crm:sales_access
 ```
 
 Pack source may use unambiguous pack-relative references such as `sales_manager`
@@ -141,7 +141,7 @@ boundary:
 
 ```json
 {
-  "role": "operant/crm:sales_manager",
+  "role": "optd/crm:sales_manager",
   "boundary": {
     "type": "project",
     "project_id": "019b7a2e-7c10-7000-8000-000000000001"
@@ -204,11 +204,11 @@ approved authority and may carry role assignments in multiple boundaries:
 
 ```yaml
 role_assignments:
-  - role: operant/crm:sales_manager
+  - role: optd/crm:sales_manager
     boundary:
       type: project
       project_id: 019b7a2e-7c10-7000-8000-000000000001
-  - role: operant/projects:viewer
+  - role: optd/projects:viewer
     boundary:
       type: project
       project_id: 019b7a2e-7c10-7000-8000-000000000002
@@ -303,7 +303,7 @@ request includes both its runtime and source-definition identity:
 ```json
 {
   "project_id": "019b7a2e-7c10-7000-8000-000000000001",
-  "resource_definition": "operant/crm:lead",
+  "resource_definition": "optd/crm:lead",
   "object_id": "019b7a2e-7c10-7000-8000-000000000002",
   "action": "update"
 }
@@ -334,7 +334,7 @@ cannot silently imply all-project access.
 
 ## Pack installation and upgrades
 
-Previewing local source for `operant/crm@0.1.0` creates the exact durable
+Previewing local source for `optd/crm@0.1.0` creates the exact durable
 migration plan/candidate revision; applying that plan transactionally activates
 server-wide resource/action/hook/lifecycle, role, policy, seed, and default
 policy-assignment definitions. It must not automatically assign domain roles to

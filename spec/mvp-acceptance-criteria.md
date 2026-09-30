@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-mvp-acceptance-criteria; contract: 1; input: sha256:ae31aabaf73233fc108543ab0a3ad1b5fb04358f2f80b4395968ebadebd92b50 -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-mvp-acceptance-criteria; contract: 1; input: sha256:fc7ef7ba2db39f8175de0e8cc215fac57a353968cf75745cf5b350ec755af361 -->
 
 # MVP Acceptance Criteria
 
@@ -10,7 +10,7 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — MVP Acceptance Criteria
 
-**Migration provenance.** Exact normative contract imported from `spec/mvp-acceptance-criteria.md` at `sha256:840d58390cc1a42d98a05c02c4d3cf73eeacc2dd7f391e90352ea70fa4f30c7b`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
+**Migration provenance.** Exact normative contract imported from `spec/mvp-acceptance-criteria.md` at `sha256:840d58390cc1a42d98a05c02c4d3cf73eeacc2dd7f391e90352ea70fa4f30c7b`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
 
 ## MVP definition
 
@@ -26,8 +26,8 @@ CRM semantics.
 A fresh containerized install must support this path without manual database
 setup:
 
-1. Configure `OPERANT_BOOTSTRAP_TOKEN` and start the server with no
-   `OPERANT_DATABASE_URL`.
+1. Configure `OPTD_BOOTSTRAP_TOKEN` and start the server with no
+   `OPTD_DATABASE_URL`.
 2. Server starts app-managed Postgres from bundled/container-provided binaries.
 3. Server runs platform migrations idempotently and reports `bootstrap_required`
    separately from readiness.
@@ -43,18 +43,18 @@ setup:
    rejected.
 8. `optctl pack apply prototypes/crm-default-pack` applies the CRM pack as
    authored in the repository.
-9. `optctl --project sales seed commit operant/crm --all` uses the exact
+9. `optctl --project sales seed commit optd/crm --all` uses the exact
    client-side stage/changeset-commit reconcile path; a repeated run returns
    unchanged without creating object versions.
-10. `optctl metadata resource operant/crm:lead` and
-    `optctl metadata action operant/crm:convert_lead` expose AXI guidance and
+10. `optctl metadata resource optd/crm:lead` and
+    `optctl metadata action optd/crm:convert_lead` expose AXI guidance and
     schema metadata.
 11. `optctl changeset stage/inspect/commit` can create, update, archive, link,
     unlink, transition, and comment on objects; stage output already contains
     the complete inspect representation.
-12. `optctl --project sales query operant/crm:lead ...` filters through
+12. `optctl --project sales query optd/crm:lead ...` filters through
     SQL-lowered expressions, policy pushdown, projection, and cursor pagination.
-13. `optctl --project sales action stage/commit operant/crm:convert_lead ...`
+13. `optctl --project sales action stage/commit optd/crm:convert_lead ...`
     runs the configured action/hook path; direct commit is a client-side stage
     followed by commit.
 14. Object and first-class relationship read/query/history show immutable
@@ -169,13 +169,13 @@ using different domain objects and workflows from CRM.
 
 Minimum resources:
 
-- `operant/projects:project`
-- `operant/projects:task`
-- `operant/projects:task_stage`
-- `operant/projects:project_milestone`
-- `operant/projects:task_tag`
-- `operant/projects:project_member`
-- `operant/projects:timesheet`
+- `optd/projects:project`
+- `optd/projects:task`
+- `optd/projects:task_stage`
+- `optd/projects:project_milestone`
+- `optd/projects:task_tag`
+- `optd/projects:project_member`
+- `optd/projects:timesheet`
 
 Minimum behaviors:
 
@@ -185,8 +185,8 @@ Minimum behaviors:
 - Milestone linkage.
 - Tags through first-class relationships or reference collections.
 - Timesheet entries linked to tasks.
-- At least one action, e.g. `operant/projects:start_task`,
-  `operant/projects:block_task`, or `operant/projects:complete_task`.
+- At least one action, e.g. `optd/projects:start_task`,
+  `optd/projects:block_task`, or `optd/projects:complete_task`.
 - At least one validation hook and one after-commit hook.
 - Policy rules for project members, assignees, managers, and admins.
 - AXI guidance sufficient for `optctl home` and metadata commands.
@@ -195,10 +195,10 @@ Minimum behaviors:
 
 - Production deployment is container-only: Docker Compose or Kubernetes.
 - The production image/container environment provides Postgres binaries.
-- If `OPERANT_DATABASE_URL` is set, the server uses external Postgres and never
+- If `OPTD_DATABASE_URL` is set, the server uses external Postgres and never
   manages that process.
-- If `OPERANT_DATABASE_URL` is absent, the server starts app-managed Postgres
-  under `OPERANT_DATA_DIR`.
+- If `OPTD_DATABASE_URL` is absent, the server starts app-managed Postgres
+  under `OPTD_DATA_DIR`.
 - Integration tests use the same app-managed Postgres lifecycle when Postgres
   binaries are available.
 - PGlite is permitted only for focused prototypes/unit spikes, not as the MVP
@@ -207,7 +207,7 @@ Minimum behaviors:
 ## Security and policy acceptance
 
 - Secret values are encrypted before storage in Postgres.
-- `OPERANT_SECRET_MASTER_KEY` is base64 for 32 bytes; AES-256-GCM uses fresh
+- `OPTD_SECRET_MASTER_KEY` is base64 for 32 bytes; AES-256-GCM uses fresh
   nonces and row/version AAD. Existing encrypted rows plus missing/mismatched
   key fail startup.
 - Secret APIs and hook injection are policy controlled through global,

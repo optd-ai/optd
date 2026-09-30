@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-optctl-axi; contract: 1; input: sha256:4823a39172e67b1449f213044343b6d5c2b0384ea2911e3ca3cb6cf1cac4aa43 -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-optctl-axi; contract: 1; input: sha256:0ba0022eeaee989450cd0576143e219daa3d06b0a09b1220bc5a1e2ad7672cbb -->
 
 # optctl AXI Guidance Model
 
@@ -10,7 +10,7 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — optctl AXI Guidance Model
 
-**Migration provenance.** Exact normative contract imported from `spec/optctl-axi.md` at `sha256:a0c0d6181e6a8bbc378c0ee893b0c34e267c2e1133fd3e3242c41681c2dd41aa`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
+**Migration provenance.** Exact normative contract imported from `spec/optctl-axi.md` at `sha256:a0c0d6181e6a8bbc378c0ee893b0c34e267c2e1133fd3e3242c41681c2dd41aa`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
 
 ## Purpose
 
@@ -76,15 +76,15 @@ Each `kind: Resource` can include an `axi` property that teaches `optctl` how to
 present and guide the resource.
 
 Resource/action component names are lowercase snake case. Public CLI definition
-identities are publisher-qualified, for example `operant/crm:contact` and
-`operant/crm:pipeline_stage`; runtime project is selected separately with
+identities are publisher-qualified, for example `optd/crm:contact` and
+`optd/crm:pipeline_stage`; runtime project is selected separately with
 `--project` or context. Display text may use human titles.
 
 Example:
 
 ```yaml
 kind: Resource
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: contact
 spec:
@@ -112,8 +112,8 @@ spec:
       empty:
         message: No contacts found.
         help:
-          - optctl --project ${project} create operant/crm:contact --stage
-          - optctl --project ${project} list operant/crm:company
+          - optctl --project ${project} create optd/crm:contact --stage
+          - optctl --project ${project} list optd/crm:company
     detail:
       sections:
         - title: Contact
@@ -121,19 +121,19 @@ spec:
         - title: Relationships
           fields: [company_id, owner_id]
       help:
-        - optctl action stage operant/crm:merge_contact --input merge.json
-        - optctl --project ${project} list operant/crm:opportunity --where primary_contact_id=${id}
+        - optctl action stage optd/crm:merge_contact --input merge.json
+        - optctl --project ${project} list optd/crm:opportunity --where primary_contact_id=${id}
     search:
       fields: [first_name, last_name, email, phone]
       examples:
-        - optctl --project ${project} search operant/crm:contact --text alice@example.com
+        - optctl --project ${project} search optd/crm:contact --text alice@example.com
     help:
       list:
-        - optctl --project ${project} view operant/crm:contact <id>
-        - optctl --project ${project} create operant/crm:contact --stage
+        - optctl --project ${project} view optd/crm:contact <id>
+        - optctl --project ${project} create optd/crm:contact --stage
       created:
-        - optctl --project ${project} view operant/crm:contact ${id}
-        - optctl action stage operant/crm:create_follow_up --input follow-up.json
+        - optctl --project ${project} view optd/crm:contact ${id}
+        - optctl action stage optd/crm:create_follow_up --input follow-up.json
 ```
 
 ## Canonical `axi` schema
@@ -201,11 +201,11 @@ context.
 ```yaml
 actions:
   primary:
-    - operant/crm:merge_contact
-    - operant/crm:create_follow_up
+    - optd/crm:merge_contact
+    - optd/crm:create_follow_up
   byState:
     active:
-      - operant/crm:mark_contact_inactive
+      - optd/crm:mark_contact_inactive
 ```
 
 ### `help`
@@ -254,36 +254,36 @@ spec:
       - Use after a lead has been qualified and should become an active opportunity.
     stageFirst: true
     examples:
-      - optctl action stage operant/crm:convert_lead --input action.json
-      - optctl action commit operant/crm:convert_lead --input action.json
+      - optctl action stage optd/crm:convert_lead --input action.json
+      - optctl action commit optd/crm:convert_lead --input action.json
     successHelp:
-      - optctl --project ${project} view operant/crm:opportunity ${created.opportunity_id}
-      - optctl --project ${project} list operant/crm:activity --where related_id=${created.opportunity_id}
+      - optctl --project ${project} view optd/crm:opportunity ${created.opportunity_id}
+      - optctl --project ${project} list optd/crm:activity --where related_id=${created.opportunity_id}
 ```
 
 ## Pack-Level AXI Guidance
 
-Packs can define home-level guidance for `optctl pack home operant/crm` or
+Packs can define home-level guidance for `optctl pack home optd/crm` or
 `optctl` no-args when the pack is active.
 
 ```yaml
 kind: Pack
 metadata:
-  publisher: operant
+  publisher: optd
   name: crm
 spec:
   axi:
     purpose: Headless CRM resources for leads, contacts, companies, opportunities, and sales activities.
     home:
       resources:
-        - operant/crm:lead
-        - operant/crm:opportunity
-        - operant/crm:contact
-        - operant/crm:company
+        - optd/crm:lead
+        - optd/crm:opportunity
+        - optd/crm:contact
+        - optd/crm:company
       help:
-        - optctl --project ${project} list operant/crm:lead
-        - optctl --project ${project} list operant/crm:opportunity
-        - optctl --project ${project} search operant/crm:contact --text <email-or-name>
+        - optctl --project ${project} list optd/crm:lead
+        - optctl --project ${project} list optd/crm:opportunity
+        - optctl --project ${project} search optd/crm:contact --text <email-or-name>
 ```
 
 ## Authentication and context UX
@@ -302,7 +302,7 @@ subtree. `auth doctor [--fix]` diagnoses/repairs local auth files and contexts.
 Authorization denials explain current principal/roles/boundary and failed
 capability but do not recommend escalation, roles, or auth commands. A denied
 auth request reports the human reason and stops. Global `--non-interactive` and
-`OPERANT_NON_INTERACTIVE=1` disable prompts; piped-input and JSON commands do
+`OPTD_NON_INTERACTIVE=1` disable prompts; piped-input and JSON commands do
 not prompt.
 
 Successful `changeset stage` and `action stage` commands return the complete
@@ -318,14 +318,14 @@ Resource commands:
 ```text
 optctl                    # content-first home/dashboard
 optctl resources          # configured resource kinds with purposes
-optctl metadata resource operant/crm:lead
-optctl --project sales list operant/crm:lead [--fields ...] [--where ...]
-optctl --project sales view operant/crm:lead <id> [--full]
-optctl --project sales search operant/crm:contact --text <query>
-optctl --project sales create operant/crm:lead --input lead.json --stage
-optctl --project sales create operant/crm:lead --input lead.json --commit
-optctl --project sales update operant/crm:lead <id> --input update.json --stage
-optctl --project sales transition operant/crm:opportunity <id> proposal --stage
+optctl metadata resource optd/crm:lead
+optctl --project sales list optd/crm:lead [--fields ...] [--where ...]
+optctl --project sales view optd/crm:lead <id> [--full]
+optctl --project sales search optd/crm:contact --text <query>
+optctl --project sales create optd/crm:lead --input lead.json --stage
+optctl --project sales create optd/crm:lead --input lead.json --commit
+optctl --project sales update optd/crm:lead <id> --input update.json --stage
+optctl --project sales transition optd/crm:opportunity <id> proposal --stage
 
 optctl changeset stage --input changeset.json
 optctl changeset inspect <stage-id>
@@ -337,9 +337,9 @@ optctl changeset cancel <stage-id>
 Action commands:
 
 ```text
-optctl metadata actions operant/crm:lead
-optctl --project sales action stage operant/crm:convert_lead --input action.json
-optctl --project sales action commit operant/crm:convert_lead --input action.json
+optctl metadata actions optd/crm:lead
+optctl --project sales action stage optd/crm:convert_lead --input action.json
+optctl --project sales action commit optd/crm:convert_lead --input action.json
 ```
 
 Pack commands:
@@ -347,7 +347,7 @@ Pack commands:
 ```text
 optctl pack preview ./packs/crm
 optctl pack apply ./packs/crm
-optctl pack inspect operant/crm
+optctl pack inspect optd/crm
 ```
 
 System secret and hook-secret grant commands:
@@ -397,8 +397,8 @@ spec:
     list:
       defaultFields: [id, name, status, updated_at]
       help:
-        - optctl --project ${project} view operant/crm:lead <id>
-        - optctl --project ${project} query operant/crm:lead --where 'status == "qualified"'
+        - optctl --project ${project} view optd/crm:lead <id>
+        - optctl --project ${project} query optd/crm:lead --where 'status == "qualified"'
 ```
 
 Structured list/query APIs should return compact fields by default, include

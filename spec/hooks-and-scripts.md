@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-hooks-and-scripts; contract: 1; input: sha256:7ca5927f3387ff4282d56543dfc092cac0072124d9dd577f612ee85c89181e4d -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-hooks-and-scripts; contract: 1; input: sha256:fd2bd424d11ebee651afce11a92dbe22708a05b325f7c565828118a7f70052bb -->
 
 # Hooks, Scripts, and Runtime Behavior
 
@@ -10,7 +10,7 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — Hooks, Scripts, and Runtime Behavior
 
-**Migration provenance.** Exact normative contract imported from `spec/hooks-and-scripts.md` at `sha256:b371e08514baf02ac6628f871dcbe24ab57b0bdd97cc6f1b4c47661bb78458db`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
+**Migration provenance.** Exact normative contract imported from `spec/hooks-and-scripts.md` at `sha256:b371e08514baf02ac6628f871dcbe24ab57b0bdd97cc6f1b4c47661bb78458db`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
 
 ## Summary
 
@@ -235,13 +235,13 @@ buttons; hooks are callbacks. Schedules are not an MVP attachment phase.
 ## Script input contract
 
 Each attachment maps named input keys from the finite curated context vocabulary
-or JSON constants. Operant validates reference availability/type at pack preview
+or JSON constants. optd validates reference availability/type at pack preview
 and materializes the selected values at invocation; hooks cannot request opaque
 raw context.
 
 ```yaml
 kind: Hook
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
   name: require_primary_contact
 spec:
@@ -434,8 +434,8 @@ Delivery status remains separate from changeset commit success. See
 ## Hook Data Access and Secrets
 
 Hooks receive curated ephemeral context in their stdin envelope and must not
-connect directly to the database. Stage hooks cannot call Operant's own HTTP API
-or receive the initiating human/agent bearer token; Operant objects are supplied
+connect directly to the database. Stage hooks cannot call optd's own HTTP API
+or receive the initiating human/agent bearer token; optd objects are supplied
 through current/proposed context and declared object-by-id reads whose immutable
 versions become stage dependencies. Arbitrary collection queries are deferred.
 

@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-project-management-pack; contract: 1; input: sha256:f86f4f3d780f227e6f3da1addabc0f8af9a47eb94cabfd0058786be7f2c4c816 -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-project-management-pack; contract: 1; input: sha256:7be8a0236acaf41b05e690ab845b3e2fd6ef65d612783d34c0b33470bb734bac -->
 
 # Project Management Proof-Pack Requirements
 
@@ -10,10 +10,10 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — Project Management Proof-Pack Requirements
 
-**Migration provenance.** Exact normative contract imported from `spec/project-management-pack.md` at `sha256:899349a5c143cd03d41de97f390ed218a90aabd0197c6d22905566367dc140d3`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
+**Migration provenance.** Exact normative contract imported from `spec/project-management-pack.md` at `sha256:899349a5c143cd03d41de97f390ed218a90aabd0197c6d22905566367dc140d3`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
 
 > **Status:** normative proof-pack domain requirements. Runtime platform
-> projects remain separate from the pack resource `operant/projects:project`;
+> projects remain separate from the pack resource `optd/projects:project`;
 > every pack object also carries an explicit platform project ID.
 
 ## Purpose
@@ -29,25 +29,25 @@ special cases.
 
 ```yaml
 kind: Pack
-apiVersion: operant.dev/v1
+apiVersion: optd.dev/v1
 metadata:
-  publisher: operant
+  publisher: optd
   name: projects
   version: 0.1.0
 spec:
   purpose: Project and task management resources for agent-operated work tracking.
   axi:
     home:
-      resources: [operant/projects:project, operant/projects:task]
-      help: ["optctl --project ${project} list operant/projects:task"]
+      resources: [optd/projects:project, optd/projects:task]
+      help: ["optctl --project ${project} list optd/projects:task"]
 ```
 
-The global pack identity is `operant/projects`; child definitions use canonical
-identities such as `operant/projects:task`.
+The global pack identity is `optd/projects`; child definitions use canonical
+identities such as `optd/projects:task`.
 
 ## Minimum resources
 
-### `operant/projects:project`
+### `optd/projects:project`
 
 Fields:
 
@@ -62,14 +62,14 @@ Fields:
 AXI guidance should explain how agents create projects, find active work, and
 inspect project health.
 
-### `operant/projects:task`
+### `optd/projects:task`
 
 Fields:
 
 - `title`: string, required
 - `description`: string, optional
-- `work_project_id`: reference to `operant/projects:project`, required
-- `stage_id`: reference to `operant/projects:task_stage`, required
+- `work_project_id`: reference to `optd/projects:project`, required
+- `stage_id`: reference to `optd/projects:task_stage`, required
 - `state`: required string enum `todo|in_progress|blocked|done`; lifecycle field
 - `assignee_id`: string with UUID format, optional
 - `priority`: string enum, e.g. `low|normal|high|urgent`
@@ -78,7 +78,7 @@ Fields:
 - `estimated_hours`: decimal, optional
 - `spent_hours`: decimal, optional or derived later
 
-### `operant/projects:task_stage`
+### `optd/projects:task_stage`
 
 Seeded reference resource.
 
@@ -96,16 +96,16 @@ Required seed records:
 - Blocked
 - Done
 
-### `operant/projects:project_milestone`
+### `optd/projects:project_milestone`
 
 Fields:
 
 - `name`: string, required
-- `work_project_id`: reference to `operant/projects:project`, required
+- `work_project_id`: reference to `optd/projects:project`, required
 - `deadline`: date, optional
 - `status`: string enum, e.g. `planned|at_risk|done`
 
-### `operant/projects:task_tag`
+### `optd/projects:task_tag`
 
 Seedable reference resource.
 
@@ -114,22 +114,22 @@ Fields:
 - `name`: string, required
 - `color`: string, optional
 
-### `operant/projects:project_member`
+### `optd/projects:project_member`
 
 Fields:
 
-- `work_project_id`: reference to `operant/projects:project`, required
+- `work_project_id`: reference to `optd/projects:project`, required
 - `principal_id`: string with UUID format, required
 - `member_role`: string enum `manager|member|viewer`, required
 
 A project-scoped composite unique constraint covers
 `work_project_id + principal_id`.
 
-### `operant/projects:timesheet`
+### `optd/projects:timesheet`
 
 Fields:
 
-- `task_id`: reference to `operant/projects:task`, required
+- `task_id`: reference to `optd/projects:task`, required
 - `principal_id`: UUID string, required; references an authenticated platform
   principal identity by value (not a pack-object `ref`)
 - `hours`: decimal, required and positive
@@ -140,12 +140,12 @@ Fields:
 
 Minimum relationships:
 
-- `operant/projects:task_milestone`: task to milestone.
-- `operant/projects:task_tag_assignment`: task to tag.
+- `optd/projects:task_milestone`: task to milestone.
+- `optd/projects:task_tag_assignment`: task to tag.
 
 Project-to-task uses the required direct `task.work_project_id`; it is not also
 duplicated as a relationship row. Membership is the explicit
-`operant/projects:project_member` resource because membership carries domain
+`optd/projects:project_member` resource because membership carries domain
 role, uniqueness, object history, and policy-visible lifecycle. The generic
 relationship schema can target read-only `system:principal`; that capability is
 not used as a substitute for this richer membership resource.
@@ -155,7 +155,7 @@ tables when the link needs metadata, history, or policy.
 
 ## Lifecycle
 
-`operant/projects:task` must have a lifecycle with states:
+`optd/projects:task` must have a lifecycle with states:
 
 ```text
 todo -> in_progress -> blocked -> in_progress -> done
@@ -172,10 +172,10 @@ Done requires an absent `blocked_reason`, enforced by validation.
 
 Minimum one action is required; preferred set:
 
-- `operant/projects:start_task`: moves a task from Todo/Blocked to In Progress.
-- `operant/projects:block_task`: moves a task to Blocked and requires
+- `optd/projects:start_task`: moves a task from Todo/Blocked to In Progress.
+- `optd/projects:block_task`: moves a task to Blocked and requires
   `blocked_reason`.
-- `operant/projects:complete_task`: moves a task to Done and can optionally
+- `optd/projects:complete_task`: moves a task to Done and can optionally
   write spent-hours summary.
 
 Actions use `action.stage`, are policy-checked/hook-validated, and commit only
@@ -198,7 +198,7 @@ Minimum policy rules:
 
 - Built-in `system:super_admin` remains the platform bypass and is not a pack
   policy wildcard.
-- `operant/projects:project_manager` can create/update/archive project-domain
+- `optd/projects:project_manager` can create/update/archive project-domain
   objects and tasks in platform projects where assigned.
 - Project members can read project tasks and update tasks assigned to them.
 - Assignees can start/block/complete their assigned tasks.
@@ -214,14 +214,14 @@ Seed at least:
 - common task tags, e.g. Bug, Feature, Chore, Research
 
 Seeds use the exact changeset-backed reconcile route and
-`seed:operant/projects:<seed>` authorization contract.
+`seed:optd/projects:<seed>` authorization contract.
 
 ## Acceptance
 
 The project-management pack is accepted when:
 
 1. It applies on a fresh MVP server without special-case code.
-2. `optctl metadata resource operant/projects:task` exposes fields, lifecycle,
+2. `optctl metadata resource optd/projects:task` exposes fields, lifecycle,
    policy hints, and AXI guidance.
 3. A test creates a project, creates a task, starts it, blocks it, unblocks it,
    completes it, logs a timesheet entry, and reads history.

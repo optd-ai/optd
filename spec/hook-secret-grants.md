@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-hook-secret-grants; contract: 1; input: sha256:3c733fdb5fee19cd04abb1fb353816bf3f8517312a6982757d077348e458cd7b -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-hook-secret-grants; contract: 1; input: sha256:af86248cfc2836e0c5b9621327943e4da148b6d5dbc3703dc1ba680c0b64df57 -->
 
 # Hook-Secret Grants
 
@@ -10,7 +10,7 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — Hook-Secret Grants
 
-**Migration provenance.** Exact normative contract imported from `spec/hook-secret-grants.md` at `sha256:01bf907b075a9d39da058f808bee555c449e498ae92add60b4898fdeff0bd666`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
+**Migration provenance.** Exact normative contract imported from `spec/hook-secret-grants.md` at `sha256:01bf907b075a9d39da058f808bee555c449e498ae92add60b4898fdeff0bd666`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
 
 ## Purpose
 
@@ -84,7 +84,7 @@ are deferred.
 
 Plaintext is accepted only through authenticated create/rotate operations,
 encrypted with AES-256-GCM before persistence, and never returned by read/list
-APIs. `OPERANT_SECRET_MASTER_KEY` supplies the application master key as defined
+APIs. `OPTD_SECRET_MASTER_KEY` supplies the application master key as defined
 in [Secret Encryption](secret-encryption.md).
 
 ## Grant model
@@ -155,7 +155,7 @@ The security digest includes security-relevant normalized hook behavior:
 - named non-secret environment access;
 - attachment phases, conditions, input mappings, and targets;
 - output schema;
-- declared Operant reads;
+- declared optd reads;
 - declared effects/capabilities.
 
 AXI guidance, display text, unrelated pack definitions, and runtime timeout

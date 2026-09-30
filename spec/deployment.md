@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-deployment; contract: 1; input: sha256:cf5ecf83b3f90f66316947fcc83e7deec1c0c4094adb549433b2667ec1f1c14b -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-deployment; contract: 1; input: sha256:c29810b53e57fdeda814972eef55712a42e0e63cac1b300c11bd5eff812d7e23 -->
 
 # Deployment
 
@@ -10,7 +10,7 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — Deployment
 
-**Migration provenance.** Exact normative contract imported from `spec/deployment.md` at `sha256:d90ebb1594b51611916f48f816badf8aeaa81cd1142c357ba0b45c58786baa25`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
+**Migration provenance.** Exact normative contract imported from `spec/deployment.md` at `sha256:d90ebb1594b51611916f48f816badf8aeaa81cd1142c357ba0b45c58786baa25`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
 
 ## Direction
 
@@ -32,15 +32,15 @@ volume.
 
 MVP storage is Postgres only. Supported modes are:
 
-1. external Postgres when `OPERANT_DATABASE_URL` is set, and
-2. app-managed local Postgres when `OPERANT_DATABASE_URL` is absent.
+1. external Postgres when `OPTD_DATABASE_URL` is set, and
+2. app-managed local Postgres when `OPTD_DATABASE_URL` is absent.
 
 SQLite is out of MVP scope. PGlite is permitted for focused prototypes only and
 must not be treated as production-equivalent.
 
 ### External Postgres Mode
 
-When `OPERANT_DATABASE_URL` is present, Operant uses that exact PostgreSQL
+When `OPTD_DATABASE_URL` is present, optd uses that exact PostgreSQL
 database for all persistence and coordination. App nodes are stateless aside
 from disposable caches; each main server runs one in-process outbox polling loop
 that coordinates through PostgreSQL locks. Startup never falls back to a local
@@ -48,13 +48,13 @@ database after selecting this mode.
 
 ### App-Managed Postgres Mode
 
-When `OPERANT_DATABASE_URL` is absent, Operant initializes and owns an official
-PostgreSQL process under `OPERANT_DATA_DIR`. The server connects over loopback
-TCP using `OPERANT_PG_PORT` (`0` selects a free port). The Operant server arms
+When `OPTD_DATABASE_URL` is absent, optd initializes and owns an official
+PostgreSQL process under `OPTD_DATA_DIR`. The server connects over loopback
+TCP using `OPTD_PG_PORT` (`0` selects a free port). The optd server arms
 signal handling before readiness, supervises the exact managed child, and uses
 bounded PostgreSQL-native smart/fast/immediate shutdown escalation.
 
-The default image runs the Operant server under `tini`; there is no separate
+The default image runs the optd server under `tini`; there is no separate
 worker, database sidecar, or generic process supervisor. One mounted data volume
 contains the managed database and required runtime state. Health checks cover
 both application and managed-database readiness; backup/restore uses normal
@@ -76,22 +76,22 @@ correctness.
 ## Storage Profile Sketch
 
 ```text
-OPERANT_DATA_DIR=/data
-OPERANT_DATABASE_URL=postgres://... # if set, use external Postgres
-OPERANT_PG_BIN_DIR=/opt/operant/postgres/bin # optional override; container supplies a default
-OPERANT_PG_PORT=0 # app-managed mode; 0 chooses a free loopback TCP port
-OPERANT_SECRET_MASTER_KEY=<base64-32-bytes> # required once encrypted secrets exist
-OPERANT_HOOK_NET_ALLOW=<comma-separated-host[:port]-ceiling> # optional narrowing
-OPERANT_HOOK_ENV_ALLOW=<comma-separated-nonsecret-env-names> # absent means none
+OPTD_DATA_DIR=/data
+OPTD_DATABASE_URL=postgres://... # if set, use external Postgres
+OPTD_PG_BIN_DIR=/opt/optd/postgres/bin # optional override; container supplies a default
+OPTD_PG_PORT=0 # app-managed mode; 0 chooses a free loopback TCP port
+OPTD_SECRET_MASTER_KEY=<base64-32-bytes> # required once encrypted secrets exist
+OPTD_HOOK_NET_ALLOW=<comma-separated-host[:port]-ceiling> # optional narrowing
+OPTD_HOOK_ENV_ALLOW=<comma-separated-nonsecret-env-names> # absent means none
 ```
 
 Bootstrap/recovery tokens and the secret master key are injected as secret
 environment/mounted values per their specs and never printed. There is no auth
 mode/bypass configuration variable.
 
-When `OPERANT_DATABASE_URL` is absent, app-managed Postgres is the default. It
+When `OPTD_DATABASE_URL` is absent, app-managed Postgres is the default. It
 lets the app initialize/start a managed Postgres process under
-`OPERANT_DATA_DIR` while preserving real Postgres behavior.
+`OPTD_DATA_DIR` while preserving real Postgres behavior.
 
 ## MVP runtime artifacts
 
@@ -100,10 +100,10 @@ The repository includes production-style examples:
 - `Dockerfile` builds a Deno server image, compiled `optctl` binary, and
   container-provided Postgres binaries.
 - `docker-compose.yml` runs the default one-container app-managed Postgres mode.
-- `compose.external-postgres.yml` runs Operant against an external Compose
-  Postgres service via `OPERANT_DATABASE_URL`.
-- `k8s/operant-app-managed.example.yaml` and
-  `k8s/operant-external-postgres.example.yaml` show Kubernetes deployment
+- `compose.external-postgres.yml` runs optd against an external Compose
+  Postgres service via `OPTD_DATABASE_URL`.
+- `k8s/optd-app-managed.example.yaml` and
+  `k8s/optd-external-postgres.example.yaml` show Kubernetes deployment
   shapes.
 - `docs/runtime.md` documents runtime env, data directory behavior,
   health/readiness, backup/restore guidance, and no-PGlite guardrails.

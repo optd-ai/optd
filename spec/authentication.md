@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-authentication; contract: 1; input: sha256:c7bb8f6260829a48f90e7d27fae0fef3ee5217877febcacef9409c8b236e5761 -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-authentication; contract: 1; input: sha256:c4494f920914899fb8d6ad930cbffceec398ad89ba1517e3919f2bb1cf19a2f9 -->
 
 # Authentication and Local Agent Grants
 
@@ -10,7 +10,7 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — Authentication and Local Agent Grants
 
-**Migration provenance.** Exact normative contract imported from `spec/authentication.md` at `sha256:907cbfed4b2bd8237c2d423f8bbde8e829966e7d7706cb44009a85c2b73eb839`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
+**Migration provenance.** Exact normative contract imported from `spec/authentication.md` at `sha256:907cbfed4b2bd8237c2d423f8bbde8e829966e7d7706cb44009a85c2b73eb839`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
 
 ## Status
 
@@ -47,7 +47,7 @@ supplied actor or role authority is rejected.
 ## Research-backed patterns
 
 - `sudo`: scoped, revocable local auth cache; useful validate/invalidate UX but
-  Operant should not copy sudo's short timeout by default.
+  optd should not copy sudo's short timeout by default.
 - polkit: unprivileged process requests action; authorized principal approves;
   policy controls who may approve.
 - OAuth device-code flow: constrained client creates a request and asks a user
@@ -59,7 +59,7 @@ supplied actor or role authority is rejected.
 
 ## Principal model
 
-Operant should model at least three execution identities:
+optd should model at least three execution identities:
 
 - `human_user`: the single human/admin identity on the local machine or server
   installation. The human user logs in through `optctl`, owns the
@@ -113,14 +113,14 @@ server authority; it only controls local access to a server-issued credential.
 
 ## One authentication model and testing strategy
 
-Operant has one normal server authentication model for development, containers,
+optd has one normal server authentication model for development, containers,
 and production: opaque server-issued bearer tokens resolved through server-side
 sessions, authorizations, role assignments, policy assignments, and auth
 contexts. Bootstrap and recovery are explicit installation states, not auth
 modes. Internal system execution and deterministic test authentication are
 application composition paths, not publicly selectable runtime modes.
 
-There is no `OPERANT_AUTH_MODE`, disabled mode, dev trust mode, or runtime actor
+There is no `OPTD_AUTH_MODE`, disabled mode, dev trust mode, or runtime actor
 impersonation switch. Unknown obsolete insecure auth-mode configuration fails
 with an actionable unsupported-configuration error.
 
@@ -129,12 +129,12 @@ with an actionable unsupported-configuration error.
 - `/live`, `/ready`, and minimal bootstrap status are unauthenticated and expose
   only operational state.
 - The bootstrap endpoint is available only in `bootstrap_required` and requires
-  `OPERANT_BOOTSTRAP_TOKEN`.
+  `OPTD_BOOTSTRAP_TOKEN`.
 - Login validates username/password before issuing authority; recovery requires
   its explicit operator-created recovery credential.
 - Every other public operation requires normal bearer authentication.
 
-If the database is `bootstrap_required` but `OPERANT_BOOTSTRAP_TOKEN` is absent,
+If the database is `bootstrap_required` but `OPTD_BOOTSTRAP_TOKEN` is absent,
 the server starts for diagnostics and reports `bootstrap_token_not_configured`;
 ordinary routes remain unavailable. Once active, the environment variable is
 unnecessary and any remaining value is ignored.
@@ -210,7 +210,7 @@ role definition can therefore be assigned in `sales`, `sandbox`, all projects,
 or the system boundary without cloning the definition.
 
 - Pack role definitions use publisher-qualified identities such as
-  `operant/crm:sales_manager`.
+  `optd/crm:sales_manager`.
 - Built-in roles use reserved identities such as `system:super_admin` and
   `system:admin`.
 - Policies reference canonical role definition ids.
@@ -235,7 +235,7 @@ metadata:
 spec:
   display_name: Sales Manager
   description: Human or agent responsible for CRM lead and opportunity work.
-  introduced_by_pack: "operant/crm"
+  introduced_by_pack: "optd/crm"
   lifecycle:
     status: active
   axi:
@@ -316,12 +316,12 @@ included in this version.
 Operators may configure individual, startup-validated variables:
 
 ```text
-OPERANT_PASSWORD_MIN_LENGTH=8
-OPERANT_PASSWORD_REQUIRE_UPPERCASE=false
-OPERANT_PASSWORD_REQUIRE_LOWERCASE=false
-OPERANT_PASSWORD_REQUIRE_DIGIT=false
-OPERANT_PASSWORD_REQUIRE_SYMBOL=false
-OPERANT_PASSWORD_MAX_CONCURRENT_HASHES=4
+OPTD_PASSWORD_MIN_LENGTH=8
+OPTD_PASSWORD_REQUIRE_UPPERCASE=false
+OPTD_PASSWORD_REQUIRE_LOWERCASE=false
+OPTD_PASSWORD_REQUIRE_DIGIT=false
+OPTD_PASSWORD_REQUIRE_SYMBOL=false
+OPTD_PASSWORD_MAX_CONCURRENT_HASHES=4
 ```
 
 Do not support a password regex. Values below eight are allowed with an explicit
@@ -346,7 +346,7 @@ login/password change/recovery resets the counter, stale rows may be removed
 after 24 hours, and there is no permanent lockout or IP storage.
 
 Each app process uses a non-queuing Argon semaphore sized by
-`OPERANT_PASSWORD_MAX_CONCURRENT_HASHES`. If no slot is immediately available,
+`OPTD_PASSWORD_MAX_CONCURRENT_HASHES`. If no slot is immediately available,
 return `503 authentication_busy` with `Retry-After: 1`.
 
 Self password change verifies the current password, applies policy, updates the
@@ -437,7 +437,7 @@ revocable full session. The authorization-request session is reused or rotated
 rather than creating an unbounded authorization-request credential for every
 login.
 
-One local OS login session/user account may be associated with only one Operant
+One local OS login session/user account may be associated with only one optd
 human user per normalized server origin. Switching users requires
 `auth logout --all` followed by password login as the other user; `optctl` never
 silently hides or orphans the previous user's durable credentials. Login always
@@ -507,15 +507,15 @@ Proposed flow:
 optctl auth roles
 optctl auth roles --verbose
 optctl --project sales auth request \
-  --role operant/crm:sales_manager \
-  --role operant/crm:sales_rep \
+  --role optd/crm:sales_manager \
+  --role optd/crm:sales_rep \
   --reason "Need to qualify CRM leads"
 ```
 
 The request may include optional, explicitly agent-reported metadata: `name`,
 `harness`, `external_session_id`, `provider`, `model`, and `reasoning_effort`.
 These typed fields are unverified approval context, never authorization input.
-Operant does not accept arbitrary environment/settings dumps or infer this
+optd does not accept arbitrary environment/settings dumps or infer this
 metadata from processes. The approver may override the friendly name.
 
 `optctl auth roles` with no flags shows only role names and concise summaries.
@@ -552,7 +552,7 @@ Request output:
 ```text
 auth request created
 request_id: 019b7a2e-7c10-7000-8000-000000000101
-requested_roles: [operant/crm:sales_manager, operant/crm:sales_rep]
+requested_roles: [optd/crm:sales_manager, optd/crm:sales_rep]
 requested_boundary: project:sales
 agent_name: crm-lead-agent
 
@@ -621,7 +621,7 @@ Approval must be policy checked. Approval UI should show:
 Confirmation:
 
 ```text
-Grant roles [operant/crm:sales_manager, operant/crm:sales_rep] in project sales to agent session sess_xyz789 until the process tree exits?
+Grant roles [optd/crm:sales_manager, optd/crm:sales_rep] in project sales to agent session sess_xyz789 until the process tree exits?
 Friendly agent name: crm-lead-agent
 Approve? [y/N]
 ```
@@ -732,12 +732,12 @@ descendants.
 integer. A parent agent may launch a subagent with:
 
 ```bash
-OPERANT_AUTH_TREE_STOP_PID="$(optctl auth session-pid)" subagent
+OPTD_AUTH_TREE_STOP_PID="$(optctl auth session-pid)" subagent
 ```
 
 The stop PID must occur in the caller's actual ancestry and must match its full
 PID/start-time/user/boot identity. `optctl` inspects that process but never
-walks above it. An unrelated or stale stop PID is rejected. `OPERANT_*` is the
+walks above it. An unrelated or stale stop PID is rejected. `OPTD_*` is the
 project-wide environment variable prefix; this variable affects only local auth
 credential selection.
 
@@ -764,7 +764,7 @@ automation is outside the MVP local-binding design.
 
 ### Agent session identity
 
-Operant generates its own opaque random local agent-session id when a process
+optd generates its own opaque random local agent-session id when a process
 anchor first runs `optctl auth request`. The id is stored with the local process
 binding and reused by later short-lived `optctl` invocations while that anchor
 identity remains valid. The server independently creates its own
@@ -774,13 +774,13 @@ are not treated as the same identifier.
 Agent identity requires no harness detection. Human versus agent intent comes
 from `auth login` versus `auth request`; process anchoring comes from the
 process inspector. Resuming a third-party harness after its process exits
-creates a new Operant local session and requires new authorization because the
+creates a new optd local session and requires new authorization because the
 process-bound security context changed.
 
 Research found no portable documented agent-session environment contract:
 
 - OpenAI Codex documents `CODEX_THREAD_ID` for child commands, but it is Codex
-  correlation metadata rather than an Operant authorization identity.
+  correlation metadata rather than an optd authorization identity.
 - Claude Code and Gemini CLI expose session ids to configured hooks, not as a
   general inherited contract for arbitrary subprocesses.
 - Cursor and standalone GitHub Copilot CLI do not document a general child
@@ -893,14 +893,14 @@ expire in this pass.
 
 Platform data roots:
 
-- Linux: `$XDG_DATA_HOME/operant/auth/`, falling back to
-  `~/.local/share/operant/auth/`.
-- macOS: `~/Library/Application Support/Operant/auth/`.
-- Windows: `%LOCALAPPDATA%\\Operant\\auth\\`.
+- Linux: `$XDG_DATA_HOME/optd/auth/`, falling back to
+  `~/.local/share/optd/auth/`.
+- macOS: `~/Library/Application Support/optd/auth/`.
+- Windows: `%LOCALAPPDATA%\\optd\\auth\\`.
 
 Runtime directories such as `$XDG_RUNTIME_DIR` may hold locks and temporary
 files, but are not the only copy of active credentials. Reboot or OS logout does
-not require a new Operant login. Dead process bindings remain unusable and are
+not require a new optd login. Dead process bindings remain unusable and are
 removed by cleanup.
 
 ### Server origin partitioning
@@ -1118,14 +1118,14 @@ prevents ordinary administration from creating that state.
 All deployment modes use the same high-entropy one-time secret:
 
 ```text
-OPERANT_BOOTSTRAP_TOKEN
+OPTD_BOOTSTRAP_TOKEN
 ```
 
 The server reads it from its environment and stores/compares only a digest.
 `optctl bootstrap init` reads the matching value from its own environment; there
 is no bootstrap-token CLI argument or file-specific workflow. Local shells,
 Docker Compose, and Kubernetes may inject the variable through their normal
-secret-management facilities. Operant never generates or prints bootstrap
+secret-management facilities. optd never generates or prints bootstrap
 secrets in server logs.
 
 The token is accepted only in `bootstrap_required`, compared in constant time,
@@ -1136,8 +1136,8 @@ the token usable for retry.
 Example local/packaged flow:
 
 ```bash
-export OPERANT_BOOTSTRAP_TOKEN='<high-entropy-secret>'
-operant server start
+export OPTD_BOOTSTRAP_TOKEN='<high-entropy-secret>'
+optd server start
 optctl bootstrap init --username jordan
 optctl auth whoami
 ```
@@ -1148,12 +1148,12 @@ Example container/remote flow:
 # The server and operator environments receive the same secret value.
 docker compose up -d
 
-OPERANT_BOOTSTRAP_TOKEN='<high-entropy-secret>' \
-  optctl --server https://operant.example.com \
+OPTD_BOOTSTRAP_TOKEN='<high-entropy-secret>' \
+  optctl --server https://optd.example.com \
   bootstrap init --username jordan
 ```
 
-`operant server start` means starting the local server process when that
+`optd server start` means starting the local server process when that
 packaging exists. Docker Compose, Kubernetes, the container entrypoint, a
 compiled server, or `deno run src/main_server.ts` have identical bootstrap
 semantics.
@@ -1162,7 +1162,7 @@ semantics.
 
 `optctl bootstrap init --username <name>`:
 
-1. Reads `OPERANT_BOOTSTRAP_TOKEN` without displaying it.
+1. Reads `OPTD_BOOTSTRAP_TOKEN` without displaying it.
 2. Prompts for password and confirmation; passwords are never command arguments.
 3. Shows that it will create the first human user with `system:super_admin`.
 4. Requests `y/N` confirmation.
@@ -1195,14 +1195,14 @@ password use `auth doctor` and normal login instead.
 The operator creates a high-entropy environment value:
 
 ```bash
-export OPERANT_RECOVERY_TOKEN='<high-entropy-secret>'
-operant auth recovery begin --username jordan
+export OPTD_RECOVERY_TOKEN='<high-entropy-secret>'
+optd auth recovery begin --username jordan
 ```
 
 Optional, explicit repair flags are:
 
 ```bash
-operant auth recovery begin --username jordan \
+optd auth recovery begin --username jordan \
   --enable-user \
   --restore-super-admin
 ```
@@ -1216,8 +1216,8 @@ sessions, anchored agent authorizations, and pending auth requests, and writes
 The operator uses the same environment value from an operator-controlled client:
 
 ```bash
-OPERANT_RECOVERY_TOKEN='<same-secret>' \
-  optctl --server https://operant.example.com \
+OPTD_RECOVERY_TOKEN='<same-secret>' \
+  optctl --server https://optd.example.com \
   auth recover --username jordan
 ```
 
@@ -1235,15 +1235,15 @@ disrupted. A lost completion response requires starting a new challenge, which
 revokes the undelivered sessions. Operators may replace or cancel challenges:
 
 ```bash
-operant auth recovery begin --username jordan --replace
-operant auth recovery cancel --username jordan
+optd auth recovery begin --username jordan --replace
+optd auth recovery cancel --username jordan
 ```
 
 Initiated, completed, cancelled, and expired outcomes are audited with target
 human id, challenge id, timestamps, requested repair flags, system executor, and
 outcome. Tokens, passwords, host identity, PID, cwd, command line, and
 environment values are never stored. Recovery never reuses `bootstrap init` or
-`OPERANT_BOOTSTRAP_TOKEN`.
+`OPTD_BOOTSTRAP_TOKEN`.
 
 ### Remote login
 
@@ -1261,14 +1261,14 @@ tokens, roles, bindings, or authorizations.
 ```bash
 optctl context list
 optctl context show
-optctl context add prod --server https://operant.example.com --project sales
+optctl context add prod --server https://optd.example.com --project sales
 optctl context use prod
 optctl context set-project delivery
 optctl context remove old
 ```
 
-Resolution precedence is explicit command flags, `OPERANT_SERVER_URL` /
-`OPERANT_PROJECT`, active context, then packaged local defaults. Explicit
+Resolution precedence is explicit command flags, `OPTD_SERVER_URL` /
+`OPTD_PROJECT`, active context, then packaged local defaults. Explicit
 resource project and selected project must agree or return `project_conflict`.
 Origins normalize scheme, lowercase hostname, effective port, trailing slash,
 and IPv6 representation; origins contain no path/query/fragment. Credentials
@@ -1284,14 +1284,14 @@ first project may set it automatically only when the context has no default.
 
 Input policy is resolved once per invocation. Prompting is allowed only when
 stdin is a terminal and not supplying command data, `--json` and
-`--non-interactive` are absent, `OPERANT_NON_INTERACTIVE` is unset, and the
+`--non-interactive` are absent, `OPTD_NON_INTERACTIVE` is unset, and the
 command explicitly permits the prompt. Permission repair prompts at most once
 per invocation and never retries. Ordinary object/query/changeset commands never
 request passwords or approval.
 
 ```bash
 optctl --non-interactive ...
-OPERANT_NON_INTERACTIVE=1 optctl ...
+OPTD_NON_INTERACTIVE=1 optctl ...
 ```
 
 `optctl auth doctor` inspects only local auth/context state by default: root
@@ -1363,7 +1363,7 @@ plan/confirmation; `--fix --yes` supports noninteractive repair.
 - `id`
 - `publisher` and `pack` nullable for built-in system roles
 - `name`
-- `canonical_id`: e.g. `operant/crm:sales_manager` or `system:admin`
+- `canonical_id`: e.g. `optd/crm:sales_manager` or `system:admin`
 - `display_name`
 - `description`
 - `source`: system/pack/local

@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-migration-classification; contract: 1; input: sha256:6fc972e0e071e82ad5bce11cb5c8221a5dcdd32eaa440fd2cf4510c9749687e3 -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-migration-classification; contract: 1; input: sha256:ec7ab03b36a247f482637cf36f749c86f9395c277f1b93b319d5a6db18aae6f5 -->
 
 # Migration Classification
 
@@ -10,7 +10,7 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — Migration Classification
 
-**Migration provenance.** Exact normative contract imported from `spec/migration-classification.md` at `sha256:8ae2a4d42f2e975867343802a8096d95b797c8486f5bf1662a174b33737ddb3d`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
+**Migration provenance.** Exact normative contract imported from `spec/migration-classification.md` at `sha256:8ae2a4d42f2e975867343802a8096d95b797c8486f5bf1662a174b33737ddb3d`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
 
 ## Status
 
@@ -251,7 +251,7 @@ cleanup, confirmation tokens, and destructive cleanup.
 
 ## Frozen MVP decisions
 
-- Operant owns a semantic pack-definition diff/planner and borrows established
+- optd owns a semantic pack-definition diff/planner and borrows established
   hazard concepts; it does not embed `pg-schema-diff` as a runtime dependency.
 - Stable internal hazard codes are the exact codes exposed through HTTP and
   `optctl`; presentation may add explanations but never rename them.

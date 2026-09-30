@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-projects; contract: 1; input: sha256:a14c31515dee7469398c387053112ce5ed3dbbb4771086e032e3efa039385340 -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-projects; contract: 1; input: sha256:f3f551c55bfb647394e1bc0f02a5b964bb69fa2f5de69f576d6d51a7d621fa30 -->
 
 # Platform Projects
 
@@ -10,13 +10,13 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — Platform Projects
 
-**Migration provenance.** Exact normative contract imported from `spec/projects.md` at `sha256:28c4f76c1ab344d7cff1f0a36fcf5adee19095466087d726190e917fd81dc38e`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
+**Migration provenance.** Exact normative contract imported from `spec/projects.md` at `sha256:28c4f76c1ab344d7cff1f0a36fcf5adee19095466087d726190e917fd81dc38e`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
 
 ## Decision
 
 A platform Project is the runtime data and authorization boundary. It is a
 built-in system resource, not a pack installation and not the
-`operant/projects:project` proof-pack domain object.
+`optd/projects:project` proof-pack domain object.
 
 Packs and their active definitions are global. A project's existence does not
 copy definitions or automatically apply seeds.
