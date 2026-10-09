@@ -1,0 +1,101 @@
+name: Publish release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  validate:
+    if: github.repository == 'optd-ai/optd'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate stable version and master ancestry
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          git merge-base --is-ancestor HEAD refs/remotes/origin/master
+      - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
+        with:
+          deno-version: v2.8.3
+      - name: Install host PostgreSQL 18
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          curl --fail --silent --show-error https://www.postgresql.org/media/keys/ACCC4CF8.asc -o /tmp/pgdg.asc
+          sudo install -m 0644 /tmp/pgdg.asc /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
+          echo 'deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt noble-pgdg main' | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update
+          sudo apt-get install -y postgresql-18
+      - name: Test publication export contracts
+        run: python3 tests/release_export_test.py
+      - name: Full exact-source release gate and image export
+        env:
+          OPTD_PG_BIN_DIR: /usr/lib/postgresql/18/bin
+          OPTD_RELEASE_EXPORT_DIR: ${{ runner.temp }}/release-export
+        run: bash scripts/release-gate.sh
+      - name: Retain validated publication artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-export
+          path: ${{ runner.temp }}/release-export/
+          if-no-files-found: error
+          retention-days: 7
+  publish:
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-export
+          path: release-export
+      - name: Publish tested image and binary
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ github.ref_name }}
+          SOURCE_REVISION: ${{ github.sha }}
+          ACTOR: ${{ github.actor }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release-export
+          sha256sum --check SHA256SUMS
+          image=$(<image-id.txt)
+          [[ "$image" =~ ^sha256:[0-9a-f]{64}$ ]]
+          jq -e --arg revision "$SOURCE_REVISION" --arg image "$image" \
+            '.source_revision == $revision and .image_id == $image and .source_dirty == false' image-metadata.json
+          docker load --input image.tar
+          [[ "$(docker image inspect "$image" --format '{{.Id}}')" == "$image" ]]
+          export DOCKER_CONFIG="$RUNNER_TEMP/publish-docker"
+          trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+          ref="ghcr.io/optd-ai/optd:$VERSION"
+          # Never overwrite a version that is already published.
+          if docker manifest inspect "$ref" > manifest-check.txt 2>&1; then
+            echo 'Image version already exists; refusing overwrite' >&2
+            exit 1
+          elif ! grep -Eq 'manifest unknown|no such manifest:' manifest-check.txt; then
+            echo 'Cannot establish image version absence; refusing publication' >&2
+            exit 1
+          fi
+          docker tag "$image" "$ref"
+          docker push "$ref"
+          docker image inspect "$ref" --format '{{join .RepoDigests "\n"}}' > container-digest.txt
+          test -s container-digest.txt
+          chmod +x optctl
+          tar -czf "optctl-$VERSION-linux-x86_64.tar.gz" optctl LICENSE NOTICE
+          sha256sum "optctl-$VERSION-linux-x86_64.tar.gz" image-metadata.json container-digest.txt > SHA256SUMS.txt
+          gh release create "$VERSION" --repo optd-ai/optd --verify-tag \
+            --title "optd $VERSION" --generate-notes \
+            "optctl-$VERSION-linux-x86_64.tar.gz" SHA256SUMS.txt image-metadata.json container-digest.txt

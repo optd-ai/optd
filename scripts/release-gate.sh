@@ -1022,4 +1022,11 @@ fi
 git diff --check "$release_base..$release_revision"
 verify_source
 
+# Export only after all checks; EXIT still enforces exact inventory restoration.
+# Publication must require this process to exit successfully, not just files.
+if [[ -n "${OPTD_RELEASE_EXPORT_DIR:-}" ]]; then
+  run_owned release-export bash scripts/release-export.sh \
+    "$release_image_id" "$artifact_dir" "$OPTD_RELEASE_EXPORT_DIR"
+fi
+
 printf '\nrelease gate complete; every gate-created image is removed on EXIT\n'

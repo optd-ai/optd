@@ -131,3 +131,35 @@ SBOM generation, signing, attestation, and a Pack registry are excluded. A clean
 candidate commit and passing distribution tests alone do not establish complete
 release readiness; actual host and exact-image results and unresolved external
 prerequisites must be reported separately.
+
+## Tag-triggered publication
+
+`.github/workflows/release.yml` publishes stable `vX.Y.Z` tags whose commits are
+ancestors of `master`. Creating and pushing a version tag is the explicit
+release operation; ordinary branch pushes do not publish. Only Linux x86_64 is
+supported.
+
+The read-only validation job runs the complete existing release gate with Deno
+2.8.3, host PostgreSQL 18, and the default Docker Buildx driver. Its unchanged
+12 GiB capacity guard may reject an undersized runner. No checks are skipped.
+`OPTD_RELEASE_EXPORT_DIR` optionally exports the exact tested image and binary
+before cleanup; export files are NOT acceptance evidence until the gate exits
+zero, including its inventory-restoration cleanup. The publishing job depends on
+that success, verifies checksums, and loads that image without rebuilding it.
+
+The publishing job alone receives `contents: write` and `packages: write`
+through GitHub's short-lived token. It publishes `ghcr.io/optd-ai/optd:vX.Y.Z`
+and a GitHub Release containing `optctl-vX.Y.Z-linux-x86_64.tar.gz`, legal
+notices, checksums, image metadata, and registry digest. No `latest` tag is
+moved. OCI version labels retain the gate's source-derived identifier; the
+registry tag supplies the release version. Existing image versions are not
+intentionally overwritten. Network or authorization ambiguity fails closed. A
+container push followed by a failed GitHub Release leaves a partial release
+requiring operator recovery; do not move the version tag or blindly retry it.
+
+GHCR package visibility is independent of repository visibility. After the first
+successful publication, verify anonymous pulling and explicitly configure the
+package as public if needed. No personal access token is required by the
+workflow. Local export checks: `python3 tests/release_export_test.py`.
+End-to-end hosted publishing must still be validated by an explicitly authorized
+first version tag.
