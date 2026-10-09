@@ -37,10 +37,19 @@ jobs:
       - name: Test publication export contracts
         run: python3 tests/release_export_test.py
       - name: Full exact-source release gate and image export
+        shell: bash
         env:
           OPTD_PG_BIN_DIR: /usr/lib/postgresql/18/bin
           OPTD_RELEASE_EXPORT_DIR: ${{ runner.temp }}/release-export
-        run: bash scripts/release-gate.sh
+        run: bash scripts/release-gate.sh 2>&1 | tee "$RUNNER_TEMP/release-gate.log"
+      - name: Retain release gate log
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-gate-log
+          path: ${{ runner.temp }}/release-gate.log
+          if-no-files-found: ignore
+          retention-days: 30
       - name: Retain validated publication artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
