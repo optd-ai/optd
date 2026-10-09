@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# This invocation owns the export; nested gate-contract tests must not inherit it.
+release_export_dir=${OPTD_RELEASE_EXPORT_DIR:-}
+unset OPTD_RELEASE_EXPORT_DIR
+
 readonly frozen_release_base="a6715631d48f2c6bf0c03326c909896ba9058164"
 readonly gate_label_key="dev.optd.release-gate"
 repo_root=""
@@ -1024,9 +1028,9 @@ verify_source
 
 # Export only after all checks; EXIT still enforces exact inventory restoration.
 # Publication must require this process to exit successfully, not just files.
-if [[ -n "${OPTD_RELEASE_EXPORT_DIR:-}" ]]; then
+if [[ -n "$release_export_dir" ]]; then
   run_owned release-export bash scripts/release-export.sh \
-    "$release_image_id" "$artifact_dir" "$OPTD_RELEASE_EXPORT_DIR"
+    "$release_image_id" "$artifact_dir" "$release_export_dir"
 fi
 
 printf '\nrelease gate complete; every gate-created image is removed on EXIT\n'

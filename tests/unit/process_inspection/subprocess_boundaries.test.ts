@@ -25,7 +25,7 @@ Deno.test("production subprocess callsites remain explicitly classified", async 
   assertEquals(
     [...Map.groupBy(sites, (site) => site.path).entries()].map(
       ([path, entries]) => ({ path, count: entries.length }),
-    ),
+    ).sort((a, b) => a.path.localeCompare(b.path)),
     [
       { path: "src/adapters/inbound/cli-cliffy/optctl.ts", count: 1 },
       { path: "src/adapters/outbound/deno-hooks/hook_runner.ts", count: 2 },
@@ -41,7 +41,7 @@ Deno.test("production subprocess callsites remain explicitly classified", async 
         path: "src/adapters/outbound/postgres/auth_repository.ts",
         count: 2,
       },
-    ],
+    ].sort((a, b) => a.path.localeCompare(b.path)),
   );
 
   const cli = only(sites, "optctl.ts");

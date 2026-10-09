@@ -34,6 +34,14 @@ jobs:
           echo 'deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt noble-pgdg main' | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update
           sudo apt-get install -y postgresql-18
+      - name: Establish pinned base-image baseline
+        shell: bash
+        run: |
+          # Pull before the gate inventory, never during exact cleanup accounting.
+          while IFS= read -r image; do
+            [[ "$image" =~ @sha256:[0-9a-f]{64}$ ]]
+            docker pull "$image"
+          done < <(awk '/^ARG (DENO_IMAGE|POSTGRES_IMAGE)=/ {sub(/^[^=]*=/, ""); print}' Dockerfile)
       - name: Test publication export contracts
         run: python3 tests/release_export_test.py
       - name: Full exact-source release gate and image export
