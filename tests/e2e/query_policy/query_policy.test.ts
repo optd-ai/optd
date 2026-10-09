@@ -741,6 +741,20 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       [ids.object, [ids.object, ids.otherObject, ids.projectTwoObject]],
     );
 
+    // Force sub-millisecond sort-key collisions to catch cursor precision loss.
+    await query(
+      harness.server.sql,
+      `with ordered as (
+      select id, row_number() over (order by id) n from ${
+        quoteIdentifier(table)
+      }
+      where project_id=$1
+    ) update ${quoteIdentifier(table)} q set created_at =
+      '2026-01-01T00:00:00.123000Z'::timestamptz + ordered.n * interval '1 microsecond'
+      from ordered where q.id=ordered.id`,
+      [project],
+    );
+
     const ordinaryArgs = [
       "--project",
       project,

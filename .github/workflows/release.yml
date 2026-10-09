@@ -42,6 +42,8 @@ jobs:
             [[ "$image" =~ @sha256:[0-9a-f]{64}$ ]]
             docker pull "$image"
           done < <(awk '/^ARG (DENO_IMAGE|POSTGRES_IMAGE)=/ {sub(/^[^=]*=/, ""); print}' Dockerfile)
+          # Required negative-compatibility fixture, not a production dependency.
+          docker pull postgres:16-bookworm
       - name: Test publication export contracts
         run: python3 tests/release_export_test.py
       - name: Full exact-source release gate and image export

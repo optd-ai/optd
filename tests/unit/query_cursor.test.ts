@@ -1,4 +1,4 @@
-import { assertEquals, assertRejects } from "jsr:@std/assert";
+import { assertEquals, assertRejects } from "@std/assert";
 import { QueryCursorSigner } from "../../src/domain/queries/cursor.ts";
 import type { FieldSpec } from "../../src/domain/expressions/cel.ts";
 
@@ -40,6 +40,27 @@ Deno.test("query cursor HMAC binds query, policy, schema, and typed position", a
     )
   );
 });
+Deno.test("query cursor preserves PostgreSQL microsecond boundaries", async () => {
+  const signer = new QueryCursorSigner("test master key material");
+  for (
+    const timestamp of [
+      "2026-01-01T00:00:00.123001Z",
+      "2026-01-01T00:00:00.123999Z",
+    ]
+  ) {
+    const position = { values: [null, timestamp], id };
+    const cursor = await signer.encode(
+      "sha256:shape",
+      "sha256:policy",
+      position,
+    );
+    assertEquals(
+      await signer.decode(cursor, "sha256:shape", "sha256:policy", specs),
+      position,
+    );
+  }
+});
+
 Deno.test("query cursors reject noncanonical base64url aliases", async () => {
   const signer = new QueryCursorSigner("test master key material");
   let canonical = "";

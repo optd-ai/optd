@@ -116,10 +116,15 @@ function validateValue(value: unknown, spec: FieldSpec): void {
     case "timestamp": {
       if (
         typeof value !== "string" ||
-        !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(value)
+        !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3}(?:\d{3})?)?Z$/.test(
+          value,
+        )
       ) throw new Error();
       const canonical = new Date(value).toISOString();
-      if (value !== canonical && value !== canonical.replace(".000Z", "Z")) {
+      const milliseconds = value.replace(/(\.\d{3})\d{3}Z$/, "$1Z");
+      if (
+        milliseconds !== canonical && value !== canonical.replace(".000Z", "Z")
+      ) {
         throw new Error();
       }
     }

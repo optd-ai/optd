@@ -460,9 +460,16 @@ Deno.test("PG18.4+ app-managed delayed stop reaches immediate fallback and crash
         await exists(`${rootDir}/postgres/data/postmaster.pid`),
         false,
       );
-      assertEquals(
-        await readClusterState(bins.postgres, runtime.dataDir),
-        "in production",
+      // SIGQUIT can interrupt the fast-shutdown checkpoint after pg_control
+      // enters "shutting down". Both states require crash recovery; neither
+      // may be mistaken for a completed clean shutdown.
+      const interruptedState = await readClusterState(
+        bins.postgres,
+        runtime.dataDir,
+      );
+      assert(
+        ["in production", "shutting down"].includes(interruptedState),
+        `expected crash-recovery state, got ${interruptedState}`,
       );
       const [blockerStatus] = await blockerOutput;
       assertEquals(blockerStatus.success, false);

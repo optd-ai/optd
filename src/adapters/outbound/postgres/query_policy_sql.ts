@@ -254,7 +254,13 @@ async function executePage(
     ? policy.predicates.read_archived
     : `q."archived_at" is null`;
   const keyset = position
-    ? keysetSql(sort, position.values, params, request.definition.kind)
+    ? keysetSql(
+      sort,
+      position.values,
+      params,
+      request.definition.kind,
+      definition.fields,
+    )
     : "true";
   const order = sort.map((item) =>
     `q.${qi(column(item.field, request.definition.kind))} ${item.direction} ${
@@ -263,10 +269,15 @@ async function executePage(
   ).join(",");
   params.push((request.limit ?? 50) + 1);
   const overrides = Object.entries(definition.fields).filter(([, spec]) =>
-    spec.type === "decimal" || spec.type === "integer"
-  ).flatMap(([field]) => [
+    spec.type === "decimal" || spec.type === "integer" ||
+    spec.type === "timestamp"
+  ).flatMap(([field, spec]) => [
     `'${column(field, request.definition.kind)}'`,
-    `page.${qi(column(field, request.definition.kind))}::text`,
+    spec.type === "timestamp"
+      ? `to_char(page.${
+        qi(column(field, request.definition.kind))
+      } at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`
+      : `page.${qi(column(field, request.definition.kind))}::text`,
   ]).join(",");
   const rowJson = overrides
     ? `to_jsonb(page) || jsonb_build_object(${overrides})`
@@ -1262,16 +1273,22 @@ function keysetSql(
   values: unknown[],
   params: unknown[],
   kind: "resource" | "relationship",
+  fields: Record<string, FieldSpec>,
 ) {
+  // Bind timestamps as text so postgres.js cannot round them through Date.
+  const parameter = (field: string) =>
+    fields[field]?.type === "timestamp"
+      ? `$${params.length}::text::timestamptz`
+      : `$${params.length}`;
   const clauses: string[] = [];
   for (let i = 0; i < sort.length; i++) {
     const equal: string[] = [];
     for (let j = 0; j < i; j++) {
       params.push(values[j]);
       equal.push(
-        `q.${
-          qi(column(sort[j].field, kind))
-        } is not distinct from $${params.length}`,
+        `q.${qi(column(sort[j].field, kind))} is not distinct from ${
+          parameter(sort[j].field)
+        }`,
       );
     }
     const col = `q.${qi(column(sort[i].field, kind))}`;
@@ -1280,7 +1297,7 @@ function keysetSql(
       after = sort[i].direction === "asc" ? "false" : `${col} is not null`;
     } else {
       params.push(values[i]);
-      const p = `$${params.length}`;
+      const p = parameter(sort[i].field);
       after = sort[i].direction === "asc"
         ? `(${col}>${p} or ${col} is null)`
         : `${col}<${p}`;
@@ -1314,7 +1331,9 @@ function typedValue(
     if (Number.isNaN(instant.getTime())) {
       throw new QueryFailure("invalid_data");
     }
-    return instant.toISOString();
+    // SQL supplies canonical UTC microseconds. Date would truncate the keyset
+    // boundary to milliseconds and skip rows sharing that millisecond.
+    return found;
   }
   if (spec?.type === "integer" && found !== null) {
     if (typeof found !== "string" || !/^-?[0-9]+$/.test(found)) {
