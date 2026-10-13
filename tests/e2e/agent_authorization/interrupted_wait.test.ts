@@ -16,6 +16,7 @@ Deno.test("distinct compiled process trees reconnect wait, delegate, replace, an
     const requestOnly = await launcher(harness, launchers, "request_only");
     const waitingAgent = await launcher(harness, launchers, "agent");
     const delegatedAgent = await launcher(harness, launchers, "agent");
+    const narrowAgent = await launcher(harness, launchers, "agent");
     const replacementAgent = await launcher(harness, launchers, "agent");
     const revocationAgent = await launcher(harness, launchers, "agent");
     assertEquals([
@@ -203,7 +204,7 @@ Deno.test("distinct compiled process trees reconnect wait, delegate, replace, an
       token: undefined,
       requestToken: initial.requestToken,
     });
-    const narrowRequest = await delegatedAgent.runOptctl([
+    const narrowRequest = await narrowAgent.runOptctl([
       "--json",
       "auth",
       "request",
@@ -232,7 +233,7 @@ Deno.test("distinct compiled process trees reconnect wait, delegate, replace, an
       token: undefined,
       requestToken: initial.requestToken,
     });
-    const narrowWait = await delegatedAgent.runOptctl([
+    const narrowWait = await narrowAgent.runOptctl([
       "--json",
       "auth",
       "wait",
@@ -262,7 +263,7 @@ Deno.test("distinct compiled process trees reconnect wait, delegate, replace, an
       token: narrowToken,
       requestToken: undefined,
     });
-    const underAuthorized = await delegatedAgent.runOptctl([
+    const underAuthorized = await narrowAgent.runOptctl([
       "--json",
       "auth",
       "approve",
