@@ -9,6 +9,8 @@ for (const flags of [[], ["--json"], ["--verbose"], ["--json", "--verbose"]]) {
   Deno.test(`agent redemption keeps shared discovery and hides credentials (${flags.join(" ") || "text"})`, async () => {
     const root = await Deno.makeTempDir({ prefix: "optd-redemption-cli-" });
     const previous = Deno.env.get("XDG_DATA_HOME");
+    const previousAnchor = Deno.env.get("OPTD_AUTH_ANCHOR_PID");
+    Deno.env.set("OPTD_AUTH_ANCHOR_PID", String(Deno.ppid));
     Deno.env.set("XDG_DATA_HOME", root);
     const requestToken = "test-request-only-secret";
     const agentToken = "test-agent-bearer-secret";
@@ -101,6 +103,8 @@ for (const flags of [[], ["--json"], ["--verbose"], ["--json", "--verbose"]]) {
       await server.shutdown();
       if (previous === undefined) Deno.env.delete("XDG_DATA_HOME");
       else Deno.env.set("XDG_DATA_HOME", previous);
+      if (previousAnchor === undefined) Deno.env.delete("OPTD_AUTH_ANCHOR_PID");
+      else Deno.env.set("OPTD_AUTH_ANCHOR_PID", previousAnchor);
       await Deno.remove(root, { recursive: true });
     }
   });

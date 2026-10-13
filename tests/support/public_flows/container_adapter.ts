@@ -13,6 +13,7 @@ import type {
   PublicFlowProcessTreeKind,
 } from "../public_flow_contract.ts";
 import { PublicFlowAssets } from "./assets.ts";
+import { readTestAuthorizationToken } from "./auth_evidence.ts";
 import {
   type CompletePublicFlowBackend,
   type HookQuiescenceEvidence,
@@ -69,16 +70,13 @@ export async function createContainerPublicFlowBackend(
     const launcher: PublicFlowLauncher = {
       kind,
       async runCli(args, options) {
-        if (kind === "agent" && args.includes("wait") && requesterRoot) {
-          await copyAuthStore(harness, requesterRoot, inner.root);
-        }
         const result = await inner.runOptctl(
           [...args],
           options?.stdin,
           options?.env ? { ...options.env } : undefined,
         );
         if (
-          kind === "request_only" && args.includes("request") &&
+          kind === "request_only" && args.includes("login") &&
           result.code === 0
         ) {
           requesterRoot = inner.root;
@@ -106,6 +104,23 @@ export async function createContainerPublicFlowBackend(
 
   const backend: CompletePublicFlowBackend = {
     backend: "release_container",
+    async authorizationTokenForHttpProbe(authorizationId) {
+      const script =
+        `${readTestAuthorizationToken.toString()}; console.log(await readTestAuthorizationToken('/data/.container-test-clients', Deno.args[0]));`;
+      const result = await harness.docker([
+        "exec",
+        harness.container,
+        "deno",
+        "eval",
+        script,
+        authorizationId,
+      ]);
+      const token = result.stdout.trim();
+      if (result.code !== 0 || !token) {
+        throw new Error("test authorization credential not found");
+      }
+      return token;
+    },
     serverOrigin: `http://127.0.0.1:${harness.port}`,
     async compileCurrentCli() {
       const expected = (await command("git", ["rev-parse", "HEAD"])).stdout

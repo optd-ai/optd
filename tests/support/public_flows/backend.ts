@@ -84,6 +84,7 @@ export const QUIESCENT_HOOK_EVIDENCE: HookQuiescenceEvidence = Object.freeze({
 /** Test-only semantic evidence and fault controls. Public facts are never made here. */
 export interface CompletePublicFlowEvidence {
   assetPath(asset: PublicFlowAsset): Promise<string>;
+  authorizationTokenForHttpProbe(authorizationId: string): Promise<string>;
   materializeInput(name: string, value: unknown): Promise<string>;
   loginProcess(
     username: string,

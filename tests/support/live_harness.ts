@@ -167,6 +167,7 @@ export async function startLiveHarness(
   env.OPTD_PG_PORT = String(freePort());
   env.OPTD_HOST = "127.0.0.1";
   env.HOME = homeDir;
+  env.XDG_DATA_HOME = join(homeDir, ".local", "share");
   env.XDG_CONFIG_HOME = xdgConfig;
   env.OPTD_AUTH_ANCHOR_PID = String(Deno.pid);
   env.XDG_STATE_HOME = xdgState;

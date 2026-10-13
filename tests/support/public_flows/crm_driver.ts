@@ -250,7 +250,7 @@ export async function runCompleteCrmPublicFlow(
     assertEquals(roles.data.roles.includes(`${CRM}:sales_manager`), true);
     const request = json(
       await ok(
-        requestOnly.runCli([
+        agent.runCli([
           "--json",
           "auth",
           "request",
@@ -288,10 +288,14 @@ export async function runCompleteCrmPublicFlow(
       role: `${CRM}:sales_manager`,
       boundary: { type: "project", project_id: projectId },
     }]);
+    assertEquals("token" in redeemed.data, false);
+    const agentToken = await harness.authorizationTokenForHttpProbe(
+      String(redeemed.data.authorization.id),
+    );
     const directWhoamiResponse = await fetch(
       `${harness.serverOrigin}/api/v1/auth/me`,
       {
-        headers: { authorization: `Bearer ${redeemed.data.token}` },
+        headers: { authorization: `Bearer ${agentToken}` },
       },
     );
     const directWhoami = await directWhoamiResponse.json();
@@ -367,12 +371,12 @@ export async function runCompleteCrmPublicFlow(
       output,
     );
     const revoked = await fetch(`${harness.serverOrigin}/api/v1/auth/me`, {
-      headers: { authorization: `Bearer ${redeemed.data.token}` },
+      headers: { authorization: `Bearer ${agentToken}` },
     });
     assertEquals(revoked.status, 401);
     const revokedBody = await revoked.text();
     assertEquals(revokedBody.includes("Bearer "), false);
-    assertEquals(revokedBody.includes(String(redeemed.data.token)), false);
+    assertEquals(revokedBody.includes(String(agentToken)), false);
     const revokedSameProcess = await agent.runCli([
       "--json",
       "auth",
@@ -381,7 +385,7 @@ export async function runCompleteCrmPublicFlow(
     output.push(revokedSameProcess.stdout, revokedSameProcess.stderr);
     assertEquals(revokedSameProcess.code, 1);
     assertEquals(
-      revokedSameProcess.stdout.includes(String(redeemed.data.token)),
+      revokedSameProcess.stdout.includes(String(agentToken)),
       false,
     );
     for (
@@ -418,11 +422,11 @@ export async function runCompleteCrmPublicFlow(
       output.push(denied.stdout, denied.stderr);
       assertEquals(denied.code, 1, denied.stderr);
       assertEquals(
-        denied.stdout.includes(String(redeemed.data.token)),
+        denied.stdout.includes(String(agentToken)),
         false,
       );
       assertEquals(
-        denied.stderr.includes(String(redeemed.data.token)),
+        denied.stderr.includes(String(agentToken)),
         false,
       );
     }

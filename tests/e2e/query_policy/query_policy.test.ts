@@ -891,7 +891,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       token: undefined,
       requestToken: ordinaryState.requestToken,
     });
-    const rootRequest = await requestOnlyAgent.runOptctl([
+    const rootRequest = await rootAgent.runOptctl([
       "--json",
       "auth",
       "request",
@@ -1039,7 +1039,11 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       delegated.token,
       agentRequest,
     );
-    assertEquals(delegatedBaseline.status, 200);
+    assertEquals(
+      delegatedBaseline.status,
+      200,
+      await delegatedBaseline.clone().text(),
+    );
     const delegatedPage = await delegatedBaseline.json();
     assertEquals(delegatedPage.meta.total, 11);
     const delegatedCursor = String(delegatedPage.meta.next_cursor);
@@ -1677,7 +1681,7 @@ async function createDelegatedQueryAgent(input: {
     token: undefined,
     requestToken: input.requestToken,
   });
-  const requested = await input.requester.runOptctl([
+  const requested = await input.redeemer.runOptctl([
     "--json",
     "auth",
     "request",

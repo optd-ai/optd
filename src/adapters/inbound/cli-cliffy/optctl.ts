@@ -64,7 +64,9 @@ async function requestCredentialHeaders(
   url: string,
 ): Promise<Record<string, string>> {
   const state = await readOrigin(new URL(url).origin);
-  const token = state.requestToken ?? state.token;
+  const token = state.authorizationId && state.token
+    ? state.token
+    : state.requestToken ?? state.token;
   return token ? { authorization: `Bearer ${token}` } : {};
 }
 async function getJson(url: string): Promise<unknown> {

@@ -726,15 +726,12 @@ async function createPublicAgent(
     0,
   );
   const requesterState = await storedAuthState(harness);
-  const requestLauncher = await harness.createProcessTreeLauncher(
-    "request_only",
-  );
   const agentLauncher = await harness.createAgentLauncher();
   await selectStoredCredential(harness, {
     token: undefined,
     requestToken: requesterState.requestToken,
   });
-  const requested = await requestLauncher.runOptctl([
+  const requested = await agentLauncher.runOptctl([
     "--json",
     "auth",
     "request",

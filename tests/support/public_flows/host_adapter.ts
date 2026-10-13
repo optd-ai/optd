@@ -15,6 +15,7 @@ import type {
   PublicFlowProcess,
 } from "../public_flow_contract.ts";
 import { PublicFlowAssets } from "./assets.ts";
+import { readTestAuthorizationToken } from "./auth_evidence.ts";
 import {
   type CompletePublicFlowBackend,
   type HookQuiescenceEvidence,
@@ -67,6 +68,14 @@ export function createHostPublicFlowBackend(
 
   const backend: CompletePublicFlowBackend = {
     backend: "host",
+    async authorizationTokenForHttpProbe(authorizationId) {
+      const token = await readTestAuthorizationToken(
+        harness.rootDir,
+        authorizationId,
+      );
+      if (!token) throw new Error("test authorization credential not found");
+      return token;
+    },
     serverOrigin: harness.baseUrl,
     async compileCurrentCli() {
       assertStringIncludes(harness.binaryPath, harness.binarySourceDigest);

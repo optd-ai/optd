@@ -343,7 +343,7 @@ export async function runCompleteProjectsPublicFlow(
     );
     const request = json(
       await ok(
-        requester.runCli([
+        agent.runCli([
           "--json",
           "auth",
           "request",
@@ -384,9 +384,13 @@ export async function runCompleteProjectsPublicFlow(
     const whoami = json(
       await ok(agent.runCli(["--json", "auth", "whoami"]), output),
     );
+    assertEquals("token" in redeemed.data, false);
+    const agentToken = await harness.authorizationTokenForHttpProbe(
+      String(redeemed.data.authorization.id),
+    );
     const directWhoamiResponse = await fetch(
       `${harness.serverOrigin}/api/v1/auth/me`,
-      { headers: { authorization: `Bearer ${redeemed.data.token}` } },
+      { headers: { authorization: `Bearer ${agentToken}` } },
     );
     const directWhoami = await directWhoamiResponse.json();
     assertEquals(directWhoamiResponse.status, 200);
@@ -1261,12 +1265,12 @@ export async function runCompleteProjectsPublicFlow(
     const revokedDirect = await fetch(
       `${harness.serverOrigin}/api/v1/auth/me`,
       {
-        headers: { authorization: `Bearer ${redeemed.data.token}` },
+        headers: { authorization: `Bearer ${agentToken}` },
       },
     );
     assertEquals(revokedDirect.status, 401);
     assertEquals(
-      (await revokedDirect.text()).includes(String(redeemed.data.token)),
+      (await revokedDirect.text()).includes(String(agentToken)),
       false,
     );
     for (
@@ -1301,8 +1305,8 @@ export async function runCompleteProjectsPublicFlow(
       const revoked = await agent.runCli(args);
       output.push(revoked.stdout, revoked.stderr);
       assertEquals(revoked.code, 1);
-      assertEquals(revoked.stdout.includes(String(redeemed.data.token)), false);
-      assertEquals(revoked.stderr.includes(String(redeemed.data.token)), false);
+      assertEquals(revoked.stdout.includes(String(agentToken)), false);
+      assertEquals(revoked.stderr.includes(String(agentToken)), false);
     }
     const diagnostics = await harness.diagnostics();
     assert(diagnostics.serverLogs.length > 0);
