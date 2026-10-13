@@ -77,7 +77,7 @@ Deno.test("distinct compiled process trees reconnect wait, delegate, replace, an
       requestToken: initial.requestToken,
     });
 
-    const request = await requestOnly.runOptctl([
+    const request = await waitingAgent.runOptctl([
       "--json",
       "auth",
       "request",
@@ -203,7 +203,7 @@ Deno.test("distinct compiled process trees reconnect wait, delegate, replace, an
       token: undefined,
       requestToken: initial.requestToken,
     });
-    const narrowRequest = await requestOnly.runOptctl([
+    const narrowRequest = await delegatedAgent.runOptctl([
       "--json",
       "auth",
       "request",
@@ -279,7 +279,7 @@ Deno.test("distinct compiled process trees reconnect wait, delegate, replace, an
       token: undefined,
       requestToken: initial.requestToken,
     });
-    const delegatedRequest = await requestOnly.runOptctl([
+    const delegatedRequest = await delegatedAgent.runOptctl([
       "--json",
       "auth",
       "request",

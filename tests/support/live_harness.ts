@@ -168,6 +168,7 @@ export async function startLiveHarness(
   env.OPTD_HOST = "127.0.0.1";
   env.HOME = homeDir;
   env.XDG_CONFIG_HOME = xdgConfig;
+  env.OPTD_AUTH_ANCHOR_PID = String(Deno.pid);
   env.XDG_STATE_HOME = xdgState;
   if (options.bootstrapToken === null) delete env.OPTD_BOOTSTRAP_TOKEN;
   else env.OPTD_BOOTSTRAP_TOKEN = options.bootstrapToken ?? randomSecret(32);
@@ -1101,6 +1102,7 @@ export async function makeProcessTreeLauncher(
   },
 ): Promise<CliLauncher> {
   const worker = `
+    Deno.env.set("OPTD_AUTH_ANCHOR_PID", String(Deno.pid));
     const binary = Deno.args[0];
     let buffered = "";
     for await (const chunk of Deno.stdin.readable.pipeThrough(new TextDecoderStream())) {

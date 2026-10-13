@@ -111,14 +111,13 @@ Deno.test("compiled optctl binds one nearest Linux process credential without fa
     );
     await proveSignalForwarding(harness);
 
-    const isolatedRequest = await runHelper(
+    const isolatedRun = runHelper(
       helperPath,
       harness,
       requestPath,
       resultPath,
       "request",
     );
-    assertEquals(isolatedRequest.code, 0, isolatedRequest.stderr);
     const requestId = await waitForJson(requestPath) as string;
     const approved = await harness.runOptctl([
       "--json",
@@ -131,13 +130,8 @@ Deno.test("compiled optctl binds one nearest Linux process credential without fa
     ]);
     assertEquals(approved.code, 0, approved.stderr);
     const contextsBefore = await authContextCount(harness);
-    const isolateResult = await runHelper(
-      helperPath,
-      harness,
-      requestPath,
-      resultPath,
-      "finish",
-    );
+    await Deno.writeTextFile(requestPath + ".approved", "ready");
+    const isolateResult = await isolatedRun;
     assertEquals(isolateResult.code, 0, isolateResult.stderr);
     const narrow = await waitForJson(resultPath) as Record<string, unknown>;
     assertEquals(narrow.credential_type, "agent");
@@ -526,6 +520,7 @@ function narrowAgentHelper(): string {
         HOME: Deno.env.get("HOME"),
         XDG_CONFIG_HOME: Deno.env.get("XDG_CONFIG_HOME"),
         XDG_STATE_HOME: Deno.env.get("XDG_STATE_HOME"),
+        OPTD_AUTH_ANCHOR_PID: String(Deno.pid),
       };
       if (mode === "request" || mode === "status-stop") {
         env.OPTD_AUTH_TREE_STOP_PID = String(Deno.pid);
@@ -549,7 +544,11 @@ function narrowAgentHelper(): string {
       if (request.code !== 0) throw new Error(request.stderr);
       const requestId = JSON.parse(request.stdout).data.id;
       await Deno.writeTextFile(requestPath, JSON.stringify(requestId));
-      Deno.exit(0);
+      const deadline = Date.now() + 30_000;
+      while (!(await Deno.stat(requestPath + ".approved").catch(() => null))) {
+        if (Date.now() > deadline) throw new Error("approval synchronization timed out");
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
     }
     const requestId = JSON.parse(await Deno.readTextFile(requestPath));
     const waited = await run(["auth", "wait", requestId]);

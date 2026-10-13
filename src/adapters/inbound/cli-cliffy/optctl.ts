@@ -10,6 +10,7 @@ import {
 import {
   activeContextOrigin,
   addContext,
+  authAnchor,
   cleanupLocalAuth,
   doctorLocalAuth,
   ensureContext,
@@ -24,6 +25,7 @@ import {
 } from "./auth_store.ts";
 import { opaqueToken, tokenDigest } from "../../../domain/auth/token.ts";
 import { isUuidV7 } from "../../../domain/ids/uuid_v7.ts";
+import { sameProcess } from "../../../application/ports/process_inspection.ts";
 
 export type OptctlRunResult = { stdout: string; stderr: string; code: number };
 type Parsed = {
@@ -945,6 +947,8 @@ const CLI_GROUPS: ReadonlyArray<readonly [string, string, readonly string[]]> =
       "status",
       "whoami",
       "sessions",
+      "session-pid",
+      "anchor",
       "roles",
       "request",
       "approve",
@@ -1094,6 +1098,21 @@ function helpText(args: string[]): string {
       "Options:",
       "  -h, --help  Show this help.",
       "",
+      ...(name === "auth" &&
+          ["request", "wait", "login", "session-pid", "anchor"].includes(
+            words[1],
+          )
+        ? [
+          "Process binding:",
+          "  Credentials bind to the nearest recognized harness, interactive shell, or narrower existing binding.",
+          "  Pipelines, subshells and command substitutions retain the owning harness.",
+          "  Unknown harness launchers can set OPTD_AUTH_ANCHOR_PID to their own PID.",
+          "  Explicit anchors must be ancestors inside auth isolate and cannot widen a nearer binding.",
+          "  Requests and redemption must resolve to the same live process identity.",
+          "  After approval, verify optctl auth status from a separate tool invocation.",
+          "",
+        ]
+        : []),
     ].join("\n");
   }
   return [
@@ -1199,6 +1218,11 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       result = await localAuthStatus(parsed.server);
     } else if (cmd === "auth" && sub === "whoami") {
       result = await getJson(`${parsed.server}/api/v1/auth/me`);
+    } else if (cmd === "auth" && sub === "anchor") {
+      result = {
+        ok: true,
+        data: { process_binding: await authAnchor(parsed.server) },
+      };
     } else if (cmd === "auth" && sub === "session-pid") {
       return { stdout: `${Deno.ppid}\n`, stderr: "", code: 0 };
     } else if (cmd === "auth" && sub === "doctor") {
@@ -1256,7 +1280,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       for (const key of Object.keys(env)) {
         if (
           /^OPTD_.*(?:TOKEN|BEARER|CREDENTIAL).*$/.test(key) ||
-          key === "OPTD_MASTER_KEY"
+          key === "OPTD_MASTER_KEY" || key === "OPTD_AUTH_ANCHOR_PID"
         ) delete env[key];
       }
       return await runIsolatedCommand(
@@ -1359,6 +1383,15 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       const prior = await readOrigin(parsed.server);
       const authorizationNonce = prior.authorizationNonces?.[value];
       if (authorizationNonce) {
+        const requestAnchor = prior.authorizationAnchors?.[value];
+        if (
+          !requestAnchor ||
+          !sameProcess(requestAnchor, await authAnchor(parsed.server))
+        ) {
+          throw usageError(
+            "authorization request belongs to a different or expired process tree; create a fresh request from this harness",
+          );
+        }
         const state = await waitForAuthorization(parsed.server, value);
         if (state.status !== "approved") {
           throw new OptctlError(errorEnvelope({
@@ -1368,6 +1401,11 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
             message: state.reason ?? `authorization request is ${state.status}`,
             details: { request_id: value, status: state.status },
           }));
+        }
+        if (!sameProcess(requestAnchor, await authAnchor(parsed.server))) {
+          throw usageError(
+            "authorization anchor changed while awaiting approval",
+          );
         }
         const redeemed = await decodeJsonResponse(
           await boundedFetch(
@@ -1390,12 +1428,18 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
           | undefined;
         await writeOrigin(parsed.server, {
           token: String(data.token),
-          requestToken: undefined,
           authorizationId: typeof authorization?.id === "string"
             ? authorization.id
             : value,
-        });
-        result = redeemed;
+        }, requestAnchor);
+        result = {
+          ok: true,
+          data: {
+            authorization,
+            authenticated: true,
+            process_binding: requestAnchor,
+          },
+        };
       } else {
         const nonce = prior.resetNonces?.[value];
         if (!nonce) {
@@ -1482,6 +1526,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       if (!roles.length) {
         throw usageError("auth request requires at least one --role");
       }
+      const requestAnchor = await authAnchor(parsed.server);
       const nonce = opaqueToken();
       result = await decodeJsonResponse(
         await boundedFetch(`${parsed.server}/api/v1/auth/requests`, {
@@ -1510,7 +1555,15 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
           ...(await readOrigin(parsed.server)).authorizationNonces,
           [id]: nonce,
         },
+        authorizationAnchors: {
+          ...(await readOrigin(parsed.server)).authorizationAnchors,
+          [id]: requestAnchor,
+        },
       });
+      result = {
+        ...(result as Record<string, unknown>),
+        data: { ...envelopeData(result), process_binding: requestAnchor },
+      };
     } else if (
       cmd === "auth" && (sub === "approve" || sub === "deny") && value
     ) {

@@ -88,6 +88,11 @@ export class LinuxProcessInspector implements ProcessInspector {
     }
   }
 
+  async command(pid: number): Promise<string[]> {
+    const text = await this.readFile(`${this.procRoot}/${pid}/cmdline`);
+    return text.split("\0").filter(Boolean);
+  }
+
   async ancestry(
     startPid: number,
     stopPid?: number,
@@ -110,14 +115,18 @@ export class LinuxProcessInspector implements ProcessInspector {
         `tree stop pid ${stopPid} is not in caller ancestry`,
       );
     }
-    // /proc is not an atomic snapshot. Reject a walk if its starting process changed.
-    if (
-      result.length && !sameProcess(result[0], await this.inspect(startPid))
-    ) {
-      throw new ProcessInspectionError(
-        "gone",
-        `process ${startPid} changed during inspection`,
-      );
+    // Reject PID reuse and reparenting anywhere in the selected ancestry.
+    for (const identity of result) {
+      const current = await this.inspect(identity.pid);
+      if (
+        !sameProcess(identity, current) ||
+        identity.parentPid !== current.parentPid
+      ) {
+        throw new ProcessInspectionError(
+          "gone",
+          `process ${identity.pid} changed during inspection`,
+        );
+      }
     }
     return result;
   }
@@ -125,7 +134,7 @@ export class LinuxProcessInspector implements ProcessInspector {
 
 export function processInspectorFor(
   os: typeof Deno.build.os,
-): ProcessInspector {
+): LinuxProcessInspector {
   if (os !== "linux") {
     throw new ProcessInspectionError(
       "unsupported",
@@ -135,6 +144,6 @@ export function processInspectorFor(
   return new LinuxProcessInspector();
 }
 
-export function platformProcessInspector(): ProcessInspector {
+export function platformProcessInspector(): LinuxProcessInspector {
   return processInspectorFor(Deno.build.os);
 }

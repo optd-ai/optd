@@ -6,7 +6,11 @@ import {
 import { dirname, join } from "@std/path";
 import { platformProcessInspector } from "../../outbound/process-inspection/linux.ts";
 import type { LocalCredential } from "../../../application/ports/local_auth.ts";
-import type { ProcessIdentity } from "../../../application/ports/process_inspection.ts";
+import {
+  type ProcessIdentity,
+  sameProcess,
+} from "../../../application/ports/process_inspection.ts";
+import { resolveProcessAnchor } from "./auth_anchor.ts";
 
 export type LocalContext = {
   name: string;
@@ -32,6 +36,7 @@ export type OriginState = {
   resetNonces?: Record<string, string>;
   resetCapabilities?: Record<string, string>;
   authorizationNonces?: Record<string, string>;
+  authorizationAnchors?: Record<string, ProcessIdentity>;
 };
 
 const contextPath = () => join(authDataRoot(), "contexts.json");
@@ -182,8 +187,24 @@ function stopPid(): number | undefined {
   return value;
 }
 
-async function parentIdentity(): Promise<ProcessIdentity> {
-  return await platformProcessInspector().inspect(Deno.ppid);
+export async function authAnchor(origin: string): Promise<ProcessIdentity> {
+  const raw = Deno.env.get("OPTD_AUTH_ANCHOR_PID");
+  const explicitPid = raw === undefined ? undefined : Number(raw);
+  if (
+    explicitPid !== undefined &&
+    (!Number.isSafeInteger(explicitPid) || explicitPid <= 1)
+  ) {
+    throw new Error(
+      "auth_anchor_invalid: OPTD_AUTH_ANCHOR_PID must identify an ancestor process",
+    );
+  }
+  const inspector = platformProcessInspector();
+  return await resolveProcessAnchor(inspector, Deno.ppid, {
+    stopPid: stopPid(),
+    explicitPid,
+    nearestBinding: (await store().select(origin, Deno.ppid, stopPid()))
+      ?.anchor,
+  });
 }
 
 export async function selectedCredential(
@@ -208,12 +229,19 @@ export async function readOrigin(origin: string): Promise<OriginState> {
 export async function writeOrigin(
   origin: string,
   update: OriginState,
+  expectedAnchor?: ProcessIdentity,
 ): Promise<void> {
   const needsAnchor = Object.hasOwn(update, "token");
+  const anchor = needsAnchor ? await authAnchor(origin) : undefined;
+  if (expectedAnchor && (!anchor || !sameProcess(anchor, expectedAnchor))) {
+    throw new Error(
+      "auth_anchor_changed: credential cannot be bound outside its request process tree",
+    );
+  }
   await store().updateState(
     origin,
     update as Record<string, unknown>,
-    needsAnchor ? await parentIdentity() : undefined,
+    anchor,
   );
 }
 

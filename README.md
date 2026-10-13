@@ -23,6 +23,12 @@ and the two supported production modes: app-managed PostgreSQL in one container,
 or an external PostgreSQL server. Official proof Packs are `optd/crm` and
 `optd/projects`, using the `optd.dev/v1` namespace. There is no Pack registry.
 
+## Agent authentication
+
+See [agent CLI authentication](docs/agent-auth.md) before using `optctl` through
+an agent command tool. Temporary shells and pipelines affect process binding;
+verify authorization from a separate tool invocation before doing work.
+
 ## Validation and release
 
 [Local distribution checks](docs/release.md) bind artifacts to exact clean
