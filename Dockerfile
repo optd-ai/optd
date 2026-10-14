@@ -7,7 +7,7 @@ FROM ${DENO_IMAGE} AS build
 WORKDIR /app
 COPY deno.json deno.lock ./
 COPY src ./src
-ARG OPTD_VERSION=0.2.1-dev
+ARG OPTD_VERSION=0.2.2-dev
 ARG OPTD_REVISION=unknown
 RUN OPTD_BUILD_VERSION="$OPTD_VERSION" OPTD_BUILD_REVISION="$OPTD_REVISION" deno eval 'await Deno.writeTextFile("src/config/build.ts", "export const BUILD_VERSION = " + JSON.stringify(Deno.env.get("OPTD_BUILD_VERSION")) + ";\nexport const BUILD_REVISION = " + JSON.stringify(Deno.env.get("OPTD_BUILD_REVISION")) + ";\n");'
 RUN deno cache --frozen src/main_server.ts src/main_optctl.ts \
@@ -46,7 +46,7 @@ RUN chmod 0555 /usr/local/bin/optd /usr/local/bin/optctl \
 # port 5432 as exposed metadata. Docker cannot remove inherited metadata, so
 # copy the prepared filesystem into a metadata-clean final image.
 FROM scratch AS runtime
-ARG OPTD_VERSION=0.2.1-dev
+ARG OPTD_VERSION=0.2.2-dev
 ARG OPTD_REVISION=unknown
 ARG OPTD_SOURCE=https://github.com/optd-ai/optd
 COPY --from=rootfs / /

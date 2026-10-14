@@ -83,7 +83,13 @@ Deno.test("partial snapshot and supplementary scan failures cannot become empty 
 
 Deno.test("gate uses NUL paths, one build, one suite, and only the frozen image ID", async () => {
   const fixture = await createFixture();
+  const parentVersion = Deno.env.get("OPTD_RELEASE_VERSION");
+  const parentExport = Deno.env.get("OPTD_RELEASE_EXPORT_DIR");
+  Deno.env.set("OPTD_RELEASE_VERSION", "v88.77.66");
+  Deno.env.set("OPTD_RELEASE_EXPORT_DIR", `${fixture.root}/parent-publication`);
   try {
+    assertEquals(fixtureEnv(fixture).OPTD_RELEASE_VERSION, "");
+    assertEquals(fixtureEnv(fixture).OPTD_RELEASE_EXPORT_DIR, "");
     const result = await runGate(fixture);
     assertEquals(result.code, 0, `${result.stdout}\n${result.stderr}`);
     assertStringIncludes(
@@ -105,6 +111,10 @@ Deno.test("gate uses NUL paths, one build, one suite, and only the frozen image 
     assert(!docker.includes("image rm -- optd:"), docker);
     assert(!docker.includes("image prune"), docker);
   } finally {
+    if (parentVersion === undefined) Deno.env.delete("OPTD_RELEASE_VERSION");
+    else Deno.env.set("OPTD_RELEASE_VERSION", parentVersion);
+    if (parentExport === undefined) Deno.env.delete("OPTD_RELEASE_EXPORT_DIR");
+    else Deno.env.set("OPTD_RELEASE_EXPORT_DIR", parentExport);
     await removeFixture(fixture);
   }
 });
@@ -1879,6 +1889,8 @@ function fixtureEnv(
     OPTD_RELEASE_GATE_REGISTRY: "",
     OPTD_RELEASE_SOURCE_REVISION: "",
     OPTD_RELEASE_SOURCE_ROOT: "",
+    OPTD_RELEASE_VERSION: "",
+    OPTD_RELEASE_EXPORT_DIR: "",
     OPTD_CONTAINER_IMAGE: "",
     OPTD_CONTAINER_IMAGE_TAG: "",
     OPTD_CONTAINER_IMAGE_ID: "",

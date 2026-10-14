@@ -24,14 +24,19 @@ and self-completion with jointly optional time entries. Canonical model revision
 The broad host run reported 481 passing and eight failing tests. All eight were
 subsequently fixed and passed in focused reruns, including complete CRM/Projects
 flows, PostgreSQL lifecycle checks, bootstrap, and exact Compose cleanup checks.
-This is not an exact-image release attestation. Local Docker is unavailable; the
-user approved committing/pushing and using the existing gated GitHub workflow
-for `v0.2.0`, with local installation only after publication succeeds. That CI
-attempt correctly rejected lint errors and published nothing. The offending
-imports now use existing pinned import-map entries, the test helper uses a
-block-scoped arrow function, and the exact 221-file release-range lint check
-passes locally. The failed tag is preserved; the corrected release candidate is
-`v0.2.1`.
+This is not an exact-image release attestation. The default Docker socket was
+unavailable (the local service was later found to use a rootless user socket);
+the user approved committing/pushing and using the existing gated GitHub
+workflow for `v0.2.0`, with local installation only after publication succeeds.
+That CI attempt correctly rejected lint errors and published nothing. The
+offending imports now use existing pinned import-map entries, the test helper
+uses a block-scoped arrow function, and the exact 221-file release-range lint
+check passes locally. The failed tag is preserved. The `v0.2.1` attempt then
+passed 483 tests but rejected 12 nested gate fixtures because they inherited the
+outer release version while reporting synthetic image versions. Fixtures now
+clear outer publication settings; all 44 release-script contracts pass with
+hostile parent version/export settings. Image identity validation is unchanged.
+The next candidate is `v0.2.2`.
 
 ## Historical first update — close your own tickets
 
