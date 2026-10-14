@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-changeset-approvals; contract: 1; input: sha256:87f633a25584aa5c71626f972a54cb77bf8c0a41ac5b4a7110057fd9d107a644 -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-changeset-approvals; contract: 1; input: sha256:67346a909eab9ce55bcd35321a3ff2f69fc448aee6c8418ac8016b9be322c082 -->
 
 # Changeset Approval Contract
 
@@ -27,8 +27,8 @@ A trusted stage hook may emit `required_approvals[]`:
   "key": "manager_discount",
   "role": "optd/crm:sales_manager",
   "boundary": {
-    "type": "project",
-    "project_id": "019b7a2e-7c10-7000-8000-000000000001"
+    "type": "workspace",
+    "workspace_id": "019b7a2e-7c10-7000-8000-000000000001"
   },
   "minimum": 1,
   "principal_types": ["human_user"],
@@ -43,9 +43,9 @@ A trusted stage hook may emit `required_approvals[]`:
   stage.
 - `role`: one exact global role identity. Wildcards and permission expressions
   are forbidden.
-- `boundary`: exactly one project/all-project/system boundary using the normal
-  assignment schema. A project boundary must be one of the stage's affected
-  projects.
+- `boundary`: exactly one workspace/all-workspace/system boundary using the normal
+  assignment schema. A workspace boundary must be one of the stage's affected
+  workspaces.
 - `minimum`: integer 1–10; default 1.
 - `principal_types`: non-empty subset of `human_user|agent_user`; default is
   `[human_user]` so human review is explicit unless the pack says otherwise.

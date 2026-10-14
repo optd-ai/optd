@@ -23,7 +23,7 @@ Deno.test("assignment disable ordering preserves immutable contexts and cuts off
       0,
     );
     const root = await credentials(harness);
-    const project = await createProject(harness);
+    const workspace = await createWorkspace(harness);
     assertEquals(
       (await harness.runOptctl([
         "--json",
@@ -71,7 +71,7 @@ Deno.test("assignment disable ordering preserves immutable contexts and cuts off
       "--role",
       "optd/test:operator",
       "--boundary",
-      "all_projects",
+      "all_workspaces",
     ]);
     const policyCreated = await harness.runOptctl([
       "--json",
@@ -81,7 +81,7 @@ Deno.test("assignment disable ordering preserves immutable contexts and cuts off
       "--policy-revision",
       policyVersion,
       "--boundary",
-      "all_projects",
+      "all_workspaces",
     ]);
     assertEquals(roleCreated.code, 0, roleCreated.stderr);
     assertEquals(policyCreated.code, 0, policyCreated.stderr);
@@ -102,7 +102,7 @@ Deno.test("assignment disable ordering preserves immutable contexts and cuts off
     const grantBeforeRole = await grantability.current({
       auth: actorContext,
       roles: ["optd/test:operator"],
-      boundary: { type: "project", projectId: project },
+      boundary: { type: "workspace", workspaceId: workspace },
     });
     assertEquals(grantBeforeRole.ok && grantBeforeRole.value.canDecide, true);
 
@@ -125,7 +125,7 @@ Deno.test("assignment disable ordering preserves immutable contexts and cuts off
       await auditCount(harness, "role_assignment.disabled", roleAssignment.id),
       0,
     );
-    const beforeRole = await authority(harness, actor, project);
+    const beforeRole = await authority(harness, actor, workspace);
     assertEquals(beforeRole.effective_roles, ["optd/test:operator"]);
     assertEquals(
       beforeRole.capabilities.some((item: Record<string, unknown>) =>
@@ -136,12 +136,12 @@ Deno.test("assignment disable ordering preserves immutable contexts and cuts off
     roleLock.release();
     assertEquals((await disableRole).status, 200);
     await roleLock.done;
-    const afterRole = await authority(harness, actor, project);
+    const afterRole = await authority(harness, actor, workspace);
     assertEquals(afterRole.effective_roles, []);
     const grantAfterRole = await grantability.current({
       auth: actorContext,
       roles: ["optd/test:operator"],
-      boundary: { type: "project", projectId: project },
+      boundary: { type: "workspace", workspaceId: workspace },
     });
     assertEquals(grantAfterRole.ok && grantAfterRole.value.canDecide, false);
     assertEquals(
@@ -178,14 +178,14 @@ Deno.test("assignment disable ordering preserves immutable contexts and cuts off
       `/api/v1/auth/users/${user.id}/role-assignments`,
       {
         role: "optd/test:operator",
-        boundary: { type: "all_projects" },
+        boundary: { type: "all_workspaces" },
       },
     );
     assertEquals(replacementRole.status, 201);
     const grantBeforePolicy = await grantability.current({
       auth: actorContext,
       roles: ["optd/test:operator"],
-      boundary: { type: "project", projectId: project },
+      boundary: { type: "workspace", workspaceId: workspace },
     });
     assertEquals(
       grantBeforePolicy.ok && grantBeforePolicy.value.canDecide,
@@ -214,19 +214,19 @@ Deno.test("assignment disable ordering preserves immutable contexts and cuts off
       ),
       0,
     );
-    const beforePolicy = await authority(harness, actor, project);
+    const beforePolicy = await authority(harness, actor, workspace);
     assertEquals(beforePolicy.effective_roles, ["optd/test:operator"]);
     assertEquals(beforePolicy.capabilities.length, 1);
     policyLock.release();
     assertEquals((await disablePolicy).status, 200);
     await policyLock.done;
-    const afterPolicy = await authority(harness, actor, project);
+    const afterPolicy = await authority(harness, actor, workspace);
     assertEquals(afterPolicy.effective_roles, ["optd/test:operator"]);
     assertEquals(afterPolicy.capabilities, []);
     const grantAfterPolicy = await grantability.current({
       auth: actorContext,
       roles: ["optd/test:operator"],
-      boundary: { type: "project", projectId: project },
+      boundary: { type: "workspace", workspaceId: workspace },
     });
     assertEquals(
       grantAfterPolicy.ok && grantAfterPolicy.value.canDecide,
@@ -253,7 +253,7 @@ Deno.test("assignment disable ordering preserves immutable contexts and cuts off
   }
 });
 
-Deno.test("agent all-project grantability is current, same-human, and Project-only", async () => {
+Deno.test("agent all-workspace grantability is current, same-human, and Workspace-only", async () => {
   const harness = await startLiveHarness();
   try {
     assertEquals(
@@ -263,7 +263,7 @@ Deno.test("agent all-project grantability is current, same-human, and Project-on
       })).code,
       0,
     );
-    const project = await createProject(harness);
+    const workspace = await createWorkspace(harness);
     const human = (await query<{ id: string }>(
       harness.server.sql,
       "select id from human_users where username='agent-boundary-root'",
@@ -295,7 +295,7 @@ Deno.test("agent all-project grantability is current, same-human, and Project-on
       await query(
         tx as Queryable,
         `insert into agent_authorization_roles(id,authorization_id,role_id,boundary_type)
-        values($1,$2,'system:admin','all_projects')`,
+        values($1,$2,'system:admin','all_workspaces')`,
         [uuidV7(), authorizationId],
       );
     });
@@ -313,13 +313,13 @@ Deno.test("agent all-project grantability is current, same-human, and Project-on
     const state = new PostgresAgentAuthorizationGrantabilityState(
       harness.server.sql,
     );
-    const projectState = await state.current({
+    const workspaceState = await state.current({
       auth,
       roles: ["system:admin"],
-      boundary: { type: "project", projectId: project },
+      boundary: { type: "workspace", workspaceId: workspace },
     });
-    assertEquals(projectState.ok && projectState.value.canDecide, true);
-    assertEquals(projectState.ok && projectState.value.effectiveRoles, [
+    assertEquals(workspaceState.ok && workspaceState.value.canDecide, true);
+    assertEquals(workspaceState.ok && workspaceState.value.effectiveRoles, [
       "system:admin",
     ]);
     const systemState = await state.current({
@@ -332,7 +332,7 @@ Deno.test("agent all-project grantability is current, same-human, and Project-on
     const wrongHuman = await state.current({
       auth: { ...auth, humanUserId: uuidV7() },
       roles: ["system:admin"],
-      boundary: { type: "project", projectId: project },
+      boundary: { type: "workspace", workspaceId: workspace },
     });
     assertEquals(wrongHuman.ok && wrongHuman.value.effectiveRoles, []);
     await query(
@@ -343,7 +343,7 @@ Deno.test("agent all-project grantability is current, same-human, and Project-on
     const revoked = await state.current({
       auth,
       roles: ["system:admin"],
-      boundary: { type: "project", projectId: project },
+      boundary: { type: "workspace", workspaceId: workspace },
     });
     assertEquals(revoked.ok && revoked.value.effectiveRoles, []);
     assertEquals(revoked.ok && revoked.value.canDecide, false);
@@ -388,10 +388,10 @@ async function waitForBlockedDisable(harness: LiveHarness, table: string) {
 async function authority(
   harness: LiveHarness,
   actor: Credentials,
-  project: string,
+  workspace: string,
 ) {
   const response = await fetch(
-    `${harness.baseUrl}/api/v1/authorization/authority?boundary_type=project&project_id=${project}`,
+    `${harness.baseUrl}/api/v1/authorization/authority?boundary_type=workspace&workspace_id=${workspace}`,
     {
       headers: { authorization: `Bearer ${actor.token}` },
     },
@@ -427,14 +427,14 @@ async function auditCount(
     [event, assignment],
   )).rows[0].count;
 }
-async function createProject(harness: LiveHarness) {
+async function createWorkspace(harness: LiveHarness) {
   const result = await harness.runOptctl([
     "--json",
-    "project",
+    "workspace",
     "create",
-    "race-project",
+    "race-workspace",
     "--display-name",
-    "Race Project",
+    "Race Workspace",
   ]);
   assertEquals(result.code, 0, result.stderr);
   return JSON.parse(result.stdout).data.id as string;

@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-authorization-assignments; contract: 1; input: sha256:52d16d579d672386b81370c1cda075c2df97e3f55da8c3106a6c5969712de115 -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-authorization-assignments; contract: 1; input: sha256:631ad21e8debe2c8ed9ec86c24b23d14907611c1dd00c8f1d7441462c8cabf83 -->
 
 # Authorization Definitions and Assignments
 
@@ -24,7 +24,7 @@ they apply:
 5. Agent authorizations carry the same explicit boundary.
 6. An omitted boundary is invalid and never implies global authority.
 
-This avoids cloning definitions into every project while preventing accidental
+This avoids cloning definitions into every workspace while preventing accidental
 system-wide access.
 
 ## Boundary model
@@ -33,13 +33,13 @@ Every assignment uses exactly one boundary variant:
 
 ```yaml
 boundary:
-  type: project
-  project_id: 019b7a2e-7c10-7000-8000-000000000001
+  type: workspace
+  workspace_id: 019b7a2e-7c10-7000-8000-000000000001
 ```
 
 ```yaml
 boundary:
-  type: all_projects
+  type: all_workspaces
 ```
 
 ```yaml
@@ -49,13 +49,13 @@ boundary:
 
 The variants have distinct meanings:
 
-- `project` applies only to one runtime project.
-- `all_projects` applies to project-resource operations in every project.
-- `system` applies to operations without a project target, such as managing
-  projects, users, policy assignments, or bootstrap recovery.
+- `workspace` applies only to one runtime workspace.
+- `all_workspaces` applies to workspace-resource operations in every workspace.
+- `system` applies to operations without a workspace target, such as managing
+  workspaces, users, policy assignments, or bootstrap recovery.
 
-System authority does not imply all-project authority, and all-project authority
-does not imply system authority. Creating `system` or `all_projects` assignments
+System authority does not imply all-workspace authority, and all-workspace authority
+does not imply system authority. Creating `system` or `all_workspaces` assignments
 requires explicit elevated authorization.
 
 ## Role definitions
@@ -88,13 +88,13 @@ system:super_admin
 system:admin
 ```
 
-The role identity remains stable across every project boundary; packs are
-installed globally rather than per project.
+The role identity remains stable across every workspace boundary; packs are
+installed globally rather than per workspace.
 
 ## Policy definitions
 
 A policy definition is globally registered authorization logic. It references
-canonical role and pack-definition identities rather than one particular project
+canonical role and pack-definition identities rather than one particular workspace
 installation.
 
 ```yaml
@@ -103,7 +103,7 @@ apiVersion: optd.dev/v1
 metadata:
   name: sales_access
 spec:
-  default_assignment: all_projects
+  default_assignment: all_workspaces
   rules:
     - name: manager_access
       effect: allow
@@ -143,15 +143,15 @@ boundary:
 {
   "role": "optd/crm:sales_manager",
   "boundary": {
-    "type": "project",
-    "project_id": "019b7a2e-7c10-7000-8000-000000000001"
+    "type": "workspace",
+    "workspace_id": "019b7a2e-7c10-7000-8000-000000000001"
   }
 }
 ```
 
-Other exact boundary variants are `{ "type": "all_projects" }` and
-`{ "type": "system" }`. A project assignment grants no authority in another
-project; all-project authority does not imply system authority and vice versa.
+Other exact boundary variants are `{ "type": "all_workspaces" }` and
+`{ "type": "system" }`. A workspace assignment grants no authority in another
+workspace; all-workspace authority does not imply system authority and vice versa.
 
 The server creates a UUIDv7 assignment with immutable principal/role/boundary/
 creator content and separate active/disabled lifecycle. Deactivation retains
@@ -206,12 +206,12 @@ approved authority and may carry role assignments in multiple boundaries:
 role_assignments:
   - role: optd/crm:sales_manager
     boundary:
-      type: project
-      project_id: 019b7a2e-7c10-7000-8000-000000000001
+      type: workspace
+      workspace_id: 019b7a2e-7c10-7000-8000-000000000001
   - role: optd/projects:viewer
     boundary:
-      type: project
-      project_id: 019b7a2e-7c10-7000-8000-000000000002
+      type: workspace
+      workspace_id: 019b7a2e-7c10-7000-8000-000000000002
   - role: system:admin
     boundary:
       type: system
@@ -223,7 +223,7 @@ containing the prior still-valid assignments plus the new assignments. The new
 token supersedes the prior local process binding; one process anchor has one
 current authorization token.
 
-`optctl` never chooses among authorizations based on roles or target project. It
+`optctl` never chooses among authorizations based on roles or target workspace. It
 walks ancestry, selects the nearest binding, and sends that one token. The
 server computes effective roles from the authorization's assignments for each
 request or changeset operation boundary. Insufficient authority fails normally;
@@ -235,7 +235,7 @@ their still-valid roles and report the removed role through auth status. The
 server checks the authorization chain when used and returns specific invalid
 ancestor/role errors; eager cascading revocation is not required.
 
-The server authorization controls role/project authority. The local `optctl`
+The server authorization controls role/workspace authority. The local `optctl`
 process binding separately controls which local process tree may select and use
 the server-issued token. See [Authentication](authentication.md).
 
@@ -272,19 +272,19 @@ audited.
 A policy assignment activates a globally registered policy definition in exactly
 one boundary.
 
-### Pack default all-project policy assignment
+### Pack default all-workspace policy assignment
 
-A pack Policy with `spec.default_assignment: all_projects` creates/activates one
+A pack Policy with `spec.default_assignment: all_workspaces` creates/activates one
 server-generated assignment bound to that exact policy/pack revision during
 transactional pack activation. `none` creates no default assignment. Pack source
-cannot default-activate system or one-project authority. Preview surfaces this
+cannot default-activate system or one-workspace authority. Preview surfaces this
 security-relevant change.
 
-The generated assignment uses a UUIDv7, canonical `{type: all_projects}`
+The generated assignment uses a UUIDv7, canonical `{type: all_workspaces}`
 boundary, source pack/policy revision UUIDs, activation auth context, and active
-timestamps. This does not grant any principal a role. Project-specific role
-assignments still determine who has CRM authority in each project. Explicit
-project policy assignments may configure exceptions/additional policy but never
+timestamps. This does not grant any principal a role. Workspace-specific role
+assignments still determine who has CRM authority in each workspace. Explicit
+workspace policy assignments may configure exceptions/additional policy but never
 install another pack copy or version.
 
 ### System policy assignment
@@ -292,17 +292,17 @@ install another pack copy or version.
 Built-in `system:*` policy definitions/assignments are created by platform
 migrations. Additional explicit system assignments use the administrative API
 below and an exact `{type: system}` boundary. Global activation is possible only
-through explicit `all_projects` or `system` assignments. Missing boundary data
+through explicit `all_workspaces` or `system` assignments. Missing boundary data
 must fail validation.
 
 ## Authorization evaluation
 
-Every protected operation has an explicit target boundary. A project-resource
+Every protected operation has an explicit target boundary. A workspace-resource
 request includes both its runtime and source-definition identity:
 
 ```json
 {
-  "project_id": "019b7a2e-7c10-7000-8000-000000000001",
+  "workspace_id": "019b7a2e-7c10-7000-8000-000000000001",
   "resource_definition": "optd/crm:lead",
   "object_id": "019b7a2e-7c10-7000-8000-000000000002",
   "action": "update"
@@ -329,8 +329,8 @@ AND policy allows role + action + resource definition
 AND ABAC/ReBAC predicates pass
 ```
 
-A project assignment cannot activate system authority. A system assignment
-cannot silently imply all-project access.
+A workspace assignment cannot activate system authority. A system assignment
+cannot silently imply all-workspace access.
 
 ## Pack installation and upgrades
 
@@ -341,9 +341,9 @@ policy-assignment definitions. It must not automatically assign domain roles to
 principals.
 
 Exactly one revision of a pack is active globally. Definitions are
-versioned/content-addressed for audit and preview equivalence, but projects
+versioned/content-addressed for audit and preview equivalence, but workspaces
 cannot select different versions. A pack upgrade atomically updates the
-server-wide active revision and all projects use the new definitions after
+server-wide active revision and all workspaces use the new definitions after
 successful migration.
 
 Whole-pack uninstall is not an MVP route. A future uninstall must deactivate
@@ -402,7 +402,7 @@ identifiers.
 | --------------------- | ----------------------------------------------------------------------- |
 | Role definition       | Globally registered responsibility identity                             |
 | Policy definition     | Globally registered authorization logic                                 |
-| Role assignment       | Principal holds a role in a project, all projects, or system boundary   |
-| Policy assignment     | Policy is active in a project, all projects, or system boundary         |
+| Role assignment       | Principal holds a role in a workspace, all workspaces, or system boundary   |
+| Policy assignment     | Policy is active in a workspace, all workspaces, or system boundary         |
 | Agent authorization   | One server-issued token containing the agent's bounded role assignments |
 | Local process binding | `optctl` process tree allowed to use the authorization token            |

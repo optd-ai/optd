@@ -35,7 +35,7 @@ spec:
       empty:
         message: No task records found.
         help:
-          - optctl --project ${project} create optd/crm:task --input object.json --stage
+          - optctl --workspace ${workspace} create optd/crm:task --input object.json --stage
     detail:
       sections:
         - title: task
@@ -46,11 +46,11 @@ spec:
             - owner_id
             - opportunity_id
       help:
-        - optctl --project ${project} query optd/crm:task --where 'id == "${id}"'
+        - optctl --workspace ${workspace} query optd/crm:task --where 'id == "${id}"'
     help:
       list:
-        - optctl --project ${project} query optd/crm:task
+        - optctl --workspace ${workspace} query optd/crm:task
       view:
-        - optctl --project ${project} view optd/crm:task ${id}
+        - optctl --workspace ${workspace} view optd/crm:task ${id}
       created:
-        - optctl --project ${project} view optd/crm:task ${id}
+        - optctl --workspace ${workspace} view optd/crm:task ${id}

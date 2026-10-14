@@ -14,14 +14,12 @@ spec:
       format: uuid
     spent_hours:
       type: decimal
-      required: true
       minimum: "0.01"
       maximum: "24.00"
       precision: 4
       scale: 2
     entry_date:
       type: date
-      required: true
   reads:
     task:
       resource: task
@@ -30,7 +28,7 @@ spec:
         - id
         - version
         - state
-        - work_project_id
+        - project_id
         - assignee_id
       required: true
   availability:
@@ -44,6 +42,6 @@ spec:
       - Use optd/projects:complete_task when its declared operation should be staged.
     stageFirst: true
     examples:
-      - optctl --project ${project} action stage optd/projects:complete_task --input action.json
+      - optctl --workspace ${workspace} action stage optd/projects:complete_task --input action.json
     successHelp:
       - optctl changeset inspect ${stage_id}

@@ -27,15 +27,15 @@ export async function startCommitMatrix(
     "--safe",
   ]);
   assertEquals(applied.code, 0, applied.stderr);
-  const project = await harness.runOptctl([
+  const workspace = await harness.runOptctl([
     "--json",
-    "project",
+    "workspace",
     "create",
     `commit-matrix-${crypto.randomUUID().slice(0, 8)}`,
     "--display-name",
     "Commit Matrix",
   ]);
-  assertEquals(project.code, 0, project.stderr);
+  assertEquals(workspace.code, 0, workspace.stderr);
   const auth = await currentAuth(harness.server.sql);
   const stageRepository = new PostgresStageRepository(
     harness.server.sql,
@@ -45,7 +45,7 @@ export async function startCommitMatrix(
   return {
     harness,
     pack,
-    projectId: JSON.parse(project.stdout).data.id as string,
+    workspaceId: JSON.parse(workspace.stdout).data.id as string,
     auth,
     stageRepository,
     stageService,
@@ -273,7 +273,7 @@ export async function writePack(root: string, providerUrl?: string) {
   );
   await Deno.writeTextFile(
     `${root}/actions/generate.yaml`,
-    `kind: Action\napiVersion: optd.dev/v1\nmetadata: { name: generate }\nspec:\n  input:\n    project_id: { type: string, required: true, format: uuid }\n    source_id: { type: string, required: true, format: uuid }\n  reads:\n    source:\n      resource: alpha\n      id_from: '$action.input.source_id'\n      fields: [key, status]\n      required: true\n  availability: { resource: alpha, states: [ready], condition: 'status == "ready"' }\n  axi: {}\n`,
+    `kind: Action\napiVersion: optd.dev/v1\nmetadata: { name: generate }\nspec:\n  input:\n    workspace_id: { type: string, required: true, format: uuid }\n    source_id: { type: string, required: true, format: uuid }\n  reads:\n    source:\n      resource: alpha\n      id_from: '$action.input.source_id'\n      fields: [key, status]\n      required: true\n  availability: { resource: alpha, states: [ready], condition: 'status == "ready"' }\n  axi: {}\n`,
   );
   const endpoint = providerUrl ? new URL(providerUrl).host : "";
   await Deno.writeTextFile(
@@ -292,7 +292,7 @@ export async function writePack(root: string, providerUrl?: string) {
           JSON.stringify(`${providerUrl}/action`)
         },{headers:{authorization:"Bearer "+Deno.env.get("TOKEN")}});`
         : ""
-    } console.log(JSON.stringify({operations:[{op:"create",project_id:e.input.request.project_id,resource:"test/commitmatrix:gamma",fields:{key:"action-"+e.input.read.key,status:"ready"}}]}));`,
+    } console.log(JSON.stringify({operations:[{op:"create",workspace_id:e.input.request.workspace_id,resource:"test/commitmatrix:gamma",fields:{key:"action-"+e.input.read.key,status:"ready"}}]}));`,
   );
   await Deno.writeTextFile(
     `${root}/hooks/approval.ts`,

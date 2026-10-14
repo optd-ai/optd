@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-events-audit; contract: 1; input: sha256:ca0d415962cf39e8bcedf88c77e75bfddc6502bf05687b2de27455b95a6392af -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-events-audit; contract: 1; input: sha256:786d84609aeacdfd2c90b204e01a00ff88e1ee1918102d2e3ab7f88808c86b8b -->
 
 # Events, Audit, History, and Outbox
 
@@ -63,15 +63,15 @@ auth_context_role_assignments
 - auth_context_id          uuid references auth_contexts(id)
 - role_id                  uuid not null
 - boundary_type            text not null
-  -- project | all_projects | system
-- project_id               uuid null
+  -- workspace | all_workspaces | system
+- workspace_id               uuid null
 ```
 
 These are server-derived query dimensions, not client assertions. An auth
 context describes the authenticated credential, not one target boundary. Login,
 status, and authorization-request operations therefore need no artificial
-boundary, while one multi-project changeset can use the same context. The
-changeset/audit `policy_summary_json` records per-operation project, action,
+boundary, while one multi-workspace changeset can use the same context. The
+changeset/audit `policy_summary_json` records per-operation workspace, action,
 matched bounded roles, policies/rules, and allow/deny result. The changeset is
 committed or denied atomically; no separate per-boundary authorization-decision
 resource is required.
@@ -109,11 +109,11 @@ Generated resource tables are mutable, query-optimized current projections.
 Generated resource tables should include:
 
 ```sql
-project_id uuid not null references projects(id)
+workspace_id uuid not null references workspaces(id)
 current_object_version_id uuid references object_versions(id)
 ```
 
-Object UUIDv7 values are globally unique, but `project_id` remains explicit on
+Object UUIDv7 values are globally unique, but `workspace_id` remains explicit on
 current rows, versions, policies, queries, events, and audit evidence.
 
 After every committed changeset:
@@ -138,7 +138,7 @@ Proposed fields:
 ```sql
 object_versions
 - id                    uuid primary key
-- project_id            uuid not null references projects(id)
+- workspace_id            uuid not null references workspaces(id)
 - definition_kind       text not null       # resource | relationship
 - resource_identity     text not null
 - object_id             uuid not null        # object or relationship UUID
@@ -155,7 +155,7 @@ object_versions
 - auth_context_id       uuid not null references auth_contexts(id)
 - created_at            timestamptz not null default now()
 
-unique(project_id, resource_identity, object_id, version)
+unique(workspace_id, resource_identity, object_id, version)
 ```
 
 `id` is the globally unique object-version identifier used by foreign keys.
@@ -215,7 +215,7 @@ audit_events
   -- secret.created | rotated | disabled | rotated_and_enabled
   -- hook_secret_grant.created | carried_forward | replaced | revoked
   -- hook_secret_resolution.failed
-- project_id              uuid null references projects(id)
+- workspace_id              uuid null references workspaces(id)
 - resource_identity       text null
 - object_id               uuid null
 - action                  text null
@@ -230,7 +230,7 @@ audit_events
 - created_at               timestamptz not null default now()
 ```
 
-Comments are append-only records with their own UUIDv7, project/target identity,
+Comments are append-only records with their own UUIDv7, workspace/target identity,
 body, target object-version provenance, commit/auth context, and timestamp. They
 do not create or increment a target `object_versions` row.
 
@@ -284,7 +284,7 @@ Proposed fields:
 events
 - id                    uuid primary key
 - changeset_commit_id   uuid not null references changeset_commits(id)
-- project_id            uuid null references projects(id)
+- workspace_id            uuid null references workspaces(id)
 - object_version_id     uuid null references object_versions(id)
 - schema_version        integer not null default 1
 - event_type            text not null

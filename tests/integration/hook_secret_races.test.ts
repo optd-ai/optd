@@ -38,17 +38,21 @@ Deno.test({
         "--safe",
       ]);
       assertEquals(apply.code, 0, apply.stderr);
-      const project = await harness.runOptctl([
+      const workspace = await harness.runOptctl([
         "--json",
-        "project",
+        "workspace",
         "create",
         "hook-secret-stage",
         "--display-name",
         "Hook Secret Stage",
       ]);
-      assertEquals(project.code, 0, project.stderr);
-      const projectId = JSON.parse(project.stdout).data.id as string;
-      const missingGrant = await stageItem(harness, projectId, "missing-grant");
+      assertEquals(workspace.code, 0, workspace.stderr);
+      const workspaceId = JSON.parse(workspace.stdout).data.id as string;
+      const missingGrant = await stageItem(
+        harness,
+        workspaceId,
+        "missing-grant",
+      );
       assertEquals(missingGrant.code, 1, missingGrant.stderr);
       assertEquals(
         JSON.parse(missingGrant.stderr).error.code,
@@ -129,7 +133,7 @@ Deno.test({
         "select grant_id from hook_secret_grant_heads",
       )).rows[0];
       assert(head?.grant_id);
-      const staged = await stageItem(harness, projectId, "proof");
+      const staged = await stageItem(harness, workspaceId, "proof");
       assertEquals(
         staged.code,
         0,
@@ -192,7 +196,11 @@ Deno.test({
         await releaseAuthorityLock;
       });
       await authorityLock;
-      const preSpawnDenied = stageItem(harness, projectId, "pre-spawn-denied");
+      const preSpawnDenied = stageItem(
+        harness,
+        workspaceId,
+        "pre-spawn-denied",
+      );
       await new Promise((resolve) => setTimeout(resolve, 100));
       assertEquals(provider.attempts.length, 1);
       releaseAuthority();
@@ -211,7 +219,7 @@ Deno.test({
         delayMs: 1_000,
         body: { allowed: true },
       });
-      const finalRace = stageItem(harness, projectId, "final-recheck-denied");
+      const finalRace = stageItem(harness, workspaceId, "final-recheck-denied");
       await provider.waitForAttemptsBefore(2, finalRace);
       await query(
         harness.server.sql,
@@ -247,7 +255,7 @@ Deno.test({
       provider.enqueue({ kind: "success", body: { allowed: true } });
       const persistenceFault = await stageItem(
         harness,
-        projectId,
+        workspaceId,
         "persistence-fault",
       );
       assertEquals(persistenceFault.code, 1, persistenceFault.stderr);
@@ -395,10 +403,10 @@ Deno.test({
         "changeset",
         "stage",
       ], {
-        project_id: projectId,
+        workspace_id: workspaceId,
         operations: [{
           op: "create",
-          project_id: projectId,
+          workspace_id: workspaceId,
           resource: "test/secrets:item",
           fields: { name: "disabled" },
         }],
@@ -425,10 +433,10 @@ Deno.test({
         "changeset",
         "stage",
       ], {
-        project_id: projectId,
+        workspace_id: workspaceId,
         operations: [{
           op: "create",
-          project_id: projectId,
+          workspace_id: workspaceId,
           resource: "test/secrets:item",
           fields: { name: "reenabled" },
         }],
@@ -448,7 +456,11 @@ Deno.test({
         delayMs: 1_000,
         body: { allowed: true },
       });
-      const pinnedInvocation = stageItem(harness, projectId, "pinned-version");
+      const pinnedInvocation = stageItem(
+        harness,
+        workspaceId,
+        "pinned-version",
+      );
       await provider.waitForAttemptsBefore(5, pinnedInvocation);
       const rotatedDuringChild = await harness.runOptctl([
         "--json",
@@ -468,7 +480,7 @@ Deno.test({
         2,
       );
       provider.enqueue({ kind: "success", body: { allowed: true } });
-      const nextVersion = await stageItem(harness, projectId, "next-version");
+      const nextVersion = await stageItem(harness, workspaceId, "next-version");
       assertEquals(nextVersion.code, 0, nextVersion.stderr);
       assertEquals(
         JSON.parse(nextVersion.stdout).data.hook_executions.find((execution: {
@@ -512,7 +524,11 @@ Deno.test({
           [currentGrant.grant_id],
         )
       );
-      const afterRevoke = await stageItem(harness, projectId, "revoked-grant");
+      const afterRevoke = await stageItem(
+        harness,
+        workspaceId,
+        "revoked-grant",
+      );
       assertEquals(afterRevoke.code, 1, afterRevoke.stderr);
       assertEquals(
         JSON.parse(afterRevoke.stderr).error.code,
@@ -552,9 +568,9 @@ Deno.test({
           boundary: "system",
         },
         {
-          username: "grant-project-only",
+          username: "grant-workspace-only",
           actions: ["secret.grant", "hook.secret.configure"],
-          boundary: "project",
+          boundary: "workspace",
         },
       ] as const;
       const launchers = [];
@@ -575,7 +591,7 @@ Deno.test({
           ordinary.username,
           [...ordinary.actions],
           ordinary.boundary,
-          projectId,
+          workspaceId,
         );
         const login = await harness.loginProcess({
           username: ordinary.username,
@@ -663,7 +679,7 @@ Deno.test({
       );
       const digestMismatch = await stageItem(
         harness,
-        projectId,
+        workspaceId,
         "digest-mismatch",
       );
       assertEquals(digestMismatch.code, 1, digestMismatch.stderr);
@@ -694,14 +710,14 @@ Deno.test({
 
 function stageItem(
   harness: Awaited<ReturnType<typeof startAuthenticatedHarness>>,
-  projectId: string,
+  workspaceId: string,
   name: string,
 ) {
   return harness.runJson(["--json", "changeset", "stage"], {
-    project_id: projectId,
+    workspace_id: workspaceId,
     operations: [{
       op: "create",
-      project_id: projectId,
+      workspace_id: workspaceId,
       resource: "test/secrets:item",
       fields: { name },
     }],
@@ -712,8 +728,8 @@ async function installGrantCapabilities(
   harness: Awaited<ReturnType<typeof startAuthenticatedHarness>>,
   username: string,
   actions: string[],
-  boundary: "system" | "project",
-  projectId: string,
+  boundary: "system" | "workspace",
+  workspaceId: string,
 ): Promise<void> {
   const identity =
     (await query<{ principal_id: string; auth_context_id: string }>(
@@ -768,28 +784,28 @@ async function installGrantCapabilities(
     await query(
       tx,
       `insert into role_assignments(
-         id,principal_id,role_id,boundary_type,project_id,active,created_by_auth_context_id
+         id,principal_id,role_id,boundary_type,workspace_id,active,created_by_auth_context_id
        ) values($1,$2,$3,$4,$5,true,$6)`,
       [
         uuidV7(),
         identity.principal_id,
         role,
         boundary,
-        boundary === "project" ? projectId : null,
+        boundary === "workspace" ? workspaceId : null,
         identity.auth_context_id,
       ],
     );
     await query(
       tx,
       `insert into policy_assignments(
-         id,policy_definition_version_id,boundary_type,project_id,active,source,
+         id,policy_definition_version_id,boundary_type,workspace_id,active,source,
          created_by_auth_context_id
        ) values($1,$2,$3,$4,true,'operator',$5)`,
       [
         uuidV7(),
         policyVersion,
         boundary,
-        boundary === "project" ? projectId : null,
+        boundary === "workspace" ? workspaceId : null,
         identity.auth_context_id,
       ],
     );

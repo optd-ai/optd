@@ -1,5 +1,6 @@
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import { loadRuntimeConfig, OPTD_VERSION } from "../../src/config/runtime.ts";
+import { BUILD_VERSION } from "../../src/config/build.ts";
 import {
   findPostgresBins,
   planPostgresRuntime,
@@ -44,7 +45,7 @@ Deno.test("optd defaults ignore adversarial legacy runtime configuration", async
     binariesAvailable: false,
   });
   assertEquals(await findPostgresBins(legacy), null);
-  assertEquals(OPTD_VERSION, "0.1.0-dev");
+  assertEquals(OPTD_VERSION, BUILD_VERSION);
 });
 
 Deno.test("canonical OPTD configuration selects external and managed modes without aliases", () => {

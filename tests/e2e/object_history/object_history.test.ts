@@ -12,7 +12,7 @@ import {
   startLiveHarness,
 } from "../../support/live_harness.ts";
 
-Deno.test("compiled optctl reads Project-scoped object and relationship history", async () => {
+Deno.test("compiled optctl reads Workspace-scoped object and relationship history", async () => {
   const harness = await startLiveHarness();
   try {
     const boot = await harness.bootstrap({
@@ -31,7 +31,7 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
     assertEquals(apply.code, 0, apply.stderr);
     const sales = await harness.runOptctl([
       "--json",
-      "project",
+      "workspace",
       "create",
       "history-sales",
       "--display-name",
@@ -39,7 +39,7 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
     ]);
     const other = await harness.runOptctl([
       "--json",
-      "project",
+      "workspace",
       "create",
       "history-other",
       "--display-name",
@@ -47,8 +47,8 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
     ]);
     assertEquals(sales.code, 0, sales.stderr);
     assertEquals(other.code, 0, other.stderr);
-    const projectOne = JSON.parse(sales.stdout).data.id;
-    const projectTwo = JSON.parse(other.stdout).data.id;
+    const workspaceOne = JSON.parse(sales.stdout).data.id;
+    const workspaceTwo = JSON.parse(other.stdout).data.id;
     const auth = (await query<{ id: string }>(
       harness.server.sql,
       "select id from auth_contexts order by created_at desc limit 1",
@@ -59,14 +59,14 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
       pack: "crm",
       resource: "lead",
       relationship: "contact_company",
-      projectIds: [projectOne, projectTwo],
+      workspaceIds: [workspaceOne, workspaceTwo],
       authContextId: auth,
       resourceData: { name: "Fixture Lead", status: "new" },
       relationshipFields: { role: "buyer", primary: true },
     });
     const object = await harness.runOptctl([
       "--json",
-      "--project",
+      "--workspace",
       "history-sales",
       "view",
       "optd/crm:lead",
@@ -79,8 +79,8 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
     );
     const history = await harness.runOptctl([
       "--json",
-      "--project",
-      projectOne,
+      "--workspace",
+      workspaceOne,
       "history",
       "optd/crm:lead",
       ids.object,
@@ -93,8 +93,8 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
     );
     const firstPage = await harness.runOptctl([
       "--json",
-      "--project",
-      projectOne,
+      "--workspace",
+      workspaceOne,
       "history",
       "optd/crm:lead",
       ids.object,
@@ -105,8 +105,8 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
     const cursor = JSON.parse(firstPage.stdout).meta.next_cursor as string;
     const secondPage = await harness.runOptctl([
       "--json",
-      "--project",
-      projectOne,
+      "--workspace",
+      workspaceOne,
       "history",
       "optd/crm:lead",
       ids.object,
@@ -123,8 +123,8 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
     await harness.restart();
     const afterRestart = await harness.runOptctl([
       "--json",
-      "--project",
-      projectOne,
+      "--workspace",
+      workspaceOne,
       "history",
       "optd/crm:lead",
       ids.object,
@@ -140,8 +140,8 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
     );
     const tampered = await harness.runOptctl([
       "--json",
-      "--project",
-      projectOne,
+      "--workspace",
+      workspaceOne,
       "history",
       "optd/crm:lead",
       ids.object,
@@ -154,8 +154,8 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
     assertEquals(JSON.parse(tampered.stderr).error.code, "invalid_cursor");
     const relationship = await harness.runOptctl([
       "--json",
-      "--project",
-      projectOne,
+      "--workspace",
+      workspaceOne,
       "view",
       "relationship",
       "optd/crm:contact_company",
@@ -165,8 +165,8 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
     assertEquals(JSON.parse(relationship.stdout).data.kind, "relationship");
     const relationshipHistory = await harness.runOptctl([
       "--json",
-      "--project",
-      projectOne,
+      "--workspace",
+      workspaceOne,
       "history",
       "relationship",
       "optd/crm:contact_company",
@@ -175,8 +175,8 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
     assertEquals(relationshipHistory.code, 0, relationshipHistory.stderr);
     assertEquals(JSON.parse(relationshipHistory.stdout).data.items.length, 2);
     const toon = await harness.runOptctl([
-      "--project",
-      projectOne,
+      "--workspace",
+      workspaceOne,
       "view",
       "optd/crm:lead",
       ids.object,
@@ -186,8 +186,8 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
     assertEquals(toon.stdout.includes("Fixture Lead"), true);
     const hookDefault = await harness.runOptctl([
       "--json",
-      "--project",
-      projectOne,
+      "--workspace",
+      workspaceOne,
       "metadata",
       "hook",
       "optd/crm:validate_lead",
@@ -196,8 +196,8 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
     assertEquals("script_digest" in JSON.parse(hookDefault.stdout).data, false);
     const hookSecurity = await harness.runOptctl([
       "--json",
-      "--project",
-      projectOne,
+      "--workspace",
+      workspaceOne,
       "metadata",
       "hook",
       "optd/crm:validate_lead",
@@ -210,8 +210,8 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
     );
     const packSecurity = await harness.runOptctl([
       "--json",
-      "--project",
-      projectOne,
+      "--workspace",
+      workspaceOne,
       "metadata",
       "pack",
       "optd/crm",
@@ -221,8 +221,8 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
     assert(Array.isArray(JSON.parse(packSecurity.stdout).data.security.hooks));
     const policySecurity = await harness.runOptctl([
       "--json",
-      "--project",
-      projectOne,
+      "--workspace",
+      workspaceOne,
       "metadata",
       "policy",
       "optd/crm:sales_access",
@@ -232,8 +232,8 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
     assert(Array.isArray(JSON.parse(policySecurity.stdout).data.rules));
     await expectCode(harness, [
       "--json",
-      "--project",
-      projectOne,
+      "--workspace",
+      workspaceOne,
       "metadata",
       "resource",
       "optd/crm:lead",
@@ -263,7 +263,7 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
     await installCapability(
       harness,
       readerPrincipal,
-      projectOne,
+      workspaceOne,
       auth,
       "history_read",
       "read",
@@ -278,8 +278,8 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
     );
     const readerView = await harness.runOptctl([
       "--json",
-      "--project",
-      projectOne,
+      "--workspace",
+      workspaceOne,
       "view",
       "optd/crm:lead",
       ids.object,
@@ -287,16 +287,16 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
     assertEquals(readerView.code, 0, readerView.stderr);
     await expectCode(harness, [
       "--json",
-      "--project",
-      projectOne,
+      "--workspace",
+      workspaceOne,
       "history",
       "optd/crm:lead",
       ids.object,
     ], "not_found");
     await expectCode(harness, [
       "--json",
-      "--project",
-      projectOne,
+      "--workspace",
+      workspaceOne,
       "view",
       "relationship",
       "optd/crm:contact_company",
@@ -305,7 +305,7 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
     await installCapability(
       harness,
       readerPrincipal,
-      projectOne,
+      workspaceOne,
       auth,
       "history_history",
       "history.read",
@@ -314,8 +314,8 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
     assertEquals(
       (await harness.runOptctl([
         "--json",
-        "--project",
-        projectOne,
+        "--workspace",
+        workspaceOne,
         "history",
         "optd/crm:lead",
         ids.object,
@@ -324,8 +324,8 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
     );
     await expectCode(harness, [
       "--json",
-      "--project",
-      projectOne,
+      "--workspace",
+      workspaceOne,
       "history",
       "relationship",
       "optd/crm:contact_company",
@@ -334,7 +334,7 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
     await installCapability(
       harness,
       readerPrincipal,
-      projectOne,
+      workspaceOne,
       auth,
       "history_archive",
       "read_archived",
@@ -343,8 +343,8 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
     assertEquals(
       (await harness.runOptctl([
         "--json",
-        "--project",
-        projectOne,
+        "--workspace",
+        workspaceOne,
         "view",
         "relationship",
         "optd/crm:contact_company",
@@ -355,8 +355,8 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
     assertEquals(
       (await harness.runOptctl([
         "--json",
-        "--project",
-        projectOne,
+        "--workspace",
+        workspaceOne,
         "history",
         "relationship",
         "optd/crm:contact_company",
@@ -366,8 +366,8 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
     );
     await expectCode(harness, [
       "--json",
-      "--project",
-      projectOne,
+      "--workspace",
+      workspaceOne,
       "metadata",
       "hook",
       "optd/crm:validate_lead",
@@ -383,8 +383,8 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
       leadTable,
       [
         "--json",
-        "--project",
-        projectOne,
+        "--workspace",
+        workspaceOne,
         "view",
         "optd/crm:lead",
         ids.object,
@@ -402,8 +402,8 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
       leadTable,
       [
         "--json",
-        "--project",
-        projectOne,
+        "--workspace",
+        workspaceOne,
         "history",
         "optd/crm:lead",
         ids.object,
@@ -425,7 +425,7 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
     const abacRule = await installCapability(
       harness,
       conditionalPrincipal,
-      projectOne,
+      workspaceOne,
       auth,
       "history_conditional",
       "read",
@@ -441,8 +441,8 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
     assertEquals(
       (await harness.runOptctl([
         "--json",
-        "--project",
-        projectOne,
+        "--workspace",
+        workspaceOne,
         "view",
         "optd/crm:lead",
         ids.object,
@@ -457,8 +457,8 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
     );
     const conditionalLeadView = [
       "--json",
-      "--project",
-      projectOne,
+      "--workspace",
+      workspaceOne,
       "view",
       "optd/crm:lead",
       ids.object,
@@ -471,7 +471,7 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
     });
     const agent = await createAgentLineage(harness, auth);
     const currentUrl =
-      `${harness.baseUrl}/api/v1/projects/${projectOne}/objects/optd/crm/lead/${ids.object}`;
+      `${harness.baseUrl}/api/v1/workspaces/${workspaceOne}/objects/optd/crm/lead/${ids.object}`;
     const historyUrl = `${currentUrl}/history`;
     const agentSmoke = await fetch(currentUrl, {
       headers: { authorization: `Bearer ${agent.token}` },
@@ -590,8 +590,8 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
     assertEquals(changedRootContinuationBody.error.code, "invalid_cursor");
     const mismatch = await harness.runOptctl([
       "--json",
-      "--project",
-      projectTwo,
+      "--workspace",
+      workspaceTwo,
       "view",
       "optd/crm:lead",
       ids.object,
@@ -600,8 +600,8 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
     assertEquals(JSON.parse(mismatch.stderr).error.code, "not_found");
     await expectCode(harness, [
       "--json",
-      "--project",
-      projectOne,
+      "--workspace",
+      workspaceOne,
       "view",
       "optd/crm:company",
       ids.object,
@@ -609,8 +609,8 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
     assertEquals(
       (await harness.runOptctl([
         "--json",
-        "--project",
-        projectOne,
+        "--workspace",
+        workspaceOne,
         "view",
         "optd/crm:lead",
         ids.object.toUpperCase(),
@@ -620,8 +620,8 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
     assertEquals(
       (await harness.runOptctl([
         "--json",
-        "--project",
-        projectOne,
+        "--workspace",
+        workspaceOne,
         "view",
         "Operant/crm:lead",
         ids.object,
@@ -644,9 +644,9 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
     const fullToken = freshCredentials.token;
     for (
       const path of [
-        `/api/v1/projects/${projectOne}/objects/optd/crm/lead/${ids.object.toUpperCase()}`,
-        `/api/v1/projects/${projectOne}/objects/optd/crm/lead/not-a-uuid`,
-        `/api/v1/projects/${projectOne}/objects/Operant/crm/lead/${ids.object}`,
+        `/api/v1/workspaces/${workspaceOne}/objects/optd/crm/lead/${ids.object.toUpperCase()}`,
+        `/api/v1/workspaces/${workspaceOne}/objects/optd/crm/lead/not-a-uuid`,
+        `/api/v1/workspaces/${workspaceOne}/objects/Operant/crm/lead/${ids.object}`,
       ]
     ) {
       const invalid = await fetch(`${harness.baseUrl}${path}`, {
@@ -667,7 +667,7 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
     assertEquals(invalidMetadataQueryBody.ok, false);
     assertEquals(invalidMetadataQueryBody.error.code, "validation_failed");
     const denied = await fetch(
-      `${harness.baseUrl}/api/v1/projects/${projectOne}/objects/optd/crm/lead/${ids.object}`,
+      `${harness.baseUrl}/api/v1/workspaces/${workspaceOne}/objects/optd/crm/lead/${ids.object}`,
       {
         headers: { authorization: `Bearer ${requestToken}` },
       },
@@ -677,17 +677,17 @@ Deno.test("compiled optctl reads Project-scoped object and relationship history"
     assertEquals(deniedBody.ok, false);
     assertEquals(deniedBody.error.code, "authorization_insufficient");
     assertEquals(
-      (await harness.runOptctl(["project", "select", "history-other"])).code,
+      (await harness.runOptctl(["workspace", "select", "history-other"])).code,
       0,
     );
     await expectCode(harness, [
       "--json",
-      "--project",
-      projectOne,
+      "--workspace",
+      workspaceOne,
       "view",
       "optd/crm:lead",
       ids.object,
-    ], "project_conflict");
+    ], "workspace_conflict");
   } catch (error) {
     console.error(error);
     console.error(await harness.diagnostics());
@@ -725,7 +725,7 @@ async function principalFor(harness: LiveHarness, username: string) {
 async function installCapability(
   harness: LiveHarness,
   principalId: string,
-  projectId: string,
+  workspaceId: string,
   authContextId: string,
   suffix: string,
   action: string,
@@ -765,18 +765,18 @@ async function installCapability(
     );
     await query(
       tx,
-      "insert into policy_rules(id,policy_definition_version_id,role_id,capability,resource,condition_kind) values($1,$2,$3,'project.read','*','unconditional')",
+      "insert into policy_rules(id,policy_definition_version_id,role_id,capability,resource,condition_kind) values($1,$2,$3,'workspace.read','*','unconditional')",
       [uuidV7(), policyVersion, role],
     );
     await query(
       tx,
-      "insert into policy_assignments(id,policy_definition_version_id,boundary_type,project_id,active,source,created_by_auth_context_id) values($1,$2,'project',$3,true,'operator',$4)",
-      [uuidV7(), policyVersion, projectId, authContextId],
+      "insert into policy_assignments(id,policy_definition_version_id,boundary_type,workspace_id,active,source,created_by_auth_context_id) values($1,$2,'workspace',$3,true,'operator',$4)",
+      [uuidV7(), policyVersion, workspaceId, authContextId],
     );
     await query(
       tx,
-      "insert into role_assignments(id,principal_id,role_id,boundary_type,project_id,active,created_by_auth_context_id) values($1,$2,$3,'project',$4,true,$5)",
-      [uuidV7(), principalId, role, projectId, authContextId],
+      "insert into role_assignments(id,principal_id,role_id,boundary_type,workspace_id,active,created_by_auth_context_id) values($1,$2,$3,'workspace',$4,true,$5)",
+      [uuidV7(), principalId, role, workspaceId, authContextId],
     );
   });
   return ruleId;
@@ -924,7 +924,7 @@ async function createAgentLineage(
       ) {
         await query(
           tx,
-          "insert into agent_authorization_roles(id,authorization_id,role_id,boundary_type,project_id) select $1,$2,$3,'project',project_id from role_assignments where role_id=$3 limit 1",
+          "insert into agent_authorization_roles(id,authorization_id,role_id,boundary_type,workspace_id) select $1,$2,$3,'workspace',workspace_id from role_assignments where role_id=$3 limit 1",
           [uuidV7(), authorizationId, role],
         );
       }
@@ -1139,7 +1139,7 @@ async function createAlternateAgentRoot(
       ) {
         await query(
           tx,
-          "insert into agent_authorization_roles(id,authorization_id,role_id,boundary_type,project_id) select $1,$2,$3,'project',project_id from role_assignments where role_id=$3 limit 1",
+          "insert into agent_authorization_roles(id,authorization_id,role_id,boundary_type,workspace_id) select $1,$2,$3,'workspace',workspace_id from role_assignments where role_id=$3 limit 1",
           [uuidV7(), authorizationId, role],
         );
       }

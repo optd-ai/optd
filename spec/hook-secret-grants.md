@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-hook-secret-grants; contract: 1; input: sha256:af86248cfc2836e0c5b9621327943e4da148b6d5dbc3703dc1ba680c0b64df57 -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-hook-secret-grants; contract: 1; input: sha256:7cb1c4a28cc6023ee4c4b2859891a1eafc36b9744ac9c7828601522826acf4f3 -->
 
 # Hook-Secret Grants
 
@@ -19,10 +19,10 @@ one pinned hook revision to receive one global secret through one declared
 required slot. Grants authorize trusted code, not the human/agent invoking the
 semantic action, and never transfer secret-read authority to that principal.
 
-Project policy determines who may invoke an action in each project. Secret
-selection does not vary by project. When separate external environments are
+Workspace policy determines who may invoke an action in each workspace. Secret
+selection does not vary by workspace. When separate external environments are
 needed, packs define separate hooks/actions and grant each hook only its own
-credential; automatic project-to-integration routing is deferred to a future
+credential; automatic workspace-to-integration routing is deferred to a future
 explicit integration model.
 
 ## Hook slots
@@ -50,7 +50,7 @@ Rules:
 
 ## Global secrets
 
-Secrets are globally named system resources and have no project/all-project
+Secrets are globally named system resources and have no workspace/all-workspace
 boundary:
 
 ```text
@@ -304,7 +304,7 @@ validate_salesforce_production + salesforce_token → salesforce-production
 Actions name the destination explicitly, and production actions may have
 stricter policy. Each hook gets only its own slot grant even when script content
 is identical. Domain data should record external environment alongside external
-IDs. Automatic project-based selection is intentionally not inferred.
+IDs. Automatic workspace-based selection is intentionally not inferred.
 
 ## Logs and redaction
 

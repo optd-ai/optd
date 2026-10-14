@@ -2,8 +2,8 @@ import { canonicalJson } from "../ids/canonical_json.ts";
 import { uuidV7 } from "../ids/uuid_v7.ts";
 
 export type ApprovalBoundary =
-  | Readonly<{ type: "project"; project_id: string }>
-  | Readonly<{ type: "all_projects" }>
+  | Readonly<{ type: "workspace"; workspace_id: string }>
+  | Readonly<{ type: "all_workspaces" }>
   | Readonly<{ type: "system" }>;
 
 export type ApprovalRequirement = Readonly<{
@@ -33,7 +33,7 @@ const ROLE =
 /** Canonicalize trusted hook requirements before they enter immutable evidence. */
 export function canonicalizeApprovalRequirements(
   values: readonly unknown[],
-  affectedProjects: ReadonlySet<string>,
+  affectedWorkspaces: ReadonlySet<string>,
   createdAt = new Date(),
   maximumWindowMs = 30 * 24 * 60 * 60 * 1000,
 ): ApprovalRequirement[] {
@@ -81,7 +81,7 @@ export function canonicalizeApprovalRequirements(
         "boundary is required",
       );
     }
-    const boundary = canonicalBoundary(raw.boundary, path, affectedProjects);
+    const boundary = canonicalBoundary(raw.boundary, path, affectedWorkspaces);
     const minimum = raw.minimum === undefined ? 1 : raw.minimum;
     if (
       !Number.isInteger(minimum) || Number(minimum) < 1 || Number(minimum) > 10
@@ -188,28 +188,30 @@ export function canonicalizeApprovalRequirements(
 function canonicalBoundary(
   value: Record<string, unknown>,
   path: string,
-  projects: ReadonlySet<string>,
+  workspaces: ReadonlySet<string>,
 ): ApprovalBoundary {
   if (
-    value.type === "project" &&
-    Object.keys(value).every((key) => key === "type" || key === "project_id") &&
-    typeof value.project_id === "string" && UUID.test(value.project_id)
+    value.type === "workspace" &&
+    Object.keys(value).every((key) =>
+      key === "type" || key === "workspace_id"
+    ) &&
+    typeof value.workspace_id === "string" && UUID.test(value.workspace_id)
   ) {
-    if (!projects.has(value.project_id)) {
+    if (!workspaces.has(value.workspace_id)) {
       throw new ApprovalContractError(
-        `${path}/boundary/project_id`,
-        "project boundary is not affected by this stage",
+        `${path}/boundary/workspace_id`,
+        "workspace boundary is not affected by this stage",
       );
     }
-    return { type: "project", project_id: value.project_id };
+    return { type: "workspace", workspace_id: value.workspace_id };
   }
   if (
-    (value.type === "all_projects" || value.type === "system") &&
+    (value.type === "all_workspaces" || value.type === "system") &&
     Object.keys(value).length === 1
   ) return { type: value.type };
   throw new ApprovalContractError(
     `${path}/boundary`,
-    "boundary must be exactly project, all_projects, or system",
+    "boundary must be exactly workspace, all_workspaces, or system",
   );
 }
 function record(value: unknown): value is Record<string, unknown> {

@@ -38,15 +38,15 @@ Deno.test("distinct compiled process trees reconnect wait, delegate, replace, an
     ], "interrupted websocket password\n");
     assertEquals(boot.code, 0, boot.stderr);
     const initial = await storedState(harness);
-    const project = await human.runOptctl([
+    const workspace = await human.runOptctl([
       "--json",
-      "project",
+      "workspace",
       "create",
       "agent-work",
       "--display-name",
       "Agent Work",
     ]);
-    assertEquals(project.code, 0, project.stderr);
+    assertEquals(workspace.code, 0, workspace.stderr);
     await selectCredential(harness, {
       token: initial.requestToken,
       requestToken: initial.requestToken,
@@ -65,7 +65,7 @@ Deno.test("distinct compiled process trees reconnect wait, delegate, replace, an
     ]);
     const requestOnlyWork = await requestOnly.runOptctl([
       "--json",
-      "project",
+      "workspace",
       "list",
     ]);
     assertEquals(requestOnlyWork.code, 1);
@@ -132,7 +132,7 @@ Deno.test("distinct compiled process trees reconnect wait, delegate, replace, an
     });
     const allowedWork = await waitingAgent.runOptctl([
       "--json",
-      "project",
+      "workspace",
       "list",
     ]);
     assertEquals(allowedWork.code, 0, allowedWork.stderr);

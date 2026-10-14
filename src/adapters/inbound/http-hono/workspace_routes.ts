@@ -1,6 +1,6 @@
 import type { Hono } from "npm:hono";
 import type { AuthContext } from "../../../domain/auth/model.ts";
-import type { Project } from "../../../domain/projects/model.ts";
+import type { Workspace } from "../../../domain/workspaces/model.ts";
 import type { Result } from "../../../domain/errors/result.ts";
 import { toHttpStatus } from "../../../domain/errors/result.ts";
 import {
@@ -10,11 +10,11 @@ import {
 import type { AuthVariables } from "./auth_middleware.ts";
 import { strictObject } from "./auth_routes.ts";
 
-export type ProjectHttpService = {
+export type WorkspaceHttpService = {
   create(
     auth: AuthContext,
     input: { slug: unknown; displayName: unknown; description?: unknown },
-  ): Promise<Result<Project>>;
+  ): Promise<Result<Workspace>>;
   list(
     auth: AuthContext,
     input: {
@@ -25,11 +25,11 @@ export type ProjectHttpService = {
     },
   ): Promise<
     Result<{
-      items: Project[];
+      items: Workspace[];
       page: { limit: number; nextCursor: string | null };
     }>
   >;
-  get(auth: AuthContext, id: string): Promise<Result<Project>>;
+  get(auth: AuthContext, id: string): Promise<Result<Workspace>>;
   update(
     auth: AuthContext,
     id: string,
@@ -38,19 +38,19 @@ export type ProjectHttpService = {
       displayName?: unknown;
       description?: unknown;
     },
-  ): Promise<Result<Project>>;
+  ): Promise<Result<Workspace>>;
   archive(
     auth: AuthContext,
     id: string,
     expectedVersion: unknown,
-  ): Promise<Result<Project>>;
+  ): Promise<Result<Workspace>>;
 };
 
-export function registerProjectRoutes(
+export function registerWorkspaceRoutes(
   app: Hono<{ Variables: AuthVariables }>,
-  service: ProjectHttpService,
+  service: WorkspaceHttpService,
 ) {
-  app.post("/api/v1/projects", async (c) => {
+  app.post("/api/v1/workspaces", async (c) => {
     const body = await c.req.json().catch(() => undefined);
     if (
       !strictObject(body, ["slug", "display_name", "description"], [
@@ -70,17 +70,17 @@ export function registerProjectRoutes(
       201,
     );
   });
-  app.get("/api/v1/projects", async (c) => {
+  app.get("/api/v1/workspaces", async (c) => {
     const parsed = parseListQuery(c.req.url);
     if (!parsed.ok) return invalidQuery(c, parsed.code, parsed.message);
     return respondPage(c, await service.list(c.get("auth"), parsed.value));
   });
   app.get(
-    "/api/v1/projects/:project_id",
+    "/api/v1/workspaces/:workspace_id",
     async (c) =>
-      respond(c, await service.get(c.get("auth"), c.req.param("project_id"))),
+      respond(c, await service.get(c.get("auth"), c.req.param("workspace_id"))),
   );
-  app.post("/api/v1/projects/:project_id/update", async (c) => {
+  app.post("/api/v1/workspaces/:workspace_id/update", async (c) => {
     const body = await c.req.json().catch(() => undefined);
     if (
       !strictObject(body, ["expected_version", "display_name", "description"], [
@@ -89,7 +89,7 @@ export function registerProjectRoutes(
     ) return invalid(c);
     return respond(
       c,
-      await service.update(c.get("auth"), c.req.param("project_id"), {
+      await service.update(c.get("auth"), c.req.param("workspace_id"), {
         expectedVersion: body.expected_version,
         ...Object.hasOwn(body, "display_name")
           ? { displayName: body.display_name }
@@ -100,7 +100,7 @@ export function registerProjectRoutes(
       }),
     );
   });
-  app.post("/api/v1/projects/:project_id/archive", async (c) => {
+  app.post("/api/v1/workspaces/:workspace_id/archive", async (c) => {
     const body = await c.req.json().catch(() => undefined);
     if (!strictObject(body, ["expected_version"], ["expected_version"])) {
       return invalid(c);
@@ -109,29 +109,29 @@ export function registerProjectRoutes(
       c,
       await service.archive(
         c.get("auth"),
-        c.req.param("project_id"),
+        c.req.param("workspace_id"),
         body.expected_version,
       ),
     );
   });
 }
 
-function dto(project: Project) {
+function dto(workspace: Workspace) {
   return {
-    id: project.id,
-    slug: project.slug,
-    display_name: project.displayName,
-    description: project.description,
-    status: project.status,
-    version: project.version,
-    created_at: project.createdAt,
-    updated_at: project.updatedAt,
-    archived_at: project.archivedAt,
+    id: workspace.id,
+    slug: workspace.slug,
+    display_name: workspace.displayName,
+    description: workspace.description,
+    status: workspace.status,
+    version: workspace.version,
+    created_at: workspace.createdAt,
+    updated_at: workspace.updatedAt,
+    archived_at: workspace.archivedAt,
   };
 }
 function respond(
   c: { json(data: unknown, status?: number): Response },
-  result: Result<Project | Project[]>,
+  result: Result<Workspace | Workspace[]>,
   status = 200,
 ) {
   if (!result.ok) {
@@ -149,7 +149,7 @@ function respond(
 function respondPage(
   c: { json(data: unknown, status?: number): Response },
   result: Result<{
-    items: Project[];
+    items: Workspace[];
     page: { limit: number; nextCursor: string | null };
   }>,
 ) {
@@ -180,14 +180,14 @@ function parseListQuery(urlValue: string): ParsedListQuery {
       return {
         ok: false,
         code: "validation_failed",
-        message: `unknown Project list query field: ${key}`,
+        message: `unknown Workspace list query field: ${key}`,
       };
     }
     if (url.searchParams.getAll(key).length !== 1) {
       return {
         ok: false,
         code: "validation_failed",
-        message: `Project list query field must occur once: ${key}`,
+        message: `Workspace list query field must occur once: ${key}`,
       };
     }
   }
@@ -209,7 +209,7 @@ function invalid(c: { json(data: unknown, status?: number): Response }) {
   return c.json(
     errorEnvelope({
       code: "validation_failed",
-      message: "project request is invalid",
+      message: "workspace request is invalid",
       details: {},
     }),
     422,

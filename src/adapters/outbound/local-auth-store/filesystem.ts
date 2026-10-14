@@ -703,10 +703,10 @@ export class FilesystemLocalAuthStore {
           await digest(normalized) !== entry.name ||
           !server.state || typeof server.state !== "object" ||
           Array.isArray(server.state) ||
-          (server.state.projectId !== undefined &&
-            typeof server.state.projectId !== "string") ||
-          (server.state.projectSlug !== undefined &&
-            typeof server.state.projectSlug !== "string") ||
+          (server.state.workspaceId !== undefined &&
+            typeof server.state.workspaceId !== "string") ||
+          (server.state.workspaceSlug !== undefined &&
+            typeof server.state.workspaceSlug !== "string") ||
           (server.state.username !== undefined &&
             typeof server.state.username !== "string")
         ) throw new Error("invalid server record");

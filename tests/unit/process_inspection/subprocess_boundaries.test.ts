@@ -86,13 +86,13 @@ Deno.test("production subprocess callsites remain explicitly classified", async 
   }
 
   const proc = only(sites, "process-inspection/linux.ts");
-  assertEquals(proc.command, '"/bin/cat"');
+  assertEquals(proc.command, '"cat"');
   assertMatch(proc.source, /args:\s*\[path\]/);
   assertMatch(proc.source, /clearEnv:\s*true/);
-  assertMatch(proc.source, /env:\s*\{\}/);
+  assertMatch(proc.source, /LC_ALL:\s*"C"/);
   assert(!proc.source.includes("/bin/sh"));
   const procFile = await Deno.readTextFile(proc.path);
-  assert(!procFile.includes("Deno.env"));
+  assertMatch(procFile, /Deno\.env\.get\("PATH"\)/);
 
   assertPostgresLifecycleSites(
     sites.filter((site) => site.path.endsWith("postgres-process/lifecycle.ts")),
@@ -120,12 +120,12 @@ function assertPostgresLifecycleSites(sites: readonly CommandSite[]): void {
   assert(!checked.source.includes("/bin/sh"));
 
   assertProcFallback(cmdline, {
-    operation: "exec /bin/cat",
+    operation: "exec cat",
     procSuffix: "/cmdline",
     selfExit: 2,
   });
   assertProcFallback(cwd, {
-    operation: "exec /bin/readlink -e",
+    operation: "exec readlink -e",
     procSuffix: "/cwd",
     selfExit: 2,
   });

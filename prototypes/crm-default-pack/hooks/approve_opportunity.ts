@@ -10,7 +10,7 @@ console.log(JSON.stringify({
     ? [{
       key: "opportunity_won",
       role: "optd/crm:sales_manager",
-      boundary: { type: "project", project_id: envelope.input.project_id },
+      boundary: { type: "workspace", workspace_id: envelope.input.workspace_id },
       minimum: 1,
       principal_types: ["human_user"],
       allow_initiator: false,

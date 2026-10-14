@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-proof-acceptance; contract: 1; input: sha256:0afb1bbaa01aaf7759c04f7b79892520ae56c61530bef80f8181d460a8188aed -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-proof-acceptance; contract: 1; input: sha256:ea87e643c5789a30830cf4cf7627eb1346ab058d72c8cfb8af99709e348a6ac0 -->
 
 # Proof packs and acceptance
 
@@ -62,4 +62,4 @@ Resource AXI list uses defaultFields. optctl search requires --text and lowers e
 
 ### Keep CRM and Projects as ordinary strict proof packs
 
-CRM exercises actions, approvals, secrets, outbox, and migration. Projects independently exercises generic resources, all seven operations, policy, direct ReBAC, and actions. Neither creates a platform product boundary.
+CRM exercises actions, approvals, secrets, outbox, and migration. Workspaces independently exercises generic resources, all seven operations, policy, direct ReBAC, and actions. Neither creates a platform product boundary.

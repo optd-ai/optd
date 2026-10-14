@@ -5,13 +5,14 @@ import {
   assertStringIncludes,
 } from "jsr:@std/assert";
 import { assertHealth } from "../support/live_harness.ts";
+import { BUILD_VERSION } from "../../src/config/build.ts";
 import { startAuthenticatedHarness } from "../support/authenticated_harness.ts";
 
 Deno.test("bootstrap scenario crosses real HTTP, Postgres, and optctl boundaries", async () => {
   const harness = await startAuthenticatedHarness();
   try {
     const health = await assertHealth(harness.baseUrl);
-    assertEquals(health.data.version, "0.1.0-dev");
+    assertEquals(health.data.version, BUILD_VERSION);
     assertEquals(health.data.database.ok, true);
     assertEquals(health.data.migrations.ok, true);
 
@@ -20,7 +21,7 @@ Deno.test("bootstrap scenario crosses real HTTP, Postgres, and optctl boundaries
     const home = JSON.parse(optctl.stdout);
     assertEquals(home.ok, true);
     assertEquals(home.data.status, "ready");
-    assertEquals(home.data.version, "0.1.0-dev");
+    assertEquals(home.data.version, BUILD_VERSION);
     assert(home.data.capabilities.includes("metadata.home"));
 
     assertStringIncludes(optctl.stdout, "metadata.home");

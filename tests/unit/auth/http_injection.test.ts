@@ -154,7 +154,7 @@ Deno.test("changeset business fields allow principal references without granting
       body: JSON.stringify(body),
     });
   const legitimate = {
-    project_id: uuidV7(),
+    workspace_id: uuidV7(),
     operations: [{
       op: "create",
       resource: "optd/projects:project_member",
@@ -244,8 +244,8 @@ Deno.test("action inputs remain recursively protected and auth roles are exact",
   }
   assertEquals(
     (await post("/api/v1/auth/requests", {
-      roles: ["project:contributor"],
-      boundary: { type: "project", project_id: uuidV7() },
+      roles: ["workspace:contributor"],
+      boundary: { type: "workspace", workspace_id: uuidV7() },
     })).status,
     200,
   );

@@ -27,7 +27,7 @@ export class PostgresObjectReader implements ObjectReader {
     const relationship = address.definition.kind === "relationship";
     const platform = [
       "id",
-      "project_id",
+      "workspace_id",
       "version",
       "current_object_version_id",
       "archived_at",
@@ -41,8 +41,8 @@ export class PostgresObjectReader implements ObjectReader {
       this.sql,
       `select ${columns} from ${
         quoteIdentifier(definition.table)
-      } where project_id=$1 and id=$2 for share`,
-      [address.projectId, address.objectId],
+      } where workspace_id=$1 and id=$2 for share`,
+      [address.workspaceId, address.objectId],
     );
     const row = result.rows[0];
     if (!row || typeof row.current_object_version_id !== "string") return null;
@@ -57,7 +57,7 @@ export class PostgresObjectReader implements ObjectReader {
     };
     const common = {
       id: String(row.id),
-      project_id: String(row.project_id),
+      workspace_id: String(row.workspace_id),
       version: Number(row.version),
       object_version_id: row.current_object_version_id,
       archived_at: timestamp(row.archived_at),
@@ -100,7 +100,7 @@ export class PostgresObjectReader implements ObjectReader {
     if (!definition) return null;
     const identity = qualifiedIdentity(address.definition);
     const params: unknown[] = [
-      address.projectId,
+      address.workspaceId,
       address.definition.kind,
       identity,
       address.objectId,
@@ -115,11 +115,11 @@ export class PostgresObjectReader implements ObjectReader {
       `select * from (
         select created_at,id,'object_version' entry_kind,version,operation,changeset_commit_id,auth_context_id,
           changed_fields,snapshot_json,null::text body,null::uuid target_object_version_id
-        from object_versions where project_id=$1 and definition_kind=$2 and resource_identity=$3 and object_id=$4 ${keyset}
+        from object_versions where workspace_id=$1 and definition_kind=$2 and resource_identity=$3 and object_id=$4 ${keyset}
         union all
         select created_at,id,'comment' entry_kind,null::integer,null::text,changeset_commit_id,auth_context_id,
           null::text[],null::jsonb,body,target_object_version_id
-        from comments where project_id=$1 and definition_kind=$2 and resource_identity=$3 and object_id=$4 ${keyset}
+        from comments where workspace_id=$1 and definition_kind=$2 and resource_identity=$3 and object_id=$4 ${keyset}
       ) timeline order by created_at desc,id desc limit $${params.length}`,
       params,
     );

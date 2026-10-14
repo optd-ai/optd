@@ -19,7 +19,7 @@ spec:
       order: 100
       input:
         operation: $operation
-        project_id: $project_id
+        workspace_id: $workspace_id
         current: $current
         proposed: $proposed
     - phase: changeset.validate
@@ -27,11 +27,11 @@ spec:
       order: 100
       input:
         operation: $operation
-        project_id: $project_id
+        workspace_id: $workspace_id
         current: $current
         proposed: $proposed
   axi:
-    purpose: validate task guidance for the optd/projects pack.
+    purpose: Validate task lifecycle and time entries. Authorized humans and agents may complete their own tasks without a separate approval.
     whenToUse:
       - Inspect hook validate_task behavior and guidance before relying on it.
     help:

@@ -15,8 +15,8 @@ import { resolveProcessAnchor } from "./auth_anchor.ts";
 export type LocalContext = {
   name: string;
   origin: string;
-  projectId?: string;
-  projectSlug?: string;
+  workspaceId?: string;
+  workspaceSlug?: string;
 };
 type ContextFile = {
   schema_version: 1;
@@ -29,8 +29,8 @@ export type OriginState = {
   token?: string;
   requestToken?: string;
   requestSessionId?: string;
-  projectId?: string;
-  projectSlug?: string;
+  workspaceId?: string;
+  workspaceSlug?: string;
   username?: string;
   authorizationId?: string;
   resetNonces?: Record<string, string>;
@@ -107,8 +107,8 @@ export async function showContext(name?: string): Promise<LocalContext> {
   const state = await store().readState(context.origin) as OriginState;
   return {
     ...context,
-    ...(state.projectId ? { projectId: state.projectId } : {}),
-    ...(state.projectSlug ? { projectSlug: state.projectSlug } : {}),
+    ...(state.workspaceId ? { workspaceId: state.workspaceId } : {}),
+    ...(state.workspaceSlug ? { workspaceSlug: state.workspaceSlug } : {}),
   };
 }
 
@@ -278,7 +278,7 @@ export async function localAuthStatus(origin: string) {
       anchor_uid: selected?.anchor?.uid ?? null,
       anchor_boot_id: selected?.anchor?.bootId ?? null,
       username: state.username ?? null,
-      project_id: state.projectId ?? null,
+      workspace_id: state.workspaceId ?? null,
       request_credential_available: request !== null,
       selection: selected
         ? "nearest verified process binding"

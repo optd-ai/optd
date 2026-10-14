@@ -530,8 +530,8 @@ export function registerAuthRoutes(
   });
   app.get("/api/v1/auth/roles", async (c) => {
     const type = c.req.query("boundary_type");
-    const boundary = type === "project"
-      ? { type, project_id: c.req.query("project_id") }
+    const boundary = type === "workspace"
+      ? { type, workspace_id: c.req.query("workspace_id") }
       : { type };
     return send(
       c,
@@ -702,8 +702,8 @@ function mapResult<T, U>(
   return result.ok ? { ok: true, value: transform(result.value) } : result;
 }
 function boundaryDto(boundary: AuthorizationBoundary) {
-  return boundary.type === "project"
-    ? { type: boundary.type, project_id: boundary.projectId }
+  return boundary.type === "workspace"
+    ? { type: boundary.type, workspace_id: boundary.workspaceId }
     : { type: boundary.type };
 }
 function agentRequestDto(request: AgentAuthorizationRequest) {

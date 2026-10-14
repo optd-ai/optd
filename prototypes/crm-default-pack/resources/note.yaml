@@ -39,7 +39,7 @@ spec:
       empty:
         message: No note records found.
         help:
-          - optctl --project ${project} create optd/crm:note --input object.json --stage
+          - optctl --workspace ${workspace} create optd/crm:note --input object.json --stage
     detail:
       sections:
         - title: note
@@ -50,11 +50,11 @@ spec:
             - opportunity_id
             - contact_id
       help:
-        - optctl --project ${project} query optd/crm:note --where 'id == "${id}"'
+        - optctl --workspace ${workspace} query optd/crm:note --where 'id == "${id}"'
     help:
       list:
-        - optctl --project ${project} query optd/crm:note
+        - optctl --workspace ${workspace} query optd/crm:note
       view:
-        - optctl --project ${project} view optd/crm:note ${id}
+        - optctl --workspace ${workspace} view optd/crm:note ${id}
       created:
-        - optctl --project ${project} view optd/crm:note ${id}
+        - optctl --workspace ${workspace} view optd/crm:note ${id}

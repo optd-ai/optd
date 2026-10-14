@@ -25,7 +25,7 @@ Deno.test({
     try {
       const stage = await matrix.stage([{
         op: "create",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:alpha",
         fields: { key: "timeout", status: "ready" },
       }]);
@@ -107,7 +107,7 @@ Deno.test({
     try {
       const first = await matrix.stage([{
         op: "create",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:alpha",
         fields: { key: "retry-success", status: "ready" },
       }]);
@@ -128,7 +128,7 @@ Deno.test({
 
       const exhausted = await matrix.stage([{
         op: "create",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:alpha",
         fields: { key: "retry-exhaust", status: "ready" },
       }]);
@@ -207,7 +207,7 @@ Deno.test({
       );
       const deadlock = await matrix.stage([{
         op: "create",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:gamma",
         fields: { key: "deadlock-exhaust", status: "ready" },
       }]);
@@ -234,7 +234,7 @@ Deno.test({
       );
       const busyStage = await matrix.stage([{
         op: "create",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:gamma",
         fields: { key: "busy-once", status: "ready" },
       }]);
@@ -257,7 +257,7 @@ Deno.test({
       );
       const domainStage = await matrix.stage([{
         op: "create",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:gamma",
         fields: { key: "domain-once", status: "ready" },
       }]);
@@ -301,7 +301,7 @@ Deno.test({
     try {
       const stage = await matrix.stage([{
         op: "create",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:alpha",
         fields: { key: "deadlock-retry", status: "ready" },
       }]);
@@ -416,8 +416,8 @@ Deno.test({
         [0, 1].map(() =>
           matrix.harness.runOptctl([
             "--json",
-            "--project",
-            matrix.projectId,
+            "--workspace",
+            matrix.workspaceId,
             "seed",
             "stage",
             "test/commitmatrix",
@@ -456,8 +456,8 @@ Deno.test({
       );
       const unchanged = await matrix.harness.runOptctl([
         "--json",
-        "--project",
-        matrix.projectId,
+        "--workspace",
+        matrix.workspaceId,
         "seed",
         "stage",
         "test/commitmatrix",
@@ -489,13 +489,13 @@ Deno.test({
       const dependency = await matrix.stage([{
         op: "create",
         key: "alpha",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:alpha",
         fields: { key: "failure-dependency-alpha", status: "ready" },
       }, {
         op: "create",
         key: "beta",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:beta",
         fields: { key: "failure-dependency-beta", status: "ready" },
       }]);
@@ -505,19 +505,19 @@ Deno.test({
       const unlinkBase = await matrix.stage([{
         op: "create",
         key: "alpha",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:alpha",
         fields: { key: "failure-unlink-alpha", status: "ready" },
       }, {
         op: "create",
         key: "beta",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:beta",
         fields: { key: "failure-unlink-beta", status: "ready" },
       }, {
         op: "link",
         key: "relationship",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         relationship: "test/commitmatrix:alpha_beta",
         from: { $ref: "alpha.object_id" },
         to: { $ref: "beta.object_id" },
@@ -565,7 +565,7 @@ Deno.test({
       for (const [ordinal, failure] of cases.entries()) {
         const operations = failureOperations(
           failure.kind,
-          matrix.projectId,
+          matrix.workspaceId,
           ordinal,
           alphaId,
           betaId,
@@ -603,12 +603,12 @@ Deno.test({
       const successStage = await matrix.stage([{
         op: "create",
         key: "created",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:alpha",
         fields: { key: "immutable-success", status: "ready" },
       }, {
         op: "comment",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:alpha",
         object_id: { $ref: "created.object_id" },
         body: "immutable",
@@ -722,13 +722,13 @@ Deno.test({
       const chainCreate = await matrix.stage([{
         op: "create",
         key: "alpha",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:alpha",
         fields: { key: "complete-chain-alpha", status: "ready" },
       }, {
         op: "create",
         key: "beta",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:beta",
         fields: { key: "complete-chain-beta", status: "ready" },
       }]);
@@ -756,21 +756,21 @@ Deno.test({
       };
       await commitChain([{
         op: "update",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:alpha",
         object_id: chainAlpha,
         set: { note: "updated" },
       }]);
       await commitChain([{
         op: "transition",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:alpha",
         object_id: chainAlpha,
         to: "done",
       }]);
       const linked = await commitChain([{
         op: "link",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         relationship: "test/commitmatrix:alpha_beta",
         from: chainAlpha,
         to: chainBeta,
@@ -786,7 +786,7 @@ Deno.test({
       );
       await commitChain([{
         op: "comment",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:alpha",
         object_id: chainAlpha,
         body: "no bump",
@@ -803,13 +803,13 @@ Deno.test({
       );
       await commitChain([{
         op: "unlink",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         relationship: "test/commitmatrix:alpha_beta",
         relationship_id: linkedId,
       }]);
       const relinked = await commitChain([{
         op: "link",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         relationship: "test/commitmatrix:alpha_beta",
         from: chainAlpha,
         to: chainBeta,
@@ -821,7 +821,7 @@ Deno.test({
       );
       await commitChain([{
         op: "archive",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:alpha",
         object_id: chainAlpha,
       }]);
@@ -956,7 +956,7 @@ async function removeFailure(
 }
 function failureOperations(
   kind: string,
-  projectId: string,
+  workspaceId: string,
   ordinal: number,
   alphaId: string,
   betaId: string,
@@ -965,7 +965,7 @@ function failureOperations(
   if (kind === "link") {
     return [{
       op: "link",
-      project_id: projectId,
+      workspace_id: workspaceId,
       relationship: "test/commitmatrix:alpha_beta",
       from: alphaId,
       to: betaId,
@@ -975,7 +975,7 @@ function failureOperations(
   if (kind === "unlink") {
     return [{
       op: "unlink",
-      project_id: projectId,
+      workspace_id: workspaceId,
       relationship: "test/commitmatrix:alpha_beta",
       relationship_id: relationshipId,
     }];
@@ -983,7 +983,7 @@ function failureOperations(
   if (kind === "comment") {
     return [{
       op: "comment",
-      project_id: projectId,
+      workspace_id: workspaceId,
       resource: "test/commitmatrix:alpha",
       object_id: alphaId,
       body: `failure-${ordinal}`,
@@ -992,7 +992,7 @@ function failureOperations(
   if (kind === "update") {
     return [{
       op: "update",
-      project_id: projectId,
+      workspace_id: workspaceId,
       resource: "test/commitmatrix:alpha",
       object_id: alphaId,
       set: { note: `failure-${ordinal}` },
@@ -1001,7 +1001,7 @@ function failureOperations(
   if (kind === "transition") {
     return [{
       op: "transition",
-      project_id: projectId,
+      workspace_id: workspaceId,
       resource: "test/commitmatrix:alpha",
       object_id: alphaId,
       to: "done",
@@ -1010,14 +1010,14 @@ function failureOperations(
   if (kind === "archive") {
     return [{
       op: "archive",
-      project_id: projectId,
+      workspace_id: workspaceId,
       resource: "test/commitmatrix:alpha",
       object_id: alphaId,
     }];
   }
   return [{
     op: "create",
-    project_id: projectId,
+    workspace_id: workspaceId,
     resource: "test/commitmatrix:alpha",
     fields: { key: `failure-${ordinal}`, status: "ready" },
   }];

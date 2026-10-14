@@ -903,9 +903,18 @@ Deno.test("quarantine failure retains the old backup at its top-level recovery p
     const output = `${fixture.root}/artifacts`;
     await Deno.mkdir(output);
     await Deno.writeTextFile(`${output}/sentinel`, "original");
+    const realMv = new TextDecoder().decode(
+      (await new Deno.Command("bash", {
+        args: ["-c", "command -v mv"],
+        stdout: "piped",
+      }).output()).stdout,
+    ).trim();
+    assert(realMv.startsWith("/"));
     await executable(
       `${fixture.bin}/mv`,
-      `#!/usr/bin/env bash\nset -euo pipefail\nfor arg in "$@"; do [[ "$arg" != *'.failed.'* ]] || exit 74; done\nexec /usr/bin/mv "$@"\n`,
+      `#!/usr/bin/env bash\nset -euo pipefail\nfor arg in "$@"; do [[ "$arg" != *'.failed.'* ]] || exit 74; done\nexec ${
+        JSON.stringify(realMv)
+      } "$@"\n`,
     );
     const marker = `${fixture.state}/after-publish-quarantine-failure`;
     const child = new Deno.Command("bash", {

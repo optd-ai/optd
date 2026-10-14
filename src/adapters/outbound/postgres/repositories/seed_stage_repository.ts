@@ -30,10 +30,10 @@ export function makePostgresSeedStageRepository(
         [publisher, pack],
       )).rows[0] ?? null;
     },
-    async authorize(auth, projectId, action): Promise<Result<void>> {
+    async authorize(auth, workspaceId, action): Promise<Result<void>> {
       const result = await authorization.authorize({
         auth,
-        boundary: { type: "project", projectId },
+        boundary: { type: "workspace", workspaceId },
         action,
         resource: action,
       });
@@ -48,10 +48,10 @@ export function makePostgresSeedStageRepository(
       if (!table) throw new Error("seed resource is unavailable");
       const rows = (await query<Record<string, unknown>>(
         sql,
-        `select * from ${quoteIdentifier(table)} where project_id=$1 and ${
+        `select * from ${quoteIdentifier(table)} where workspace_id=$1 and ${
           quoteIdentifier(input.key)
         }=$2 and archived_at is null order by id for share`,
-        [input.projectId, input.value],
+        [input.workspaceId, input.value],
       )).rows;
       if (rows.length > 1) {
         throw new Error("active-only seed uniqueness is violated");

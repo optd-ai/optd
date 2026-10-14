@@ -7,7 +7,7 @@ Deno.test("resource convenience commands probe only canonical routes", async () 
   const controller = new AbortController();
   const stageId = "019b7a2e-7c10-7000-8000-000000000011";
   const objectId = "019b7a2e-7c10-7000-8000-000000000012";
-  const projectId = "019b7a2e-7c10-7000-8000-000000000013";
+  const workspaceId = "019b7a2e-7c10-7000-8000-000000000013";
   const server = Deno.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -43,8 +43,8 @@ Deno.test("resource convenience commands probe only canonical routes", async () 
   const base = [
     "--server",
     `http://127.0.0.1:${server.addr.port}`,
-    "--project",
-    projectId,
+    "--workspace",
+    workspaceId,
     "--json",
   ];
   try {

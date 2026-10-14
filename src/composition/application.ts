@@ -44,14 +44,14 @@ import { OPTD_VERSION } from "../config/runtime.ts";
 import type { Queryable, Sql } from "../adapters/outbound/postgres/client.ts";
 import { PostgresTransactionManager } from "../adapters/outbound/postgres/transaction_manager.ts";
 import { PostgresAuthRepository } from "../adapters/outbound/postgres/auth_repository.ts";
-import { PostgresProjectRepository } from "../adapters/outbound/postgres/project_repository.ts";
+import { PostgresWorkspaceRepository } from "../adapters/outbound/postgres/workspace_repository.ts";
 import { makeBootstrapService } from "../application/services/auth/bootstrap.ts";
 import { makeAgentAuthService } from "../application/services/auth/agent.ts";
 import {
   loadPasswordPolicy,
   makeHumanAuthService,
 } from "../application/services/auth/human.ts";
-import { makeProjectService } from "../application/services/projects/manage_projects.ts";
+import { makeWorkspaceService } from "../application/services/workspaces/manage_workspaces.ts";
 import { PostgresAuthorizationRepository } from "../adapters/outbound/postgres/authorization_repository.ts";
 import { makeAuthorizationService } from "../application/services/authorization/manage_assignments.ts";
 import { PostgresObjectReadBoundary } from "../adapters/outbound/postgres/object_read_boundary.ts";
@@ -161,7 +161,7 @@ export function makeApplication(
     bootstrap: makeBootstrapService(authentication, passwordPolicy),
     humanAuth: makeHumanAuthService(authentication, passwordPolicy),
     agentAuth: makeAgentAuthService(authentication),
-    projects: makeProjectService(new PostgresProjectRepository(sql)),
+    workspaces: makeWorkspaceService(new PostgresWorkspaceRepository(sql)),
     authorization,
     metadata: makeInspectMetadataService({
       catalog: makePostgresMetadataRepository(sql),

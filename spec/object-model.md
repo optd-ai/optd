@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-object-model; contract: 1; input: sha256:2cf4212837d2207c1323aa5cc66fdd282f54e91d198b79f599af9f31e4a6ca7f -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-object-model; contract: 1; input: sha256:84e277d1c433a407f3f32a533fbd4fd21546a04e4b90e5b47289e3f6492a337b -->
 
 # Object Model
 
@@ -36,7 +36,7 @@ mapping, or mutable resource-definition endpoint.
 Every object instance has universal platform fields:
 
 - `id`: server-generated UUIDv7 per RFC 9562.
-- `project_id` and publisher-qualified resource definition/revision identity.
+- `workspace_id` and publisher-qualified resource definition/revision identity.
 - `created_at`, `updated_at`, `archived_at`.
 - creating/updating/archiving auth-context provenance.
 - monotonic `version` plus current immutable object-version UUID.
@@ -91,7 +91,7 @@ Likely architecture:
 
 - Platform core: object infrastructure and universal capabilities.
 - Domain packs/templates: optional starter object types such as CRM, Helpdesk,
-  Project, Finance.
+  Workspace, Finance.
 - User customizations: locally edited object types, constraints, hooks, and
   extensions.
 
@@ -104,7 +104,7 @@ and scripts layered on the same resource APIs as user-defined resources.
   relationship definitions come from globally installed packs. Operators create
   custom domain types by authoring/applying packs, not by bypassing pack
   validation with an unversioned loose-type API.
-- Every runtime object has UUIDv7 identity, explicit project, qualified resource
+- Every runtime object has UUIDv7 identity, explicit workspace, qualified resource
   definition, mutable current projection, immutable version history, audit
   provenance, archive fields, policy evaluation, and changeset-only mutation.
   Lifecycle, search, comments, relationships, actions, and hooks are optional

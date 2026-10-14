@@ -374,6 +374,15 @@ function diffDefinitions(
     | "seeds",
   changes: MigrationChange[],
 ) {
+  const singular = {
+    relationships: "relationship",
+    lifecycles: "lifecycle",
+    actions: "action",
+    hooks: "hook",
+    roles: "role",
+    policies: "policy",
+    seeds: "seed",
+  }[kind];
   const before = definitions(input.active?.normalized, kind);
   const after = Object.fromEntries(
     Object.entries(input.candidate[kind]).map((
@@ -395,13 +404,11 @@ function diffDefinitions(
       : "safe";
     changes.push({
       id: uuidV7(),
-      kind: `${removed ? "remove" : changed ? "change" : "add"}_${
-        kind.slice(0, -1)
-      }`,
+      kind: `${removed ? "remove" : changed ? "change" : "add"}_${singular}`,
       class: className,
       status: removed || relationshipReplacement ? "blocked" : "ready",
-      target: { [kind.slice(0, -1)]: identity(input.candidate, name) },
-      reason: `${kind.slice(0, -1)} ${
+      target: { [singular]: identity(input.candidate, name) },
+      reason: `${singular} ${
         removed ? "removed" : changed ? "changed" : "added"
       } in desired revision`,
       facts: {},
@@ -419,7 +426,7 @@ function diffDefinitions(
         ? "remove or migrate dependent relationship rows"
         : null,
       destructive_action: removed || relationshipReplacement
-        ? `${removed ? "remove" : "replace"} ${kind.slice(0, -1)}`
+        ? `${removed ? "remove" : "replace"} ${singular}`
         : null,
     });
   }

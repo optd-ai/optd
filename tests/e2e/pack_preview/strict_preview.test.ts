@@ -249,7 +249,7 @@ Deno.test("compiled pack preview persists inactive reusable candidates and disti
         "pack.yaml": strictRoot(),
         "resources/lead.yaml": strictResource().replace(
           "name: {",
-          "project_id: {",
+          "workspace_id: {",
         ),
       },
       "resources/lead.yaml",

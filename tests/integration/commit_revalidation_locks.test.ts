@@ -35,19 +35,19 @@ Deno.test({
       const base = await matrix.stage([{
         op: "create",
         key: "alpha_one",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:alpha",
         fields: { key: "lock-alpha-one", status: "ready" },
       }, {
         op: "create",
         key: "alpha_two",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:alpha",
         fields: { key: "lock-alpha-two", status: "ready" },
       }, {
         op: "create",
         key: "beta",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:beta",
         fields: { key: "lock-beta", status: "ready" },
       }]);
@@ -57,13 +57,13 @@ Deno.test({
       const beta = String(base.operations[2].object_id);
       const stageA = await matrix.stage([{
         op: "update",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:beta",
         object_id: beta,
         set: { note: "reverse-beta" },
       }, {
         op: "update",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:alpha",
         object_id: alphaOne,
         set: { note: "reverse-alpha" },
@@ -133,7 +133,7 @@ Deno.test({
       }
       assertEquals(
         heldLocks.some((lock) =>
-          lock.relation_name === "projects" && lock.mode === "RowShareLock" &&
+          lock.relation_name === "workspaces" && lock.mode === "RowShareLock" &&
           lock.granted
         ),
         true,
@@ -141,7 +141,7 @@ Deno.test({
 
       const stageB = await matrix.stage([{
         op: "update",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:alpha",
         object_id: alphaTwo,
         set: { note: "independent" },
@@ -192,7 +192,7 @@ Deno.test({
     try {
       const base = await matrix.stage([{
         op: "create",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:alpha",
         fields: { key: "pack-race", status: "ready" },
       }]);
@@ -207,7 +207,7 @@ Deno.test({
       const firstPlan = await nextPackPlan(matrix, "pack_field_one");
       const commitFirstStage = await matrix.stage([{
         op: "update",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:alpha",
         object_id: objectId,
         set: { note: "commit first" },
@@ -274,7 +274,7 @@ Deno.test({
       const secondPlan = await nextPackPlan(matrix, "pack_field_two");
       const packFirstStage = await matrix.stage([{
         op: "update",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:alpha",
         object_id: objectId,
         set: { note: "pack first" },
@@ -395,7 +395,7 @@ Deno.test({
     try {
       const stage = await matrix.stage([{
         op: "create",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:alpha",
         fields: { key: "metadata-race", status: "ready" },
       }]);
@@ -582,7 +582,7 @@ Deno.test({
       assertEquals(initial.code, 0, initial.stderr);
       const stage = await matrix.stage([{
         op: "create",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:gamma",
         fields: { key: "unrelated-pack-commit", status: "ready" },
       }]);

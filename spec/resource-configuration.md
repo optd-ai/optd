@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-resource-configuration; contract: 1; input: sha256:c155074e376775736e323fb7c9495f514955c27d144a738f8ab1abd4a518d4e1 -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-resource-configuration; contract: 1; input: sha256:c2bef0df38b1d86ec914d008f15bc1d37bef4e05d423bd6870392b5a8df6e99a -->
 
 # Resource Configuration
 
@@ -114,7 +114,7 @@ Guideline:
 
 ## Proof and future packs
 
-The MVP bundled proof packs are CRM and project management. Helpdesk and other
+The MVP bundled proof packs are CRM and workspace management. Helpdesk and other
 Odoo-inspired packs are future examples, not MVP acceptance requirements.
 
 Users should be able to copy and modify them. No pack should require hidden

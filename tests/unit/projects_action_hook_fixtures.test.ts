@@ -3,7 +3,7 @@ import { assertEquals } from "jsr:@std/assert";
 import { DenoHookRunner } from "../../src/adapters/outbound/deno-hooks/hook_runner.ts";
 import { authoredOperationContract } from "../../src/schemas/changesets/operations.ts";
 
-const projectId = "019b7a2e-7c10-7000-8000-000000000001";
+const workspaceId = "019b7a2e-7c10-7000-8000-000000000001";
 const taskId = "019b7a2e-7c10-7000-8000-000000000002";
 const stageId = "019b7a2e-7c10-7000-8000-000000000003";
 
@@ -65,13 +65,13 @@ for (
       assertEquals(
         authoredOperationContract.check({
           ...operation,
-          project_id: projectId,
+          workspace_id: workspaceId,
         }),
         true,
         JSON.stringify(
           authoredOperationContract.issues({
             ...operation,
-            project_id: projectId,
+            workspace_id: workspaceId,
           }),
         ),
       );

@@ -2,10 +2,10 @@ import { Type } from "npm:@sinclair/typebox";
 
 export const AuthorizationBoundarySchema = Type.Union([
   Type.Object({
-    type: Type.Literal("project"),
-    project_id: Type.String({ format: "uuid" }),
+    type: Type.Literal("workspace"),
+    workspace_id: Type.String({ format: "uuid" }),
   }, { additionalProperties: false }),
-  Type.Object({ type: Type.Literal("all_projects") }, {
+  Type.Object({ type: Type.Literal("all_workspaces") }, {
     additionalProperties: false,
   }),
   Type.Object({ type: Type.Literal("system") }, {

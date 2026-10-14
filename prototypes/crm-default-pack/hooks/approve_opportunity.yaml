@@ -22,7 +22,7 @@ spec:
       order: 200
       input:
         operation: $operation
-        project_id: $project_id
+        workspace_id: $workspace_id
         current: $current
         proposed: $proposed
   axi:

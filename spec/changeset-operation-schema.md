@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-changeset-operation-schema; contract: 1; input: sha256:7bc83f01b50fa69be3d5f72dbb66e1a3d22dc2815b1f1f0daecabc96b1fe0498 -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-changeset-operation-schema; contract: 1; input: sha256:14f68b07d0140cfda37c88f6a1ec1cc2f8edb3f1693cd7426af25a5b03078ed8 -->
 
 # Changeset Operation Schemas v1
 
@@ -51,13 +51,13 @@ A public changeset staging request contains:
 
 ```json
 {
-  "project_id": "019b7a2e-7c10-7000-8000-000000000001",
+  "workspace_id": "019b7a2e-7c10-7000-8000-000000000001",
   "operations": []
 }
 ```
 
-`project_id` is optional only as single-project inheritance context; operations
-may instead carry explicit `project_id` values for a cross-project graph. An
+`workspace_id` is optional only as single-workspace inheritance context; operations
+may instead carry explicit `workspace_id` values for a cross-workspace graph. An
 `action.stage` hook writes:
 
 ```json
@@ -89,8 +89,8 @@ Operations preserve authored array order and may contain:
 - `op`: required operation discriminator.
 - `key`: optional operation-local identifier. It is required when another
   operation references an ID this operation will produce.
-- `project_id`: optional UUIDv7 inherited from a single-project staging/action
-  request context when omitted. A request spanning projects must set it on every
+- `workspace_id`: optional UUIDv7 inherited from a single-workspace staging/action
+  request context when omitted. A request spanning workspaces must set it on every
   operation. The canonical stage always stores it explicitly.
 
 `key` values are unique within one staging attempt. They are not platform IDs
@@ -100,7 +100,7 @@ ordinal labels such as `op_000001` during normalization.
 Public requests use publisher/pack-qualified component identities such as
 `optd/crm:lead`. A hook may use a local component name such as `lead`; the
 engine resolves it relative to the hook's pinned owning pack revision. The
-persisted stage always uses qualified identities. Pack identity and project
+persisted stage always uses qualified identities. Pack identity and workspace
 identity are independent.
 
 ## Operations
@@ -128,7 +128,7 @@ Authored:
 {
   "op": "create",
   "key": "company",
-  "project_id": "019b7a2e-7c10-7000-8000-000000000001",
+  "workspace_id": "019b7a2e-7c10-7000-8000-000000000001",
   "resource": "optd/crm:company",
   "fields": {
     "name": "Acme",
@@ -143,7 +143,7 @@ Canonical staged form:
 {
   "op": "create",
   "key": "company",
-  "project_id": "019b7a2e-7c10-7000-8000-000000000001",
+  "workspace_id": "019b7a2e-7c10-7000-8000-000000000001",
   "resource": "optd/crm:company",
   "object_id": "019bef41-7d8e-7abc-8def-0123456789ab",
   "fields": {
@@ -158,16 +158,17 @@ Rules:
 - `resource` and `fields` are required.
 - `object_id` is forbidden in authored creates and generated during staging.
 - Platform fields such as IDs, versions, timestamps, archive fields, actor
-  fields, project ownership, and current-version pointers are forbidden inside
+  fields, workspace ownership, and current-version pointers are forbidden inside
   `fields`.
 - Field values may contain structured operation references.
+- Direct changeset creates may additionally supply paired initial_state and nonblank import_reason. This explicit historical-import path requires a declared lifecycle state and independent import authorization, in addition to create authorization. The requested state and reason remain in the immutable operation graph and audit history. Actions and hooks cannot request historical import. Ordinary creates retain strict initial lifecycle state enforcement.
 
 ### `update`
 
 ```json
 {
   "op": "update",
-  "project_id": "019b7a2e-7c10-7000-8000-000000000001",
+  "workspace_id": "019b7a2e-7c10-7000-8000-000000000001",
   "resource": "optd/crm:lead",
   "object_id": "019bef41-7d8e-7abc-8def-0123456789ab",
   "expected_version": 7,
@@ -197,7 +198,7 @@ Rules:
 ```json
 {
   "op": "transition",
-  "project_id": "019b7a2e-7c10-7000-8000-000000000001",
+  "workspace_id": "019b7a2e-7c10-7000-8000-000000000001",
   "resource": "optd/crm:opportunity",
   "object_id": "019bef41-7d8e-7abc-8def-0123456789ab",
   "expected_version": 4,
@@ -224,7 +225,7 @@ Rules:
 ```json
 {
   "op": "archive",
-  "project_id": "019b7a2e-7c10-7000-8000-000000000001",
+  "workspace_id": "019b7a2e-7c10-7000-8000-000000000001",
   "resource": "optd/crm:lead",
   "object_id": "019bef41-7d8e-7abc-8def-0123456789ab",
   "expected_version": 3
@@ -242,7 +243,7 @@ Authored:
 {
   "op": "link",
   "key": "contact-company",
-  "project_id": "019b7a2e-7c10-7000-8000-000000000001",
+  "workspace_id": "019b7a2e-7c10-7000-8000-000000000001",
   "relationship": "optd/crm:contact_company",
   "from": { "$ref": "contact.object_id" },
   "to": { "$ref": "company.object_id" },
@@ -271,7 +272,7 @@ Rules:
 ```json
 {
   "op": "unlink",
-  "project_id": "019b7a2e-7c10-7000-8000-000000000001",
+  "workspace_id": "019b7a2e-7c10-7000-8000-000000000001",
   "relationship": "optd/crm:contact_company",
   "relationship_id": "019bef41-7d8e-7abc-8def-0123456789ab",
   "expected_version": 2
@@ -289,7 +290,7 @@ Authored:
 {
   "op": "comment",
   "key": "follow-up-comment",
-  "project_id": "019b7a2e-7c10-7000-8000-000000000001",
+  "workspace_id": "019b7a2e-7c10-7000-8000-000000000001",
   "resource": "optd/crm:lead",
   "object_id": "019bef41-7d8e-7abc-8def-0123456789ab",
   "body": "Called and agreed on next steps."
@@ -327,7 +328,7 @@ Rules:
   resolving references.
 - Unknown keys/properties fail staging.
 - A reference field or relationship endpoint must resolve within the consuming
-  operation's project; cross-project references/links fail `project_conflict`.
+  operation's workspace; cross-workspace references/links fail `workspace_conflict`.
 - Persisted canonical operations contain resolved UUIDs and no `$ref` objects.
 - Strings such as `@company` have no special meaning.
 
@@ -335,7 +336,7 @@ Rules:
 
 Callers and independent hooks may emit compatible operations against the same
 object. Normalization groups them by resolved
-`(project_id, resource, object_id)` and produces at most one canonical
+`(workspace_id, resource, object_id)` and produces at most one canonical
 create/update/transition/archive mutation per object.
 
 Merge rules:
@@ -379,12 +380,12 @@ Rules:
 - The first path segment must name a mutable pack-defined resource field.
 - Nested object/array paths follow RFC 6902 semantics.
 - Pack-defined fields named `metadata` are ordinary patchable data. Platform
-  identity/version/project/actor/timestamp/archive metadata is outside the patch
+  identity/version/workspace/actor/timestamp/archive metadata is outside the patch
   document and cannot be reached.
 - Duplicate paths within one hook output are rejected.
 - Later ordered normalization hooks may patch a path changed by an earlier hook.
 - Failed `test` or invalid path/application fails staging.
-- A patch cannot change operation kind, resource, project ID, target ID,
+- A patch cannot change operation kind, resource, workspace ID, target ID,
   expected version, relationship endpoints, or any platform-managed metadata.
 - The engine recompiles the final proposed state into canonical operation
   `fields`, `set`, and `unset` properties.
@@ -397,7 +398,7 @@ V1 rejects prototype compatibility spellings:
 id                  (use object_id/relationship_id/comment_id)
 fields.id           (created IDs are server generated)
 expectedVersion     (use expected_version)
-project             (use project_id)
+workspace             (use workspace_id)
 as                  (use key)
 "@company"          (use structured $ref)
 update.fields       (use set/unset)
@@ -413,8 +414,8 @@ The staging engine:
 
 1. Validates operation-specific schemas and rejects unknown properties.
 2. Resolves hook-local component identities against the pinned pack revision.
-3. Inherits/resolves a single-project request context and writes explicit
-   `project_id`.
+3. Inherits/resolves a single-workspace request context and writes explicit
+   `workspace_id`.
 4. Assigns missing ordinal operation labels.
 5. Generates all new entity IDs as UUIDv7.
 6. Resolves every structured reference.

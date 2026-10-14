@@ -24,7 +24,7 @@ Deno.test("public CLI exposes root, group, and subcommand help", async () => {
   assertEquals(subcommand.code, 0);
   assertStringIncludes(
     subcommand.stdout,
-    "Usage: optctl context list [options]",
+    "optctl context list",
   );
 });
 

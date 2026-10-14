@@ -37,27 +37,27 @@ for (const trace of [false, true]) {
           "--safe",
         ]);
         assertEquals(applied.code, 0, applied.stderr);
-        const project = await harness.runOptctl([
+        const workspace = await harness.runOptctl([
           "--json",
-          "project",
+          "workspace",
           "create",
           `commit-proof-${trace ? "trace" : "default"}`,
           "--display-name",
           "Commit Proof",
         ]);
-        assertEquals(project.code, 0, project.stderr);
-        const projectId = JSON.parse(project.stdout).data.id as string;
+        assertEquals(workspace.code, 0, workspace.stderr);
+        const workspaceId = JSON.parse(workspace.stdout).data.id as string;
         const setup = await stageFile(harness, pack, {
           operations: ["a", "b", "c", "d"].map((key) => ({
             op: "create",
             key,
-            project_id: projectId,
+            workspace_id: workspaceId,
             resource: "test/commitproof:item",
             fields: { name: key.toUpperCase(), status: "new" },
           })).concat([{
             op: "link",
             key: "old_link",
-            project_id: projectId,
+            workspace_id: workspaceId,
             relationship: "test/commitproof:item_link",
             from: { $ref: "a.object_id" },
             to: { $ref: "b.object_id" },
@@ -84,43 +84,43 @@ for (const trace of [false, true]) {
           operations: [{
             op: "create",
             key: "e",
-            project_id: projectId,
+            workspace_id: workspaceId,
             resource: "test/commitproof:item",
             fields: { name: "E", status: "new" },
           }, {
             op: "update",
-            project_id: projectId,
+            workspace_id: workspaceId,
             resource: "test/commitproof:item",
             object_id: a,
             set: { note: "updated" },
           }, {
             op: "transition",
-            project_id: projectId,
+            workspace_id: workspaceId,
             resource: "test/commitproof:item",
             object_id: b,
             to: "active",
           }, {
             op: "archive",
-            project_id: projectId,
+            workspace_id: workspaceId,
             resource: "test/commitproof:item",
             object_id: c,
           }, {
             op: "link",
             key: "new_link",
-            project_id: projectId,
+            workspace_id: workspaceId,
             relationship: "test/commitproof:item_link",
             from: d,
             to: { $ref: "e.object_id" },
             fields: { label: "new" },
           }, {
             op: "unlink",
-            project_id: projectId,
+            workspace_id: workspaceId,
             relationship: "test/commitproof:item_link",
             relationship_id: oldLink,
           }, {
             op: "comment",
             key: "created_comment",
-            project_id: projectId,
+            workspace_id: workspaceId,
             resource: "test/commitproof:item",
             object_id: { $ref: "e.object_id" },
             body: "created in this graph",
@@ -162,8 +162,8 @@ for (const trace of [false, true]) {
         const e = staged.operations[0].object_id;
         const view = await harness.runOptctl([
           "--json",
-          "--project",
-          projectId,
+          "--workspace",
+          workspaceId,
           "view",
           "test/commitproof:item",
           e,
@@ -172,8 +172,8 @@ for (const trace of [false, true]) {
         assertEquals(JSON.parse(view.stdout).data.version, 1);
         const history = await harness.runOptctl([
           "--json",
-          "--project",
-          projectId,
+          "--workspace",
+          workspaceId,
           "history",
           "test/commitproof:item",
           e,
@@ -251,7 +251,7 @@ for (const trace of [false, true]) {
           const failureStage = await stageFile(harness, pack, {
             operations: [{
               op: "create",
-              project_id: projectId,
+              workspace_id: workspaceId,
               resource: "test/commitproof:item",
               fields: { name: `failure-${point}-${trace}`, status: "new" },
             }],
@@ -289,7 +289,7 @@ for (const trace of [false, true]) {
         const commentFailureStage = await stageFile(harness, pack, {
           operations: [{
             op: "comment",
-            project_id: projectId,
+            workspace_id: workspaceId,
             resource: "test/commitproof:item",
             object_id: e,
             body: "must roll back",

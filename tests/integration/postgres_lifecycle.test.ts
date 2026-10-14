@@ -695,7 +695,7 @@ function startPostgresIdentityFixture(
   return new Deno.Command("/bin/bash", {
     args: [
       "-c",
-      `exec -a postgres /usr/bin/perl -e '$SIG{TERM}=sub{exit}; sleep 60' -- ${shellArgs}`,
+      `exec -a postgres perl -e '$SIG{TERM}=sub{exit}; sleep 60' -- ${shellArgs}`,
     ],
     cwd,
     stdout: "null",
@@ -709,7 +709,7 @@ function shellQuote(value: string): string {
 
 async function waitForProcCmdline(pid: number): Promise<void> {
   for (let attempt = 0; attempt < 100; attempt++) {
-    const output = await new Deno.Command("/bin/cat", {
+    const output = await new Deno.Command("cat", {
       args: [`/proc/${pid}/cmdline`],
       stdout: "piped",
       stderr: "null",
@@ -722,7 +722,7 @@ async function waitForProcCmdline(pid: number): Promise<void> {
 }
 
 async function readProcCwd(pid: number): Promise<string> {
-  const output = await new Deno.Command("/bin/readlink", {
+  const output = await new Deno.Command("readlink", {
     args: ["-e", `/proc/${pid}/cwd`],
     stdout: "piped",
     stderr: "piped",

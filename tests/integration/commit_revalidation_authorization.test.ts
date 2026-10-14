@@ -23,7 +23,7 @@ Deno.test({
       for (const mutation of ["session", "principal", "human"] as const) {
         const stage = await matrix.stage([{
           op: "create",
-          project_id: matrix.projectId,
+          workspace_id: matrix.workspaceId,
           resource: "test/commitmatrix:gamma",
           fields: { key: `observed-actor-${mutation}`, status: "ready" },
         }]);
@@ -61,7 +61,7 @@ Deno.test({
 
       const actionSource = await matrix.stage([{
         op: "create",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:alpha",
         fields: { key: "observed-source-action-object", status: "ready" },
       }]);
@@ -70,21 +70,21 @@ Deno.test({
       const sourceStages: Array<{ kind: string; id: string }> = [];
       const directSource = await matrix.stage([{
         op: "create",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:gamma",
         fields: { key: "observed-source-direct", status: "ready" },
       }]);
       sourceStages.push({ kind: "direct", id: directSource.id });
       const actionResult = await matrix.harness.runOptctl([
         "--json",
-        "--project",
-        matrix.projectId,
+        "--workspace",
+        matrix.workspaceId,
         "action",
         "stage",
         "test/commitmatrix:generate",
         "--input",
         JSON.stringify({
-          project_id: matrix.projectId,
+          workspace_id: matrix.workspaceId,
           source_id: actionSourceId,
         }),
       ]);
@@ -95,8 +95,8 @@ Deno.test({
       });
       const seedResult = await matrix.harness.runOptctl([
         "--json",
-        "--project",
-        matrix.projectId,
+        "--workspace",
+        matrix.workspaceId,
         "seed",
         "stage",
         "test/commitmatrix",
@@ -142,7 +142,7 @@ Deno.test({
       for (const authorization of [agent.root, agent.leaf]) {
         const stage = await matrix.stage([{
           op: "create",
-          project_id: matrix.projectId,
+          workspace_id: matrix.workspaceId,
           resource: "test/commitmatrix:gamma",
           fields: {
             key: `observed-agent-${authorization.slice(-8)}`,
@@ -252,7 +252,7 @@ Deno.test({
       for (const authorityCase of cases) {
         const stage = await matrix.stage([{
           op: "create",
-          project_id: matrix.projectId,
+          workspace_id: matrix.workspaceId,
           resource: "test/commitmatrix:alpha",
           fields: {
             key: `observed-${authorityCase.name}`,
@@ -277,7 +277,7 @@ Deno.test({
 
       const unconditionalStage = await matrix.stage([{
         op: "create",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:gamma",
         fields: { key: "observed-unconditional", status: "ready" },
       }], ordinary);
@@ -300,35 +300,35 @@ Deno.test({
         "authorization_changed",
       );
 
-      const secondProject = await matrix.harness.runOptctl([
+      const secondWorkspace = await matrix.harness.runOptctl([
         "--json",
-        "project",
+        "workspace",
         "create",
         `matrix-second-${crypto.randomUUID().slice(0, 8)}`,
         "--display-name",
-        "Matrix Second Project",
+        "Matrix Second Workspace",
       ]);
-      assertEquals(secondProject.code, 0, secondProject.stderr);
-      const secondProjectId = JSON.parse(secondProject.stdout).data
+      assertEquals(secondWorkspace.code, 0, secondWorkspace.stderr);
+      const secondWorkspaceId = JSON.parse(secondWorkspace.stdout).data
         .id as string;
       await query(
         matrix.harness.server.sql,
-        "update role_assignments set boundary_type='all_projects',project_id=null where id=$1",
+        "update role_assignments set boundary_type='all_workspaces',workspace_id=null where id=$1",
         [authority.roleAssignment],
       );
       await query(
         matrix.harness.server.sql,
-        "update policy_assignments set boundary_type='all_projects',project_id=null where id=$1",
+        "update policy_assignments set boundary_type='all_workspaces',workspace_id=null where id=$1",
         [authority.policyAssignment],
       );
-      const multiProject = await matrix.stage([{
+      const multiWorkspace = await matrix.stage([{
         op: "create",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:alpha",
         fields: { key: "observed-multi-first", status: "ready", note: "allow" },
       }, {
         op: "create",
-        project_id: secondProjectId,
+        workspace_id: secondWorkspaceId,
         resource: "test/commitmatrix:alpha",
         fields: {
           key: "observed-multi-second",
@@ -338,19 +338,19 @@ Deno.test({
       }], ordinary);
       const multiResult = await commitAfterObservedLifecycleBarrier(
         matrix,
-        multiProject.id,
+        multiWorkspace.id,
         async () => {
           await query(
             matrix.harness.server.sql,
-            "update role_assignments set boundary_type='project',project_id=$2 where id=$1",
-            [authority.roleAssignment, matrix.projectId],
+            "update role_assignments set boundary_type='workspace',workspace_id=$2 where id=$1",
+            [authority.roleAssignment, matrix.workspaceId],
           );
         },
         ordinary,
       );
       await assertAuthFailure(
         matrix,
-        multiProject.id,
+        multiWorkspace.id,
         multiResult,
         "authorization_changed",
       );
@@ -372,7 +372,7 @@ Deno.test({
       for (const mutation of ["session", "principal", "human"] as const) {
         const stage = await matrix.stage([{
           op: "create",
-          project_id: matrix.projectId,
+          workspace_id: matrix.workspaceId,
           resource: "test/commitmatrix:alpha",
           fields: { key: `current-${mutation}`, status: "ready" },
         }]);
@@ -431,7 +431,7 @@ Deno.test({
       for (const authorizationId of [agent.root, agent.leaf]) {
         const stage = await matrix.stage([{
           op: "create",
-          project_id: matrix.projectId,
+          workspace_id: matrix.workspaceId,
           resource: "test/commitmatrix:alpha",
           fields: {
             key: `agent-${authorizationId.slice(-8)}`,
@@ -471,7 +471,7 @@ Deno.test({
 
 Deno.test({
   name:
-    "production cutoff evaluates current ABAC replacement and direct same-Project ReBAC",
+    "production cutoff evaluates current ABAC replacement and direct same-Workspace ReBAC",
   sanitizeOps: false,
   sanitizeResources: false,
   async fn() {
@@ -481,7 +481,7 @@ Deno.test({
       const policy = await grantWriter(matrix, ordinary.principalId);
       const denied = await matrix.stage([{
         op: "create",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:alpha",
         fields: { key: "abac-denied", status: "ready", note: "allow" },
       }], ordinary);
@@ -499,7 +499,7 @@ Deno.test({
 
       const stillAllowed = await matrix.stage([{
         op: "create",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:alpha",
         fields: { key: "abac-replaced", status: "ready", note: "allow" },
       }], ordinary);
@@ -514,13 +514,13 @@ Deno.test({
       const owned = await matrix.stage([{
         op: "create",
         key: "owned",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:alpha",
         fields: { key: "rebac-object", status: "ready" },
       }, {
         op: "link",
         key: "owner",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         relationship: "test/commitmatrix:alpha_owner",
         from: { $ref: "owned.object_id" },
         to: ordinary.principalId,
@@ -531,7 +531,7 @@ Deno.test({
       const relationshipId = String(owned.operations[1].relationship_id);
       const rebacStage = await matrix.stage([{
         op: "update",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:alpha",
         object_id: objectId,
         set: { note: "owner update" },
@@ -541,7 +541,7 @@ Deno.test({
 
       const rebacDenied = await matrix.stage([{
         op: "update",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:alpha",
         object_id: objectId,
         set: { note: "staged owner update" },
@@ -552,7 +552,7 @@ Deno.test({
         async () => {
           const unlink = await matrix.stage([{
             op: "unlink",
-            project_id: matrix.projectId,
+            workspace_id: matrix.workspaceId,
             relationship: "test/commitmatrix:alpha_owner",
             relationship_id: relationshipId,
           }]);
@@ -605,9 +605,9 @@ Deno.test({
         );
         await query(
           tx,
-          `insert into agent_authorization_roles(id,authorization_id,role_id,boundary_type,project_id)
-           values($1,$2,$3,'project',$4)`,
-          [uuidV7(), agent.leaf, policy.role, matrix.projectId],
+          `insert into agent_authorization_roles(id,authorization_id,role_id,boundary_type,workspace_id)
+           values($1,$2,$3,'workspace',$4)`,
+          [uuidV7(), agent.leaf, policy.role, matrix.workspaceId],
         );
         await query(
           tx,
@@ -630,7 +630,7 @@ Deno.test({
 
       const abac = await matrix.stage([{
         op: "create",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:alpha",
         fields: { key: "agent-anchor-abac", status: "ready", note: "allow" },
       }], agent.auth);
@@ -639,7 +639,7 @@ Deno.test({
       const owned = await matrix.stage([{
         op: "create",
         key: "agent-owned",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:alpha",
         fields: { key: "agent-anchor-rebac", status: "ready" },
       }]);
@@ -656,11 +656,11 @@ Deno.test({
       await query(
         matrix.harness.server.sql,
         `insert into ${quoteIdentifier(relationshipTable)}
-          (id,project_id,from_object_id,to_object_id,created_by,updated_by)
+          (id,workspace_id,from_object_id,to_object_id,created_by,updated_by)
          values($1,$2,$3,$4,$5,$5)`,
         [
           relationshipId,
-          matrix.projectId,
+          matrix.workspaceId,
           objectId,
           agent.auth.humanUserId,
           matrix.auth.id,
@@ -668,7 +668,7 @@ Deno.test({
       );
       const rebac = await matrix.stage([{
         op: "update",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:alpha",
         object_id: objectId,
         set: { note: "anchored agent update" },
@@ -681,8 +681,8 @@ Deno.test({
           await query(
             matrix.harness.server.sql,
             `update ${quoteIdentifier(relationshipTable)} set archived_at=now()
-              where id=$1 and project_id=$2`,
-            [relationshipId, matrix.projectId],
+              where id=$1 and workspace_id=$2`,
+            [relationshipId, matrix.workspaceId],
           );
         },
         agent.auth,
@@ -823,8 +823,8 @@ async function grantWriter(
   const roleAssignment = uuidV7();
   await query(
     matrix.harness.server.sql,
-    "insert into role_assignments(id,principal_id,role_id,boundary_type,project_id,active) values($1,$2,$3,'project',$4,true)",
-    [roleAssignment, principal, role, matrix.projectId],
+    "insert into role_assignments(id,principal_id,role_id,boundary_type,workspace_id,active) values($1,$2,$3,'workspace',$4,true)",
+    [roleAssignment, principal, role, matrix.workspaceId],
   );
   const definition = uuidV7(), assignment = uuidV7(), abacRule = uuidV7();
   const revision = (await query<{ id: string }>(
@@ -865,8 +865,8 @@ async function grantWriter(
   );
   await query(
     matrix.harness.server.sql,
-    "insert into policy_assignments(id,policy_definition_version_id,boundary_type,project_id,active) values($1,$2,'project',$3,true)",
-    [assignment, definition, matrix.projectId],
+    "insert into policy_assignments(id,policy_definition_version_id,boundary_type,workspace_id,active) values($1,$2,'workspace',$3,true)",
+    [assignment, definition, matrix.workspaceId],
   );
   return {
     abacRule,

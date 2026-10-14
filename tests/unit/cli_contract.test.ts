@@ -89,7 +89,7 @@ Deno.test("optctl maps current strict commands to canonical HTTP URLs", async ()
       ["outbox", "drain", "--limit", "1"],
       ["outbox", "retry", stageId],
       [
-        "--project",
+        "--workspace",
         stageId,
         "action",
         "commit",
@@ -98,7 +98,7 @@ Deno.test("optctl maps current strict commands to canonical HTTP URLs", async ()
         "{}",
       ],
       [
-        "--project",
+        "--workspace",
         stageId,
         "seed",
         "commit",

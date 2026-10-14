@@ -27,16 +27,16 @@ Deno.test({
         "--safe",
       ]);
       assertEquals(applied.code, 0, applied.stderr);
-      const project = await harness.runOptctl([
+      const workspace = await harness.runOptctl([
         "--json",
-        "project",
+        "workspace",
         "create",
         "approval-races",
         "--display-name",
         "Approval Races",
       ]);
-      assertEquals(project.code, 0, project.stderr);
-      const projectId = JSON.parse(project.stdout).data.id as string;
+      assertEquals(workspace.code, 0, workspace.stderr);
+      const workspaceId = JSON.parse(workspace.stdout).data.id as string;
       const auth = await currentAuth(harness.server.sql);
       const repository = new PostgresStageRepository(
         harness.server.sql,
@@ -47,7 +47,7 @@ Deno.test({
         actor: AuthContext,
         minimum: number,
         overrides: Record<string, unknown> = {},
-      ) => stageApproval(harness, projectId, actor, minimum, overrides);
+      ) => stageApproval(harness, workspaceId, actor, minimum, overrides);
       const first = await stage(auth, 1);
       const before = await immutableSnapshot(harness.server.sql, first.stageId);
       const same = await queueTwo(
@@ -144,7 +144,7 @@ Deno.test({
         )).ok,
         false,
       );
-      const invalidExpiry = await runStageApproval(harness, projectId, 1, {
+      const invalidExpiry = await runStageApproval(harness, workspaceId, 1, {
         expires_at: new Date(Date.now() - 1_000).toISOString(),
       });
       assertEquals(invalidExpiry.code, 1);
@@ -628,7 +628,7 @@ function immutableDto(dto: Record<string, unknown>) {
         "created_auth_context_id",
         "operation_graph_digest",
         "stage_digest",
-        "projects",
+        "workspaces",
         "pack_revisions",
         "operations",
         "dependencies",
@@ -869,12 +869,12 @@ async function writeRacePack(root: string): Promise<void> {
 
 function runStageApproval(
   harness: Awaited<ReturnType<typeof startAuthenticatedHarness>>,
-  projectId: string,
+  workspaceId: string,
   minimum: number,
   overrides: Record<string, unknown> = {},
 ) {
   return harness.runJson(["--json", "changeset", "stage"], {
-    project_id: projectId,
+    workspace_id: workspaceId,
     operations: [{
       op: "create",
       resource: "test/races:approval_case",
@@ -894,12 +894,17 @@ function runStageApproval(
 
 async function stageApproval(
   harness: Awaited<ReturnType<typeof startAuthenticatedHarness>>,
-  projectId: string,
+  workspaceId: string,
   _actor: AuthContext,
   minimum: number,
   overrides: Record<string, unknown> = {},
 ) {
-  const result = await runStageApproval(harness, projectId, minimum, overrides);
+  const result = await runStageApproval(
+    harness,
+    workspaceId,
+    minimum,
+    overrides,
+  );
   assertEquals(result.code, 0, result.stderr);
   const dto = JSON.parse(result.stdout).data;
   assertEquals(dto.operations.length, 1);

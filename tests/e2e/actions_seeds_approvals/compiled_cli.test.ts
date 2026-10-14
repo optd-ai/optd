@@ -55,21 +55,21 @@ for (const trace of [false, true]) {
             .code,
           0,
         );
-        const project = await harness.runOptctl([
+        const workspace = await harness.runOptctl([
           "--json",
-          "project",
+          "workspace",
           "create",
-          "acceptance-project",
+          "acceptance-workspace",
           "--display-name",
-          "Acceptance Project",
+          "Acceptance Workspace",
         ]);
-        assertEquals(project.code, 0, project.stderr);
-        const projectId = JSON.parse(project.stdout).data.id as string;
-        const read = await seedRead(harness, projectId);
+        assertEquals(workspace.code, 0, workspace.stderr);
+        const workspaceId = JSON.parse(workspace.stdout).data.id as string;
+        const read = await seedRead(harness, workspaceId);
         actor = await provisionOrdinary(
           harness,
           `actor-${trace ? "trace" : "default"}`,
-          "all_projects",
+          "all_workspaces",
         );
         reviewer = await provisionOrdinary(
           harness,
@@ -79,8 +79,8 @@ for (const trace of [false, true]) {
 
         const action = await actor!.runOptctl([
           "--json",
-          "--project",
-          projectId,
+          "--workspace",
+          workspaceId,
           "action",
           "stage",
           "test/actionproof:generate",
@@ -96,7 +96,7 @@ for (const trace of [false, true]) {
         );
         const authority = actionData.source.identity.authority_evidence;
         assertEquals(authority.targets.length, 1);
-        assertEquals(authority.targets[0].project_id, projectId);
+        assertEquals(authority.targets[0].workspace_id, workspaceId);
         assertEquals(
           authority.targets[0].resource,
           "test/actionproof:source",
@@ -149,8 +149,8 @@ for (const trace of [false, true]) {
 
         const missingRead = await actor!.runOptctl([
           "--json",
-          "--project",
-          projectId,
+          "--workspace",
+          workspaceId,
           "action",
           "stage",
           "test/actionproof:generate",
@@ -161,8 +161,8 @@ for (const trace of [false, true]) {
         const beforeSeed = await stageCount(harness.server.sql);
         const seed = await actor!.runOptctl([
           "--json",
-          "--project",
-          projectId,
+          "--workspace",
+          workspaceId,
           "seed",
           "stage",
           "test/actionproof",
@@ -193,8 +193,8 @@ for (const trace of [false, true]) {
         );
         const unchanged = await actor!.runOptctl([
           "--json",
-          "--project",
-          projectId,
+          "--workspace",
+          workspaceId,
           "seed",
           "stage",
           "test/actionproof",
@@ -208,13 +208,13 @@ for (const trace of [false, true]) {
         const targetTable = await runtimeTable(harness.server.sql, "target");
         await query(
           harness.server.sql,
-          `update "${targetTable}" set status='stale',note='preserved extra' where project_id=$1 and id=$2`,
-          [projectId, seedObjectId],
+          `update "${targetTable}" set status='stale',note='preserved extra' where workspace_id=$1 and id=$2`,
+          [workspaceId, seedObjectId],
         );
         const changed = await actor!.runOptctl([
           "--json",
-          "--project",
-          projectId,
+          "--workspace",
+          workspaceId,
           "seed",
           "stage",
           "test/actionproof",
@@ -236,8 +236,8 @@ for (const trace of [false, true]) {
           "preserved extra",
         );
         const toon = await actor!.runOptctl([
-          "--project",
-          projectId,
+          "--workspace",
+          workspaceId,
           "seed",
           "stage",
           "test/actionproof",
@@ -257,10 +257,10 @@ for (const trace of [false, true]) {
         const archiveStage = await harness.runJson(
           ["--json", "changeset", "stage"],
           {
-            project_id: projectId,
+            workspace_id: workspaceId,
             operations: [{
               op: "archive",
-              project_id: projectId,
+              workspace_id: workspaceId,
               resource: "test/actionproof:target",
               object_id: seedObjectId,
               expected_version: 1,
@@ -278,7 +278,7 @@ for (const trace of [false, true]) {
         assertEquals(archiveCommit.code, 0, archiveCommit.stderr);
         const firstHistoryBeforeLaterReplacement = await objectHistory(
           harness,
-          projectId,
+          workspaceId,
           seedObjectId,
         );
         assertCompleteArchivedHistory(
@@ -287,8 +287,8 @@ for (const trace of [false, true]) {
         );
         const replacement = await actor!.runOptctl([
           "--json",
-          "--project",
-          projectId,
+          "--workspace",
+          workspaceId,
           "seed",
           "stage",
           "test/actionproof",
@@ -311,8 +311,8 @@ for (const trace of [false, true]) {
         assertEquals(replacementCommit.code, 0, replacementCommit.stderr);
         const replacementRepeat = await actor!.runOptctl([
           "--json",
-          "--project",
-          projectId,
+          "--workspace",
+          workspaceId,
           "seed",
           "stage",
           "test/actionproof",
@@ -324,10 +324,10 @@ for (const trace of [false, true]) {
         const secondArchiveStage = await harness.runJson(
           ["--json", "changeset", "stage"],
           {
-            project_id: projectId,
+            workspace_id: workspaceId,
             operations: [{
               op: "archive",
-              project_id: projectId,
+              workspace_id: workspaceId,
               resource: "test/actionproof:target",
               object_id: replacementId,
               expected_version: 1,
@@ -344,7 +344,7 @@ for (const trace of [false, true]) {
         assertEquals(secondArchiveCommit.code, 0, secondArchiveCommit.stderr);
         const secondHistoryBeforeLaterReplacement = await objectHistory(
           harness,
-          projectId,
+          workspaceId,
           replacementId,
         );
         assertCompleteArchivedHistory(
@@ -353,8 +353,8 @@ for (const trace of [false, true]) {
         );
         const secondReplacement = await actor!.runOptctl([
           "--json",
-          "--project",
-          projectId,
+          "--workspace",
+          workspaceId,
           "seed",
           "stage",
           "test/actionproof",
@@ -382,8 +382,8 @@ for (const trace of [false, true]) {
         );
         const secondReplacementRepeat = await actor!.runOptctl([
           "--json",
-          "--project",
-          projectId,
+          "--workspace",
+          workspaceId,
           "seed",
           "stage",
           "test/actionproof",
@@ -402,8 +402,8 @@ for (const trace of [false, true]) {
           current_object_version_id: string;
         }>(
           harness.server.sql,
-          `select id,version::int version,archived_at,current_object_version_id from "${targetTable}" where project_id=$1 and name='Seeded Target' order by created_at,id`,
-          [projectId],
+          `select id,version::int version,archived_at,current_object_version_id from "${targetTable}" where workspace_id=$1 and name='Seeded Target' order by created_at,id`,
+          [workspaceId],
         )).rows;
         assertEquals(generations.length, 3);
         assertEquals(
@@ -435,25 +435,29 @@ for (const trace of [false, true]) {
         );
         const publicActive = await querySeedGenerations(
           harness,
-          projectId,
+          workspaceId,
           false,
         );
         assertEquals(publicActive.map((item) => item.id), [
           secondReplacementId,
         ]);
-        const publicAll = await querySeedGenerations(harness, projectId, true);
+        const publicAll = await querySeedGenerations(
+          harness,
+          workspaceId,
+          true,
+        );
         assertEquals(
           publicAll.map((item) => item.id).sort(),
           [seedObjectId, replacementId, secondReplacementId].sort(),
         );
         const firstArchivedHistory = await objectHistory(
           harness,
-          projectId,
+          workspaceId,
           seedObjectId,
         );
         const secondArchivedHistory = await objectHistory(
           harness,
-          projectId,
+          workspaceId,
           replacementId,
         );
         assertCompleteArchivedHistory(firstArchivedHistory, seedObjectId);
@@ -467,22 +471,22 @@ for (const trace of [false, true]) {
           secondHistoryBeforeLaterReplacement,
         );
 
-        const concurrentProject = await harness.runOptctl([
+        const concurrentWorkspace = await harness.runOptctl([
           "--json",
-          "project",
+          "workspace",
           "create",
           `concurrent-${trace ? "trace" : "default"}`,
           "--display-name",
-          "Concurrent Seed Project",
+          "Concurrent Seed Workspace",
         ]);
-        assertEquals(concurrentProject.code, 0, concurrentProject.stderr);
-        const concurrentId = JSON.parse(concurrentProject.stdout).data
+        assertEquals(concurrentWorkspace.code, 0, concurrentWorkspace.stderr);
+        const concurrentId = JSON.parse(concurrentWorkspace.stdout).data
           .id as string;
         const concurrentStages = await Promise.all(
           [0, 1].map(() =>
             actor!.runOptctl([
               "--json",
-              "--project",
+              "--workspace",
               concurrentId,
               "seed",
               "stage",
@@ -569,20 +573,21 @@ for (const trace of [false, true]) {
           trace,
         );
 
-        const sameStageProject = await harness.runOptctl([
+        const sameStageWorkspace = await harness.runOptctl([
           "--json",
-          "project",
+          "workspace",
           "create",
           `same-stage-${trace ? "trace" : "default"}`,
           "--display-name",
-          "Same Stage Commit Project",
+          "Same Stage Commit Workspace",
         ]);
-        assertEquals(sameStageProject.code, 0, sameStageProject.stderr);
-        const sameStageProjectId = JSON.parse(sameStageProject.stdout).data.id;
+        assertEquals(sameStageWorkspace.code, 0, sameStageWorkspace.stderr);
+        const sameStageWorkspaceId =
+          JSON.parse(sameStageWorkspace.stdout).data.id;
         const sameStage = await actor!.runOptctl([
           "--json",
-          "--project",
-          sameStageProjectId,
+          "--workspace",
+          sameStageWorkspaceId,
           "seed",
           "stage",
           "test/actionproof",
@@ -607,20 +612,20 @@ for (const trace of [false, true]) {
           JSON.parse(sameStageCommits[1].stdout).data,
         );
 
-        const retryProject = await harness.runOptctl([
+        const retryWorkspace = await harness.runOptctl([
           "--json",
-          "project",
+          "workspace",
           "create",
           `retry-${trace ? "trace" : "default"}`,
           "--display-name",
-          "Commit Retry Project",
+          "Commit Retry Workspace",
         ]);
-        assertEquals(retryProject.code, 0, retryProject.stderr);
-        const retryProjectId = JSON.parse(retryProject.stdout).data.id;
+        assertEquals(retryWorkspace.code, 0, retryWorkspace.stderr);
+        const retryWorkspaceId = JSON.parse(retryWorkspace.stdout).data.id;
         const retryStage = await actor!.runOptctl([
           "--json",
-          "--project",
-          retryProjectId,
+          "--workspace",
+          retryWorkspaceId,
           "seed",
           "stage",
           "test/actionproof",
@@ -670,20 +675,21 @@ for (const trace of [false, true]) {
           ),
           hookFactsBeforeRetry,
         );
-        const exhaustedProject = await harness.runOptctl([
+        const exhaustedWorkspace = await harness.runOptctl([
           "--json",
-          "project",
+          "workspace",
           "create",
           `retry-exhausted-${trace ? "trace" : "default"}`,
           "--display-name",
-          "Commit Retry Exhaustion Project",
+          "Commit Retry Exhaustion Workspace",
         ]);
-        assertEquals(exhaustedProject.code, 0, exhaustedProject.stderr);
-        const exhaustedProjectId = JSON.parse(exhaustedProject.stdout).data.id;
+        assertEquals(exhaustedWorkspace.code, 0, exhaustedWorkspace.stderr);
+        const exhaustedWorkspaceId =
+          JSON.parse(exhaustedWorkspace.stdout).data.id;
         const exhaustedStage = await actor!.runOptctl([
           "--json",
-          "--project",
-          exhaustedProjectId,
+          "--workspace",
+          exhaustedWorkspaceId,
           "seed",
           "stage",
           "test/actionproof",
@@ -753,20 +759,21 @@ for (const trace of [false, true]) {
           "drop sequence commit_retry_fault_sequence",
         );
 
-        const deadlockProject = await harness.runOptctl([
+        const deadlockWorkspace = await harness.runOptctl([
           "--json",
-          "project",
+          "workspace",
           "create",
           `deadlock-${trace ? "trace" : "default"}`,
           "--display-name",
-          "Commit Deadlock Project",
+          "Commit Deadlock Workspace",
         ]);
-        assertEquals(deadlockProject.code, 0, deadlockProject.stderr);
-        const deadlockProjectId = JSON.parse(deadlockProject.stdout).data.id;
+        assertEquals(deadlockWorkspace.code, 0, deadlockWorkspace.stderr);
+        const deadlockWorkspaceId =
+          JSON.parse(deadlockWorkspace.stdout).data.id;
         const deadlockStage = await actor!.runOptctl([
           "--json",
-          "--project",
-          deadlockProjectId,
+          "--workspace",
+          deadlockWorkspaceId,
           "seed",
           "stage",
           "test/actionproof",
@@ -880,20 +887,20 @@ for (const trace of [false, true]) {
         );
         await query(harness.server.sql, "drop table commit_deadlock_barrier");
 
-        const timeoutProject = await harness.runOptctl([
+        const timeoutWorkspace = await harness.runOptctl([
           "--json",
-          "project",
+          "workspace",
           "create",
           `timeout-${trace ? "trace" : "default"}`,
           "--display-name",
-          "Commit Timeout Project",
+          "Commit Timeout Workspace",
         ]);
-        assertEquals(timeoutProject.code, 0, timeoutProject.stderr);
-        const timeoutProjectId = JSON.parse(timeoutProject.stdout).data.id;
+        assertEquals(timeoutWorkspace.code, 0, timeoutWorkspace.stderr);
+        const timeoutWorkspaceId = JSON.parse(timeoutWorkspace.stdout).data.id;
         const timeoutStage = await actor!.runOptctl([
           "--json",
-          "--project",
-          timeoutProjectId,
+          "--workspace",
+          timeoutWorkspaceId,
           "seed",
           "stage",
           "test/actionproof",
@@ -945,21 +952,21 @@ for (const trace of [false, true]) {
         const longResult = await longCommit;
         assertEquals(longResult.code, 0, longResult.stderr);
 
-        const multiProject = await harness.runOptctl([
+        const multiWorkspace = await harness.runOptctl([
           "--json",
-          "project",
+          "workspace",
           "create",
           `multi-${trace ? "trace" : "default"}`,
           "--display-name",
-          "Multi Seed Project",
+          "Multi Seed Workspace",
         ]);
-        assertEquals(multiProject.code, 0, multiProject.stderr);
-        const multiProjectId = JSON.parse(multiProject.stdout).data
+        assertEquals(multiWorkspace.code, 0, multiWorkspace.stderr);
+        const multiWorkspaceId = JSON.parse(multiWorkspace.stdout).data
           .id as string;
         const multiSeed = await actor!.runOptctl([
           "--json",
-          "--project",
-          multiProjectId,
+          "--workspace",
+          multiWorkspaceId,
           "seed",
           "stage",
           "test/actionproof",
@@ -990,13 +997,13 @@ for (const trace of [false, true]) {
         const limited = await provisionOrdinary(
           harness,
           `limited-${trace ? "trace" : "default"}`,
-          "all_projects",
+          "all_workspaces",
           ["targets"],
         );
         const deniedMulti = await limited.runOptctl([
           "--json",
-          "--project",
-          multiProjectId,
+          "--workspace",
+          multiWorkspaceId,
           "seed",
           "stage",
           "test/actionproof",
@@ -1074,8 +1081,8 @@ for (const trace of [false, true]) {
           assertEquals(
             (await reviewer!.runOptctl([
               "--json",
-              "--project",
-              projectId,
+              "--workspace",
+              workspaceId,
               ...legacy,
             ])).code,
             2,
@@ -1095,7 +1102,7 @@ for (const trace of [false, true]) {
 async function provisionOrdinary(
   harness: LiveHarness,
   username: string,
-  boundary: "all_projects" | "system",
+  boundary: "all_workspaces" | "system",
   seedNames: string[] = ["targets", "targets_alt"],
 ): Promise<CliLauncher> {
   const password = `ordinary password ${username}`;
@@ -1150,7 +1157,7 @@ async function provisionOrdinary(
         name,
       ) => [`seed:test/actionproof:${name}`, `seed:test/actionproof:${name}`]),
       ["changeset.inspect", "changeset"],
-      ["project.read", "*"],
+      ["workspace.read", "*"],
     ];
   for (const [capability, resource] of capabilities) {
     await query(
@@ -1187,7 +1194,7 @@ async function insertApprovalFixture(sql: Sql) {
     digest = `sha256:${"d".repeat(64)}`;
   await query(
     sql,
-    `insert into staged_changesets(id,schema_version,source_kind,source_identity_json,created_auth_context_id,created_principal_id,creating_context_json,operation_graph_digest,stage_digest,canonical_graph_json,projects_json,pack_revisions_json,warnings_json,planned_events_json,planned_deliveries_json) values($1,1,'direct','{}',$2,$3,'{}',$4,$4,'{"schema":"changeset.operations.v1","operations":[]}','[]','[]','[]','[]','[]')`,
+    `insert into staged_changesets(id,schema_version,source_kind,source_identity_json,created_auth_context_id,created_principal_id,creating_context_json,operation_graph_digest,stage_digest,canonical_graph_json,workspaces_json,pack_revisions_json,warnings_json,planned_events_json,planned_deliveries_json) values($1,1,'direct','{}',$2,$3,'{}',$4,$4,'{"schema":"changeset.operations.v1","operations":[]}','[]','[]','[]','[]','[]')`,
     [stageId, auth.id, auth.principal_id, digest],
   );
   await query(
@@ -1250,13 +1257,13 @@ async function runtimeTable(sql: Sql, name: string) {
 
 async function querySeedGenerations(
   harness: LiveHarness,
-  projectId: string,
+  workspaceId: string,
   includeArchived: boolean,
 ): Promise<Array<{ id: string }>> {
   const result = await harness.runOptctl([
     "--json",
-    "--project",
-    projectId,
+    "--workspace",
+    workspaceId,
     "query",
     "test/actionproof:target",
     "--where",
@@ -1274,13 +1281,13 @@ async function querySeedGenerations(
 
 async function objectHistory(
   harness: LiveHarness,
-  projectId: string,
+  workspaceId: string,
   objectId: string,
 ): Promise<Array<Record<string, unknown>>> {
   const result = await harness.runOptctl([
     "--json",
-    "--project",
-    projectId,
+    "--workspace",
+    workspaceId,
     "history",
     "test/actionproof:target",
     objectId,
@@ -1359,20 +1366,20 @@ async function assertDirectSeedRace(
   seedWins: boolean,
 ) {
   const orientation = seedWins ? "seed-wins" : "direct-wins";
-  const project = await harness.runOptctl([
+  const workspace = await harness.runOptctl([
     "--json",
-    "project",
+    "workspace",
     "create",
     `${orientation}-${trace ? "trace" : "default"}`,
     "--display-name",
     `Direct Seed ${orientation}`,
   ]);
-  assertEquals(project.code, 0, project.stderr);
-  const projectId = JSON.parse(project.stdout).data.id as string;
+  assertEquals(workspace.code, 0, workspace.stderr);
+  const workspaceId = JSON.parse(workspace.stdout).data.id as string;
   const seed = await actor.runOptctl([
     "--json",
-    "--project",
-    projectId,
+    "--workspace",
+    workspaceId,
     "seed",
     "stage",
     "test/actionproof",
@@ -1384,7 +1391,7 @@ async function assertDirectSeedRace(
   const direct = await harness.runJson(
     ["--json", "changeset", "stage"],
     {
-      project_id: projectId,
+      workspace_id: workspaceId,
       operations: [{
         op: "create",
         resource: "test/actionproof:target",
@@ -1442,8 +1449,8 @@ async function assertDirectSeedRace(
   );
   const active = (await query<{ id: string }>(
     harness.server.sql,
-    `select id from "${targetTable}" where project_id=$1 and name='Seeded Target' and archived_at is null`,
-    [projectId],
+    `select id from "${targetTable}" where workspace_id=$1 and name='Seeded Target' and archived_at is null`,
+    [workspaceId],
   )).rows;
   assertEquals(active, [{ id: winner.operations[0].object_id }]);
 }
@@ -1498,45 +1505,45 @@ async function assertSeedRevisionBarriers(
     )).rows[0].id;
     assertEquals(alternateRevision === active, false);
 
-    const lookupProject = await harness.runOptctl([
+    const lookupWorkspace = await harness.runOptctl([
       "--json",
-      "project",
+      "workspace",
       "create",
       `seed-lookup-revision-${trace ? "trace" : "default"}`,
       "--display-name",
       "Seed Lookup Revision Barrier",
     ]);
-    assertEquals(lookupProject.code, 0, lookupProject.stderr);
-    const lookupProjectId = JSON.parse(lookupProject.stdout).data.id;
+    assertEquals(lookupWorkspace.code, 0, lookupWorkspace.stderr);
+    const lookupWorkspaceId = JSON.parse(lookupWorkspace.stdout).data.id;
     const beforeStage = await stagedFactCounts(harness.server.sql);
-    const projectHold = holdRow(
+    const workspaceHold = holdRow(
       harness.server.sql,
-      "select id from projects where id=$1 for update",
-      [lookupProjectId],
+      "select id from workspaces where id=$1 for update",
+      [lookupWorkspaceId],
     );
-    await projectHold.locked;
+    await workspaceHold.locked;
     const blockedStage = actor.runOptctl([
       "--json",
-      "--project",
-      lookupProjectId,
+      "--workspace",
+      lookupWorkspaceId,
       "seed",
       "stage",
       "test/actionproof",
       "--seed",
       "targets",
     ]);
-    await observeBlockedQuery(harness.server.sql, "projects where id");
+    await observeBlockedQuery(harness.server.sql, "workspaces where id");
     await query(
       harness.server.sql,
       `update pack_active_revisions set candidate_revision_id=$1 where publisher='test' and pack_name='actionproof'`,
       [alternateRevision],
     );
-    projectHold.release();
-    await projectHold.done;
+    workspaceHold.release();
+    await workspaceHold.done;
     const stageResult = await blockedStage;
     assertEquals(stageResult.code, 1);
     assertEquals(JSON.parse(stageResult.stderr).error, {
-      code: "project_conflict",
+      code: "workspace_conflict",
       message: "Semantic source revision changed before persistence",
       details: {},
     });
@@ -1547,20 +1554,20 @@ async function assertSeedRevisionBarriers(
       [active],
     );
 
-    const commitProject = await harness.runOptctl([
+    const commitWorkspace = await harness.runOptctl([
       "--json",
-      "project",
+      "workspace",
       "create",
       `seed-commit-revision-${trace ? "trace" : "default"}`,
       "--display-name",
       "Seed Commit Revision Barrier",
     ]);
-    assertEquals(commitProject.code, 0, commitProject.stderr);
-    const commitProjectId = JSON.parse(commitProject.stdout).data.id;
+    assertEquals(commitWorkspace.code, 0, commitWorkspace.stderr);
+    const commitWorkspaceId = JSON.parse(commitWorkspace.stdout).data.id;
     const staged = await actor.runOptctl([
       "--json",
-      "--project",
-      commitProjectId,
+      "--workspace",
+      commitWorkspaceId,
       "seed",
       "stage",
       "test/actionproof",
@@ -1638,16 +1645,16 @@ async function assertMultipleActiveFailsClosed(
   targetTable: string,
   trace: boolean,
 ) {
-  const project = await harness.runOptctl([
+  const workspace = await harness.runOptctl([
     "--json",
-    "project",
+    "workspace",
     "create",
     `multiple-active-${trace ? "trace" : "default"}`,
     "--display-name",
     "Multiple Active Corruption",
   ]);
-  assertEquals(project.code, 0, project.stderr);
-  const projectId = JSON.parse(project.stdout).data.id;
+  assertEquals(workspace.code, 0, workspace.stderr);
+  const workspaceId = JSON.parse(workspace.stdout).data.id;
   const auth = (await query<{ id: string }>(
     harness.server.sql,
     "select id from auth_contexts order by created_at desc limit 1",
@@ -1661,9 +1668,9 @@ async function assertMultipleActiveFailsClosed(
   try {
     await query(
       harness.server.sql,
-      `insert into "${targetTable}"(id,project_id,created_by,updated_by,name,status)
+      `insert into "${targetTable}"(id,workspace_id,created_by,updated_by,name,status)
        values($1,$3,$4,$4,'Seeded Target','ready'),($2,$3,$4,$4,'Seeded Target','ready')`,
-      [objectIds[0], objectIds[1], projectId, auth],
+      [objectIds[0], objectIds[1], workspaceId, auth],
     );
     const repository = makePostgresSeedStageRepository(
       harness.server.sql,
@@ -1676,7 +1683,7 @@ async function assertMultipleActiveFailsClosed(
           publisher: "test",
           pack: "actionproof",
           resourceName: "target",
-          projectId,
+          workspaceId,
           key: "name",
           value: "Seeded Target",
         }),
@@ -1685,8 +1692,8 @@ async function assertMultipleActiveFailsClosed(
     );
     const failed = await actor.runOptctl([
       "--json",
-      "--project",
-      projectId,
+      "--workspace",
+      workspaceId,
       "seed",
       "stage",
       "test/actionproof",
@@ -1704,7 +1711,7 @@ async function assertMultipleActiveFailsClosed(
     );
     await query(
       harness.server.sql,
-      `create unique index actionproof_target_active_name on "${targetTable}" (project_id, name) where archived_at is null`,
+      `create unique index actionproof_target_active_name on "${targetTable}" (workspace_id, name) where archived_at is null`,
     );
   }
   assertEquals(
@@ -1715,7 +1722,7 @@ async function assertMultipleActiveFailsClosed(
     )).rows,
     [{
       indexdef:
-        `CREATE UNIQUE INDEX actionproof_target_active_name ON public.${targetTable} USING btree (project_id, name) WHERE (archived_at IS NULL)`,
+        `CREATE UNIQUE INDEX actionproof_target_active_name ON public.${targetTable} USING btree (workspace_id, name) WHERE (archived_at IS NULL)`,
     }],
   );
   assertEquals(

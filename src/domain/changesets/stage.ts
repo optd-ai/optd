@@ -89,7 +89,7 @@ export type StageReadDependency = Readonly<{
     | "policy"
     | "assignment"
     | "uniqueness";
-  project_id?: string;
+  workspace_id?: string;
   object_id?: string;
   expected_version_id?: string;
   definition?: string;
@@ -103,7 +103,7 @@ export type PlannedIdentity = Readonly<{
 
 export type StageEvidence = {
   operation_graph_digest: string;
-  projects: readonly unknown[];
+  workspaces: readonly unknown[];
   pack_revisions: readonly unknown[];
   operations: readonly CanonicalOperation[];
   dependencies: readonly unknown[];
@@ -121,7 +121,7 @@ export async function stageDigest(evidence: StageEvidence): Promise<string> {
   return `sha256:${await canonicalSha256({
     schema: "changeset.stage-evidence.v1",
     operation_graph_digest: evidence.operation_graph_digest,
-    projects: evidence.projects,
+    workspaces: evidence.workspaces,
     pack_revisions: evidence.pack_revisions,
     operations: evidence.operations,
     dependencies: evidence.dependencies,
@@ -137,7 +137,7 @@ export async function stageDigest(evidence: StageEvidence): Promise<string> {
 
 export type StageHookInput = Readonly<{
   operations: readonly CanonicalOperation[];
-  projects: readonly unknown[];
+  workspaces: readonly unknown[];
   pack_revisions: readonly unknown[];
   hook_declarations: readonly StageHookDeclaration[];
   authority_snapshot: HookAuthoritySnapshot;

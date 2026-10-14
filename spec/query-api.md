@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-query-api; contract: 1; input: sha256:1da2a74f1147e72dbaf6744486ed9ea07aaffc9e4e70035433b6db2354c3cb86 -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-query-api; contract: 1; input: sha256:cc39ff68baa4235720f834ee200f4bc1ededb58f737f96ea021eeb390c7d2018 -->
 
 # Query and Object Read API v1
 
@@ -20,7 +20,7 @@ A resource object uses:
 {
   "kind": "object",
   "id": "019b7a2e-7c10-7000-8000-000000000001",
-  "project_id": "019b7a2e-7c10-7000-8000-000000000002",
+  "workspace_id": "019b7a2e-7c10-7000-8000-000000000002",
   "resource": {
     "publisher": "optd",
     "pack": "crm",
@@ -44,7 +44,7 @@ A relationship row uses:
 {
   "kind": "relationship",
   "id": "019b...",
-  "project_id": "019c...",
+  "workspace_id": "019c...",
   "relationship": {
     "publisher": "optd",
     "pack": "crm",
@@ -71,7 +71,7 @@ A relationship row uses:
 
 ```json
 {
-  "project_id": "019b7a2e-7c10-7000-8000-000000000002",
+  "workspace_id": "019b7a2e-7c10-7000-8000-000000000002",
   "definition": {
     "kind": "resource",
     "publisher": "optd",
@@ -90,15 +90,15 @@ A relationship row uses:
 }
 ```
 
-- Project/definition are required and explicit. `definition.kind` is
+- Workspace/definition are required and explicit. `definition.kind` is
   `resource|relationship`.
 - `where` is optional and defaults `true`; it uses the frozen CEL query subset.
   Relationship context exposes payload fields plus `from` and `to` UUID fields.
 - `fields` is optional. If absent, server resolves the definition AXI list
   fields; if AXI has none it uses a bounded platform default. Unknown or
   duplicate fields fail. Field-level policy is not an MVP feature. Platform
-  identity/version/timestamps are always in the outer DTO and are not projection
-  names.
+  identity/version/timestamps are always in the outer DTO. The id identity is
+  also a valid projection name; version/timestamps remain outer-DTO fields.
 - `sort` is optional and resolves AXI default then `updated_at desc`. It is a
   non-empty bounded array of declared scalar pack fields (plus relationship
   `from|to`) or `created_at|updated_at|archived_at`; direction is `asc|desc`.
@@ -145,7 +145,7 @@ null.
 
 ## Policy and pagination ordering
 
-Applicable project/boundary policy is lowered into the SQL `WHERE` before
+Applicable workspace/boundary policy is lowered into the SQL `WHERE` before
 sorting, keyset predicates, limiting, and counting. Application-side
 post-filtering and offset pagination are forbidden.
 
@@ -156,7 +156,7 @@ payload, or secrets. Cursor content is untrusted and fully schema/type/size
 validated; policy is always reapplied. A server secret is unnecessary because a
 forged cursor can only change keyset position within currently authorized rows.
 
-The query-shape digest binds project/definition revision, normalized CEL AST,
+The query-shape digest binds workspace/definition revision, normalized CEL AST,
 projection, resolved sort, limit semantics, and archive/count flags. The policy
 context digest binds principal/authorization root plus active role/policy
 assignment/revision context. Any mismatch returns `invalid_cursor`; callers
@@ -165,9 +165,9 @@ inserts/updates may appear according to ordinary keyset semantics.
 
 ## Object/relationship/history reads
 
-Object and relationship GET routes resolve explicit project/definition/row ID
+Object and relationship GET routes resolve explicit workspace/definition/row ID
 and apply `read` (and `read_archived` when needed) before returning the matching
-DTO. Definition or project mismatch returns safe `not_found`/`project_conflict`
+DTO. Definition or workspace mismatch returns safe `not_found`/`workspace_conflict`
 without existence leak.
 
 History GET returns one cursor-paginated timeline newest first by
@@ -178,3 +178,7 @@ comment entries contain comment ID/body, target version ID, commit/auth
 provenance, and timestamp. Comments never masquerade as object versions. History
 access uses `read` plus `history.read`; archived history also requires
 `read_archived`.
+
+## Projection and pagination guidance
+
+The platform id field is valid in explicit and default projections. Omitted fields use axi.list.defaultFields when present, otherwise resource fields. CLI text output displays a next-cursor notice whenever meta.has_more is true; JSON preserves the envelope and cursor without presentation text.

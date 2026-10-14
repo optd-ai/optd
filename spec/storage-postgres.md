@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-storage-postgres; contract: 1; input: sha256:13cf5e06dfec61cecc705ecf1bc817af5748415d12fe40a02cd5a58e73e1ab24 -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-storage-postgres; contract: 1; input: sha256:6d7ddbb5ffe04f5aaeb24688c88fb9f209ce572738b32f35a37f879d0b3b87ec -->
 
 # Postgres Storage
 
@@ -14,7 +14,7 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ## Direction
 
-The project is open-source and single-tenant by default. MVP storage is Postgres
+The workspace is open-source and single-tenant by default. MVP storage is Postgres
 only, either:
 
 1. external Postgres via `OPTD_DATABASE_URL`, or
@@ -42,11 +42,11 @@ correctness in the default deployment.
 
 Initial MVP table families:
 
-- platform migrations and built-in `projects`
+- platform migrations and built-in `workspaces`
 - immutable `pack_revisions`/source files plus one active-pack pointer
 - immutable resource/relationship/lifecycle/action/hook/role/policy/seed
   definition revisions and hook attachments
-- generated project-scoped current resource/relationship tables
+- generated workspace-scoped current resource/relationship tables
 - immutable stage evidence, lifecycle coordination, approval requirements/
   decisions, and exactly-once `changeset_commits` exactly as named in
   `staged-changeset-storage.md`

@@ -36,26 +36,26 @@ Deno.test({
         })).code,
         0,
       );
-      const projectResult = await harness.runOptctl([
+      const workspaceResult = await harness.runOptctl([
         "--json",
-        "project",
+        "workspace",
         "create",
         "alpha",
         "--display-name",
         "Alpha",
       ]);
-      assertEquals(projectResult.code, 0, projectResult.stderr);
-      const projectId = JSON.parse(projectResult.stdout).data.id;
+      assertEquals(workspaceResult.code, 0, workspaceResult.stderr);
+      const workspaceId = JSON.parse(workspaceResult.stdout).data.id;
       const betaResult = await harness.runOptctl([
         "--json",
-        "project",
+        "workspace",
         "create",
         "beta",
         "--display-name",
         "Beta",
       ]);
       assertEquals(betaResult.code, 0, betaResult.stderr);
-      const betaProjectId = JSON.parse(betaResult.stdout).data.id;
+      const betaWorkspaceId = JSON.parse(betaResult.stdout).data.id;
       const pack = join(harness.rootDir, "strict-pack");
       await Deno.mkdir(join(pack, "resources"), { recursive: true });
       await Deno.mkdir(join(pack, "relationships"), { recursive: true });
@@ -200,7 +200,11 @@ Deno.test({
           [initialItemComponent],
         )
       );
-      const facts = await seedCurrentFacts(harness, projectId, betaProjectId);
+      const facts = await seedCurrentFacts(
+        harness,
+        workspaceId,
+        betaWorkspaceId,
+      );
       const prerequisiteStageCount = Number(
         (await query<{ count: string }>(
           harness.server.sql,
@@ -209,7 +213,7 @@ Deno.test({
       );
       const request = {
         operations: [{
-          project_id: projectId,
+          workspace_id: workspaceId,
           op: "create",
           key: "item",
           resource: "testpub/strict:item",
@@ -223,19 +227,19 @@ Deno.test({
           },
         }, {
           op: "update",
-          project_id: projectId,
+          workspace_id: workspaceId,
           resource: "testpub/strict:item",
           object_id: { $ref: "item.object_id" },
           set: { score: 2 },
         }, {
           op: "comment",
-          project_id: projectId,
+          workspace_id: workspaceId,
           resource: "testpub/strict:item",
           object_id: { $ref: "item.object_id" },
           body: "staged",
         }, {
           op: "transition",
-          project_id: projectId,
+          workspace_id: workspaceId,
           resource: "testpub/strict:item",
           object_id: facts.transitionId,
           expected_version: 1,
@@ -243,20 +247,20 @@ Deno.test({
           set: { completed_note: "complete" },
         }, {
           op: "archive",
-          project_id: projectId,
+          workspace_id: workspaceId,
           resource: "testpub/strict:item",
           object_id: facts.archiveId,
           expected_version: 1,
         }, {
           op: "link",
-          project_id: betaProjectId,
+          workspace_id: betaWorkspaceId,
           relationship: "testpub/strict:item_link",
           from: facts.betaToId,
           to: facts.betaThirdId,
           fields: { label: "peer" },
         }, {
           op: "unlink",
-          project_id: betaProjectId,
+          workspace_id: betaWorkspaceId,
           relationship: "testpub/strict:item_link",
           relationship_id: facts.relationshipId,
           expected_version: 1,
@@ -375,12 +379,12 @@ Deno.test({
       for (
         const invalid of [
           {
-            project_id: projectId,
+            workspace_id: workspaceId,
             idempotency_key: "x",
             operations: request.operations,
           },
           {
-            project_id: projectId,
+            workspace_id: workspaceId,
             operations: [{
               op: "create",
               resource: "testpub/strict:item",
@@ -389,7 +393,7 @@ Deno.test({
             }],
           },
           {
-            project_id: projectId,
+            workspace_id: workspaceId,
             operations: [{
               op: "create",
               resource: "testpub/strict:item",
@@ -398,7 +402,7 @@ Deno.test({
             }],
           },
           {
-            project_id: projectId,
+            workspace_id: workspaceId,
             operations: [{
               op: "update",
               resource: "testpub/strict:item",
@@ -422,7 +426,7 @@ Deno.test({
       for (
         const duplicate of [
           {
-            project_id: betaProjectId,
+            workspace_id: betaWorkspaceId,
             operations: [{
               op: "link",
               relationship: "testpub/strict:item_link",
@@ -432,7 +436,7 @@ Deno.test({
             }],
           },
           {
-            project_id: betaProjectId,
+            workspace_id: betaWorkspaceId,
             operations: [{
               op: "link",
               relationship: "testpub/strict:item_link",
@@ -471,7 +475,7 @@ Deno.test({
       for (
         const invalid of [
           {
-            project_id: betaProjectId,
+            workspace_id: betaWorkspaceId,
             operations: [{
               op: "link",
               relationship: "testpub/strict:item_link",
@@ -480,7 +484,7 @@ Deno.test({
             }],
           },
           {
-            project_id: projectId,
+            workspace_id: workspaceId,
             operations: [{
               op: "link",
               relationship: "testpub/strict:item_link",
@@ -491,19 +495,19 @@ Deno.test({
           {
             operations: [{
               op: "archive",
-              project_id: betaProjectId,
+              workspace_id: betaWorkspaceId,
               resource: "testpub/strict:item",
               object_id: facts.betaToId,
             }, {
               op: "link",
-              project_id: betaProjectId,
+              workspace_id: betaWorkspaceId,
               relationship: "testpub/strict:item_link",
               from: facts.betaToId,
               to: facts.betaThirdId,
             }],
           },
           {
-            project_id: projectId,
+            workspace_id: workspaceId,
             operations: [{
               op: "create",
               resource: "testpub/strict:item",
@@ -511,7 +515,7 @@ Deno.test({
             }],
           },
           {
-            project_id: projectId,
+            workspace_id: workspaceId,
             operations: [{
               op: "create",
               resource: "testpub/strict:item",
@@ -542,7 +546,7 @@ Deno.test({
             },
             { name: "reference", state: "new", ref_id: uuidV7() },
           ].map((fields) => ({
-            project_id: projectId,
+            workspace_id: workspaceId,
             operations: [{
               op: "create",
               resource: "testpub/strict:item",
@@ -550,7 +554,7 @@ Deno.test({
             }],
           })),
           {
-            project_id: projectId,
+            workspace_id: workspaceId,
             operations: [{
               op: "create",
               resource: "testpub/strict:item",
@@ -562,7 +566,7 @@ Deno.test({
             }],
           },
           {
-            project_id: projectId,
+            workspace_id: workspaceId,
             operations: [{
               op: "transition",
               resource: "testpub/strict:item",
@@ -572,7 +576,7 @@ Deno.test({
             }],
           },
           {
-            project_id: projectId,
+            workspace_id: workspaceId,
             operations: [{
               op: "transition",
               resource: "testpub/strict:item",
@@ -581,7 +585,7 @@ Deno.test({
             }],
           },
           {
-            project_id: projectId,
+            workspace_id: workspaceId,
             operations: [{
               op: "update",
               resource: "testpub/strict:item",
@@ -590,7 +594,7 @@ Deno.test({
             }],
           },
           {
-            project_id: projectId,
+            workspace_id: workspaceId,
             operations: [{
               op: "update",
               resource: "testpub/strict:item",
@@ -600,7 +604,7 @@ Deno.test({
             }],
           },
           {
-            project_id: projectId,
+            workspace_id: workspaceId,
             operations: [{
               op: "update",
               resource: "testpub/strict:item",
@@ -609,7 +613,7 @@ Deno.test({
             }],
           },
           {
-            project_id: projectId,
+            workspace_id: workspaceId,
             operations: [{
               op: "transition",
               resource: "testpub/strict:item",
@@ -618,7 +622,7 @@ Deno.test({
             }],
           },
           {
-            project_id: betaProjectId,
+            workspace_id: betaWorkspaceId,
             operations: [{
               op: "link",
               relationship: "testpub/strict:item_link",
@@ -665,7 +669,7 @@ Deno.test({
         harness.server.sql.begin(async (tx) => {
           await query(
             tx,
-            `insert into staged_changesets(id,schema_version,source_kind,source_identity_json,created_auth_context_id,created_principal_id,creating_context_json,operation_graph_digest,stage_digest,canonical_graph_json,projects_json,pack_revisions_json,warnings_json,planned_events_json,planned_deliveries_json)
+            `insert into staged_changesets(id,schema_version,source_kind,source_identity_json,created_auth_context_id,created_principal_id,creating_context_json,operation_graph_digest,stage_digest,canonical_graph_json,workspaces_json,pack_revisions_json,warnings_json,planned_events_json,planned_deliveries_json)
              values($1,1,'direct',$2::jsonb,$3,(select principal_id from auth_contexts where id=$3),$2::jsonb,$4,$4,$2::jsonb,'[]','[]','[]','[]','[]')`,
             [injectedId, {}, auth, `sha256:${"0".repeat(64)}`],
           );
@@ -768,7 +772,7 @@ Deno.test({
         "changeset",
         "stage",
       ], {
-        project_id: projectId,
+        workspace_id: workspaceId,
         operations: [{
           op: "create",
           resource: "testpub/strict:item",
@@ -816,7 +820,7 @@ Deno.test({
               patch_outputs: [],
               read_dependencies: [{
                 kind: "policy" as const,
-                project_id: projectId,
+                workspace_id: workspaceId,
                 definition: "testpub/strict:allow_create",
                 query_digest: `sha256:${"4".repeat(64)}`,
               }],
@@ -828,7 +832,7 @@ Deno.test({
               approval_requirements: [{
                 key: "strict_review",
                 role: "testpub/strict:reviewer",
-                boundary: { type: "project", project_id: projectId },
+                boundary: { type: "workspace", workspace_id: workspaceId },
                 minimum: 1,
                 principal_types: ["human_user"],
                 allow_initiator: true,
@@ -881,7 +885,7 @@ Deno.test({
         },
       );
       const malformedCoordinator = await malformedInjected.stage({
-        project_id: projectId,
+        workspace_id: workspaceId,
         operations: [{
           op: "create",
           resource: "testpub/strict:item",
@@ -898,7 +902,7 @@ Deno.test({
       );
 
       const coordinated = await injected.stage({
-        project_id: projectId,
+        workspace_id: workspaceId,
         operations: [{
           op: "create",
           resource: "testpub/strict:item",
@@ -1012,7 +1016,7 @@ Deno.test({
           );
           try {
             const failed = await injected.stage({
-              project_id: projectId,
+              workspace_id: workspaceId,
               operations: [{
                 op: "create",
                 resource: "testpub/strict:item",
@@ -1155,7 +1159,7 @@ async function seedCurrentFacts(
     [beta, ids.betaToId, "To", null, null],
     [beta, ids.betaThirdId, "Third", null, null],
   ] as const;
-  for (const [project, objectId, name, score, code] of objects) {
+  for (const [workspace, objectId, name, score, code] of objects) {
     const commitId = await prerequisiteCommit(
         harness,
         metadata.auth_context_id,
@@ -1163,9 +1167,9 @@ async function seedCurrentFacts(
       versionId = uuidV7();
     await query(
       harness.server.sql,
-      `insert into object_versions(id,project_id,definition_kind,resource_identity,object_id,version,changeset_commit_id,operation,resource_revision,snapshot_json,changed_fields,auth_context_id)
+      `insert into object_versions(id,workspace_id,definition_kind,resource_identity,object_id,version,changeset_commit_id,operation,resource_revision,snapshot_json,changed_fields,auth_context_id)
        values($1,$2,'resource','testpub/strict:item',$3,1,$4,'create',$5,$6::jsonb,array['name','state'],$7)`,
-      [versionId, project, objectId, commitId, metadata.revision_id, {
+      [versionId, workspace, objectId, commitId, metadata.revision_id, {
         data: { name, state: "new", score, code },
         archived_at: null,
       }, metadata.auth_context_id],
@@ -1174,10 +1178,10 @@ async function seedCurrentFacts(
       harness.server.sql,
       `insert into ${
         quoteIdentifier(metadata.resource_table)
-      }(id,project_id,version,current_object_version_id,created_by,updated_by,name,state,score,code) values($1,$2,1,$3,$7,$7,$4,'new',$5,$6)`,
+      }(id,workspace_id,version,current_object_version_id,created_by,updated_by,name,state,score,code) values($1,$2,1,$3,$7,$7,$4,'new',$5,$6)`,
       [
         objectId,
-        project,
+        workspace,
         versionId,
         name,
         score,
@@ -1193,7 +1197,7 @@ async function seedCurrentFacts(
     );
   await query(
     harness.server.sql,
-    `insert into object_versions(id,project_id,definition_kind,resource_identity,object_id,version,changeset_commit_id,operation,resource_revision,snapshot_json,changed_fields,auth_context_id)
+    `insert into object_versions(id,workspace_id,definition_kind,resource_identity,object_id,version,changeset_commit_id,operation,resource_revision,snapshot_json,changed_fields,auth_context_id)
      values($1,$2,'relationship','testpub/strict:item_link',$3,1,$4,'link',$5,$6::jsonb,array['label'],$7)`,
     [
       relationshipVersion,
@@ -1214,7 +1218,7 @@ async function seedCurrentFacts(
     harness.server.sql,
     `insert into ${
       quoteIdentifier(metadata.relationship_table)
-    }(id,project_id,version,current_object_version_id,created_by,updated_by,from_object_id,to_object_id,label) values($1,$2,1,$3,$6,$6,$4,$5,'old')`,
+    }(id,workspace_id,version,current_object_version_id,created_by,updated_by,from_object_id,to_object_id,label) values($1,$2,1,$3,$6,$6,$4,$5,'old')`,
     [
       ids.relationshipId,
       beta,
@@ -1233,7 +1237,7 @@ async function prerequisiteCommit(harness: LiveHarness, authContextId: string) {
   await harness.server.sql.begin(async (tx) => {
     await query(
       tx,
-      `insert into staged_changesets(id,schema_version,source_kind,source_identity_json,created_auth_context_id,created_principal_id,creating_context_json,operation_graph_digest,stage_digest,canonical_graph_json,projects_json,pack_revisions_json,warnings_json,planned_events_json,planned_deliveries_json)
+      `insert into staged_changesets(id,schema_version,source_kind,source_identity_json,created_auth_context_id,created_principal_id,creating_context_json,operation_graph_digest,stage_digest,canonical_graph_json,workspaces_json,pack_revisions_json,warnings_json,planned_events_json,planned_deliveries_json)
        values($1,1,'seed',$2::jsonb,$3,(select principal_id from auth_contexts where id=$3),$2::jsonb,$4,$4,$5::jsonb,'[]','[]','[]','[]','[]')`,
       [stageId, {}, authContextId, digest, {
         schema: "changeset.operations.v1",

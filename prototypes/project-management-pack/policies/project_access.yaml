@@ -3,7 +3,7 @@ apiVersion: optd.dev/v1
 metadata:
   name: project_access
 spec:
-  default_assignment: all_projects
+  default_assignment: all_workspaces
   rules:
     - name: projects_admin
       effect: allow
@@ -32,16 +32,47 @@ spec:
         - optd/projects:timesheet
       axi:
         summary: Projects administrators may manage every Projects pack resource.
+    - name: projects_admin_import
+      effect: allow
+      roles: [optd/projects:projects_admin]
+      actions: [import]
+      resources: [optd/projects:task]
+      axi:
+        summary: Administrators may import historical tasks with an explicit state and reason.
+    - name: projects_admin_stages
+      effect: allow
+      roles: [optd/projects:projects_admin]
+      actions: [seed:optd/projects:task_stages]
+      resources: [optd/projects:task_stage]
+      axi:
+        summary: Administrators may initialize task stages.
+    - name: projects_admin_tags
+      effect: allow
+      roles: [optd/projects:projects_admin]
+      actions: [seed:optd/projects:task_tags]
+      resources: [optd/projects:task_tag]
+      axi:
+        summary: Administrators may initialize task tags.
+    - name: projects_admin_relationships
+      effect: allow
+      roles: [optd/projects:projects_admin]
+      actions: [link, unlink]
+      resources:
+        - optd/projects:task_tag_assignment
+        - optd/projects:task_milestone
+      axi:
+        summary: Projects administrators may manage task tags and milestones.
     - name: project_manager_approval
       effect: allow
       roles:
         - optd/projects:project_manager
+        - optd/projects:projects_admin
       actions:
         - changeset.approval.decide
       resources:
         - system:changeset-approval
       axi:
-        summary: Project managers may decide task-completion approvals.
+        summary: Project managers may decide approvals requiring their role.
     - name: project_manager
       effect: allow
       roles:
@@ -66,7 +97,7 @@ spec:
         - optd/projects:task_tag
         - optd/projects:timesheet
       axi:
-        summary: Project managers may manage resources within their assigned Project boundary.
+        summary: Project managers may manage resources within their assigned Workspace boundary.
     - name: project_member_read
       effect: allow
       roles:
@@ -128,10 +159,10 @@ spec:
         - optd/projects:task_tag
         - optd/projects:timesheet
       axi:
-        summary: Viewers have read-only access within their assigned Project boundary.
+        summary: Viewers have read-only access within their assigned Workspace boundary.
   axi:
     purpose: Defines administrator, manager, member, assignee, owner, and viewer access.
     whenToUse:
-      - Inspect Projects access before assigning a role at a Project boundary.
+      - Inspect Projects access before assigning a role at a Workspace boundary.
     help:
       - optctl metadata policy optd/projects:project_access

@@ -72,7 +72,7 @@ function operation(
 ) {
   return {
     op: "create",
-    project_id: matrix.projectId,
+    workspace_id: matrix.workspaceId,
     resource: "test/commitmatrix:alpha",
     fields: { key, status: "ready" },
   };

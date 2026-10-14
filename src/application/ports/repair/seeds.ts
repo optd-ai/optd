@@ -1,6 +1,6 @@
 export type ActiveUniqueConstraint = Readonly<{
   name: string;
-  projectScoped: true;
+  workspaceScoped: true;
   fields: readonly string[];
   predicate: "active()";
 }>;

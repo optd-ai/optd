@@ -72,21 +72,21 @@ Deno.test("compiled optctl completes safe, destructive, stale, timeout, risky, a
     assertEquals(projectsMetadata.data.resources.includes("task"), true);
     const aggregatedHome = await runOk(harness, ["home"], secrets);
     assertEquals(aggregatedHome.data.system.active_packs, [
-      "optd/crm@0.1.0",
-      "optd/projects@0.1.0",
+      "optd/crm@0.2.0",
+      "optd/projects@0.2.0",
     ]);
 
     for (const slug of ["alpha", "beta"]) {
       await runOk(
         harness,
-        ["project", "create", slug, "--display-name", slug],
+        ["workspace", "create", slug, "--display-name", slug],
         secrets,
       );
     }
 
     const destructiveDir = join(harness.rootDir, "crm-destructive");
     await copyPack("prototypes/crm-default-pack", destructiveDir);
-    await setVersion(destructiveDir, "0.2.0");
+    await setVersion(destructiveDir, "0.2.1");
     const leadPath = join(destructiveDir, "resources", "lead.yaml");
     const lead = parseYamlJsonObject(
       await Deno.readTextFile(leadPath),
@@ -264,7 +264,7 @@ Deno.test("compiled optctl completes safe, destructive, stale, timeout, risky, a
 
     const noopDir = join(harness.rootDir, "crm-noop");
     await copyPack("prototypes/crm-default-pack", noopDir);
-    await setVersion(noopDir, "0.1.1");
+    await setVersion(noopDir, "0.2.2");
     const noop = await preview(harness, noopDir);
     assertEquals(noop.class, "safe");
     const safeTokenRejected = await harness.runOptctl([
@@ -298,9 +298,9 @@ Deno.test("compiled optctl completes safe, destructive, stale, timeout, risky, a
       harness.server.sql,
       "select table_name from pack_runtime_tables where publisher='optd' and pack_name='crm' and definition_kind='resource' and definition_name='lead'",
     )).rows[0].table_name;
-    const projectId = (await query<{ id: string }>(
+    const workspaceId = (await query<{ id: string }>(
       harness.server.sql,
-      "select id::text id from projects where slug='alpha'",
+      "select id::text id from workspaces where slug='alpha'",
     )).rows[0].id;
     const rootAuthContext = (await query<{ id: string }>(
       harness.server.sql,
@@ -311,17 +311,17 @@ Deno.test("compiled optctl completes safe, destructive, stale, timeout, risky, a
     assertEquals(
       (await query<{ count: string }>(
         harness.server.sql,
-        `select count(*)::text count from projects p
+        `select count(*)::text count from workspaces p
          join auth_contexts c on c.id=$2 where p.id=$1`,
-        [projectId, rootAuthContext],
+        [workspaceId, rootAuthContext],
       )).rows[0].count,
       "1",
     );
     const rowId = uuidV7();
     await query(
       harness.server.sql,
-      `insert into "${leadTable}"(id,project_id,created_by,updated_by,name,status,phone) values($1,$2,$3,$3,'Fact changed','new','555')`,
-      [rowId, projectId, rootAuthContext],
+      `insert into "${leadTable}"(id,workspace_id,created_by,updated_by,name,status,phone) values($1,$2,$3,$3,'Fact changed','new','555')`,
+      [rowId, workspaceId, rootAuthContext],
     );
     await expectError(
       harness,
@@ -478,7 +478,7 @@ Deno.test("compiled optctl completes safe, destructive, stale, timeout, risky, a
     );
 
     for (const slug of ["alpha", "beta"]) {
-      await runOk(harness, ["project", "select", slug], secrets);
+      await runOk(harness, ["workspace", "select", slug], secrets);
       const metadata = await runOk(harness, [
         "metadata",
         "resource",

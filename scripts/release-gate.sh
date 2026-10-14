@@ -903,7 +903,7 @@ run_owned format deno fmt --check src tests docs project-model deno.json
 verify_source
 
 printf '\n== exact one-time release image build ==\n'
-release_version="release-gate-${release_revision:0:12}"
+release_version="${OPTD_RELEASE_VERSION:-release-gate-${release_revision:0:12}}"
 release_image_tag="optd:${release_version}-${run_id}"
 # The approved existing Docker driver retains its normal BuildKit cache. Only
 # daemon objects belong to the four-set cleanup contract, never shared cache.

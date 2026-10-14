@@ -170,11 +170,11 @@ Deno.test("atomic pack apply activates globally, is idempotent, and rolls back i
     assert(Number(projection.policies) > 0);
     assert(Number(projection.rules) > 0);
     assert(Number(projection.defaults) > 0);
-    const carryProject = uuidV7();
+    const carryWorkspace = uuidV7();
     await query(
       sql,
-      "insert into projects(id,slug,display_name,created_by_auth_context_id,updated_by_auth_context_id) values($1,'carry-project','Carry Project',$2,$2)",
-      [carryProject, auth],
+      "insert into workspaces(id,slug,display_name,created_by_auth_context_id,updated_by_auth_context_id) values($1,'carry-workspace','Carry Workspace',$2,$2)",
+      [carryWorkspace, auth],
     );
     const activePolicyVersion = (await query<{ id: string }>(
       sql,
@@ -183,20 +183,20 @@ Deno.test("atomic pack apply activates globally, is idempotent, and rolls back i
     const carriedAssignmentIds = [uuidV7(), uuidV7(), uuidV7()];
     for (
       const [index, boundary] of [
-        "project",
-        "all_projects",
+        "workspace",
+        "all_workspaces",
         "system",
       ].entries()
     ) {
       await query(
         sql,
-        `insert into policy_assignments(id,policy_definition_version_id,boundary_type,project_id,active,source,created_by_auth_context_id)
+        `insert into policy_assignments(id,policy_definition_version_id,boundary_type,workspace_id,active,source,created_by_auth_context_id)
          values($1,$2,$3,$4,true,'operator',$5)`,
         [
           carriedAssignmentIds[index],
           activePolicyVersion,
           boundary,
-          boundary === "project" ? carryProject : null,
+          boundary === "workspace" ? carryWorkspace : null,
           auth,
         ],
       );
@@ -376,12 +376,12 @@ Deno.test("atomic pack apply activates globally, is idempotent, and rolls back i
     carryCandidate.sourceDigest = `sha256:${"7".repeat(64)}`;
     carryCandidate.revision = `optd/crm@0.1.8:sha256:${"6".repeat(64)}`;
     const carryPolicy = carryCandidate.policies.sales_access.document as {
-      spec: { default_assignment: "none" | "all_projects" };
+      spec: { default_assignment: "none" | "all_workspaces" };
     };
     carryPolicy.spec.default_assignment = "none";
     const normalizedCarryPolicy = (carryCandidate.normalized.policies as Record<
       string,
-      { spec: { default_assignment: "none" | "all_projects" } }
+      { spec: { default_assignment: "none" | "all_workspaces" } }
     >).sales_access;
     normalizedCarryPolicy.spec.default_assignment = "none";
     const carryPlan = await createPackMigrationPlan(sql, carryCandidate, auth);
@@ -950,7 +950,7 @@ Deno.test("PG18.4 migrates legacy full seed uniqueness atomically to exact activ
       [table],
     )).rows;
     assertEquals(oldConstraint.length, 1);
-    assertEquals(oldConstraint[0].definition, "UNIQUE (project_id, name)");
+    assertEquals(oldConstraint[0].definition, "UNIQUE (workspace_id, name)");
     assert(oldConstraint[0].conname.startsWith(`uq_${table}_name_`));
     const oldConstraintName = oldConstraint[0].conname;
     const initialActivation = (await query<{
@@ -1042,7 +1042,7 @@ Deno.test("PG18.4 migrates legacy full seed uniqueness atomically to exact activ
       })),
     );
     const createIndexSql =
-      `create unique index "legacyseed_status_active_name" on "${table}" ("project_id", "name") where "archived_at" is null`;
+      `create unique index "legacyseed_status_active_name" on "${table}" ("workspace_id", "name") where "archived_at" is null`;
     const dropConstraintSql =
       `alter table "${table}" drop constraint if exists "${oldConstraintName}"`;
     const createIndexPosition = statements.indexOf(createIndexSql);
@@ -1161,7 +1161,7 @@ Deno.test("PG18.4 migrates legacy full seed uniqueness atomically to exact activ
       )).rows,
       [{
         indexdef:
-          `CREATE UNIQUE INDEX legacyseed_status_active_name ON public.${table} USING btree (project_id, name) WHERE (archived_at IS NULL)`,
+          `CREATE UNIQUE INDEX legacyseed_status_active_name ON public.${table} USING btree (workspace_id, name) WHERE (archived_at IS NULL)`,
       }],
     );
     assertEquals(

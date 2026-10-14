@@ -65,11 +65,11 @@ for (const logLevel of ["info", "trace"] as const) {
           }),
           outputs,
         );
-        const project = json(
+        const workspace = json(
           await successful(
             harness.runOptctl([
               "--json",
-              "project",
+              "workspace",
               "create",
               `outbox-${crypto.randomUUID().slice(0, 8)}`,
               "--display-name",
@@ -78,7 +78,7 @@ for (const logLevel of ["info", "trace"] as const) {
             outputs,
           ),
         );
-        const projectId = String(project.data.id);
+        const workspaceId = String(workspace.data.id);
 
         await writePack(pack, provider.url, "1.0.0", "V1");
         await successful(
@@ -150,7 +150,7 @@ for (const logLevel of ["info", "trace"] as const) {
         const normal = await stageCommit(
           harness,
           pack,
-          projectId,
+          workspaceId,
           "normal",
           "normal",
         );
@@ -181,7 +181,7 @@ for (const logLevel of ["info", "trace"] as const) {
         const ambiguous = await stageCommit(
           harness,
           pack,
-          projectId,
+          workspaceId,
           "ambiguous",
           "ambiguous",
         );
@@ -215,7 +215,7 @@ for (const logLevel of ["info", "trace"] as const) {
         const delayed = await stageCommit(
           harness,
           pack,
-          projectId,
+          workspaceId,
           "retry_after",
           "retry-after",
         );
@@ -262,7 +262,7 @@ for (const logLevel of ["info", "trace"] as const) {
         const permanent = await stageCommit(
           harness,
           pack,
-          projectId,
+          workspaceId,
           "permanent",
           "permanent",
         );
@@ -305,7 +305,7 @@ for (const logLevel of ["info", "trace"] as const) {
         const crashing = await stageCommit(
           harness,
           pack,
-          projectId,
+          workspaceId,
           "normal",
           "crash",
         );
@@ -354,7 +354,7 @@ for (const logLevel of ["info", "trace"] as const) {
         const pendingCancel = await stageCommit(
           harness,
           pack,
-          projectId,
+          workspaceId,
           "normal",
           "pending-cancel",
         );
@@ -381,7 +381,7 @@ for (const logLevel of ["info", "trace"] as const) {
         const queued = await stageCommit(
           harness,
           pack,
-          projectId,
+          workspaceId,
           "normal",
           "pinned-v1",
         );
@@ -448,7 +448,7 @@ for (const logLevel of ["info", "trace"] as const) {
         const drainWork = await stageCommit(
           harness,
           pack,
-          projectId,
+          workspaceId,
           "normal",
           "concurrent-drain",
         );
@@ -472,7 +472,7 @@ for (const logLevel of ["info", "trace"] as const) {
         const slow = await stageCommit(
           harness,
           pack,
-          projectId,
+          workspaceId,
           "normal",
           "slow-earlier",
         );
@@ -480,7 +480,7 @@ for (const logLevel of ["info", "trace"] as const) {
         const fast = await stageCommit(
           harness,
           pack,
-          projectId,
+          workspaceId,
           "normal",
           "fast-later",
         );
@@ -527,7 +527,7 @@ for (const logLevel of ["info", "trace"] as const) {
         const hookBUpdate = await stageUpdateCommit(
           harness,
           pack,
-          projectId,
+          workspaceId,
           normalObjectId,
         );
         const hookBDelivery = await deliveryForStage(
@@ -587,7 +587,7 @@ for (const logLevel of ["info", "trace"] as const) {
         const statusPending = await stageCommit(
           harness,
           pack,
-          projectId,
+          workspaceId,
           "normal",
           "status-pending",
         );
@@ -598,7 +598,7 @@ for (const logLevel of ["info", "trace"] as const) {
         const statusCancelled = await stageCommit(
           harness,
           pack,
-          projectId,
+          workspaceId,
           "normal",
           "status-cancelled",
         );
@@ -620,7 +620,7 @@ for (const logLevel of ["info", "trace"] as const) {
         const statusSucceeded = await stageCommit(
           harness,
           pack,
-          projectId,
+          workspaceId,
           "normal",
           "status-succeeded",
         );
@@ -636,7 +636,7 @@ for (const logLevel of ["info", "trace"] as const) {
         const statusDead = await stageCommit(
           harness,
           pack,
-          projectId,
+          workspaceId,
           "normal",
           "status-dead",
         );
@@ -652,7 +652,7 @@ for (const logLevel of ["info", "trace"] as const) {
         const statusRetry = await stageCommit(
           harness,
           pack,
-          projectId,
+          workspaceId,
           "normal",
           "status-retry",
         );
@@ -673,7 +673,7 @@ for (const logLevel of ["info", "trace"] as const) {
         const statusRunning = await stageCommit(
           harness,
           pack,
-          projectId,
+          workspaceId,
           "normal",
           "status-running",
         );
@@ -1059,7 +1059,7 @@ for (const logLevel of ["info", "trace"] as const) {
         const pagedAttemptWork = await stageCommit(
           harness,
           pack,
-          projectId,
+          workspaceId,
           "ambiguous",
           "attempt-pagination",
         );
@@ -1326,7 +1326,7 @@ for (const logLevel of ["info", "trace"] as const) {
         const toonCancelWork = await stageCommit(
           harness,
           pack,
-          projectId,
+          workspaceId,
           "normal",
           "toon-cancel",
         );
@@ -1352,7 +1352,7 @@ for (const logLevel of ["info", "trace"] as const) {
         const toonRetryWork = await stageCommit(
           harness,
           pack,
-          projectId,
+          workspaceId,
           "normal",
           "toon-retry",
         );
@@ -1419,7 +1419,7 @@ for (const logLevel of ["info", "trace"] as const) {
         const drainOneWork = await stageCommit(
           harness,
           pack,
-          projectId,
+          workspaceId,
           "normal",
           "drain-exact-one",
         );
@@ -1452,7 +1452,7 @@ for (const logLevel of ["info", "trace"] as const) {
         const jsonDrainWork = await stageCommit(
           harness,
           pack,
-          projectId,
+          workspaceId,
           "normal",
           "json-drain-exact-one",
         );
@@ -1578,14 +1578,14 @@ for (const logLevel of ["info", "trace"] as const) {
         const ordinaryAssignment = crypto.randomUUID();
         await query(
           harness.server.sql,
-          `insert into role_assignments(id,principal_id,role_id,boundary_type,project_id,active)
+          `insert into role_assignments(id,principal_id,role_id,boundary_type,workspace_id,active)
            values($1,$2,'system:admin','system',null,true)`,
           [ordinaryAssignment, ordinaryPrincipal],
         );
         await query(
           harness.server.sql,
           `insert into policy_assignments(
-             id,policy_definition_version_id,boundary_type,project_id,active)
+             id,policy_definition_version_id,boundary_type,workspace_id,active)
            values($1,'01900000-0000-7000-8000-000000000201','system',null,true)
            on conflict do nothing`,
           [crypto.randomUUID()],
@@ -1714,7 +1714,7 @@ for (const logLevel of ["info", "trace"] as const) {
         const ordinaryMutation = await stageCommit(
           harness,
           pack,
-          projectId,
+          workspaceId,
           "normal",
           "ordinary-mutation",
         );
@@ -1739,7 +1739,7 @@ for (const logLevel of ["info", "trace"] as const) {
         const ordinaryToonCancelWork = await stageCommit(
           harness,
           pack,
-          projectId,
+          workspaceId,
           "normal",
           "ordinary-toon-cancel",
         );
@@ -1763,7 +1763,7 @@ for (const logLevel of ["info", "trace"] as const) {
         const ordinaryRetryWork = await stageCommit(
           harness,
           pack,
-          projectId,
+          workspaceId,
           "normal",
           "ordinary-retry",
         );
@@ -1774,7 +1774,7 @@ for (const logLevel of ["info", "trace"] as const) {
         const ordinaryToonRetryWork = await stageCommit(
           harness,
           pack,
-          projectId,
+          workspaceId,
           "normal",
           "ordinary-toon-retry",
         );
@@ -2027,7 +2027,7 @@ async function addHookB(root: string, providerUrl: string) {
 async function stageUpdateCommit(
   harness: LiveHarness,
   pack: string,
-  projectId: string,
+  workspaceId: string,
   objectId: string,
 ) {
   const file = `${pack}/operation-${crypto.randomUUID()}.json`;
@@ -2036,7 +2036,7 @@ async function stageUpdateCommit(
     JSON.stringify({
       operations: [{
         op: "update",
-        project_id: projectId,
+        workspace_id: workspaceId,
         resource: "test/durableoutbox:item",
         object_id: objectId,
         set: { mode: "updated-for-hook-b" },
@@ -2058,7 +2058,7 @@ async function stageUpdateCommit(
 async function stageCommit(
   harness: LiveHarness,
   pack: string,
-  projectId: string,
+  workspaceId: string,
   mode: string,
   key: string,
 ) {
@@ -2068,7 +2068,7 @@ async function stageCommit(
     JSON.stringify({
       operations: [{
         op: "create",
-        project_id: projectId,
+        workspace_id: workspaceId,
         resource: "test/durableoutbox:item",
         fields: { key, mode },
       }],

@@ -3,7 +3,7 @@ apiVersion: optd.dev/v1
 metadata:
   publisher: optd
   name: projects
-  version: 0.1.0
+  version: 0.2.0
 spec:
   purpose: Project and task management resources for agent-operated work tracking.
   axi:
@@ -23,5 +23,5 @@ spec:
         - optd/projects:start_task
       help:
         - optctl resources
-        - optctl --project ${project} list optd/projects:project
+        - optctl --workspace ${workspace} list optd/projects:project
         - optctl metadata pack optd/projects

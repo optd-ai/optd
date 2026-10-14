@@ -301,15 +301,15 @@ Deno.test({
         "outbox-admin",
         "--password-stdin",
       ], "container outbox password\n");
-      const project = await ok([
+      const workspace = await ok([
         "--json",
-        "project",
+        "workspace",
         "create",
         "outbox-restart",
         "--display-name",
         "Outbox Restart",
       ]);
-      const projectId = String(project.id);
+      const workspaceId = String(workspace.id);
       const containerPack = await harness.copyPack(pack);
       await ok(["--json", "pack", "apply", containerPack, "--safe"]);
       provider.enqueue(
@@ -322,12 +322,14 @@ Deno.test({
         { kind: "hold", token: "lease-generation-0" },
       );
 
-      const queuedStage = await stageChangeset(harness, launcher, projectId, [{
-        op: "create",
-        project_id: projectId,
-        resource: "test/containeroutbox:item",
-        fields: { key: "queued" },
-      }]);
+      const queuedStage = await stageChangeset(harness, launcher, workspaceId, [
+        {
+          op: "create",
+          workspace_id: workspaceId,
+          resource: "test/containeroutbox:item",
+          fields: { key: "queued" },
+        },
+      ]);
       assertEquals(queuedStage.raw.code, 0, queuedStage.raw.stderr);
       await ok(["--json", "changeset", "commit", queuedStage.data.id]);
       const queued = await waitOutboxStatus(launcher, "pending");
@@ -367,9 +369,9 @@ Deno.test({
         "succeeded",
       );
 
-      const retryStage = await stageChangeset(harness, launcher, projectId, [{
+      const retryStage = await stageChangeset(harness, launcher, workspaceId, [{
         op: "create",
-        project_id: projectId,
+        workspace_id: workspaceId,
         resource: "test/containeroutbox:item",
         fields: { key: "retry" },
       }]);
@@ -522,12 +524,14 @@ Deno.test({
         "succeeded",
       );
 
-      const leasedStage = await stageChangeset(harness, launcher, projectId, [{
-        op: "create",
-        project_id: projectId,
-        resource: "test/containeroutbox:item",
-        fields: { key: "leased" },
-      }]);
+      const leasedStage = await stageChangeset(harness, launcher, workspaceId, [
+        {
+          op: "create",
+          workspace_id: workspaceId,
+          resource: "test/containeroutbox:item",
+          fields: { key: "leased" },
+        },
+      ]);
       assertEquals(leasedStage.raw.code, 0, leasedStage.raw.stderr);
       await ok(["--json", "changeset", "commit", leasedStage.data.id]);
       await waitProviderHold(provider, "lease-generation-0");
@@ -1020,12 +1024,12 @@ Deno.test({
   async fn() {
     const releaseImage = await image();
     const id = releaseScopedId(10);
-    const project = `optd-ext-${id}`;
+    const workspace = `optd-ext-${id}`;
     const version = `compose-${id}`;
     const port = 20000 + Math.floor(Math.random() * 20000);
     const env = {
       ...Deno.env.toObject(),
-      COMPOSE_PROJECT_NAME: project,
+      COMPOSE_PROJECT_NAME: workspace,
       OPTD_VERSION: version,
       OPTD_IMAGE: releaseImage,
       OPTD_RELEASE_GATE_ID: Deno.env.get("OPTD_RELEASE_GATE_ID") ??
@@ -1058,7 +1062,7 @@ Deno.test({
         "optd",
         "sh",
         "-c",
-        "printf '%s\\n' 'compose proof password' | OPTD_AUTH_TREE_STOP_PID=$$ optctl --server http://127.0.0.1:8789 --json bootstrap init --username compose-admin --password-stdin && OPTD_AUTH_TREE_STOP_PID=$$ optctl --server http://127.0.0.1:8789 --json project create compose-fact --display-name 'Compose Persistent Fact'",
+        "printf '%s\\n' 'compose proof password' | OPTD_AUTH_TREE_STOP_PID=$$ optctl --server http://127.0.0.1:8789 --json bootstrap init --username compose-admin --password-stdin && OPTD_AUTH_TREE_STOP_PID=$$ optctl --server http://127.0.0.1:8789 --json workspace create compose-fact --display-name 'Compose Persistent Fact'",
       ]);
       assertStringIncludes(bootstrap.stdout, '"ok": true');
       assertStringIncludes(bootstrap.stdout, "compose-fact");
@@ -1191,12 +1195,12 @@ async function assertNoNewAnonymousDockerVolumes(
 async function stageChangeset(
   harness: ContainerHarness,
   launcher: ContainerCliLauncher,
-  projectId: string,
+  workspaceId: string,
   operations: unknown[],
 ) {
   const path =
     `/data/.container-test-clients/input-${crypto.randomUUID()}.json`;
-  const payload = JSON.stringify({ project_id: projectId, operations });
+  const payload = JSON.stringify({ workspace_id: workspaceId, operations });
   await harness.docker([
     "exec",
     "--interactive",

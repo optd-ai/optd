@@ -44,7 +44,7 @@ export type HomeDto = {
   help: string[];
 };
 export type MetadataOptions = Readonly<
-  { auth: AuthContext; projectId?: string; includeSecurity?: boolean }
+  { auth: AuthContext; workspaceId?: string; includeSecurity?: boolean }
 >;
 
 export function makeInspectMetadataService(
@@ -58,17 +58,17 @@ export function makeInspectMetadataService(
   async function projection(
     options: MetadataOptions,
   ): Promise<Result<Record<string, unknown>>> {
-    if (!options.projectId) return ok({ boundary_required: true });
-    if (!isUuidV7(options.projectId)) {
-      return err(badRequest("project_id must be a lowercase UUIDv7"));
+    if (!options.workspaceId) return ok({ boundary_required: true });
+    if (!isUuidV7(options.workspaceId)) {
+      return err(badRequest("workspace_id must be a lowercase UUIDv7"));
     }
     const authority = await deps.authorization.authority(options.auth, {
-      type: "project",
-      projectId: options.projectId,
+      type: "workspace",
+      workspaceId: options.workspaceId,
     });
     if (!authority.ok) return authority;
     return ok({
-      project_id: options.projectId,
+      workspace_id: options.workspaceId,
       boundary_required: false,
       capabilities: authority.value.capabilities.filter((c) =>
         c.condition === "unconditional"
@@ -128,7 +128,23 @@ export function makeInspectMetadataService(
     };
     if (section === "resources") {
       Object.assign(base, {
-        schema: { fields: spec.fields ?? {} },
+        schema: {
+          fields: Object.fromEntries(
+            Object.entries(jsonRecord(spec.fields)).sort((
+              [a, left],
+              [b, right],
+            ) =>
+              Number(jsonRecord(right).required === true) -
+                Number(jsonRecord(left).required === true) || a.localeCompare(b)
+            ),
+          ),
+        },
+        required_fields: Object.entries(jsonRecord(spec.fields)).filter((
+          [, field],
+        ) => jsonRecord(field).required === true).map(([name]) => name).sort(),
+        optional_fields: Object.entries(jsonRecord(spec.fields)).filter((
+          [, field],
+        ) => jsonRecord(field).required !== true).map(([name]) => name).sort(),
         axi: spec.axi ?? {},
       });
     } else if (section === "relationships") {
@@ -201,6 +217,8 @@ export function makeInspectMetadataService(
       Object.assign(base, {
         input: spec.input ?? {},
         output: spec.output ?? {},
+        availability: spec.availability ?? {},
+        reads: spec.reads ?? {},
         axi: spec.axi ?? {},
         effects: summary(spec.effects),
       });
@@ -213,7 +231,10 @@ export function makeInspectMetadataService(
     } else if (section === "seeds") {
       Object.assign(base, {
         axi: spec.axi ?? {},
-        resources: Array.isArray(spec.resources) ? spec.resources : [],
+        resource: spec.resource,
+        key: spec.key,
+        mode: spec.mode,
+        rows: spec.rows ?? [],
       });
     }
     return ok(base);
@@ -249,8 +270,8 @@ export function makeInspectMetadataService(
         );
         for (const command of preferred(home.help, [])) {
           help.add(
-            options.projectId
-              ? command.replaceAll("${project}", options.projectId)
+            options.workspaceId
+              ? command.replaceAll("${workspace}", options.workspaceId)
               : command,
           );
         }
@@ -289,7 +310,7 @@ export function makeInspectMetadataService(
         capabilities: [
           "metadata.home",
           "metadata.inspect",
-          "project.list",
+          "workspace.list",
           "pack.preview",
           "query",
           "changeset.stage",

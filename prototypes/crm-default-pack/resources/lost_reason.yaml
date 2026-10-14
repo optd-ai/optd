@@ -34,7 +34,7 @@ spec:
       empty:
         message: No lost reason records found.
         help:
-          - optctl --project ${project} create optd/crm:lost_reason --input object.json --stage
+          - optctl --workspace ${workspace} create optd/crm:lost_reason --input object.json --stage
     detail:
       sections:
         - title: lost reason
@@ -43,11 +43,11 @@ spec:
             - label
             - active
       help:
-        - optctl --project ${project} query optd/crm:lost_reason --where 'id == "${id}"'
+        - optctl --workspace ${workspace} query optd/crm:lost_reason --where 'id == "${id}"'
     help:
       list:
-        - optctl --project ${project} query optd/crm:lost_reason
+        - optctl --workspace ${workspace} query optd/crm:lost_reason
       view:
-        - optctl --project ${project} view optd/crm:lost_reason ${id}
+        - optctl --workspace ${workspace} view optd/crm:lost_reason ${id}
       created:
-        - optctl --project ${project} view optd/crm:lost_reason ${id}
+        - optctl --workspace ${workspace} view optd/crm:lost_reason ${id}

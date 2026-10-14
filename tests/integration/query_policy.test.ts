@@ -33,8 +33,8 @@ Deno.test("query pushes assigned ABAC before count and page on PostgreSQL", asyn
       human = uuidV7(),
       session = uuidV7(),
       authId = uuidV7(),
-      project = uuidV7(),
-      projectTwo = uuidV7(),
+      workspace = uuidV7(),
+      workspaceTwo = uuidV7(),
       candidate = uuidV7(),
       roleVersion = uuidV7(),
       policyVersion = uuidV7(),
@@ -62,8 +62,8 @@ Deno.test("query pushes assigned ABAC before count and page on PostgreSQL", asyn
     );
     await query(
       sql,
-      "insert into projects(id,slug,display_name,created_by_auth_context_id,updated_by_auth_context_id) values($1,'query-project','Query Project',$3,$3),($2,'query-project-two','Query Project Two',$3,$3)",
-      [project, projectTwo, authId],
+      "insert into workspaces(id,slug,display_name,created_by_auth_context_id,updated_by_auth_context_id) values($1,'query-workspace','Query Workspace',$3,$3),($2,'query-workspace-two','Query Workspace Two',$3,$3)",
+      [workspace, workspaceTwo, authId],
     );
     const normalized = {
       resources: {
@@ -95,12 +95,12 @@ Deno.test("query pushes assigned ABAC before count and page on PostgreSQL", asyn
     );
     await query(
       sql,
-      "create table res_query_lead(id uuid primary key,project_id uuid not null,version bigint not null,current_object_version_id uuid,created_at timestamptz not null,updated_at timestamptz not null,archived_at timestamptz,name text,score bigint)",
+      "create table res_query_lead(id uuid primary key,workspace_id uuid not null,version bigint not null,current_object_version_id uuid,created_at timestamptz not null,updated_at timestamptz not null,archived_at timestamptz,name text,score bigint)",
     );
     await query(
       sql,
       "insert into res_query_lead values($1,$3,1,$4,now(),now(),null,'hidden',5),($2,$3,1,$5,now(),now(),null,'visible',15)",
-      [uuidV7(), uuidV7(), project, uuidV7(), uuidV7()],
+      [uuidV7(), uuidV7(), workspace, uuidV7(), uuidV7()],
     );
     await query(
       sql,
@@ -113,8 +113,8 @@ Deno.test("query pushes assigned ABAC before count and page on PostgreSQL", asyn
     );
     await query(
       sql,
-      "insert into role_assignments(id,principal_id,role_id,boundary_type,project_id,active) values($1,$2,'optd/querytest:reader','project',$3,true)",
-      [roleAssignment, principal, project],
+      "insert into role_assignments(id,principal_id,role_id,boundary_type,workspace_id,active) values($1,$2,'optd/querytest:reader','workspace',$3,true)",
+      [roleAssignment, principal, workspace],
     );
     await query(
       sql,
@@ -128,8 +128,8 @@ Deno.test("query pushes assigned ABAC before count and page on PostgreSQL", asyn
     );
     await query(
       sql,
-      "insert into policy_assignments(id,policy_definition_version_id,boundary_type,project_id,active,source) values($1,$2,'project',$3,true,'operator')",
-      [assignment, policyVersion, project],
+      "insert into policy_assignments(id,policy_definition_version_id,boundary_type,workspace_id,active,source) values($1,$2,'workspace',$3,true,'operator')",
+      [assignment, policyVersion, workspace],
     );
     const auth = {
       id: authId,
@@ -151,7 +151,7 @@ Deno.test("query pushes assigned ABAC before count and page on PostgreSQL", asyn
       }),
     );
     const result = await service.query({
-      project_id: project,
+      workspace_id: workspace,
       definition: {
         kind: "resource",
         publisher: "optd",
@@ -173,7 +173,7 @@ Deno.test("query pushes assigned ABAC before count and page on PostgreSQL", asyn
     assertEquals(result.value.has_more, false);
 
     const request = {
-      project_id: project,
+      workspace_id: workspace,
       definition: {
         kind: "resource" as const,
         publisher: "optd",
@@ -183,51 +183,53 @@ Deno.test("query pushes assigned ABAC before count and page on PostgreSQL", asyn
     };
     await query(
       sql,
-      "update role_assignments set boundary_type='system',project_id=null where id=$1",
+      "update role_assignments set boundary_type='system',workspace_id=null where id=$1",
       [roleAssignment],
     );
     await query(
       sql,
-      "update policy_assignments set boundary_type='system',project_id=null where id=$1",
+      "update policy_assignments set boundary_type='system',workspace_id=null where id=$1",
       [assignment],
     );
     assertEquals((await service.query(request, auth)).ok, false);
     assertEquals(
-      (await service.query({ ...request, project_id: projectTwo }, auth)).ok,
+      (await service.query({ ...request, workspace_id: workspaceTwo }, auth))
+        .ok,
       false,
     );
 
     await query(
       sql,
-      "update role_assignments set boundary_type='all_projects',project_id=null where id=$1",
+      "update role_assignments set boundary_type='all_workspaces',workspace_id=null where id=$1",
       [roleAssignment],
     );
     await query(
       sql,
-      "update policy_assignments set boundary_type='all_projects',project_id=null where id=$1",
+      "update policy_assignments set boundary_type='all_workspaces',workspace_id=null where id=$1",
       [assignment],
     );
     assertEquals((await service.query(request, auth)).ok, true);
-    const allProjectsEmpty = await service.query({
+    const allWorkspacesEmpty = await service.query({
       ...request,
-      project_id: projectTwo,
+      workspace_id: workspaceTwo,
     }, auth);
-    assertEquals(allProjectsEmpty.ok, true);
-    if (allProjectsEmpty.ok) assertEquals(allProjectsEmpty.value.items, []);
+    assertEquals(allWorkspacesEmpty.ok, true);
+    if (allWorkspacesEmpty.ok) assertEquals(allWorkspacesEmpty.value.items, []);
 
     await query(
       sql,
-      "update role_assignments set boundary_type='project',project_id=$2 where id=$1",
-      [roleAssignment, project],
+      "update role_assignments set boundary_type='workspace',workspace_id=$2 where id=$1",
+      [roleAssignment, workspace],
     );
     await query(
       sql,
-      "update policy_assignments set boundary_type='project',project_id=$2 where id=$1",
-      [assignment, project],
+      "update policy_assignments set boundary_type='workspace',workspace_id=$2 where id=$1",
+      [assignment, workspace],
     );
     assertEquals((await service.query(request, auth)).ok, true);
     assertEquals(
-      (await service.query({ ...request, project_id: projectTwo }, auth)).ok,
+      (await service.query({ ...request, workspace_id: workspaceTwo }, auth))
+        .ok,
       false,
     );
   } finally {

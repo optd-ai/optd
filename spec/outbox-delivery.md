@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-outbox-delivery; contract: 1; input: sha256:df4688e7ec7b5827d7b7bb4c3d009ed1f2f38ac1dfa591fc433571b825d5af2f -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-outbox-delivery; contract: 1; input: sha256:296ce13e23e695f8af6198de2afb0947dd582a115c4f7a0d17b68b7dbeaba515 -->
 
 # Durable Outbox Delivery
 
@@ -188,7 +188,7 @@ authorized manual retry may reopen `dead_letter` as a new generation.
 ## No delivery ordering guarantee
 
 MVP provides no ordering guarantee between deliveries, even when they reference
-the same object, project, event type, or hook. Independent rows may execute and
+the same object, workspace, event type, or hook. Independent rows may execute and
 complete in any order.
 
 This avoids head-of-line blocking and hidden coordination before real pack usage
@@ -395,7 +395,7 @@ manual drain, pinned-revision disablement, and dead-letter state changes are
 audited with auth context; automatic claims/retries are represented by attempts
 and hook executions rather than noisy per-poll audit events.
 
-Error/log text is bounded and secret-redacted. Ordinary project users do not
+Error/log text is bounded and secret-redacted. Ordinary workspace users do not
 receive secret/grant internals or escalation coaching.
 
 ## API

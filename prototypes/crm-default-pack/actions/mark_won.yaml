@@ -18,6 +18,6 @@ spec:
       - Use optd/crm:mark_won when its declared operation should be staged.
     stageFirst: true
     examples:
-      - optctl --project ${project} action stage optd/crm:mark_won --input action.json
+      - optctl --workspace ${workspace} action stage optd/crm:mark_won --input action.json
     successHelp:
       - optctl changeset inspect ${stage_id}

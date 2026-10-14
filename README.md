@@ -1,8 +1,8 @@
 # optd
 
 optd is a single-tenant, open-source runtime for versioned business objects,
-project-scoped authorization, and Pack-defined workflows. The server is `optd`;
-the standalone client is `optctl`. The HTTP API remains `/api/v1`.
+workspace-scoped authorization, and Pack-defined workflows. The server is
+`optd`; the standalone client is `optctl`. The HTTP API remains `/api/v1`.
 
 ## Development
 

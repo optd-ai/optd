@@ -34,7 +34,7 @@ spec:
       empty:
         message: No activity type records found.
         help:
-          - optctl --project ${project} create optd/crm:activity_type --input object.json --stage
+          - optctl --workspace ${workspace} create optd/crm:activity_type --input object.json --stage
     detail:
       sections:
         - title: activity type
@@ -43,11 +43,11 @@ spec:
             - label
             - default_deadline_days
       help:
-        - optctl --project ${project} query optd/crm:activity_type --where 'id == "${id}"'
+        - optctl --workspace ${workspace} query optd/crm:activity_type --where 'id == "${id}"'
     help:
       list:
-        - optctl --project ${project} query optd/crm:activity_type
+        - optctl --workspace ${workspace} query optd/crm:activity_type
       view:
-        - optctl --project ${project} view optd/crm:activity_type ${id}
+        - optctl --workspace ${workspace} view optd/crm:activity_type ${id}
       created:
-        - optctl --project ${project} view optd/crm:activity_type ${id}
+        - optctl --workspace ${workspace} view optd/crm:activity_type ${id}

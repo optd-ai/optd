@@ -50,7 +50,7 @@ export type ActionStageHookDeclaration =
   }>;
 export type ActionStageReadDependency = Readonly<{
   name: string;
-  project_id: string;
+  workspace_id: string;
   resource_identity: string;
   object_id: string;
   object_version_id: string;
@@ -61,7 +61,7 @@ export type ActionStageActor = Readonly<{
 }>;
 export type ActionStageHookInput = Readonly<{
   action: string;
-  project_id: string;
+  workspace_id: string;
   actor: ActionStageActor;
   input: Readonly<Record<string, unknown>>;
   reads: Readonly<Record<string, unknown>>;
@@ -238,12 +238,13 @@ export class TrustedStageHookCoordinator implements StageHookCoordinator {
       for (let index = 0; index < emitted.length; index++) {
         const rawOperation = emitted[index];
         if (
-          isRecord(rawOperation) && Object.hasOwn(rawOperation, "project_id") &&
-          rawOperation.project_id !== input.project_id
+          isRecord(rawOperation) &&
+          Object.hasOwn(rawOperation, "workspace_id") &&
+          rawOperation.workspace_id !== input.workspace_id
         ) {
           throw new StageHookError(
             "hook_invalid_output",
-            "action hook operation project conflicts with request project",
+            "action hook operation workspace conflicts with request workspace",
             {
               hook: declaration.hook,
               operation_index: index,
@@ -251,8 +252,8 @@ export class TrustedStageHookCoordinator implements StageHookCoordinator {
           );
         }
         const boundOperation = isRecord(rawOperation) &&
-            !Object.hasOwn(rawOperation, "project_id")
-          ? { ...rawOperation, project_id: input.project_id }
+            !Object.hasOwn(rawOperation, "workspace_id")
+          ? { ...rawOperation, workspace_id: input.workspace_id }
           : rawOperation;
         if (!authoredOperationContract.check(boundOperation)) {
           throw new StageHookError(
@@ -404,7 +405,7 @@ export function buildHookEnvelope(
     ) ?? null;
   const context: Record<string, unknown> = {
     "$operation": operation,
-    "$project_id": operation?.project_id ?? null,
+    "$workspace_id": operation?.workspace_id ?? null,
     "$current": declaration.operation_key === null
       ? null
       : input.base_states[declaration.operation_key],

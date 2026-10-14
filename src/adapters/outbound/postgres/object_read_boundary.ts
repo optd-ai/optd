@@ -34,7 +34,7 @@ export class PostgresObjectReadBoundary implements ObjectReadBoundary {
     ) => Promise<T>,
   ): Promise<T> {
     return await this.sql.begin(async (tx) => {
-      const anchor = await lockReadAuthority(tx, auth, address.projectId);
+      const anchor = await lockReadAuthority(tx, auth, address.workspaceId);
       return await work(
         this.factories.reader(tx),
         this.factories.authorization(tx),
@@ -48,7 +48,7 @@ export class PostgresObjectReadBoundary implements ObjectReadBoundary {
 export async function lockReadAuthority(
   sql: Queryable,
   auth: AuthContext,
-  projectId: string,
+  workspaceId: string,
 ): Promise<ReadAuthorityAnchor> {
   await requireOne(
     sql,
@@ -78,25 +78,25 @@ export async function lockReadAuthority(
     await query(
       sql,
       `select id from agent_authorization_roles where authorization_id=$1
-       and (boundary_type in ('system','all_projects') or project_id=$2)
+       and (boundary_type in ('system','all_workspaces') or workspace_id=$2)
        order by id for share`,
-      [auth.authorizationId, projectId],
+      [auth.authorizationId, workspaceId],
     );
   } else {
     await query(
       sql,
       `select id from role_assignments where principal_id=$1
-       and (boundary_type in ('system','all_projects') or project_id=$2)
+       and (boundary_type in ('system','all_workspaces') or workspace_id=$2)
        order by id for share`,
-      [auth.principalId, projectId],
+      [auth.principalId, workspaceId],
     );
   }
   await query(
     sql,
     `select id from policy_assignments where
-       boundary_type in ('system','all_projects') or project_id=$1
+       boundary_type in ('system','all_workspaces') or workspace_id=$1
      order by id for share`,
-    [projectId],
+    [workspaceId],
   );
   await query(
     sql,
@@ -118,17 +118,17 @@ export async function lockReadAuthority(
     sql,
     `select pd.id from policy_definition_versions pd
      join policy_assignments pa on pa.policy_definition_version_id=pd.id
-     where pa.boundary_type in ('system','all_projects') or pa.project_id=$1
+     where pa.boundary_type in ('system','all_workspaces') or pa.workspace_id=$1
      order by pd.id for share of pd`,
-    [projectId],
+    [workspaceId],
   );
   await query(
     sql,
     `select pr.id from policy_rules pr
      join policy_assignments pa on pa.policy_definition_version_id=pr.policy_definition_version_id
-     where pa.boundary_type in ('system','all_projects') or pa.project_id=$1
+     where pa.boundary_type in ('system','all_workspaces') or pa.workspace_id=$1
      order by pr.id for share of pr`,
-    [projectId],
+    [workspaceId],
   );
   return { authorizationRootId };
 }

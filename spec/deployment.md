@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-deployment; contract: 1; input: sha256:c29810b53e57fdeda814972eef55712a42e0e63cac1b300c11bd5eff812d7e23 -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-deployment; contract: 1; input: sha256:a13318a3ad70bc1fe2c79958ab2e20ef515eb9bddeab71a0de346016aca0130a -->
 
 # Deployment
 
@@ -14,7 +14,7 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ## Direction
 
-The project is now assumed to be open source and single-tenant by default.
+The workspace is now assumed to be open source and single-tenant by default.
 Deployment should be simple enough to run as one container with one mounted
 volume.
 

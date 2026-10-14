@@ -33,6 +33,7 @@ const DOMAIN_POLICY_ACTIONS = new Set([
   "read_archived",
   "history.read",
   "create",
+  "import",
   "update",
   "archive",
   "transition",
@@ -425,7 +426,7 @@ function qualifyDocument(
 }
 
 function validateAxiGuidance(pack: LoadedPack) {
-  const platformFields = new Set(["id", "project"]);
+  const platformFields = new Set(["id", "workspace"]);
   const validateTemplates = (
     value: JsonValue,
     allowed: Set<string>,
@@ -478,7 +479,7 @@ function validateAxiGuidance(pack: LoadedPack) {
   const packAxi = asRecord(manifestSpec.axi, "pack.yaml.spec.axi");
   if (!isExplicitlyEmpty(packAxi)) {
     const home = asRecord(packAxi.home, "pack.yaml.spec.axi.home");
-    validateTemplates(packAxi, new Set(["project"]), "pack.yaml.spec.axi");
+    validateTemplates(packAxi, new Set(["workspace"]), "pack.yaml.spec.axi");
     requireCommands(home.help, "pack.yaml.spec.axi.home.help");
     for (
       const identity of asArray(
@@ -612,7 +613,7 @@ function validateReferences(pack: LoadedPack) {
   };
   const reservedFields = new Set([
     "id",
-    "project_id",
+    "workspace_id",
     "version",
     "current_version",
     "created_at",
@@ -893,6 +894,16 @@ function validateReferences(pack: LoadedPack) {
             pack.seeds,
             `${def.path}.actions`,
           );
+          const seedName = action.split(":").at(-1)!;
+          const target = String(pack.seeds[seedName].spec.resource);
+          if (
+            policyTargets.length !== 1 || policyTargets[0] !== target ||
+            r.where !== undefined || r.relation !== undefined
+          ) {
+            throw new Error(
+              `${def.path}: seed policies must unconditionally target the seed resource`,
+            );
+          }
         } else if (!DOMAIN_POLICY_ACTIONS.has(action)) {
           throw new Error(`${def.path}: unknown policy action ${action}`);
         }

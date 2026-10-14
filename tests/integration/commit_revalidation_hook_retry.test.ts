@@ -47,21 +47,21 @@ Deno.test({
       assertEquals(grant.code, 0, grant.stderr);
       const source = await matrix.stage([{
         op: "create",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:alpha",
         fields: { key: "hook-retry-source", status: "ready" },
       }]);
       assertEquals((await matrix.commit(source.id)).ok, true);
       const staged = await matrix.harness.runOptctl([
         "--json",
-        "--project",
-        matrix.projectId,
+        "--workspace",
+        matrix.workspaceId,
         "action",
         "stage",
         "test/commitmatrix:generate",
         "--input",
         JSON.stringify({
-          project_id: matrix.projectId,
+          workspace_id: matrix.workspaceId,
           source_id: String(source.operations[0].object_id),
         }),
       ]);

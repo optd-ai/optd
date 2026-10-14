@@ -42,7 +42,7 @@ spec:
       empty:
         message: No timesheet records found.
         help:
-          - optctl --project ${project} create optd/projects:timesheet --input object.json
+          - optctl --workspace ${workspace} create optd/projects:timesheet --input object.json
             --stage
     detail:
       sections:
@@ -54,11 +54,11 @@ spec:
             - description
             - entry_date
       help:
-        - optctl --project ${project} query optd/projects:timesheet --where 'id == "${id}"'
+        - optctl --workspace ${workspace} query optd/projects:timesheet --where 'id == "${id}"'
     help:
       list:
-        - optctl --project ${project} query optd/projects:timesheet
+        - optctl --workspace ${workspace} query optd/projects:timesheet
       view:
-        - optctl --project ${project} view optd/projects:timesheet ${id}
+        - optctl --workspace ${workspace} view optd/projects:timesheet ${id}
       created:
-        - optctl --project ${project} view optd/projects:timesheet ${id}
+        - optctl --workspace ${workspace} view optd/projects:timesheet ${id}

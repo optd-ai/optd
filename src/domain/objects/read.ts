@@ -12,15 +12,15 @@ const PUBLISHER = /^[a-z][a-z0-9-]{0,62}$/;
 const NAME = /^[a-z][a-z0-9_]{0,62}$/;
 
 export function assertReadAddress(input: {
-  projectId: string;
+  workspaceId: string;
   objectId: string;
   publisher: string;
   pack: string;
   name: string;
 }): void {
-  if (!isUuidV7(input.projectId) || !isUuidV7(input.objectId)) {
+  if (!isUuidV7(input.workspaceId) || !isUuidV7(input.objectId)) {
     throw new TypeError(
-      "project_id and object id must be lowercase UUIDv7 values",
+      "workspace_id and object id must be lowercase UUIDv7 values",
     );
   }
   if (

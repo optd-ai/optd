@@ -9,7 +9,7 @@ import type {
 import type { ObjectReaderPort } from "./repair/repositories.ts";
 
 export type ReadAddress = Readonly<{
-  projectId: string;
+  workspaceId: string;
   objectId: string;
   definition: DefinitionIdentity;
 }>;
@@ -32,7 +32,7 @@ export class ObjectReadAuthorityInvalidError extends Error {
 export interface ObjectPolicyReader {
   evaluate(
     input: Readonly<{
-      projectId: string;
+      workspaceId: string;
       objectId: string;
       definition: DefinitionIdentity;
       actions: readonly string[];

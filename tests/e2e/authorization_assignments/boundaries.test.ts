@@ -32,7 +32,7 @@ Deno.test("compiled optctl resolves current explicit assignment boundaries and s
     )).rows[0].id;
     const first = await harness.runOptctl([
       "--json",
-      "project",
+      "workspace",
       "create",
       "first",
       "--display-name",
@@ -40,7 +40,7 @@ Deno.test("compiled optctl resolves current explicit assignment boundaries and s
     ]);
     const second = await harness.runOptctl([
       "--json",
-      "project",
+      "workspace",
       "create",
       "second",
       "--display-name",
@@ -59,7 +59,7 @@ Deno.test("compiled optctl resolves current explicit assignment boundaries and s
       userId,
       "--role",
       "system:admin",
-      "--project",
+      "--workspace",
       firstId,
     ]);
     assertEquals(assigned.code, 0, assigned.stderr);
@@ -75,7 +75,7 @@ Deno.test("compiled optctl resolves current explicit assignment boundaries and s
       "--json",
       "auth",
       "authority",
-      "--project",
+      "--workspace",
       firstId,
     ]);
     assertEquals(allowed.code, 0, allowed.stderr);
@@ -86,7 +86,7 @@ Deno.test("compiled optctl resolves current explicit assignment boundaries and s
       "--json",
       "auth",
       "authority",
-      "--project",
+      "--workspace",
       secondId,
     ]);
     assertEquals(empty.code, 0, empty.stderr);
@@ -102,7 +102,7 @@ Deno.test("compiled optctl resolves current explicit assignment boundaries and s
         },
         body: JSON.stringify({
           role: "system:admin",
-          boundary: { type: "project", project_id: secondId },
+          boundary: { type: "workspace", workspace_id: secondId },
         }),
       },
     );
@@ -134,7 +134,7 @@ Deno.test("compiled optctl resolves current explicit assignment boundaries and s
         },
         body: JSON.stringify({
           role: "system:admin",
-          boundary: { type: "project", project_id: firstId },
+          boundary: { type: "workspace", workspace_id: firstId },
           attributes: { roles: ["system:super_admin"] },
         }),
       },
@@ -160,14 +160,14 @@ Deno.test("compiled optctl resolves current explicit assignment boundaries and s
       "--json",
       "auth",
       "authority",
-      "--project",
+      "--workspace",
       firstId,
     ]);
     assertEquals(revoked.code, 0, revoked.stderr);
     assertEquals(JSON.parse(revoked.stdout).data.effective_roles, []);
 
     await login(harness, "root", "authorization root password");
-    const allProjects = await harness.runOptctl([
+    const allWorkspaces = await harness.runOptctl([
       "--json",
       "assignment",
       "role",
@@ -176,7 +176,7 @@ Deno.test("compiled optctl resolves current explicit assignment boundaries and s
       "--role",
       "system:admin",
       "--boundary",
-      "all_projects",
+      "all_workspaces",
     ]);
     const system = await harness.runOptctl([
       "--json",
@@ -189,14 +189,14 @@ Deno.test("compiled optctl resolves current explicit assignment boundaries and s
       "--boundary",
       "system",
     ]);
-    assertEquals(allProjects.code, 0, allProjects.stderr);
+    assertEquals(allWorkspaces.code, 0, allWorkspaces.stderr);
     assertEquals(system.code, 0, system.stderr);
     await login(harness, "bounded-admin", "bounded admin password");
-    const inheritedAllProjects = await harness.runOptctl([
+    const inheritedAllWorkspaces = await harness.runOptctl([
       "--json",
       "auth",
       "authority",
-      "--project",
+      "--workspace",
       secondId,
     ]);
     const explicitSystem = await harness.runOptctl([
@@ -207,7 +207,7 @@ Deno.test("compiled optctl resolves current explicit assignment boundaries and s
       "system",
     ]);
     assertEquals(
-      JSON.parse(inheritedAllProjects.stdout).data.effective_roles,
+      JSON.parse(inheritedAllWorkspaces.stdout).data.effective_roles,
       ["system:admin"],
     );
     assertEquals(JSON.parse(explicitSystem.stdout).data.effective_roles, [

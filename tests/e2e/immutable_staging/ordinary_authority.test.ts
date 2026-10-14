@@ -13,7 +13,7 @@ import {
 
 Deno.test({
   name:
-    "ordinary principals stage and access only under current Project authority",
+    "ordinary principals stage and access only under current Workspace authority",
   sanitizeOps: false,
   sanitizeResources: false,
   async fn() {
@@ -26,8 +26,8 @@ Deno.test({
         })).code,
         0,
       );
-      const alpha = await createProject(harness, "authority-alpha");
-      const beta = await createProject(harness, "authority-beta");
+      const alpha = await createWorkspace(harness, "authority-alpha");
+      const beta = await createWorkspace(harness, "authority-beta");
       await applyAuthorityPack(harness);
       const rootAuth = (await query<{ id: string }>(
         harness.server.sql,
@@ -58,12 +58,12 @@ Deno.test({
 
       const authority = await installAuthority(harness, {
         principal: human.principal_id,
-        project: alpha,
+        workspace: alpha,
         candidate: facts.candidate,
         role: "test/stage:writer",
         actions: ["create", "update", "link"],
         condition: "unconditional",
-        boundary: "project",
+        boundary: "workspace",
         rootAuth,
       });
       const exact = await stage(
@@ -75,29 +75,29 @@ Deno.test({
 
       await query(
         harness.server.sql,
-        "update role_assignments set boundary_type='all_projects',project_id=null where id=$1",
+        "update role_assignments set boundary_type='all_workspaces',workspace_id=null where id=$1",
         [authority.roleAssignment],
       );
       await query(
         harness.server.sql,
-        "update policy_assignments set boundary_type='all_projects',project_id=null where id=$1",
+        "update policy_assignments set boundary_type='all_workspaces',workspace_id=null where id=$1",
         [authority.policyAssignment],
       );
-      const allProjects = await stage(
+      const allWorkspaces = await stage(
         harness,
         humanProcess.launcher,
         create(beta, 50),
       );
-      assertEquals(allProjects.code, 0, allProjects.stderr);
+      assertEquals(allWorkspaces.code, 0, allWorkspaces.stderr);
 
       await query(
         harness.server.sql,
-        "update role_assignments set boundary_type='system',project_id=null where id=$1",
+        "update role_assignments set boundary_type='system',workspace_id=null where id=$1",
         [authority.roleAssignment],
       );
       await query(
         harness.server.sql,
-        "update policy_assignments set boundary_type='system',project_id=null where id=$1",
+        "update policy_assignments set boundary_type='system',workspace_id=null where id=$1",
         [authority.policyAssignment],
       );
       await expectStageDenied(
@@ -107,7 +107,7 @@ Deno.test({
       );
       await query(
         harness.server.sql,
-        "update role_assignments set boundary_type='project',project_id=$2 where id=$1",
+        "update role_assignments set boundary_type='workspace',workspace_id=$2 where id=$1",
         [authority.roleAssignment, alpha],
       );
       await query(
@@ -118,13 +118,13 @@ Deno.test({
 
       const abac = await installAuthority(harness, {
         principal: human.principal_id,
-        project: alpha,
+        workspace: alpha,
         candidate: facts.candidate,
         role: "test/stage:abac",
         actions: ["create", "update"],
         condition: "abac",
         predicate: "score >= 40",
-        boundary: "project",
+        boundary: "workspace",
         rootAuth,
       });
       assertEquals(
@@ -153,13 +153,13 @@ Deno.test({
 
       const actor = await installAuthority(harness, {
         principal: human.principal_id,
-        project: alpha,
+        workspace: alpha,
         candidate: facts.candidate,
         role: "test/stage:actor",
         actions: ["update"],
         condition: "rebac",
         relationSubject: "actor.id",
-        boundary: "project",
+        boundary: "workspace",
         rootAuth,
       });
       assertEquals(
@@ -179,13 +179,13 @@ Deno.test({
 
       const humanRelation = await installAuthority(harness, {
         principal: human.principal_id,
-        project: alpha,
+        workspace: alpha,
         candidate: facts.candidate,
         role: "test/stage:human",
         actions: ["update"],
         condition: "rebac",
         relationSubject: "actor.human_user_id",
-        boundary: "project",
+        boundary: "workspace",
         rootAuth,
       });
       assertEquals(
@@ -205,12 +205,12 @@ Deno.test({
 
       const commentGrant = await installAuthority(harness, {
         principal: human.principal_id,
-        project: alpha,
+        workspace: alpha,
         candidate: facts.candidate,
         role: "test/stage:commenter",
         actions: ["comment"],
         condition: "unconditional",
-        boundary: "project",
+        boundary: "workspace",
         rootAuth,
       });
       await query(
@@ -222,10 +222,10 @@ Deno.test({
       );
       const beforeArchivedComment = await stageCount(harness);
       await expectStageDenied(harness, humanProcess.launcher, {
-        project_id: alpha,
+        workspace_id: alpha,
         operations: [{
           op: "comment",
-          project_id: alpha,
+          workspace_id: alpha,
           resource: "test/stage:item",
           object_id: facts.neither,
           body: "archived",
@@ -234,19 +234,19 @@ Deno.test({
       assertEquals(await stageCount(harness), beforeArchivedComment);
       const archivedReadGrant = await installAuthority(harness, {
         principal: human.principal_id,
-        project: alpha,
+        workspace: alpha,
         candidate: facts.candidate,
         role: "test/stage:archived-reader",
         actions: ["read_archived"],
         condition: "unconditional",
-        boundary: "project",
+        boundary: "workspace",
         rootAuth,
       });
       const archivedComment = await stage(harness, humanProcess.launcher, {
-        project_id: alpha,
+        workspace_id: alpha,
         operations: [{
           op: "comment",
-          project_id: alpha,
+          workspace_id: alpha,
           resource: "test/stage:item",
           object_id: facts.neither,
           body: "archived allowed",
@@ -265,14 +265,14 @@ Deno.test({
 
       const combined = await installAuthority(harness, {
         principal: human.principal_id,
-        project: alpha,
+        workspace: alpha,
         candidate: facts.candidate,
         role: "test/stage:combined",
         actions: ["update"],
         condition: "rebac",
         predicate: "score >= 40",
         relationSubject: "actor.id",
-        boundary: "project",
+        boundary: "workspace",
         rootAuth,
       });
       await expectStageDenied(
@@ -301,7 +301,7 @@ Deno.test({
       await expectStageDenied(
         harness,
         humanProcess.launcher,
-        update(alpha, facts.crossProjectEdge, 55),
+        update(alpha, facts.crossWorkspaceEdge, 55),
       );
       await disableAuthority(harness, combined);
 
@@ -319,7 +319,7 @@ Deno.test({
       await query(
         harness.server.sql,
         `insert into ${quoteIdentifier(facts.viewerTable)}
-         (id,project_id,from_object_id,to_object_id,created_by,updated_by)
+         (id,workspace_id,from_object_id,to_object_id,created_by,updated_by)
          values($1,$2,$3,$4,$5,$5)`,
         [uuidV7(), alpha, facts.actor, agent.principal, rootAuth],
       );
@@ -426,12 +426,12 @@ Deno.test({
 
       const inspectGrant = await installAuthority(harness, {
         principal: other.principal_id,
-        project: alpha,
+        workspace: alpha,
         candidate: facts.candidate,
         role: "test/stage:inspector",
         actions: ["changeset.inspect"],
         condition: "unconditional",
-        boundary: "project",
+        boundary: "workspace",
         rootAuth,
         resource: "*",
       });
@@ -442,12 +442,12 @@ Deno.test({
       await expectHidden(otherProcess.launcher, "cancel", creatorStage);
       const cancelGrant = await installAuthority(harness, {
         principal: other.principal_id,
-        project: alpha,
+        workspace: alpha,
         candidate: facts.candidate,
         role: "test/stage:canceller",
         actions: ["changeset.cancel"],
         condition: "unconditional",
-        boundary: "project",
+        boundary: "workspace",
         rootAuth,
         resource: "*",
       });
@@ -455,22 +455,22 @@ Deno.test({
 
       const alphaMultiAuthority = await installAuthority(harness, {
         principal: human.principal_id,
-        project: alpha,
+        workspace: alpha,
         candidate: facts.candidate,
         role: "test/stage:alpha-multi-writer",
         actions: ["create"],
         condition: "unconditional",
-        boundary: "project",
+        boundary: "workspace",
         rootAuth,
       });
       const multiAuthority = await installAuthority(harness, {
         principal: human.principal_id,
-        project: beta,
+        workspace: beta,
         candidate: facts.candidate,
         role: "test/stage:beta-writer",
         actions: ["create"],
         condition: "unconditional",
-        boundary: "project",
+        boundary: "workspace",
         rootAuth,
       });
       const humanMultiLogin = await humanProcess.launcher.runOptctl([
@@ -502,12 +502,12 @@ Deno.test({
       await expectHidden(otherProcess.launcher, "inspect", multiId);
       await installAuthority(harness, {
         principal: other.principal_id,
-        project: beta,
+        workspace: beta,
         candidate: facts.candidate,
         role: "test/stage:beta-inspector",
         actions: ["changeset.inspect"],
         condition: "unconditional",
-        boundary: "project",
+        boundary: "workspace",
         rootAuth,
         resource: "*",
       });
@@ -515,7 +515,7 @@ Deno.test({
 
       await query(
         harness.server.sql,
-        "update projects set status='archived',version=version+1 where id=$1",
+        "update workspaces set status='archived',version=version+1 where id=$1",
         [beta],
       );
       await expectHidden(otherProcess.launcher, "inspect", multiId);
@@ -525,10 +525,13 @@ Deno.test({
         create(beta, 70),
       );
       assertEquals(inactive.code, 1);
-      assertEquals(JSON.parse(inactive.stderr).error.code, "project_inactive");
+      assertEquals(
+        JSON.parse(inactive.stderr).error.code,
+        "workspace_inactive",
+      );
       await query(
         harness.server.sql,
-        "update projects set status='active',version=version+1 where id=$1",
+        "update workspaces set status='active',version=version+1 where id=$1",
         [beta],
       );
       const humanRaceLogin = await humanProcess.launcher.runOptctl([
@@ -544,12 +547,12 @@ Deno.test({
       await disableAuthority(harness, authority);
       const raceAuthority = await installAuthority(harness, {
         principal: human.principal_id,
-        project: alpha,
+        workspace: alpha,
         candidate: facts.candidate,
         role: "test/stage:race-writer",
         actions: ["create", "update"],
         condition: "unconditional",
-        boundary: "project",
+        boundary: "workspace",
         rootAuth,
       });
 
@@ -588,23 +591,23 @@ Deno.test({
   },
 });
 
-function create(project: string, score: number) {
+function create(workspace: string, score: number) {
   return {
-    project_id: project,
+    workspace_id: workspace,
     operations: [{
       op: "create",
-      project_id: project,
+      workspace_id: workspace,
       resource: "test/stage:item",
       fields: { name: `score-${score}-${uuidV7()}`, score },
     }],
   };
 }
-function update(project: string, object: string, score: number) {
+function update(workspace: string, object: string, score: number) {
   return {
-    project_id: project,
+    workspace_id: workspace,
     operations: [{
       op: "update",
-      project_id: project,
+      workspace_id: workspace,
       resource: "test/stage:item",
       object_id: object,
       set: { score },
@@ -652,7 +655,7 @@ async function expectHidden(
     : await cancel(launcher, id);
   assertEquals(result.code, 1, result.stdout);
   assertEquals(JSON.parse(result.stderr).error.code, "not_found");
-  assert(!/policy_rules|select |project/i.test(result.stderr), result.stderr);
+  assert(!/policy_rules|select |workspace/i.test(result.stderr), result.stderr);
 }
 async function stageCount(harness: LiveHarness) {
   return Number(
@@ -662,10 +665,10 @@ async function stageCount(harness: LiveHarness) {
     )).rows[0].count,
   );
 }
-async function createProject(harness: LiveHarness, slug: string) {
+async function createWorkspace(harness: LiveHarness, slug: string) {
   const result = await harness.runOptctl([
     "--json",
-    "project",
+    "workspace",
     "create",
     slug,
     "--display-name",
@@ -716,7 +719,7 @@ async function selectStoredCredential(
 async function createPublicAgent(
   harness: LiveHarness,
   approver: CliLauncher,
-  project: string,
+  workspace: string,
 ) {
   assertEquals(
     (await harness.login({
@@ -739,8 +742,8 @@ async function createPublicAgent(
     "test/stage:actor",
     "--role",
     "test/stage:human",
-    "--project",
-    project,
+    "--workspace",
+    workspace,
     "--reason",
     "ordinary stage agent",
   ]);
@@ -783,7 +786,7 @@ async function createPublicAgent(
 
 async function seedAgentDecidePolicy(
   harness: LiveHarness,
-  project: string,
+  workspace: string,
 ) {
   const version = uuidV7();
   await query(
@@ -798,8 +801,8 @@ async function seedAgentDecidePolicy(
   );
   await query(
     harness.server.sql,
-    "insert into policy_assignments(id,policy_definition_version_id,boundary_type,project_id,active) values($1,$2,'project',$3,true)",
-    [uuidV7(), version, project],
+    "insert into policy_assignments(id,policy_definition_version_id,boundary_type,workspace_id,active) values($1,$2,'workspace',$3,true)",
+    [uuidV7(), version, workspace],
   );
 }
 
@@ -873,14 +876,14 @@ async function installAuthority(
   harness: LiveHarness,
   input: {
     principal: string;
-    project: string;
+    workspace: string;
     candidate: string;
     role: string;
     actions: string[];
     condition: "unconditional" | "abac" | "rebac";
     predicate?: string;
     relationSubject?: "actor.id" | "actor.human_user_id";
-    boundary: "project" | "all_projects" | "system";
+    boundary: "workspace" | "all_workspaces" | "system";
     rootAuth: string;
     resource?: string;
   },
@@ -934,24 +937,24 @@ async function installAuthority(
     }
     await query(
       tx,
-      `insert into role_assignments(id,principal_id,role_id,boundary_type,project_id,active,created_by_auth_context_id) values($1,$2,$3,$4,$5,true,$6)`,
+      `insert into role_assignments(id,principal_id,role_id,boundary_type,workspace_id,active,created_by_auth_context_id) values($1,$2,$3,$4,$5,true,$6)`,
       [
         roleAssignment,
         input.principal,
         input.role,
         input.boundary,
-        input.boundary === "project" ? input.project : null,
+        input.boundary === "workspace" ? input.workspace : null,
         input.rootAuth,
       ],
     );
     await query(
       tx,
-      `insert into policy_assignments(id,policy_definition_version_id,boundary_type,project_id,active,source,created_by_auth_context_id) values($1,$2,$3,$4,true,'operator',$5)`,
+      `insert into policy_assignments(id,policy_definition_version_id,boundary_type,workspace_id,active,source,created_by_auth_context_id) values($1,$2,$3,$4,true,'operator',$5)`,
       [
         policyAssignment,
         policyVersion,
         input.boundary,
-        input.boundary === "project" ? input.project : null,
+        input.boundary === "workspace" ? input.workspace : null,
         input.rootAuth,
       ],
     );
@@ -996,21 +999,23 @@ async function seedObjects(
     "relationOnly",
     "both",
     "neither",
-    "crossProjectEdge",
+    "crossWorkspaceEdge",
   ] as const;
   const values = Object.fromEntries(
     names.map((name) => [name, uuidV7()]),
   ) as Record<typeof names[number], string>;
   for (const [name, id] of Object.entries(values)) {
-    const project = name === "crossProjectEdge" ? alpha : alpha;
+    const workspace = name === "crossWorkspaceEdge" ? alpha : alpha;
     const score =
-      ["high", "whereOnly", "both", "crossProjectEdge"].includes(name) ? 50 : 5;
+      ["high", "whereOnly", "both", "crossWorkspaceEdge"].includes(name)
+        ? 50
+        : 5;
     const commit = await prerequisiteCommit(harness, auth), version = uuidV7();
     await query(
       harness.server.sql,
-      `insert into object_versions(id,project_id,definition_kind,resource_identity,object_id,version,changeset_commit_id,operation,resource_revision,snapshot_json,changed_fields,auth_context_id)
+      `insert into object_versions(id,workspace_id,definition_kind,resource_identity,object_id,version,changeset_commit_id,operation,resource_revision,snapshot_json,changed_fields,auth_context_id)
       values($1,$2,'resource','test/stage:item',$3,1,$4,'create',$5,$6::jsonb,array['name','score'],$7)`,
-      [version, project, id, commit, metadata.candidate, {
+      [version, workspace, id, commit, metadata.candidate, {
         data: { name, score },
         archived_at: null,
       }, auth],
@@ -1019,8 +1024,8 @@ async function seedObjects(
       harness.server.sql,
       `insert into ${
         quoteIdentifier(metadata.item_table)
-      }(id,project_id,version,current_object_version_id,created_by,updated_by,name,score) values($1,$2,1,$3,$6,$6,$4,$5)`,
-      [id, project, version, name, score, auth],
+      }(id,workspace_id,version,current_object_version_id,created_by,updated_by,name,score) values($1,$2,1,$3,$6,$6,$4,$5)`,
+      [id, workspace, version, name, score, auth],
     );
   }
   const edges = [
@@ -1028,15 +1033,15 @@ async function seedObjects(
     [values.human, human.human_user_id, alpha],
     [values.relationOnly, human.principal_id, alpha],
     [values.both, human.principal_id, alpha],
-    [values.crossProjectEdge, human.principal_id, beta],
+    [values.crossWorkspaceEdge, human.principal_id, beta],
   ];
-  for (const [object, subject, project] of edges) {
+  for (const [object, subject, workspace] of edges) {
     await query(
       harness.server.sql,
       `insert into ${
         quoteIdentifier(metadata.viewer_table)
-      }(id,project_id,from_object_id,to_object_id,created_by,updated_by) values($1,$2,$3,$4,$5,$5)`,
-      [uuidV7(), project, object, subject, auth],
+      }(id,workspace_id,from_object_id,to_object_id,created_by,updated_by) values($1,$2,$3,$4,$5,$5)`,
+      [uuidV7(), workspace, object, subject, auth],
     );
   }
   return {
@@ -1053,7 +1058,7 @@ async function prerequisiteCommit(harness: LiveHarness, auth: string) {
   await harness.server.sql.begin(async (tx) => {
     await query(
       tx,
-      `insert into staged_changesets(id,schema_version,source_kind,source_identity_json,created_auth_context_id,created_principal_id,creating_context_json,operation_graph_digest,stage_digest,canonical_graph_json,projects_json,pack_revisions_json,warnings_json,planned_events_json,planned_deliveries_json) values($1,1,'seed','{}',$2,(select principal_id from auth_contexts where id=$2),'{}',$3,$3,'{}','[]','[]','[]','[]','[]')`,
+      `insert into staged_changesets(id,schema_version,source_kind,source_identity_json,created_auth_context_id,created_principal_id,creating_context_json,operation_graph_digest,stage_digest,canonical_graph_json,workspaces_json,pack_revisions_json,warnings_json,planned_events_json,planned_deliveries_json) values($1,1,'seed','{}',$2,(select principal_id from auth_contexts where id=$2),'{}',$3,$3,'{}','[]','[]','[]','[]','[]')`,
       [stageId, auth, digest],
     );
     await query(
@@ -1073,7 +1078,7 @@ async function prerequisiteCommit(harness: LiveHarness, auth: string) {
 async function proveAuthorityOrdering(
   harness: LiveHarness,
   launcher: CliLauncher,
-  project: string,
+  workspace: string,
   facts: { high: string },
   authority: Authority,
   rootAuth: string,
@@ -1085,13 +1090,13 @@ async function proveAuthorityOrdering(
   );
   await query(
     harness.server.sql,
-    "update role_assignments set active=true,disabled_at=null,boundary_type='project',project_id=$2 where id=$1",
-    [authority.roleAssignment, project],
+    "update role_assignments set active=true,disabled_at=null,boundary_type='workspace',workspace_id=$2 where id=$1",
+    [authority.roleAssignment, workspace],
   );
   const before = await stageCount(harness);
   await mutateBeforeAuthority(
     harness,
-    () => stage(harness, launcher, create(project, 80)),
+    () => stage(harness, launcher, create(workspace, 80)),
     () =>
       query(
         harness.server.sql,
@@ -1108,13 +1113,13 @@ async function proveAuthorityOrdering(
   const raceSmoke = await stage(
     harness,
     launcher,
-    update(project, facts.high, 79),
+    update(workspace, facts.high, 79),
   );
   assertEquals(raceSmoke.code, 0, raceSmoke.stderr);
   await mutateAfterAuthority(
     harness,
     facts.high,
-    () => stage(harness, launcher, update(project, facts.high, 81)),
+    () => stage(harness, launcher, update(workspace, facts.high, 81)),
     () =>
       query(
         harness.server.sql,
@@ -1123,7 +1128,7 @@ async function proveAuthorityOrdering(
       ),
     "%update role_assignments%",
   );
-  await expectStageDenied(harness, launcher, update(project, facts.high, 82));
+  await expectStageDenied(harness, launcher, update(workspace, facts.high, 82));
   await query(
     harness.server.sql,
     "update role_assignments set active=true,disabled_at=null where id=$1",
@@ -1133,7 +1138,7 @@ async function proveAuthorityOrdering(
   const beforePolicy = await stageCount(harness);
   await mutateBeforeAuthority(
     harness,
-    () => stage(harness, launcher, create(project, 83)),
+    () => stage(harness, launcher, create(workspace, 83)),
     () =>
       query(
         harness.server.sql,
@@ -1150,7 +1155,7 @@ async function proveAuthorityOrdering(
   await mutateAfterAuthority(
     harness,
     facts.high,
-    () => stage(harness, launcher, update(project, facts.high, 84)),
+    () => stage(harness, launcher, update(workspace, facts.high, 84)),
     () =>
       query(
         harness.server.sql,
@@ -1159,53 +1164,56 @@ async function proveAuthorityOrdering(
       ),
     "%update policy_definition_versions%",
   );
-  await expectStageDenied(harness, launcher, update(project, facts.high, 85));
+  await expectStageDenied(harness, launcher, update(workspace, facts.high, 85));
   await query(
     harness.server.sql,
     "update policy_definition_versions set active=true where id=$1",
     [authority.policyVersion],
   );
 
-  const beforeProject = await stageCount(harness);
+  const beforeWorkspace = await stageCount(harness);
   await mutateBeforeAuthority(
     harness,
-    () => stage(harness, launcher, create(project, 86)),
+    () => stage(harness, launcher, create(workspace, 86)),
     () =>
       query(
         harness.server.sql,
-        "update projects set status='archived',version=version+1 where id=$1",
-        [project],
+        "update workspaces set status='archived',version=version+1 where id=$1",
+        [workspace],
       ),
   );
-  assertEquals(await stageCount(harness), beforeProject);
+  assertEquals(await stageCount(harness), beforeWorkspace);
   await query(
     harness.server.sql,
-    "update projects set status='active',version=version+1 where id=$1",
-    [project],
+    "update workspaces set status='active',version=version+1 where id=$1",
+    [workspace],
   );
   await mutateAfterAuthority(
     harness,
     facts.high,
-    () => stage(harness, launcher, update(project, facts.high, 87)),
+    () => stage(harness, launcher, update(workspace, facts.high, 87)),
     () =>
       query(
         harness.server.sql,
-        "update projects set status='archived',version=version+1 where id=$1",
-        [project],
+        "update workspaces set status='archived',version=version+1 where id=$1",
+        [workspace],
       ),
-    "%update projects%",
+    "%update workspaces%",
   );
-  const projectDenied = await stage(
+  const workspaceDenied = await stage(
     harness,
     launcher,
-    update(project, facts.high, 88),
+    update(workspace, facts.high, 88),
   );
-  assertEquals(projectDenied.code, 1, projectDenied.stderr);
-  assertEquals(JSON.parse(projectDenied.stderr).error.code, "project_inactive");
+  assertEquals(workspaceDenied.code, 1, workspaceDenied.stderr);
+  assertEquals(
+    JSON.parse(workspaceDenied.stderr).error.code,
+    "workspace_inactive",
+  );
   await query(
     harness.server.sql,
-    "update projects set status='active',version=version+1 where id=$1",
-    [project],
+    "update workspaces set status='active',version=version+1 where id=$1",
+    [workspace],
   );
   void rootAuth;
 }
@@ -1213,7 +1221,7 @@ async function proveAccessOrdering(
   harness: LiveHarness,
   launcher: CliLauncher,
   stageId: string,
-  _projectId: string,
+  _workspaceId: string,
   inspectGrant: Authority,
   cancelGrant: Authority,
 ) {
@@ -1282,14 +1290,14 @@ async function mutateAfterAccess(
   id: string,
   request: () => Promise<{ code: number; stderr: string }>,
   mutate: () => Promise<unknown>,
-  barrier: "project" | "lifecycle",
+  barrier: "workspace" | "lifecycle",
 ) {
   let release!: () => void, ready!: () => void;
   const released = new Promise<void>((resolve) => release = resolve),
     started = new Promise<void>((resolve) => ready = resolve);
   const blocker = harness.server.sql.begin(async (tx) => {
-    if (barrier === "project") {
-      await query(tx, "lock table projects in access exclusive mode");
+    if (barrier === "workspace") {
+      await query(tx, "lock table workspaces in access exclusive mode");
     } else {
       await query(
         tx,
@@ -1306,7 +1314,7 @@ async function mutateAfterAccess(
   try {
     await waitForLock(
       harness,
-      barrier === "project" ? "%projects%" : "%staged_changeset_lifecycle%",
+      barrier === "workspace" ? "%workspaces%" : "%staged_changeset_lifecycle%",
     );
     mutation = mutate();
     await waitForLock(harness, "%update role_assignments%");

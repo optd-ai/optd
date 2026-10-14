@@ -8,11 +8,11 @@ import {
 } from "../../src/application/services/seeds/stage_seeds.ts";
 import { isUuidV7 } from "../../src/domain/ids/uuid_v7.ts";
 
-const project = "019b7a2e-7c10-7000-8000-000000000001";
+const workspace = "019b7a2e-7c10-7000-8000-000000000001";
 const object = "019b7a2e-7c10-7000-8000-000000000002";
 const context = {
   operationKey: "statuses_0",
-  projectId: project,
+  workspaceId: workspace,
   resource: "test/demo:status",
 };
 
@@ -20,8 +20,8 @@ Deno.test("seed stage rejects names alias and unknown DTO fields before persiste
   const service = makeStageSeedsService({} as never);
   const auth = {} as never;
   for (
-    const body of [{ project_id: project, all: false, names: ["a"] }, {
-      project_id: project,
+    const body of [{ workspace_id: workspace, all: false, names: ["a"] }, {
+      workspace_id: workspace,
       all: true,
       seed_names: [],
       extra: true,
@@ -73,7 +73,7 @@ Deno.test("seed stage freezes declared active uniqueness and exact absence", asy
   const result = await service.stage(
     "test",
     "demo",
-    { project_id: project, all: false, seed_names: ["statuses"] },
+    { workspace_id: workspace, all: false, seed_names: ["statuses"] },
     {} as never,
   );
   assertEquals(result.ok, true);
@@ -83,14 +83,14 @@ Deno.test("seed stage freezes declared active uniqueness and exact absence", asy
   >[])[0];
   assertEquals(dependency, {
     kind: "uniqueness",
-    project_id: project,
+    workspace_id: workspace,
     definition: "test/demo:status",
     key: "code",
     value: "ready",
     constraint_name: "status_active_code",
     constraint_fields: ["code"],
     constraint_predicate: "active()",
-    project_scoped: true,
+    workspace_scoped: true,
     present: false,
   });
 });

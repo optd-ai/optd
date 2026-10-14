@@ -174,7 +174,7 @@ Deno.test("full seed uniqueness converts to a named active index before activati
   const compiled = await compileMigrationPreview(candidate, plan);
   assertMatch(
     compiled.statements[0],
-    /^create unique index "lead_active_name" on "res_.*" \("project_id", "name"\) where "archived_at" is null$/,
+    /^create unique index "lead_active_name" on "res_.*" \("workspace_id", "name"\) where "archived_at" is null$/,
   );
   assertMatch(compiled.statements[1], /alter column "name" set not null/);
   assertMatch(compiled.statements[3], /drop constraint if exists "uq_/);

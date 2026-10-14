@@ -12,7 +12,7 @@ const CRM = "optd/crm";
 export async function runCompleteCrmMigration(
   harness: CompletePublicFlowBackend,
   human: PublicFlowLauncher,
-  projectId: string,
+  workspaceId: string,
   output: string[],
 ): Promise<void> {
   const [v1, transitional, final] = await Promise.all([
@@ -36,11 +36,11 @@ export async function runCompleteCrmMigration(
   const created = data(
     await ok(
       runJson(harness, ["--json", "changeset", "stage"], {
-        project_id: projectId,
+        workspace_id: workspaceId,
         operations: [{
           op: "create",
           key: "migration_lead",
-          project_id: projectId,
+          workspace_id: workspaceId,
           resource: `${CRM}:lead`,
           fields: {
             name: "Legacy migration lead",
@@ -176,8 +176,8 @@ export async function runCompleteCrmMigration(
     await ok(
       human.runCli([
         "--json",
-        "--project",
-        projectId,
+        "--workspace",
+        workspaceId,
         "view",
         `${CRM}:lead`,
         leadId,
@@ -189,10 +189,10 @@ export async function runCompleteCrmMigration(
   const cleanup = data(
     await ok(
       runJson(harness, ["--json", "changeset", "stage"], {
-        project_id: projectId,
+        workspace_id: workspaceId,
         operations: [{
           op: "update",
-          project_id: projectId,
+          workspace_id: workspaceId,
           resource: `${CRM}:lead`,
           object_id: leadId,
           expected_version: 1,
@@ -260,7 +260,7 @@ export async function runCompleteCrmMigration(
   const beforePostDdl = await captureMigrationState(
     harness,
     human,
-    projectId,
+    workspaceId,
     leadId,
     output,
   );
@@ -287,7 +287,7 @@ export async function runCompleteCrmMigration(
   await assertFailedMigrationIsAtomic(
     harness,
     human,
-    projectId,
+    workspaceId,
     leadId,
     finalPlan.id,
     beforePostDdl,
@@ -299,7 +299,7 @@ export async function runCompleteCrmMigration(
   const beforeLockTimeout = await captureMigrationState(
     harness,
     human,
-    projectId,
+    workspaceId,
     leadId,
     output,
   );
@@ -328,7 +328,7 @@ export async function runCompleteCrmMigration(
   await assertFailedMigrationIsAtomic(
     harness,
     human,
-    projectId,
+    workspaceId,
     leadId,
     finalPlan.id,
     beforeLockTimeout,
@@ -389,7 +389,7 @@ export async function runCompleteCrmMigration(
   );
   assertEquals(repeated, applied);
 
-  const finalEvidence = await harness.observeMigration(projectId, leadId);
+  const finalEvidence = await harness.observeMigration(workspaceId, leadId);
   assertEquals(finalEvidence.activeRevisionId, finalPlan.to_pack_revision_id);
   const finalMetadata = data(
     await ok(
@@ -408,8 +408,8 @@ export async function runCompleteCrmMigration(
     await ok(
       human.runCli([
         "--json",
-        "--project",
-        projectId,
+        "--workspace",
+        workspaceId,
         "view",
         `${CRM}:lead`,
         leadId,
@@ -423,8 +423,8 @@ export async function runCompleteCrmMigration(
     await ok(
       human.runCli([
         "--json",
-        "--project",
-        projectId,
+        "--workspace",
+        workspaceId,
         "history",
         `${CRM}:lead`,
         leadId,
@@ -440,10 +440,10 @@ export async function runCompleteCrmMigration(
     harness,
     ["--json", "changeset", "stage"],
     {
-      project_id: projectId,
+      workspace_id: workspaceId,
       operations: [{
         op: "update",
-        project_id: projectId,
+        workspace_id: workspaceId,
         resource: `${CRM}:lead`,
         object_id: leadId,
         expected_version: 2,
@@ -476,7 +476,7 @@ export async function runCompleteCrmMigration(
 async function captureMigrationState(
   harness: CompletePublicFlowBackend,
   human: PublicFlowLauncher,
-  projectId: string,
+  workspaceId: string,
   leadId: string,
   output: string[],
 ): Promise<string> {
@@ -490,8 +490,8 @@ async function captureMigrationState(
     await ok(
       human.runCli([
         "--json",
-        "--project",
-        projectId,
+        "--workspace",
+        workspaceId,
         "view",
         `${CRM}:lead`,
         leadId,
@@ -503,8 +503,8 @@ async function captureMigrationState(
     await ok(
       human.runCli([
         "--json",
-        "--project",
-        projectId,
+        "--workspace",
+        workspaceId,
         "history",
         `${CRM}:lead`,
         leadId,
@@ -514,7 +514,7 @@ async function captureMigrationState(
   );
   const publicView = {
     id: view.id,
-    project_id: view.project_id,
+    workspace_id: view.workspace_id,
     resource: view.resource,
     version: view.version,
     state: view.state,
@@ -523,7 +523,7 @@ async function captureMigrationState(
   };
   return JSON.stringify({
     activationApplicationCatalogSchemaData: await harness.observeMigration(
-      projectId,
+      workspaceId,
       leadId,
     ),
     publicMetadataFields: metadata.schema.fields,
@@ -536,7 +536,7 @@ async function captureMigrationState(
 async function assertFailedMigrationIsAtomic(
   harness: CompletePublicFlowBackend,
   human: PublicFlowLauncher,
-  projectId: string,
+  workspaceId: string,
   leadId: string,
   planId: string,
   beforeBytes: string,
@@ -547,7 +547,7 @@ async function assertFailedMigrationIsAtomic(
   output: string[],
 ): Promise<void> {
   assertEquals(
-    await captureMigrationState(harness, human, projectId, leadId, output),
+    await captureMigrationState(harness, human, workspaceId, leadId, output),
     beforeBytes,
   );
   const afterAudit = await harness.observeMigrationSideEffects(planId);

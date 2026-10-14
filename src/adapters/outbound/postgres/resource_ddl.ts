@@ -32,7 +32,7 @@ export type CompiledMigrationPreview = {
 
 const platformColumns = new Set([
   "id",
-  "project_id",
+  "workspace_id",
   "version",
   "archived_at",
   "archived_by",
@@ -183,7 +183,7 @@ export async function compileMigrationPreview(
           ? [
             `alter table ${qi(table)} add constraint ${
               qi(constraintName("uq", table, change.target.field))
-            } unique (${qi("project_id")}, ${qi(change.target.field)})`,
+            } unique (${qi("workspace_id")}, ${qi(change.target.field)})`,
           ]
           : [],
       ];
@@ -240,7 +240,7 @@ export async function compileMigrationPreview(
           ? [
             `alter table ${qi(table)} add constraint ${
               qi(uniqueName)
-            } unique (${qi("project_id")}, ${qi(change.target.field)})`,
+            } unique (${qi("workspace_id")}, ${qi(change.target.field)})`,
           ]
           : [],
       ];
@@ -427,7 +427,7 @@ function compileResourceTable(
   );
   const columns = [
     `${qi("id")} uuid primary key`,
-    `${qi("project_id")} uuid not null references ${qi("projects")}(${
+    `${qi("workspace_id")} uuid not null references ${qi("workspaces")}(${
       qi("id")
     }) deferrable initially deferred`,
     `${qi("version")} bigint not null default 1`,
@@ -444,9 +444,9 @@ function compileResourceTable(
       qi("id")
     }) deferrable initially deferred`,
     `${qi("current_object_version_id")} uuid`,
-    `foreign key (${qi("project_id")},${qi("id")},${
+    `foreign key (${qi("workspace_id")},${qi("id")},${
       qi("current_object_version_id")
-    }) references ${qi("object_versions")}(${qi("project_id")},${
+    }) references ${qi("object_versions")}(${qi("workspace_id")},${
       qi("object_id")
     },${qi("id")}) deferrable initially deferred`,
     ...compileFields(definition, platformColumns, tableName),
@@ -454,12 +454,12 @@ function compileResourceTable(
       record(descriptor).unique === true
     ).map(([field]) =>
       `constraint ${qi(constraintName("uq", tableName, field))} unique (${
-        qi("project_id")
+        qi("workspace_id")
       }, ${qi(field)})`
     ),
     ...fullUniqueConstraints.map((constraint) =>
       `constraint ${qi(String(constraint.name))} unique (${
-        ["project_id", ...arrayStrings(constraint.fields)].map(qi).join(", ")
+        ["workspace_id", ...arrayStrings(constraint.fields)].map(qi).join(", ")
       })`
     ),
   ];
@@ -479,7 +479,7 @@ function compileResourceUniqueConstraint(
   if (!constraint || constraint.kind !== "unique") {
     throw new Error("migration references an unavailable unique constraint");
   }
-  const fields = ["project_id", ...arrayStrings(constraint.fields)];
+  const fields = ["workspace_id", ...arrayStrings(constraint.fields)];
   if (constraint.where === "active()") {
     return `create unique index ${qi(String(constraint.name))} on ${
       qi(tableName)
@@ -505,7 +505,7 @@ function compileRelationshipTable(
   assertRelationshipEndpoint(definition, "to");
   const columns = [
     `${qi("id")} uuid primary key`,
-    `${qi("project_id")} uuid not null references ${qi("projects")}(${
+    `${qi("workspace_id")} uuid not null references ${qi("workspaces")}(${
       qi("id")
     }) deferrable initially deferred`,
     `${qi("from_object_id")} uuid not null`,
@@ -524,9 +524,9 @@ function compileRelationshipTable(
       qi("id")
     }) deferrable initially deferred`,
     `${qi("current_object_version_id")} uuid`,
-    `foreign key (${qi("project_id")},${qi("id")},${
+    `foreign key (${qi("workspace_id")},${qi("id")},${
       qi("current_object_version_id")
-    }) references ${qi("object_versions")}(${qi("project_id")},${
+    }) references ${qi("object_versions")}(${qi("workspace_id")},${
       qi("object_id")
     },${qi("id")}) deferrable initially deferred`,
     ...compileFields(definition, relationshipColumns, tableName),
@@ -545,7 +545,7 @@ function compileRelationshipTable(
   );
   const name = constraintName("uq", tableName, mapped.join("_"));
   return `${create}; create unique index ${qi(name)} on ${qi(tableName)} (${
-    ["project_id", ...mapped].map(qi).join(", ")
+    ["workspace_id", ...mapped].map(qi).join(", ")
   }) where ${qi("archived_at")} is null`;
 }
 

@@ -38,7 +38,7 @@ spec:
       empty:
         message: No lead status records found.
         help:
-          - optctl --project ${project} create optd/crm:lead_status --input object.json --stage
+          - optctl --workspace ${workspace} create optd/crm:lead_status --input object.json --stage
     detail:
       sections:
         - title: lead status
@@ -48,11 +48,11 @@ spec:
             - sort_order
             - terminal
       help:
-        - optctl --project ${project} query optd/crm:lead_status --where 'id == "${id}"'
+        - optctl --workspace ${workspace} query optd/crm:lead_status --where 'id == "${id}"'
     help:
       list:
-        - optctl --project ${project} query optd/crm:lead_status
+        - optctl --workspace ${workspace} query optd/crm:lead_status
       view:
-        - optctl --project ${project} view optd/crm:lead_status ${id}
+        - optctl --workspace ${workspace} view optd/crm:lead_status ${id}
       created:
-        - optctl --project ${project} view optd/crm:lead_status ${id}
+        - optctl --workspace ${workspace} view optd/crm:lead_status ${id}

@@ -88,7 +88,10 @@ export type LiveHarness = {
   login(input: LoginInput): Promise<CliResult>;
   bootstrapProcess(input: BootstrapInput): Promise<ProcessLaunchResult>;
   loginProcess(input: LoginInput): Promise<ProcessLaunchResult>;
-  selectProject(projectId: string, launcher?: CliLauncher): Promise<CliResult>;
+  selectWorkspace(
+    workspaceId: string,
+    launcher?: CliLauncher,
+  ): Promise<CliResult>;
   runJson(
     args: string[],
     input: unknown,
@@ -359,9 +362,9 @@ export async function startLiveHarness(
         throw error;
       }
     },
-    async selectProject(projectId, launcher) {
+    async selectWorkspace(workspaceId, launcher) {
       const run = launcher?.runOptctl ?? runBinary;
-      return await run(["project", "select", projectId]);
+      return await run(["workspace", "select", workspaceId]);
     },
     async runJson(args, input, launcher) {
       const inputDir = join(rootDir, "inputs");
@@ -572,12 +575,6 @@ async function compileOptctl(options: {
   isolation: string;
   denoDir: string;
 }): Promise<string> {
-  const cat = await Deno.stat("/bin/cat").catch(() => undefined);
-  if (!cat?.isFile || ((cat.mode ?? 0) & 0o111) === 0) {
-    throw new Error(
-      "compiled Linux process inspection requires reviewed executable /bin/cat",
-    );
-  }
   const digest = options.digest;
   const cacheDir = options.forceFresh
     ? join(options.isolation, "forced-fresh-optctl", digest)

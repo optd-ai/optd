@@ -124,7 +124,7 @@ type QueryPagePort =
   >;
 
 export type QueryReadSession = Readonly<{
-  projectExists: boolean;
+  workspaceExists: boolean;
   definition(): Promise<QueryDefinition | null>;
   authorize(
     plan: Omit<QueryExecutionPlan, "cursorPosition">,
@@ -172,7 +172,7 @@ export function makeQueryObjectsService(
         const response = await port.execute(
           { input: request, auth },
           async (session) => {
-            if (!session.projectExists) throw hidden();
+            if (!session.workspaceExists) throw hidden();
             const definition = await session.definition();
             if (!definition) throw hidden();
             const fields = resolveFields(request.fields, definition);
@@ -193,7 +193,7 @@ export function makeQueryObjectsService(
             }
             const cursors = queryCursors();
             const shapeDigest = await cursors.shapeDigest({
-              project_id: request.project_id,
+              workspace_id: request.workspace_id,
               definition: request.definition,
               revision_id: definition.revisionId,
               where: policy.normalizedWhere,
@@ -306,7 +306,7 @@ function resolveFields(
   if (requested) {
     rejectDuplicates(requested, "projection");
     for (const field of requested) {
-      if (!definition.packFields.includes(field)) {
+      if (field !== "id" && !definition.packFields.includes(field)) {
         throw new QueryRepositoryError(
           "bad_request",
           `unknown projection field ${field}`,
@@ -316,9 +316,9 @@ function resolveFields(
     return requested;
   }
   const list = record(record(record(definition.document.spec).axi).list);
-  const axi = Array.isArray(list.fields)
-    ? list.fields.map(String).filter((field) =>
-      field !== "id" && definition.packFields.includes(field)
+  const axi = Array.isArray(list.defaultFields)
+    ? list.defaultFields.map(String).filter((field) =>
+      field === "id" || definition.packFields.includes(field)
     )
     : [];
   return axi.length ? axi : definition.packFields.slice(0, 20);
@@ -367,7 +367,7 @@ function queryRowDto(
 ): Record<string, unknown> {
   const common = {
     id: String(row.id),
-    project_id: String(row.project_id),
+    workspace_id: String(row.workspace_id),
     version: Number(row.version),
     object_version_id: String(row.current_object_version_id),
     archived_at: timestamp(row.archived_at),
@@ -474,6 +474,6 @@ function record(value: unknown): Record<string, unknown> {
 function hidden(): QueryRepositoryError {
   return new QueryRepositoryError(
     "not_found",
-    "requested project or definition was not found",
+    "requested workspace or definition was not found",
   );
 }

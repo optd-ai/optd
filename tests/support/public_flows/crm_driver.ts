@@ -70,11 +70,11 @@ export async function runCompleteCrmPublicFlow(
     const homeToon = toon(await ok(human.runCli([]), output));
     assertSubstantiveParity(homeToon.data, homeJson.data);
 
-    const project = json(
+    const workspace = json(
       await ok(
         human.runCli([
           "--json",
-          "project",
+          "workspace",
           "create",
           "sales",
           "--display-name",
@@ -83,9 +83,9 @@ export async function runCompleteCrmPublicFlow(
         output,
       ),
     );
-    const projectId = String(project.data.id);
-    assert(isUuidV7(projectId));
-    await ok(human.runCli(["project", "select", "sales"]), output);
+    const workspaceId = String(workspace.data.id);
+    assert(isUuidV7(workspaceId));
+    await ok(human.runCli(["workspace", "select", "sales"]), output);
 
     const preview = json(
       await ok(
@@ -142,13 +142,13 @@ export async function runCompleteCrmPublicFlow(
     for (const command of metadataCases) {
       const plain = toon(
         await ok(
-          human.runCli(["--project", projectId, ...command]),
+          human.runCli(["--workspace", workspaceId, ...command]),
           output,
         ),
       );
       const structured = json(
         await ok(
-          human.runCli(["--json", "--project", projectId, ...command]),
+          human.runCli(["--json", "--workspace", workspaceId, ...command]),
           output,
         ),
       );
@@ -159,8 +159,8 @@ export async function runCompleteCrmPublicFlow(
       await ok(
         human.runCli([
           "--json",
-          "--project",
-          projectId,
+          "--workspace",
+          workspaceId,
           "metadata",
           "hook",
           `${CRM}:notify_crm_change`,
@@ -197,8 +197,8 @@ export async function runCompleteCrmPublicFlow(
       await ok(
         human.runCli([
           "--json",
-          "--project",
-          projectId,
+          "--workspace",
+          workspaceId,
           "seed",
           "commit",
           CRM,
@@ -227,8 +227,8 @@ export async function runCompleteCrmPublicFlow(
           humanUserId,
           "--role",
           role,
-          "--project",
-          projectId,
+          "--workspace",
+          workspaceId,
         ]),
         output,
       );
@@ -240,9 +240,9 @@ export async function runCompleteCrmPublicFlow(
           "auth",
           "roles",
           "--boundary",
-          "project",
-          "--project",
-          projectId,
+          "workspace",
+          "--workspace",
+          workspaceId,
         ]),
         output,
       ),
@@ -257,9 +257,9 @@ export async function runCompleteCrmPublicFlow(
           "--role",
           `${CRM}:sales_manager`,
           "--boundary",
-          "project",
-          "--project",
-          projectId,
+          "workspace",
+          "--workspace",
+          workspaceId,
           "--reason",
           "Run the reviewed CRM acceptance flow",
         ]),
@@ -286,7 +286,7 @@ export async function runCompleteCrmPublicFlow(
     assert(isUuidV7(String(redeemed.data.authorization.id)));
     assertEquals(redeemed.data.authorization.role_assignments, [{
       role: `${CRM}:sales_manager`,
-      boundary: { type: "project", project_id: projectId },
+      boundary: { type: "workspace", workspace_id: workspaceId },
     }]);
     assertEquals("token" in redeemed.data, false);
     const agentToken = await harness.authorizationTokenForHttpProbe(
@@ -327,7 +327,7 @@ export async function runCompleteCrmPublicFlow(
     ]);
     assertEquals(directWhoami.data.role_assignments, [{
       role: `${CRM}:sales_manager`,
-      boundary: { type: "project", project_id: projectId },
+      boundary: { type: "workspace", workspace_id: workspaceId },
     }]);
     assertEquals(
       /token|password|anchor_pid/i.test(JSON.stringify(directWhoami.data)),
@@ -391,14 +391,14 @@ export async function runCompleteCrmPublicFlow(
     for (
       const args of [[
         "--json",
-        "--project",
-        projectId,
+        "--workspace",
+        workspaceId,
         "query",
         `${CRM}:company`,
       ], [
         "--json",
-        "--project",
-        projectId,
+        "--workspace",
+        workspaceId,
         "action",
         "stage",
         `${CRM}:log_activity`,
@@ -516,8 +516,8 @@ export async function runCompleteCrmPublicFlow(
       await ok(
         replacementHuman.launcher.runCli([
           "--json",
-          "--project",
-          projectId,
+          "--workspace",
+          workspaceId,
           "seed",
           "commit",
           CRM,
@@ -540,29 +540,29 @@ export async function runCompleteCrmPublicFlow(
           harness,
           ["--json", "changeset", "stage"],
           {
-            project_id: projectId,
+            workspace_id: workspaceId,
             operations: [{
               op: "create",
               key: "company",
-              project_id: projectId,
+              workspace_id: workspaceId,
               resource: `${CRM}:company`,
               fields: { name: "Acme", industry: "Software" },
             }, {
               op: "create",
               key: "primary_contact",
-              project_id: projectId,
+              workspace_id: workspaceId,
               resource: `${CRM}:contact`,
               fields: { name: "Ada", email: "ada@example.test" },
             }, {
               op: "create",
               key: "old_contact",
-              project_id: projectId,
+              workspace_id: workspaceId,
               resource: `${CRM}:contact`,
               fields: { name: "Grace", email: "grace@example.test" },
             }, {
               op: "create",
               key: "opportunity",
-              project_id: projectId,
+              workspace_id: workspaceId,
               resource: `${CRM}:opportunity`,
               fields: {
                 name: "Enterprise",
@@ -573,7 +573,7 @@ export async function runCompleteCrmPublicFlow(
             }, {
               op: "link",
               key: "old_link",
-              project_id: projectId,
+              workspace_id: workspaceId,
               relationship: `${CRM}:contact_company`,
               from: { $ref: "old_contact.object_id" },
               to: { $ref: "company.object_id" },
@@ -629,11 +629,11 @@ export async function runCompleteCrmPublicFlow(
           harness,
           ["--json", "changeset", "stage"],
           {
-            project_id: projectId,
+            workspace_id: workspaceId,
             operations: [{
               op: "create",
               key: "lead",
-              project_id: projectId,
+              workspace_id: workspaceId,
               resource: `${CRM}:lead`,
               fields: {
                 name: "Public Lead",
@@ -644,42 +644,42 @@ export async function runCompleteCrmPublicFlow(
               },
             }, {
               op: "update",
-              project_id: projectId,
+              workspace_id: workspaceId,
               resource: `${CRM}:company`,
               object_id: companyId,
               expected_version: 1,
               set: { industry: "Enterprise software" },
             }, {
               op: "transition",
-              project_id: projectId,
+              workspace_id: workspaceId,
               resource: `${CRM}:opportunity`,
               object_id: opportunityId,
               expected_version: 1,
               to: "qualified",
             }, {
               op: "archive",
-              project_id: projectId,
+              workspace_id: workspaceId,
               resource: `${CRM}:contact`,
               object_id: oldContactId,
               expected_version: 1,
             }, {
               op: "link",
               key: "new_link",
-              project_id: projectId,
+              workspace_id: workspaceId,
               relationship: `${CRM}:contact_company`,
               from: primaryContactId,
               to: companyId,
               fields: { primary: true },
             }, {
               op: "unlink",
-              project_id: projectId,
+              workspace_id: workspaceId,
               relationship: `${CRM}:contact_company`,
               relationship_id: oldLinkId,
               expected_version: 1,
             }, {
               op: "comment",
               key: "company_comment",
-              project_id: projectId,
+              workspace_id: workspaceId,
               resource: `${CRM}:company`,
               object_id: companyId,
               body: "Updated through the public CRM acceptance graph",
@@ -737,8 +737,8 @@ export async function runCompleteCrmPublicFlow(
     );
     const convertLeadResult = await replacementHuman.launcher.runCli([
       "--json",
-      "--project",
-      projectId,
+      "--workspace",
+      workspaceId,
       "action",
       "stage",
       `${CRM}:convert_lead`,
@@ -770,8 +770,8 @@ export async function runCompleteCrmPublicFlow(
       );
       const spoofed = await replacementHuman.launcher.runCli([
         "--json",
-        "--project",
-        projectId,
+        "--workspace",
+        workspaceId,
         "action",
         "stage",
         `${CRM}:log_activity`,
@@ -801,8 +801,8 @@ export async function runCompleteCrmPublicFlow(
       await ok(
         replacementHuman.launcher.runCli([
           "--json",
-          "--project",
-          projectId,
+          "--workspace",
+          workspaceId,
           "action",
           "stage",
           `${CRM}:log_activity`,
@@ -880,8 +880,8 @@ export async function runCompleteCrmPublicFlow(
         reviewerId,
         "--role",
         `${CRM}:sales_manager`,
-        "--project",
-        projectId,
+        "--workspace",
+        workspaceId,
       ]),
       output,
     );
@@ -925,8 +925,8 @@ export async function runCompleteCrmPublicFlow(
           id,
           "--role",
           `${CRM}:sales_rep`,
-          "--project",
-          projectId,
+          "--workspace",
+          workspaceId,
         ]),
         output,
       );
@@ -954,7 +954,7 @@ export async function runCompleteCrmPublicFlow(
     const relationshipAuthority = await harness
       .observeCrmRelationshipAuthority({
         principalId: relationshipAuthor.data.principal.id,
-        projectId,
+        workspaceId,
       });
     assertEquals(relationshipAuthority, 1);
     const viewerLink = json(
@@ -963,10 +963,10 @@ export async function runCompleteCrmPublicFlow(
           harness,
           ["--json", "changeset", "stage"],
           {
-            project_id: projectId,
+            workspace_id: workspaceId,
             operations: [{
               op: "link",
-              project_id: projectId,
+              workspace_id: workspaceId,
               relationship: `${CRM}:opportunity_viewer`,
               from: opportunityId,
               to: viewerCredentials[0].principalId,
@@ -1004,7 +1004,7 @@ export async function runCompleteCrmPublicFlow(
     const viewerTuple = await harness.observeRelationshipTuple({
       pack: "crm",
       relationship: "opportunity_viewer",
-      projectId,
+      workspaceId,
       fromObjectId: opportunityId,
     });
     assertEquals(
@@ -1013,8 +1013,8 @@ export async function runCompleteCrmPublicFlow(
     );
     const exactViewerRead = await viewerLaunchers[0].runCli([
       "--json",
-      "--project",
-      projectId,
+      "--workspace",
+      workspaceId,
       "view",
       `${CRM}:opportunity`,
       opportunityId,
@@ -1023,8 +1023,8 @@ export async function runCompleteCrmPublicFlow(
     assertEquals(exactViewerRead.code, 0, exactViewerRead.stderr);
     const unrelatedViewerRead = await viewerLaunchers[1].runCli([
       "--json",
-      "--project",
-      projectId,
+      "--workspace",
+      workspaceId,
       "view",
       `${CRM}:opportunity`,
       opportunityId,
@@ -1043,10 +1043,10 @@ export async function runCompleteCrmPublicFlow(
           harness,
           ["--json", "changeset", "stage"],
           {
-            project_id: projectId,
+            workspace_id: workspaceId,
             operations: [{
               op: "transition",
-              project_id: projectId,
+              workspace_id: workspaceId,
               resource: `${CRM}:opportunity`,
               object_id: opportunityId,
               expected_version: 2,
@@ -1081,8 +1081,8 @@ export async function runCompleteCrmPublicFlow(
       await ok(
         replacementHuman.launcher.runCli([
           "--json",
-          "--project",
-          projectId,
+          "--workspace",
+          workspaceId,
           "action",
           "stage",
           `${CRM}:mark_won`,
@@ -1155,8 +1155,8 @@ export async function runCompleteCrmPublicFlow(
       await ok(
         replacementHuman.launcher.runCli([
           "--json",
-          "--project",
-          projectId,
+          "--workspace",
+          workspaceId,
           "view",
           `${CRM}:opportunity`,
           opportunityId,
@@ -1167,8 +1167,8 @@ export async function runCompleteCrmPublicFlow(
     const wonViewToon = toon(
       await ok(
         replacementHuman.launcher.runCli([
-          "--project",
-          projectId,
+          "--workspace",
+          workspaceId,
           "view",
           `${CRM}:opportunity`,
           opportunityId,
@@ -1184,8 +1184,8 @@ export async function runCompleteCrmPublicFlow(
       await ok(
         replacementHuman.launcher.runCli([
           "--json",
-          "--project",
-          projectId,
+          "--workspace",
+          workspaceId,
           "history",
           `${CRM}:opportunity`,
           opportunityId,
@@ -1207,11 +1207,11 @@ export async function runCompleteCrmPublicFlow(
           harness,
           ["--json", "changeset", "stage"],
           {
-            project_id: projectId,
+            workspace_id: workspaceId,
             operations: [{
               op: "create",
               key: "lost_opportunity",
-              project_id: projectId,
+              workspace_id: workspaceId,
               resource: `${CRM}:opportunity`,
               fields: {
                 name: "Rejected loss",
@@ -1254,10 +1254,10 @@ export async function runCompleteCrmPublicFlow(
             harness,
             ["--json", "changeset", "stage"],
             {
-              project_id: projectId,
+              workspace_id: workspaceId,
               operations: [{
                 op: "transition",
-                project_id: projectId,
+                workspace_id: workspaceId,
                 resource: `${CRM}:opportunity`,
                 object_id: lostOpportunityId,
                 expected_version: version,
@@ -1284,7 +1284,7 @@ export async function runCompleteCrmPublicFlow(
         `crm:post-commit:lost-transition-${to}`,
       );
     }
-    const lostReasonId = await harness.observeCrmLostReasonId(projectId);
+    const lostReasonId = await harness.observeCrmLostReasonId(workspaceId);
     assert(isUuidV7(lostReasonId));
     await assertHookQuiescence(
       harness,
@@ -1295,8 +1295,8 @@ export async function runCompleteCrmPublicFlow(
       await ok(
         replacementHuman.launcher.runCli([
           "--json",
-          "--project",
-          projectId,
+          "--workspace",
+          workspaceId,
           "action",
           "stage",
           `${CRM}:mark_lost`,
@@ -1358,8 +1358,8 @@ export async function runCompleteCrmPublicFlow(
       );
       const terminal = await replacementHuman.launcher.runCli([
         "--json",
-        "--project",
-        projectId,
+        "--workspace",
+        workspaceId,
         "action",
         "stage",
         `${CRM}:mark_won`,
@@ -1530,10 +1530,10 @@ export async function runCompleteCrmPublicFlow(
             harness,
             ["--json", "changeset", "stage"],
             {
-              project_id: projectId,
+              workspace_id: workspaceId,
               operations: [{
                 op: "create",
-                project_id: projectId,
+                workspace_id: workspaceId,
                 resource: `${CRM}:company`,
                 fields: {
                   name: `Cancellation proof ${crypto.randomUUID()}`,
@@ -1647,10 +1647,10 @@ export async function runCompleteCrmPublicFlow(
           harness,
           ["--json", "changeset", "stage"],
           {
-            project_id: projectId,
+            workspace_id: workspaceId,
             operations: [{
               op: "create",
-              project_id: projectId,
+              workspace_id: workspaceId,
               resource: `${CRM}:company`,
               fields: {
                 name: `Drain proof ${crypto.randomUUID()}`,
@@ -1753,7 +1753,7 @@ export async function runCompleteCrmPublicFlow(
     await runCompleteCrmMigration(
       harness,
       replacementHuman.launcher,
-      projectId,
+      workspaceId,
       output,
     );
 

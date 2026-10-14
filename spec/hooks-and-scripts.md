@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-hooks-and-scripts; contract: 1; input: sha256:fd2bd424d11ebee651afce11a92dbe22708a05b325f7c565828118a7f70052bb -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-hooks-and-scripts; contract: 1; input: sha256:a5927c1cf4845935ff897c693b42a980b2751175c312b0b0dc9a25bd90899053 -->
 
 # Hooks, Scripts, and Runtime Behavior
 
@@ -409,7 +409,7 @@ action. Hook/action attachments declare reviewed resource/action effects and
 runtime capabilities. Pack preview/install validates those declarations.
 
 For each invocation the platform creates a constrained internal capability bound
-to hook revision/script digest, invocation and causation ids, affected project
+to hook revision/script digest, invocation and causation ids, affected workspace
 boundary, declared API/resource/action effects, and short invocation lifetime.
 System executors authorize mechanics only and never imply super-admin. An
 undeclared effect fails closed.

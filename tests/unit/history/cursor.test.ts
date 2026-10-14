@@ -7,7 +7,7 @@ const position = {
 };
 const binding = {
   v: 1,
-  project_id: "019a0000-0000-7000-8000-000000000002",
+  workspace_id: "019a0000-0000-7000-8000-000000000002",
   definition: {
     kind: "resource",
     publisher: "optd",
@@ -34,7 +34,7 @@ Deno.test("history cursors bind every actor, policy, definition, object, and pag
       authorization_root_id: "019a0000-0000-7000-8000-000000000009",
     },
     { ...binding, policy_digest: "policy-two" },
-    { ...binding, project_id: "019a0000-0000-7000-8000-00000000000a" },
+    { ...binding, workspace_id: "019a0000-0000-7000-8000-00000000000a" },
     { ...binding, definition: { ...binding.definition, kind: "relationship" } },
     { ...binding, definition: { ...binding.definition, publisher: "other" } },
     { ...binding, definition: { ...binding.definition, pack: "other" } },

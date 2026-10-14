@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-optctl-axi; contract: 1; input: sha256:0ba0022eeaee989450cd0576143e219daa3d06b0a09b1220bc5a1e2ad7672cbb -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-optctl-axi; contract: 1; input: sha256:9866d00851208588f0f388003cfc8ebbfe369d5f0cfd3d36234f12b8f8845278 -->
 
 # optctl AXI Guidance Model
 
@@ -77,8 +77,8 @@ present and guide the resource.
 
 Resource/action component names are lowercase snake case. Public CLI definition
 identities are publisher-qualified, for example `optd/crm:contact` and
-`optd/crm:pipeline_stage`; runtime project is selected separately with
-`--project` or context. Display text may use human titles.
+`optd/crm:pipeline_stage`; runtime workspace is selected separately with
+`--workspace` or context. Display text may use human titles.
 
 Example:
 
@@ -112,8 +112,8 @@ spec:
       empty:
         message: No contacts found.
         help:
-          - optctl --project ${project} create optd/crm:contact --stage
-          - optctl --project ${project} list optd/crm:company
+          - optctl --workspace ${workspace} create optd/crm:contact --stage
+          - optctl --workspace ${workspace} list optd/crm:company
     detail:
       sections:
         - title: Contact
@@ -122,17 +122,17 @@ spec:
           fields: [company_id, owner_id]
       help:
         - optctl action stage optd/crm:merge_contact --input merge.json
-        - optctl --project ${project} list optd/crm:opportunity --where primary_contact_id=${id}
+        - optctl --workspace ${workspace} list optd/crm:opportunity --where primary_contact_id=${id}
     search:
       fields: [first_name, last_name, email, phone]
       examples:
-        - optctl --project ${project} search optd/crm:contact --text alice@example.com
+        - optctl --workspace ${workspace} search optd/crm:contact --text alice@example.com
     help:
       list:
-        - optctl --project ${project} view optd/crm:contact <id>
-        - optctl --project ${project} create optd/crm:contact --stage
+        - optctl --workspace ${workspace} view optd/crm:contact <id>
+        - optctl --workspace ${workspace} create optd/crm:contact --stage
       created:
-        - optctl --project ${project} view optd/crm:contact ${id}
+        - optctl --workspace ${workspace} view optd/crm:contact ${id}
         - optctl action stage optd/crm:create_follow_up --input follow-up.json
 ```
 
@@ -257,8 +257,8 @@ spec:
       - optctl action stage optd/crm:convert_lead --input action.json
       - optctl action commit optd/crm:convert_lead --input action.json
     successHelp:
-      - optctl --project ${project} view optd/crm:opportunity ${created.opportunity_id}
-      - optctl --project ${project} list optd/crm:activity --where related_id=${created.opportunity_id}
+      - optctl --workspace ${workspace} view optd/crm:opportunity ${created.opportunity_id}
+      - optctl --workspace ${workspace} list optd/crm:activity --where related_id=${created.opportunity_id}
 ```
 
 ## Pack-Level AXI Guidance
@@ -281,21 +281,21 @@ spec:
         - optd/crm:contact
         - optd/crm:company
       help:
-        - optctl --project ${project} list optd/crm:lead
-        - optctl --project ${project} list optd/crm:opportunity
-        - optctl --project ${project} search optd/crm:contact --text <email-or-name>
+        - optctl --workspace ${workspace} list optd/crm:lead
+        - optctl --workspace ${workspace} list optd/crm:opportunity
+        - optctl --workspace ${workspace} search optd/crm:contact --text <email-or-name>
 ```
 
 ## Authentication and context UX
 
 `optctl` contexts store only normalized server origin and optional default
-project; they never select identity, roles, or authorization. Commands include
-`context list/show/add/use/set-project/remove`. Bootstrap automatically creates
+workspace; they never select identity, roles, or authorization. Commands include
+`context list/show/add/use/set-workspace/remove`. Bootstrap automatically creates
 and activates the successful origin context without confirmation.
 
 Credential selection walks to the nearest process binding and uses its one
 current authorization token. It never searches for a better credential based on
-roles/projects. `auth wait` redeems approved authority and atomically installs
+roles/workspaces. `auth wait` redeems approved authority and atomically installs
 the replacement token. `auth isolate -- <agent-command>` creates a request-only
 subtree. `auth doctor [--fix]` diagnoses/repairs local auth files and contexts.
 
@@ -319,13 +319,13 @@ Resource commands:
 optctl                    # content-first home/dashboard
 optctl resources          # configured resource kinds with purposes
 optctl metadata resource optd/crm:lead
-optctl --project sales list optd/crm:lead [--fields ...] [--where ...]
-optctl --project sales view optd/crm:lead <id> [--full]
-optctl --project sales search optd/crm:contact --text <query>
-optctl --project sales create optd/crm:lead --input lead.json --stage
-optctl --project sales create optd/crm:lead --input lead.json --commit
-optctl --project sales update optd/crm:lead <id> --input update.json --stage
-optctl --project sales transition optd/crm:opportunity <id> proposal --stage
+optctl --workspace sales list optd/crm:lead [--fields ...] [--where ...]
+optctl --workspace sales view optd/crm:lead <id> [--full]
+optctl --workspace sales search optd/crm:contact --text <query>
+optctl --workspace sales create optd/crm:lead --input lead.json --stage
+optctl --workspace sales create optd/crm:lead --input lead.json --commit
+optctl --workspace sales update optd/crm:lead <id> --input update.json --stage
+optctl --workspace sales transition optd/crm:opportunity <id> proposal --stage
 
 optctl changeset stage --input changeset.json
 optctl changeset inspect <stage-id>
@@ -338,8 +338,8 @@ Action commands:
 
 ```text
 optctl metadata actions optd/crm:lead
-optctl --project sales action stage optd/crm:convert_lead --input action.json
-optctl --project sales action commit optd/crm:convert_lead --input action.json
+optctl --workspace sales action stage optd/crm:convert_lead --input action.json
+optctl --workspace sales action commit optd/crm:convert_lead --input action.json
 ```
 
 Pack commands:
@@ -397,8 +397,8 @@ spec:
     list:
       defaultFields: [id, name, status, updated_at]
       help:
-        - optctl --project ${project} view optd/crm:lead <id>
-        - optctl --project ${project} query optd/crm:lead --where 'status == "qualified"'
+        - optctl --workspace ${workspace} view optd/crm:lead <id>
+        - optctl --workspace ${workspace} query optd/crm:lead --where 'status == "qualified"'
 ```
 
 Structured list/query APIs should return compact fields by default, include

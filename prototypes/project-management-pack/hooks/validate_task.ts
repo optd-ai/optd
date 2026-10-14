@@ -62,20 +62,6 @@ if (resource === "optd/projects:timesheet") {
     });
   }
 }
-const requiredApprovals = resource === "optd/projects:task"
-  ? after.state === "done" && before?.state !== "done"
-    ? [{
-      key: "task_completion",
-      role: "optd/projects:project_manager",
-      boundary: { type: "project", project_id: envelope.input.project_id },
-      minimum: 1,
-      principal_types: ["human_user"],
-      allow_initiator: false,
-      expires_at: null,
-      reason: "A project manager must approve task completion.",
-    }]
-    : []
-  : [];
 console.error(
   `validate_task errors=${errors.length} warnings=${warnings.length}`,
 );
@@ -83,5 +69,5 @@ console.log(JSON.stringify({
   allow: errors.length === 0,
   errors,
   warnings,
-  required_approvals: requiredApprovals,
+  required_approvals: [],
 }));

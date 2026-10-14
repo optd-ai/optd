@@ -20,7 +20,7 @@ const INPUT_REFS: Record<string, Set<string>> = {
     "$proposed",
     "$reads",
     "$object_version",
-    "$project_id",
+    "$workspace_id",
   ]),
   "changeset.validate": new Set([
     "$operation",
@@ -28,7 +28,7 @@ const INPUT_REFS: Record<string, Set<string>> = {
     "$proposed",
     "$reads",
     "$object_version",
-    "$project_id",
+    "$workspace_id",
   ]),
   "event.after_commit": new Set([
     "$actor",

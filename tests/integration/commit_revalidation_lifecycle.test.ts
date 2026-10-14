@@ -27,7 +27,7 @@ Deno.test({
     try {
       const initial = await matrix.stage([{
         op: "create",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:alpha",
         fields: { key: "same-stage", status: "ready" },
       }]);
@@ -119,7 +119,7 @@ Deno.test({
         try {
           const stage = await matrix.stage([{
             op: "create",
-            project_id: matrix.projectId,
+            workspace_id: matrix.workspaceId,
             resource: "test/commitmatrix:alpha",
             fields: { key: `order-${firstKind}`, status: "ready" },
           }]);
@@ -356,7 +356,7 @@ async function stageApproval(
     {
       operations: [{
         op: "create",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:approval_case",
         fields: { key: `approval-${suffix}` },
       }],

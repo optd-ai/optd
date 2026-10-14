@@ -201,7 +201,7 @@ Deno.test("concurrent replacement invalidates stale ancestry and its new session
       `select count(*)::int count from auth_contexts where session_id=(select id from auth_sessions where token_digest=$1)`,
       [await tokenDigest(childToken)],
     )).rows[0]!.count;
-    const staleChild = await get(harness, childToken, "/api/v1/projects");
+    const staleChild = await get(harness, childToken, "/api/v1/workspaces");
     assertEquals(staleChild.status, 401);
     assertEquals((await staleChild.json()).error.code, "credential_invalid");
     const contextsAfter = (await query<{ count: number }>(

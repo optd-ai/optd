@@ -249,7 +249,7 @@ export class PostgresAuthRepository implements AuthRepository {
                     and current.revoked_at is null and current.superseded_at is null
                     and upstream.role_id=ar.role_id
                     and upstream.boundary_type=ar.boundary_type
-                    and upstream.project_id is not distinct from ar.project_id
+                    and upstream.workspace_id is not distinct from ar.workspace_id
                )
           )
        where s.token_digest = $1 and s.revoked_at is null
@@ -540,8 +540,8 @@ export class PostgresAuthRepository implements AuthRepository {
       };
       const rows = (await query<{
         role_id: string;
-        boundary_type: "project" | "all_projects" | "system";
-        project_id: string | null;
+        boundary_type: "workspace" | "all_workspaces" | "system";
+        workspace_id: string | null;
       }>(
         this.sql,
         `with recursive lineage(id,parent_authorization_id) as (
@@ -551,7 +551,7 @@ export class PostgresAuthRepository implements AuthRepository {
              from agent_authorizations parent
              join lineage child on child.parent_authorization_id=parent.id
          )
-         select ar.role_id,ar.boundary_type,ar.project_id
+         select ar.role_id,ar.boundary_type,ar.workspace_id
            from agent_authorization_roles ar
           where ar.authorization_id=$1
             and not exists (
@@ -566,10 +566,10 @@ export class PostgresAuthRepository implements AuthRepository {
                   and current.superseded_at is null
                   and upstream.role_id=ar.role_id
                   and upstream.boundary_type=ar.boundary_type
-                  and upstream.project_id is not distinct from ar.project_id
+                  and upstream.workspace_id is not distinct from ar.workspace_id
               )
             )
-          order by ar.role_id,ar.boundary_type,ar.project_id`,
+          order by ar.role_id,ar.boundary_type,ar.workspace_id`,
         [auth.authorizationId],
       )).rows;
       roleAssignments = rows.map((row) => ({
@@ -580,13 +580,13 @@ export class PostgresAuthRepository implements AuthRepository {
       const rows = auth.credentialKind === "human_full"
         ? (await query<{
           role_id: string;
-          boundary_type: "project" | "all_projects" | "system";
-          project_id: string | null;
+          boundary_type: "workspace" | "all_workspaces" | "system";
+          workspace_id: string | null;
         }>(
           this.sql,
-          `select role_id,boundary_type,project_id from role_assignments
+          `select role_id,boundary_type,workspace_id from role_assignments
             where principal_id=$1 and active
-            order by role_id,boundary_type,project_id`,
+            order by role_id,boundary_type,workspace_id`,
           [auth.principalId],
         )).rows
         : [];
@@ -1737,7 +1737,7 @@ export class PostgresAuthRepository implements AuthRepository {
       auth.credentialKind !== "agent_authorization"
     ) return authorizationDenied();
     if (auth.authorizationId) {
-      const [boundaryType, projectId] = boundaryParams(input.boundary);
+      const [boundaryType, workspaceId] = boundaryParams(input.boundary);
       const held = (await query<{ role_id: string }>(
         this.sql,
         `select ar.role_id from agent_authorizations a
@@ -1747,7 +1747,7 @@ export class PostgresAuthRepository implements AuthRepository {
         [
           auth.authorizationId,
           boundaryType,
-          projectId,
+          workspaceId,
           auth.humanUserId,
         ],
       )).rows.map((row) => row.role_id);
@@ -1788,10 +1788,10 @@ export class PostgresAuthRepository implements AuthRepository {
         );
       }
       const id = uuidV7();
-      const [boundaryType, projectId] = boundaryParams(input.boundary);
+      const [boundaryType, workspaceId] = boundaryParams(input.boundary);
       const inserted = (await query<AgentRequestRow>(
         tx,
-        `insert into agent_authorization_requests(id,requester_session_id,requester_authorization_id,human_user_id,idempotency_key,roles,boundary_type,project_id,reason,agent_name,nonce_digest,status) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'pending') returning *`,
+        `insert into agent_authorization_requests(id,requester_session_id,requester_authorization_id,human_user_id,idempotency_key,roles,boundary_type,workspace_id,reason,agent_name,nonce_digest,status) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'pending') returning *`,
         [
           id,
           auth.sessionId,
@@ -1800,7 +1800,7 @@ export class PostgresAuthRepository implements AuthRepository {
           input.idempotencyKey,
           input.roles,
           boundaryType,
-          projectId,
+          workspaceId,
           input.reason,
           input.agentName ?? null,
           input.nonceHash,
@@ -1933,23 +1933,23 @@ export class PostgresAuthRepository implements AuthRepository {
             {
               role_id: string;
               boundary_type: string;
-              project_id: string | null;
+              workspace_id: string | null;
             }
           >(
             tx,
-            `select role_id,boundary_type,project_id from agent_authorization_roles where authorization_id=$1`,
+            `select role_id,boundary_type,workspace_id from agent_authorization_roles where authorization_id=$1`,
             [prior.id],
           )).rows;
           for (const role of priorRoles) {
             await query(
               tx,
-              `insert into agent_authorization_roles(id,authorization_id,role_id,boundary_type,project_id) values($1,$2,$3,$4,$5)`,
+              `insert into agent_authorization_roles(id,authorization_id,role_id,boundary_type,workspace_id) values($1,$2,$3,$4,$5)`,
               [
                 uuidV7(),
                 authorizationId,
                 role.role_id,
                 role.boundary_type,
-                role.project_id,
+                role.workspace_id,
               ],
             );
           }
@@ -1957,13 +1957,13 @@ export class PostgresAuthRepository implements AuthRepository {
         for (const role of row.roles) {
           await query(
             tx,
-            `insert into agent_authorization_roles(id,authorization_id,role_id,boundary_type,project_id) values($1,$2,$3,$4,$5) on conflict do nothing`,
+            `insert into agent_authorization_roles(id,authorization_id,role_id,boundary_type,workspace_id) values($1,$2,$3,$4,$5) on conflict do nothing`,
             [
               uuidV7(),
               authorizationId,
               role,
               row.boundary_type,
-              row.project_id,
+              row.workspace_id,
             ],
           );
         }
@@ -1972,8 +1972,8 @@ export class PostgresAuthRepository implements AuthRepository {
         schema: "auth.authorization_decision.v1",
         request_id: id,
         requested_roles: row.roles,
-        boundary: row.boundary_type === "project"
-          ? { type: "project", project_id: row.project_id }
+        boundary: row.boundary_type === "workspace"
+          ? { type: "workspace", workspace_id: row.workspace_id }
           : { type: row.boundary_type },
         approver_auth_context_id: auth.id,
         role_definition_versions: grantable.value.roleDefinitionVersions,
@@ -2345,8 +2345,8 @@ type AgentRequestRow = {
   requester_authorization_id: string | null;
   human_user_id: string;
   roles: string[];
-  boundary_type: "project" | "all_projects" | "system";
-  project_id: string | null;
+  boundary_type: "workspace" | "all_workspaces" | "system";
+  workspace_id: string | null;
   reason: string;
   agent_name: string | null;
   nonce_digest: string;
@@ -2361,18 +2361,18 @@ type AgentRequestRow = {
 function boundaryParams(
   boundary: AuthorizationBoundary,
 ): [string, string | null] {
-  return boundary.type === "project"
-    ? [boundary.type, boundary.projectId]
+  return boundary.type === "workspace"
+    ? [boundary.type, boundary.workspaceId]
     : [boundary.type, null];
 }
 function boundaryFromRow(
   row: {
-    boundary_type: "project" | "all_projects" | "system";
-    project_id: string | null;
+    boundary_type: "workspace" | "all_workspaces" | "system";
+    workspace_id: string | null;
   },
 ): AuthorizationBoundary {
-  return row.boundary_type === "project"
-    ? { type: "project", projectId: row.project_id! }
+  return row.boundary_type === "workspace"
+    ? { type: "workspace", workspaceId: row.workspace_id! }
     : { type: row.boundary_type };
 }
 function agentRequest(row: AgentRequestRow): AgentAuthorizationRequest {
@@ -2424,12 +2424,12 @@ async function authorizationRow(
   const roles = (await query<
     {
       role_id: string;
-      boundary_type: "project" | "all_projects" | "system";
-      project_id: string | null;
+      boundary_type: "workspace" | "all_workspaces" | "system";
+      workspace_id: string | null;
     }
   >(
     sql,
-    `select role_id,boundary_type,project_id from agent_authorization_roles where authorization_id=$1 order by boundary_type,project_id,role_id`,
+    `select role_id,boundary_type,workspace_id from agent_authorization_roles where authorization_id=$1 order by boundary_type,workspace_id,role_id`,
     [id],
   )).rows;
   return {
@@ -2499,7 +2499,7 @@ export class PostgresAgentAuthorizationGrantabilityState
       snapshot: AgentAuthorizationGrantabilitySnapshot;
     }>
   > {
-    const [boundaryType, projectId] = boundaryParams(input.boundary);
+    const [boundaryType, workspaceId] = boundaryParams(input.boundary);
     const assignments = input.auth.authorizationId
       ? (await query<{ role_id: string }>(
         this.sql,
@@ -2520,7 +2520,7 @@ export class PostgresAgentAuthorizationGrantabilityState
           input.auth.authorizationId,
           input.auth.humanUserId,
           boundaryType,
-          projectId,
+          workspaceId,
         ],
       )).rows
       : (await query<{ role_id: string }>(
@@ -2535,7 +2535,7 @@ export class PostgresAgentAuthorizationGrantabilityState
             and ${authorizationBoundaryPredicate("ra", "$2", "$3")}
           order by ra.role_id
           for share of u,p,ra,r`,
-        [input.auth.humanUserId, boundaryType, projectId],
+        [input.auth.humanUserId, boundaryType, workspaceId],
       )).rows;
     const effectiveRoles = [...new Set(assignments.map((row) => row.role_id))];
     const superAdmin = isSuperAdmin(input.auth) && await currentSuperAdmin(
@@ -2561,7 +2561,7 @@ export class PostgresAgentAuthorizationGrantabilityState
             and pr.role_id=any($3::text[])
           order by pd.policy_id,pd.version,pr.capability
           for share of pa,pd,pr`,
-        [boundaryType, projectId, effectiveRoles],
+        [boundaryType, workspaceId, effectiveRoles],
       )).rows
       : [];
     const roleVersions = input.roles.length

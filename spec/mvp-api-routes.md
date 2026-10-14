@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-mvp-api-routes; contract: 1; input: sha256:0aabb5bcfd77e2df616ffd9d01579b8b11d63f611678f8a81f00b55bed36fb11 -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-mvp-api-routes; contract: 1; input: sha256:fe0d2b881188292714ff6899891e21161d3a7070896539277399ba1f91d3b27e -->
 
 # MVP API Routes
 
@@ -19,7 +19,7 @@ client and TOON renderer over these contracts. All responses use
 [API Response and Error Contract](api-errors.md); auth-specific DTOs are frozen
 in [Authentication API](auth-api.md).
 
-Definition identities are publisher-qualified. Runtime project is always a
+Definition identities are publisher-qualified. Runtime workspace is always a
 separate UUID/body/path value. The API has no user-facing `namespace`, dotted
 identity alias, actor header, role header, or combined stage-and-commit route.
 
@@ -40,12 +40,12 @@ GET  /authorization/roles
 GET  /expressions/help
 POST /expressions/validate
 
-# Platform projects (not optd/projects:project domain objects)
-GET  /projects
-POST /projects
-GET  /projects/{project_id}
-POST /projects/{project_id}/update
-POST /projects/{project_id}/archive
+# Platform workspaces (not optd/projects:project domain objects)
+GET  /workspaces
+POST /workspaces
+GET  /workspaces/{workspace_id}
+POST /workspaces/{workspace_id}/update
+POST /workspaces/{workspace_id}/archive
 
 # Metadata and globally installed definitions
 GET  /metadata/home
@@ -71,12 +71,12 @@ POST /migrations/{migration_id}/apply
 
 # Query/object reads; DTO/pagination are frozen in query-api.md
 POST /queries
-GET  /projects/{project_id}/objects/{publisher}/{pack}/{resource}/{object_id}
-GET  /projects/{project_id}/objects/{publisher}/{pack}/{resource}/{object_id}/history
-GET  /projects/{project_id}/relationships/{publisher}/{pack}/{relationship}/{relationship_id}
-GET  /projects/{project_id}/relationships/{publisher}/{pack}/{relationship}/{relationship_id}/history
+GET  /workspaces/{workspace_id}/objects/{publisher}/{pack}/{resource}/{object_id}
+GET  /workspaces/{workspace_id}/objects/{publisher}/{pack}/{resource}/{object_id}/history
+GET  /workspaces/{workspace_id}/relationships/{publisher}/{pack}/{relationship}/{relationship_id}
+GET  /workspaces/{workspace_id}/relationships/{publisher}/{pack}/{relationship}/{relationship_id}/history
 
-# Immutable staging; operations may span explicit projects
+# Immutable staging; operations may span explicit workspaces
 POST /changesets/stage
 GET  /changesets/{stage_id}
 POST /changesets/{stage_id}/commit
@@ -117,16 +117,16 @@ POST /policy-assignments/{assignment_id}/disable
 - `{publisher}`, `{pack}`, and child-name segments are lowercase canonical
   names; the server resolves the one active revision and returns its immutable
   revision ID/digest in metadata.
-- `{project_id}`, `{object_id}`, `{stage_id}`, migration/grant/delivery IDs, and
-  generated operation/entity IDs are UUIDv7 values. CLI may resolve a project
-  slug/name before invoking project-ID routes.
-- `POST /queries` carries one explicit `project_id` and one structured
+- `{workspace_id}`, `{object_id}`, `{stage_id}`, migration/grant/delivery IDs, and
+  generated operation/entity IDs are UUIDv7 values. CLI may resolve a workspace
+  slug/name before invoking workspace-ID routes.
+- `POST /queries` carries one explicit `workspace_id` and one structured
   definition identity `{kind: resource|relationship, publisher, pack, name}`.
-  Cross-project list/query is not an MVP query mode.
-- A multi-project stage carries `project_id` on each operation. Stage inspection
-  exposes the canonical set of affected projects.
-- Object reads include project in the path even though object UUIDv7 values are
-  globally unique; a mismatch returns safe `not_found`/`project_conflict` per
+  Cross-workspace list/query is not an MVP query mode.
+- A multi-workspace stage carries `workspace_id` on each operation. Stage inspection
+  exposes the canonical set of affected workspaces.
+- Object reads include workspace in the path even though object UUIDv7 values are
+  globally unique; a mismatch returns safe `not_found`/`workspace_conflict` per
   the authorization/error contracts.
 
 ## Write sequencing
@@ -168,7 +168,7 @@ Seed staging accepts:
 
 ```json
 {
-  "project_id": "019b...",
+  "workspace_id": "019b...",
   "seed_names": ["pipeline_stages"],
   "all": false
 }
@@ -186,10 +186,10 @@ route. Seed identity/idempotency semantics are frozen in `pack-structure.md`.
 ## Metadata behavior
 
 Metadata definitions are global, but responses may include current capability/
-AXI projections only for an explicit `project_id` query parameter. `optctl`
-sends its resolved context project when present. Without it, metadata returns
-global definition/schema guidance and labels project-bound capabilities as
-requiring a boundary; the server never guesses a project. Safe schema/AXI
+AXI projections only for an explicit `workspace_id` query parameter. `optctl`
+sends its resolved context workspace when present. Without it, metadata returns
+global definition/schema guidance and labels workspace-bound capabilities as
+requiring a boundary; the server never guesses a workspace. Safe schema/AXI
 definition reads are available to every authenticated human/agent session
 (request-only credentials remain limited to auth workflow routes). Default Hook
 metadata contains identity/purpose/phases/output/effect summary only. Policy
@@ -197,7 +197,7 @@ default metadata exposes identity/AXI/capability summary, not full predicates.
 Exact query `include_security=true` on pack/Hook/Policy metadata requires
 `pack.inspect_security` and adds full policy rules plus Hook script/ source
 digests, network/env/secret-slot/read mappings; secret/grant values/details and
-migration SQL remain on their separately authorized routes. Project capability
+migration SQL remain on their separately authorized routes. Workspace capability
 projections evaluate current authority in that boundary.
 
 ## Required request behavior
@@ -207,7 +207,7 @@ projections evaluate current authority in that boundary.
 - Unknown JSON and multipart fields are rejected.
 - Structured identity fields are used in JSON; concatenated dotted aliases are
   rejected.
-- `POST /actions/.../stage` body contains `project_id`, action `input`, and
+- `POST /actions/.../stage` body contains `workspace_id`, action `input`, and
   optional documented stage-request controls only.
 - Request lock-timeout override is accepted only on commit/apply routes and is
   bounded/configured as specified by their transactional contracts.
@@ -218,11 +218,11 @@ projections evaluate current authority in that boundary.
 ## CLI mapping examples
 
 ```text
-optctl --project sales view optd/crm:lead 019b...
-  -> resolve project `sales` to UUID
-  -> GET /api/v1/projects/{project_id}/objects/optd/crm/lead/{object_id}
+optctl --workspace sales view optd/crm:lead 019b...
+  -> resolve workspace `sales` to UUID
+  -> GET /api/v1/workspaces/{workspace_id}/objects/optd/crm/lead/{object_id}
 
-optctl --project sales action stage optd/crm:convert_lead --input action.json
+optctl --workspace sales action stage optd/crm:convert_lead --input action.json
   -> POST /api/v1/actions/optd/crm/convert_lead/stage
 
 optctl changeset commit 019c...

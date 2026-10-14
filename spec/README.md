@@ -1,20 +1,20 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-index; contract: 1; input: sha256:85ce4a4f715d4d7e965e15e9fe74b37198a1552eeea940c25f7854f7ce7a4302 -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-index; contract: 1; input: sha256:efe58c90874e1305c461c4fe6a3bce906d8eacc0d49f16ebbe235d4d820f8f9f -->
 
 # Specifications
 
-Generated canonical views of the reviewed Operant project model. model.json remains the structured source of truth.
+Generated canonical views of the reviewed Operant workspace model. model.json remains the structured source of truth.
 
 ## Contents
 
 - [Product direction](product.md) — Canonical product direction decisions and contracts projected from project-model/model.json.
 - [Identity, authentication, and authorization](identity-auth.md) — Canonical identity, authentication, and authorization decisions and contracts projected from project-model/model.json.
-- [Packs, Projects, and resources](packs-projects.md) — Canonical packs, projects, and resources decisions and contracts projected from project-model/model.json.
+- [Packs, Workspaces, and resources](packs-workspaces.md) — Canonical packs, workspaces, and resources decisions and contracts projected from project-model/model.json.
 - [Queries, policy, and history](queries-policy-history.md) — Canonical queries, policy, and history decisions and contracts projected from project-model/model.json.
 - [Immutable writes, Actions, and approvals](writes-actions.md) — Canonical immutable writes, actions, and approvals decisions and contracts projected from project-model/model.json.
 - [Hooks, secrets, and outbox](hooks-secrets-outbox.md) — Canonical hooks, secrets, and outbox decisions and contracts projected from project-model/model.json.
 - [Runtime, architecture, and release](runtime-release.md) — Canonical runtime, architecture, and release decisions and contracts projected from project-model/model.json.
 - [Proof packs and acceptance](proof-acceptance.md) — Canonical proof packs and acceptance decisions and contracts projected from project-model/model.json.
-- [Project-model governance and cutover](model-governance.md) — Canonical project-model governance and cutover decisions and contracts projected from project-model/model.json.
+- [Workspace-model governance and cutover](model-governance.md) — Canonical project-model governance and cutover decisions and contracts projected from project-model/model.json.
 - [API Actions](api-actions.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed api-actions.md source.
 - [API Response and Error Contract](api-errors.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed api-errors.md source.
 - [Authentication API and CLI Contract](auth-api.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed auth-api.md source.
@@ -52,13 +52,13 @@ Generated canonical views of the reviewed Operant project model. model.json rema
 - [optctl AXI Guidance Model](optctl-axi.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed optctl-axi.md source.
 - [Durable Outbox Delivery](outbox-delivery.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed outbox-delivery.md source.
 - [Pack Definition Schemas v1](pack-definition-schemas.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed pack-definition-schemas.md source.
-- [Pack Publishers and Projects](pack-publishers-and-projects.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed pack-publishers-and-projects.md source.
+- [Pack Publishers and Workspaces](pack-publishers-and-workspaces.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed pack-publishers-and-workspaces.md source.
 - [Pack Structure](pack-structure.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed pack-structure.md source.
 - [Specification Planning-Readiness Audit](planning-readiness-audit.md) — Generated non-normative disposition view preserving the complete reviewed legacy source for auditability.
 - [Policies and Authorization](policies.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed policies.md source.
 - [Historical Pre-MVP Questions and Proposals](pre-mvp-open-questions.md) — Generated non-normative disposition view preserving the complete reviewed legacy source for auditability.
 - [Project Management Proof-Pack Requirements](project-management-pack.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed project-management-pack.md source.
-- [Platform Projects](projects.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed projects.md source.
+- [Platform Workspaces](workspaces.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed workspaces.md source.
 - [Historical Design Proposals](proposals.md) — Generated non-normative disposition view preserving the complete reviewed legacy source for auditability.
 - [Query and Object Read API v1](query-api.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed query-api.md source.
 - [Resource Configuration](resource-configuration.md) — Generated exact-contract projection imported into project-model/model.json from the reviewed resource-configuration.md source.
@@ -105,7 +105,7 @@ The migration and consistency review is recorded under
   partial index config, CEL lowering, and security/breakage tests.
 - [Object Model](object-model.md): object types, identity, collaboration,
   governance, AI capabilities, relationships.
-- [Platform Projects](projects.md): built-in UUIDv7 project boundary, lifecycle,
+- [Platform Workspaces](workspaces.md): built-in UUIDv7 workspace boundary, lifecycle,
   routes, locking, and CLI behavior.
 - [Changesets](changesets.md): immutable staging, validation, commit, and
   conflict behavior.
@@ -133,7 +133,7 @@ The migration and consistency review is recorded under
   considerations, and scaling constraints.
 - [Authorization Definitions and Assignments](authorization-assignments.md):
   globally registered role/policy definitions, explicit
-  project/all-project/system assignments, and authorization evaluation
+  workspace/all-workspace/system assignments, and authorization evaluation
   boundaries.
 - [Authentication](authentication.md): local user/agent authentication,
   process-tree-selected filesystem grants, approval workflow, bootstrap,
@@ -154,8 +154,8 @@ The migration and consistency review is recorded under
 - [Pack Definition Schemas](pack-definition-schemas.md): strict v1 Pack,
   Resource, Relationship, Lifecycle, Action, Hook, Policy, Role, and Seed
   vocabulary plus rejected legacy aliases.
-- [Pack Publishers and Projects](pack-publishers-and-projects.md): distinct pack
-  publishers, runtime projects, canonical identities, and migration from the
+- [Pack Publishers and Workspaces](pack-publishers-and-workspaces.md): distinct pack
+  publishers, runtime workspaces, canonical identities, and migration from the
   currently overloaded namespace model.
 - [optctl AXI Guidance](optctl-axi.md): AXI-style CLI/resource guidance so packs
   can teach agents how to use them.
@@ -232,5 +232,5 @@ The migration and consistency review is recorded under
   integration-test default.
 - SQLite is out of MVP scope unless a later planning cycle deliberately revives
   it.
-- CRM is the default bundled proof fixture; a project-management pack is the
+- CRM is the default bundled proof fixture; a workspace-management pack is the
   second proof fixture.

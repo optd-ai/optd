@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-auth-api; contract: 1; input: sha256:7fe1a508225610a192cd58791124d3ccbe364cb29f6ac7a93489aa3b4040f270 -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-auth-api; contract: 1; input: sha256:5c1d74c06c903fbb74964f615e272d1747e240da9d26339d72e41c7bd71be074 -->
 
 # Authentication API and CLI Contract
 
@@ -44,11 +44,11 @@ Passwords/tokens never appear in URL parameters or ordinary CLI arguments.
 Exactly one variant:
 
 ```json
-{ "type": "project", "project_id": "019b7a2e-7c10-7000-8000-000000000001" }
+{ "type": "workspace", "workspace_id": "019b7a2e-7c10-7000-8000-000000000001" }
 ```
 
 ```json
-{ "type": "all_projects" }
+{ "type": "all_workspaces" }
 ```
 
 ```json
@@ -61,8 +61,8 @@ Role assignment:
 {
   "role": "optd/crm:sales_manager",
   "boundary": {
-    "type": "project",
-    "project_id": "019b7a2e-7c10-7000-8000-000000000001"
+    "type": "workspace",
+    "workspace_id": "019b7a2e-7c10-7000-8000-000000000001"
   }
 }
 ```
@@ -123,7 +123,7 @@ reauthentication and confirmation.
 ### Roles
 
 ```text
-GET /api/v1/auth/roles?boundary_type=project&project_id=019b...&verbose=false
+GET /api/v1/auth/roles?boundary_type=workspace&workspace_id=019b...&verbose=false
 ```
 
 Response follows the authored-guidance/computed-capability contract in
@@ -147,8 +147,8 @@ Creation requires `Idempotency-Key` plus a request or agent bearer credential:
 {
   "roles": ["optd/crm:sales_manager", "optd/crm:sales_rep"],
   "boundary": {
-    "type": "project",
-    "project_id": "019b7a2e-7c10-7000-8000-000000000001"
+    "type": "workspace",
+    "workspace_id": "019b7a2e-7c10-7000-8000-000000000001"
   },
   "reason": "Need to qualify CRM leads",
   "redemption_nonce_hash": "...",
@@ -401,7 +401,7 @@ context list
 context show
 context add
 context use
-context set-project
+context set-workspace
 context remove
 ```
 

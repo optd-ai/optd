@@ -59,7 +59,7 @@ Deno.test({
         user = uuidV7(),
         session = uuidV7(),
         auth = uuidV7(),
-        project = uuidV7(),
+        workspace = uuidV7(),
         candidate = uuidV7(),
         stage = uuidV7(),
         operation = uuidV7();
@@ -133,8 +133,8 @@ Deno.test({
         );
         await query(
           tx,
-          "insert into projects(id,slug,display_name,created_by_auth_context_id,updated_by_auth_context_id) values($1,'stage-upgrade','Stage Upgrade',$2,$2)",
-          [project, auth],
+          "insert into workspaces(id,slug,display_name,created_by_auth_context_id,updated_by_auth_context_id) values($1,'stage-upgrade','Stage Upgrade',$2,$2)",
+          [workspace, auth],
         );
         await query(
           tx,
@@ -150,15 +150,15 @@ Deno.test({
         );
         await query(
           tx,
-          `insert into staged_changesets(id,schema_version,source_kind,source_identity_json,created_auth_context_id,created_principal_id,creating_context_json,operation_graph_digest,stage_digest,canonical_graph_json,projects_json,pack_revisions_json,warnings_json,planned_events_json,planned_deliveries_json)
+          `insert into staged_changesets(id,schema_version,source_kind,source_identity_json,created_auth_context_id,created_principal_id,creating_context_json,operation_graph_digest,stage_digest,canonical_graph_json,workspaces_json,pack_revisions_json,warnings_json,planned_events_json,planned_deliveries_json)
           values($1,1,'direct','{}',$2,$3,'{}',$4,$4,'{}','[]','[]','[]','[]','[]')`,
           [stage, auth, principal, `sha256:${"3".repeat(64)}`],
         );
         await query(
           tx,
-          `insert into staged_changeset_operations(stage_id,ordinal,operation_id,project_id,pack_revision_id,resource_revision_id,operation_kind,object_id,canonical_operation_json,component_digest)
+          `insert into staged_changeset_operations(stage_id,ordinal,operation_id,workspace_id,pack_revision_id,resource_revision_id,operation_kind,object_id,canonical_operation_json,component_digest)
           values($1,0,$2,$3,$4,null,'create',$5,$6::jsonb,$7)`,
-          [stage, operation, project, candidate, uuidV7(), {
+          [stage, operation, workspace, candidate, uuidV7(), {
             op: "create",
             resource: "test/upgrade:thing",
           }, `sha256:${"0".repeat(64)}`],

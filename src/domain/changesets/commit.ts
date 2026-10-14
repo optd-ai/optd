@@ -1,6 +1,7 @@
 export type CommitChangesetDto = Readonly<{
   id: string;
   stage_id: string;
+  created: Readonly<Record<string, string>>;
   committed_auth_context_id: string;
   authorization_cutoff_at: string;
   operation_graph_digest: string;

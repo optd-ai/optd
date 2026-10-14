@@ -31,7 +31,7 @@ Deno.test({
 
 Deno.test({
   name:
-    "compiled optctl serializes bootstrap and persists transactional Projects",
+    "compiled optctl serializes bootstrap and persists transactional Workspaces",
   sanitizeOps: false,
   sanitizeResources: false,
   async fn() {
@@ -293,7 +293,7 @@ Deno.test({
 
       const created = await harness.runOptctl([
         "--json",
-        "project",
+        "workspace",
         "create",
         "sales",
         "--display-name",
@@ -302,17 +302,17 @@ Deno.test({
         "CRM",
       ]);
       assertEquals(created.code, 0, created.stderr);
-      const project = JSON.parse(created.stdout).data;
+      const workspace = JSON.parse(created.stdout).data;
       assertMatch(
-        project.id,
+        workspace.id,
         /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
       );
-      assertEquals(project.version, 1);
-      assertEquals((await harness.selectProject("sales")).code, 0);
+      assertEquals(workspace.version, 1);
+      assertEquals((await harness.selectWorkspace("sales")).code, 0);
       for (const slug of ["alpha", "bravo", "charlie"]) {
         const extra = await harness.runOptctl([
           "--json",
-          "project",
+          "workspace",
           "create",
           slug,
           "--display-name",
@@ -322,7 +322,7 @@ Deno.test({
       }
       const firstPage = await harness.runOptctl([
         "--json",
-        "project",
+        "workspace",
         "list",
         "--status",
         "active",
@@ -339,7 +339,7 @@ Deno.test({
       assert(typeof firstPageData.page.next_cursor === "string");
       const secondPage = await harness.runOptctl([
         "--json",
-        "project",
+        "workspace",
         "list",
         "--status",
         "active",
@@ -356,7 +356,7 @@ Deno.test({
       assertEquals(secondPageData.page.next_cursor, null);
       const cursorMismatch = await harness.runOptctl([
         "--json",
-        "project",
+        "workspace",
         "list",
         "--status",
         "archived",
@@ -368,11 +368,11 @@ Deno.test({
       assertEquals(cursorMismatch.code, 1);
       assertEquals(
         JSON.parse(cursorMismatch.stderr).error.code,
-        "project_cursor_mismatch",
+        "workspace_cursor_mismatch",
       );
       const malformedCursor = await harness.runOptctl([
         "--json",
-        "project",
+        "workspace",
         "list",
         "--cursor",
         "not-a-cursor",
@@ -380,11 +380,11 @@ Deno.test({
       assertEquals(malformedCursor.code, 1);
       assertEquals(
         JSON.parse(malformedCursor.stderr).error.code,
-        "project_cursor_invalid",
+        "workspace_cursor_invalid",
       );
       const exactSlug = await harness.runOptctl([
         "--json",
-        "project",
+        "workspace",
         "list",
         "--slug",
         "sales",
@@ -397,7 +397,7 @@ Deno.test({
         {
           args: [
             "--json",
-            "project",
+            "workspace",
             "update",
             "sales",
             "--display-name",
@@ -409,7 +409,7 @@ Deno.test({
         {
           args: [
             "--json",
-            "project",
+            "workspace",
             "update",
             "sales",
             "--display-name",
@@ -424,19 +424,19 @@ Deno.test({
       assert(conflict);
       assertEquals(
         JSON.parse(conflict.stderr).error.code,
-        "project_version_conflict",
+        "workspace_version_conflict",
       );
 
       const current = await harness.runOptctl([
         "--json",
-        "project",
+        "workspace",
         "view",
         "sales",
       ]);
       assertEquals(JSON.parse(current.stdout).data.version, 2);
       const archived = await harness.runOptctl([
         "--json",
-        "project",
+        "workspace",
         "archive",
         "sales",
         "--expected-version",
@@ -447,12 +447,12 @@ Deno.test({
 
       const audit = await query<{ action: string; auth_context_id: string }>(
         harness.server.sql,
-        `select action, auth_context_id::text from project_audit_events order by created_at`,
+        `select action, auth_context_id::text from workspace_audit_events order by created_at`,
       );
-      assert(audit.rows.some((row) => row.action === "project.create"));
-      assert(audit.rows.some((row) => row.action === "project.read"));
-      assert(audit.rows.some((row) => row.action === "project.update"));
-      assert(audit.rows.some((row) => row.action === "project.archive"));
+      assert(audit.rows.some((row) => row.action === "workspace.create"));
+      assert(audit.rows.some((row) => row.action === "workspace.read"));
+      assert(audit.rows.some((row) => row.action === "workspace.update"));
+      assert(audit.rows.some((row) => row.action === "workspace.archive"));
       assert(
         audit.rows.every((row) => /^[0-9a-f-]{36}$/.test(row.auth_context_id)),
       );
@@ -469,7 +469,7 @@ Deno.test({
       assertEquals(JSON.parse(completedStatus.stdout).data.state, "active");
       const persisted = await harness.runOptctl([
         "--json",
-        "project",
+        "workspace",
         "view",
         "sales",
       ]);
@@ -477,7 +477,7 @@ Deno.test({
       assertEquals(JSON.parse(persisted.stdout).data.status, "archived");
 
       const actorInjection = await fetch(
-        `${harness.baseUrl}/api/v1/projects?actor=admin`,
+        `${harness.baseUrl}/api/v1/workspaces?actor=admin`,
         {
           headers: { authorization: "Bearer invalid" },
         },

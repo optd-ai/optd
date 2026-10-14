@@ -53,16 +53,16 @@ Deno.test({
         "--safe",
       ]);
       assertEquals(applied.code, 0, applied.stderr);
-      const project = await harness.runOptctl([
+      const workspace = await harness.runOptctl([
         "--json",
-        "project",
+        "workspace",
         "create",
         "redirect-boundary",
         "--display-name",
         "Redirect Boundary",
       ]);
-      assertEquals(project.code, 0, project.stderr);
-      const projectId = JSON.parse(project.stdout).data.id;
+      assertEquals(workspace.code, 0, workspace.stderr);
+      const workspaceId = JSON.parse(workspace.stdout).data.id;
       const before = (await query<{ count: string }>(
         harness.server.sql,
         "select count(*)::text count from staged_changesets",
@@ -72,7 +72,7 @@ Deno.test({
         "changeset",
         "stage",
       ], {
-        project_id: projectId,
+        workspace_id: workspaceId,
         operations: [{
           op: "create",
           resource: "test/redirect:item",

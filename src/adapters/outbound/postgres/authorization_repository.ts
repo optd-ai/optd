@@ -118,7 +118,7 @@ export class PostgresAuthorizationRepository
     boundary: AuthorizationBoundary,
     auth: AuthContext,
   ): Promise<Result<Array<RoleDefinition & { assigned: boolean }>>> {
-    const [type, projectId] = boundaryParams(boundary);
+    const [type, workspaceId] = boundaryParams(boundary);
     const rows = await query<{
       id: string;
       version_id: string;
@@ -136,7 +136,7 @@ export class PostgresAuthorizationRepository
           and ${authorizationBoundaryPredicate("a", "$2", "$3")}) assigned
       from system_roles r join role_definition_versions v on v.role_id=r.id and v.active
       order by r.id`,
-      [auth.principalId, type, projectId],
+      [auth.principalId, type, workspaceId],
     );
     return ok(rows.rows.map((row) => ({
       id: row.id,
@@ -233,14 +233,14 @@ export class PostgresAuthorizationRepository
       const exists = await query<RoleAssignmentRow>(
         tx,
         roleAssignmentSelect +
-          " where u.id=$1 and ra.role_id=$2 and ra.boundary_type=$3 and ra.project_id is not distinct from $4::uuid and ra.active",
+          " where u.id=$1 and ra.role_id=$2 and ra.boundary_type=$3 and ra.workspace_id is not distinct from $4::uuid and ra.active",
         [userId, role, ...boundaryParams(boundary)],
       );
       if (exists.rows[0]) return ok(mapRoleAssignment(exists.rows[0]));
       const id = uuidV7();
       await query(
         tx,
-        `insert into role_assignments(id,principal_id,role_id,boundary_type,project_id,active,version,created_by_auth_context_id) values($1,$2,$3,$4,$5,true,1,$6)`,
+        `insert into role_assignments(id,principal_id,role_id,boundary_type,workspace_id,active,version,created_by_auth_context_id) values($1,$2,$3,$4,$5,true,1,$6)`,
         [
           id,
           target.rows[0].principal_id,
@@ -425,7 +425,7 @@ export class PostgresAuthorizationRepository
       const id = uuidV7();
       await query(
         tx,
-        `insert into policy_assignments(id,policy_definition_version_id,boundary_type,project_id,active,version,source,created_by_auth_context_id) values($1,$2,$3,$4,true,1,'operator',$5)`,
+        `insert into policy_assignments(id,policy_definition_version_id,boundary_type,workspace_id,active,version,source,created_by_auth_context_id) values($1,$2,$3,$4,true,1,'operator',$5)`,
         [id, revisionId, ...boundaryParams(boundary), auth.id],
       );
       await assignmentAudit(tx, auth.id, "policy_assignment.created", id, {
@@ -518,7 +518,7 @@ async function currentAuthority(
     });
     if (!lineage.ok) return inactiveCredential(auth);
   }
-  const [type, projectId] = boundaryParams(boundary);
+  const [type, workspaceId] = boundaryParams(boundary);
   const rows = await query<AuthorityRow>(
     sql,
     `
@@ -554,7 +554,7 @@ async function currentAuthority(
     select er.role_id,sa.value super_admin,a.policy_id,a.policy_revision_id,a.rule_id,a.action,a.resource,a.condition_kind,a.summary,a.predicate
     from valid_actor va cross join super_admin sa left join effective_roles er on true left join applicable a on true
     order by er.role_id,a.policy_id,a.rule_id`,
-    [auth.sessionId, actor.id, actor.human_user_id, type, projectId],
+    [auth.sessionId, actor.id, actor.human_user_id, type, workspaceId],
   );
   if (!rows.rows.length) return inactiveCredential(auth);
   const effectiveRoles = [
@@ -620,8 +620,8 @@ function hasCapability(authority: BoundaryAuthority, action: string): boolean {
 function boundaryParams(
   boundary: AuthorizationBoundary,
 ): [string, string | null] {
-  return boundary.type === "project"
-    ? ["project", boundary.projectId]
+  return boundary.type === "workspace"
+    ? ["workspace", boundary.workspaceId]
     : [boundary.type, null];
 }
 function policyDenied(
@@ -732,7 +732,7 @@ async function assignmentAudit(
   );
 }
 
-type BoundaryRow = { boundary_type: string; project_id: string | null };
+type BoundaryRow = { boundary_type: string; workspace_id: string | null };
 type RoleAssignmentRow = BoundaryRow & {
   id: string;
   user_id: string;
@@ -744,7 +744,7 @@ type RoleAssignmentRow = BoundaryRow & {
   disabled_at: Date | null;
 };
 const roleAssignmentSelect =
-  `select ra.id,u.id user_id,ra.principal_id,ra.role_id,ra.boundary_type,ra.project_id,ra.active,ra.version,ra.created_at,ra.disabled_at from role_assignments ra join human_users u on u.principal_id=ra.principal_id`;
+  `select ra.id,u.id user_id,ra.principal_id,ra.role_id,ra.boundary_type,ra.workspace_id,ra.active,ra.version,ra.created_at,ra.disabled_at from role_assignments ra join human_users u on u.principal_id=ra.principal_id`;
 type PolicyAssignmentRow = BoundaryRow & {
   id: string;
   policy_id: string;
@@ -756,11 +756,11 @@ type PolicyAssignmentRow = BoundaryRow & {
   disabled_at: Date | null;
 };
 const policyAssignmentSelect =
-  `select pa.id,pd.policy_id,pa.policy_definition_version_id policy_revision_id,pa.boundary_type,pa.project_id,pa.active,pa.version,pa.source,pa.created_at,pa.disabled_at from policy_assignments pa join policy_definition_versions pd on pd.id=pa.policy_definition_version_id`;
+  `select pa.id,pd.policy_id,pa.policy_definition_version_id policy_revision_id,pa.boundary_type,pa.workspace_id,pa.active,pa.version,pa.source,pa.created_at,pa.disabled_at from policy_assignments pa join policy_definition_versions pd on pd.id=pa.policy_definition_version_id`;
 function rowBoundary(row: BoundaryRow): AuthorizationBoundary {
-  return row.boundary_type === "project"
-    ? { type: "project", projectId: String(row.project_id) }
-    : { type: row.boundary_type as "system" | "all_projects" };
+  return row.boundary_type === "workspace"
+    ? { type: "workspace", workspaceId: String(row.workspace_id) }
+    : { type: row.boundary_type as "system" | "all_workspaces" };
 }
 function mapRoleAssignment(row: RoleAssignmentRow): RoleAssignmentRecord {
   return {

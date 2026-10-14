@@ -125,14 +125,14 @@ Deno.test("fresh real server supports compiled CLI TOON/JSON, restart, and stabl
     assertEquals(loginFuture.result.code, 1);
     assertFrozenErrorEnvelope(loginFuture.result.stderr, "login_invalid");
     await loginFuture.launcher.close();
-    const missingProject = await harness.runOptctl([
+    const missingWorkspace = await harness.runOptctl([
       "--json",
-      "project",
+      "workspace",
       "select",
       crypto.randomUUID(),
     ]);
-    assertEquals(missingProject.code, 1);
-    assertFrozenErrorEnvelope(missingProject.stderr, "validation_failed");
+    assertEquals(missingWorkspace.code, 1);
+    assertFrozenErrorEnvelope(missingWorkspace.stderr, "validation_failed");
 
     const jsonInput = await harness.runJson(
       ["--json", "changeset", "preview"],

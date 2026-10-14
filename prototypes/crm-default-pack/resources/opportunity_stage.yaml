@@ -40,7 +40,7 @@ spec:
       empty:
         message: No opportunity stage records found.
         help:
-          - optctl --project ${project} create optd/crm:opportunity_stage --input object.json
+          - optctl --workspace ${workspace} create optd/crm:opportunity_stage --input object.json
             --stage
     detail:
       sections:
@@ -52,11 +52,11 @@ spec:
             - sort_order
             - terminal
       help:
-        - optctl --project ${project} query optd/crm:opportunity_stage --where 'id == "${id}"'
+        - optctl --workspace ${workspace} query optd/crm:opportunity_stage --where 'id == "${id}"'
     help:
       list:
-        - optctl --project ${project} query optd/crm:opportunity_stage
+        - optctl --workspace ${workspace} query optd/crm:opportunity_stage
       view:
-        - optctl --project ${project} view optd/crm:opportunity_stage ${id}
+        - optctl --workspace ${workspace} view optd/crm:opportunity_stage ${id}
       created:
-        - optctl --project ${project} view optd/crm:opportunity_stage ${id}
+        - optctl --workspace ${workspace} view optd/crm:opportunity_stage ${id}

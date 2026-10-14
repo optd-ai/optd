@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-authentication; contract: 1; input: sha256:c4494f920914899fb8d6ad930cbffceec398ad89ba1517e3919f2bb1cf19a2f9 -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-authentication; contract: 1; input: sha256:09c5cc8d160a0889ed7c19eb9d49a333991bdbb700f9c1a7110da42b4dbfeba7 -->
 
 # Authentication and Local Agent Grants
 
@@ -92,13 +92,13 @@ The design separates two related records:
   binds a credential to a local process tree and controls credential selection.
 - An **agent authorization session** is server-owned state that maps an opaque
   bearer token to an agent principal, anchoring human user, approved role,
-  project authority, revocation state, and audit provenance.
+  workspace authority, revocation state, and audit provenance.
 
 The server checks the current HTTP request only:
 
 1. Is there a credential?
 2. Is its authorization session valid, unexpired if applicable, and not revoked?
-3. What principal/session/effective role and project authority does it map to?
+3. What principal/session/effective role and workspace authority does it map to?
 4. Is that effective actor authorized for this operation?
 5. What provenance should be recorded?
 
@@ -206,7 +206,7 @@ grants to reference.
 
 Role definitions are globally registered system objects; holding a role is
 always expressed by a separate assignment with an explicit boundary. The same
-role definition can therefore be assigned in `sales`, `sandbox`, all projects,
+role definition can therefore be assigned in `sales`, `sandbox`, all workspaces,
 or the system boundary without cloning the definition.
 
 - Pack role definitions use publisher-qualified identities such as
@@ -215,7 +215,7 @@ or the system boundary without cloning the definition.
   `system:admin`.
 - Policies reference canonical role definition ids.
 - Human-user role assignments and server agent authorizations reference a role
-  definition plus exactly one project/all-project/system boundary.
+  definition plus exactly one workspace/all-workspace/system boundary.
 - Pack install/preview canonicalizes relative references and detects definition
   conflicts.
 - Missing assignment boundary never implies global authority.
@@ -254,7 +254,7 @@ include `axi.summary` to explain their conditions in human terms; the server
 combines that prose with the structured rule but never uses prose to decide.
 
 `optctl auth roles` resolves an explicit or active-context
-project/all-project/system boundary and echoes it, then shows canonical role id,
+workspace/all-workspace/system boundary and echoes it, then shows canonical role id,
 display name, and `role.spec.axi.summary`. It lists roles available through the
 anchoring human user's assignments even when no active policy currently grants
 useful capabilities; such roles remain visible with a warning.
@@ -506,7 +506,7 @@ Proposed flow:
 ```bash
 optctl auth roles
 optctl auth roles --verbose
-optctl --project sales auth request \
+optctl --workspace sales auth request \
   --role optd/crm:sales_manager \
   --role optd/crm:sales_rep \
   --reason "Need to qualify CRM leads"
@@ -525,8 +525,8 @@ caller explicitly chooses to inspect available roles.
 The request records:
 
 - one or more requested canonical roles;
-- exactly one requested boundary shared by all requested roles: project,
-  all-projects, or system;
+- exactly one requested boundary shared by all requested roles: workspace,
+  all-workspaces, or system;
 - reason;
 - optional typed agent-reported metadata;
 - created timestamp;
@@ -553,7 +553,7 @@ Request output:
 auth request created
 request_id: 019b7a2e-7c10-7000-8000-000000000101
 requested_roles: [optd/crm:sales_manager, optd/crm:sales_rep]
-requested_boundary: project:sales
+requested_boundary: workspace:sales
 agent_name: crm-lead-agent
 
 Ask an authorized user/agent to run:
@@ -621,7 +621,7 @@ Approval must be policy checked. Approval UI should show:
 Confirmation:
 
 ```text
-Grant roles [optd/crm:sales_manager, optd/crm:sales_rep] in project sales to agent session sess_xyz789 until the process tree exits?
+Grant roles [optd/crm:sales_manager, optd/crm:sales_rep] in workspace sales to agent session sess_xyz789 until the process tree exits?
 Friendly agent name: crm-lead-agent
 Approve? [y/N]
 ```
@@ -691,7 +691,7 @@ should start that agent outside a human-authenticated tree, then log in and
 approve its request from another terminal.
 
 `optctl` walks ancestry and selects the nearest process binding, which points to
-one current authorization token. It does not inspect target roles/projects to
+one current authorization token. It does not inspect target roles/workspaces to
 choose among credentials, combine tokens, search other bindings after denial, or
 fall back to a broader ancestor. If no process binding matches, it uses the
 authorization-request credential only for its narrow auth workflow.
@@ -711,7 +711,7 @@ A binding anchor identity requires:
 - binding creation time.
 
 PID alone is never sufficient because operating systems reuse PIDs. Hostname,
-executable basename, redacted command summary, cwd/project path, and model or
+executable basename, redacted command summary, cwd/workspace path, and model or
 harness metadata are diagnostic/provenance fields only and do not establish a
 binding.
 
@@ -722,11 +722,7 @@ narrower binding matches but its server authorization is revoked or
 insufficient, `optctl` must not retry with a broader ancestor credential; it may
 use only the authorization-request credential to request replacement authority.
 
-Human login and agent authorization requests anchor to the immediate parent of
-the transient `optctl` command. This requires no agent-harness or terminal-
-multiplexer detection: the command expresses human versus agent intent, the
-invoking shell/harness is naturally the parent, and sibling shells/panes are not
-descendants.
+Human login and agent authorization requests anchor to the nearest verified persistent harness or interactive shell, not a transient command shell. Known command-shell wrappers are traversed; unknown launchers fail closed and must provide OPTD_AUTH_ANCHOR_PID for their own live PID. Explicit anchors must be in the caller's permitted ancestry and cannot bypass a nearer binding or isolate boundary. The selected ancestry is revalidated before use. On Linux, any narrow-reader helper resolves cat through PATH; a missing helper or boot identity reports process_inspection_unavailable rather than pretending a valid process disappeared.
 
 `optctl auth session-pid` prints the immediate caller PID as a machine-readable
 integer. A parent agent may launch a subagent with:
@@ -1252,24 +1248,24 @@ local or `--server <url>` endpoint. Local process-tree token selection remains
 on the client machine. The server sees only opaque credentials and server-needed
 authorization/provenance data.
 
-## CLI server/project contexts
+## CLI server/workspace contexts
 
 Contexts are non-secret convenience configuration containing only a normalized
-server origin and optional default project. They never contain/select users,
+server origin and optional default workspace. They never contain/select users,
 tokens, roles, bindings, or authorizations.
 
 ```bash
 optctl context list
 optctl context show
-optctl context add prod --server https://optd.example.com --project sales
+optctl context add prod --server https://optd.example.com --workspace sales
 optctl context use prod
-optctl context set-project delivery
+optctl context set-workspace delivery
 optctl context remove old
 ```
 
 Resolution precedence is explicit command flags, `OPTD_SERVER_URL` /
-`OPTD_PROJECT`, active context, then packaged local defaults. Explicit
-resource project and selected project must agree or return `project_conflict`.
+`OPTD_WORKSPACE`, active context, then packaged local defaults. Explicit
+resource workspace and selected workspace must agree or return `workspace_conflict`.
 Origins normalize scheme, lowercase hostname, effective port, trailing slash,
 and IPv6 representation; origins contain no path/query/fragment. Credentials
 never follow redirects to another origin.
@@ -1277,8 +1273,8 @@ never follow redirects to another origin.
 Successful bootstrap automatically creates/updates and activates a context—no
 confirmation. Loopback uses `local`, an explicit `--context` uses that name, and
 remote origins otherwise use the normalized hostname with deterministic
-collision handling. The project remains unset until one exists; creation of the
-first project may set it automatically only when the context has no default.
+collision handling. The workspace remains unset until one exists; creation of the
+first workspace may set it automatically only when the context has no default.
 
 ## CLI input and diagnostics
 
@@ -1379,8 +1375,8 @@ plan/confirmation; `--fix --yes` supports noninteractive repair.
 - `principal_type`
 - `principal_id`
 - `role_id`
-- `boundary_type`: project/all_projects/system
-- `project_id` present only for project boundary
+- `boundary_type`: workspace/all_workspaces/system
+- `workspace_id` present only for workspace boundary
 
 `can_grant` is derived from active policy evaluation of `auth.request.decide`;
 it is not stored as an independent delegation assignment.
@@ -1401,7 +1397,7 @@ it is not stored as an independent delegation assignment.
 - `request_metadata_json`
 
 For `agent_user` rows, this is the authoritative **agent authorization
-session**. It stores approved role/project authority directly or references a
+session**. It stores approved role/workspace authority directly or references a
 normalized server-side authorization binding. It does not store an authoritative
 PID/process-tree constraint.
 
@@ -1424,9 +1420,9 @@ PID/process-tree constraint.
 Auth contexts are immutable server-derived credential snapshots. Bounded roles
 are stored in
 `auth_context_role_assignments(auth_context_id, role_id,
-boundary_type, project_id)`.
+boundary_type, workspace_id)`.
 Contexts do not require one target boundary; audit policy summaries record
-per-operation boundary decisions for multi-project changesets.
+per-operation boundary decisions for multi-workspace changesets.
 Authorization-request credentials use the associated human principal, credential
 kind `authorization_request`, and no role rows. Contexts contain no local
 process/client fingerprinting fields.
@@ -1436,8 +1432,8 @@ process/client fingerprinting fields.
 - `id`
 - `human_user_id`
 - `requested_role_ids`
-- `boundary_type`: project/all_projects/system
-- `project_id` present only for project boundary
+- `boundary_type`: workspace/all_workspaces/system
+- `workspace_id` present only for workspace boundary
 - `reason`
 - `status`: pending/approved/denied/invalidated
 - `agent_reported_metadata_json` with only the typed optional fields
@@ -1475,8 +1471,8 @@ claim to enforce a local process tree.
 
 - `authorization_id`
 - `role_id`
-- `boundary_type`: project/all_projects/system
-- `project_id` present only for project boundary
+- `boundary_type`: workspace/all_workspaces/system
+- `workspace_id` present only for workspace boundary
 - `source_request_id`
 
 `auth_recovery_challenges`
@@ -1532,8 +1528,8 @@ context as defined in [Events and Audit](events-audit.md).
 `prototypes/authentication/` exercises the proposed public lifecycle in an
 isolated Hono server: one-time bootstrap, Argon2id login, retained/issued
 request credentials, idempotent multi-role requests, approval without token
-disclosure, requester nonce redemption, multi-project replacement authorization,
-per-project role use, agent-to-subagent approval and chain invalidation, denial
+disclosure, requester nonce redemption, multi-workspace replacement authorization,
+per-workspace role use, agent-to-subagent approval and chain invalidation, denial
 without escalation suggestions, self-revocation, password-confirmed logout-all,
 targeted recovery, stable errors, and auth contexts without process evidence.
 

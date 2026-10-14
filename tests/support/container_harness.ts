@@ -744,7 +744,10 @@ async function preflightComposeRemoval(
     identities: string[];
   }> = [];
   for (const [kind, command] of composeResourceCommands) {
-    const projectResources = await listExactComposeResources(command, project);
+    const projectResources = await listExactComposeResources(
+      command,
+      project,
+    );
     const ownedResources = await listExactComposeResources(
       command,
       project,

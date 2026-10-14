@@ -46,7 +46,7 @@ spec:
       empty:
         message: No activity records found.
         help:
-          - optctl --project ${project} create optd/crm:activity --input object.json --stage
+          - optctl --workspace ${workspace} create optd/crm:activity --input object.json --stage
     detail:
       sections:
         - title: activity
@@ -57,11 +57,11 @@ spec:
             - due_at
             - completed_at
       help:
-        - optctl --project ${project} query optd/crm:activity --where 'id == "${id}"'
+        - optctl --workspace ${workspace} query optd/crm:activity --where 'id == "${id}"'
     help:
       list:
-        - optctl --project ${project} query optd/crm:activity
+        - optctl --workspace ${workspace} query optd/crm:activity
       view:
-        - optctl --project ${project} view optd/crm:activity ${id}
+        - optctl --workspace ${workspace} view optd/crm:activity ${id}
       created:
-        - optctl --project ${project} view optd/crm:activity ${id}
+        - optctl --workspace ${workspace} view optd/crm:activity ${id}

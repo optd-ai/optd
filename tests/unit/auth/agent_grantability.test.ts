@@ -84,7 +84,7 @@ Deno.test("authenticated current super-admin bypass remains structural", async (
     auth,
     decision: "approved",
     roles: ["system:super_admin"],
-    boundary: { type: "all_projects" },
+    boundary: { type: "all_workspaces" },
     state: state({ superAdmin: true, canDecide: false, effectiveRoles: [] }),
   });
   assertEquals(result, { ok: true, value: snapshot });

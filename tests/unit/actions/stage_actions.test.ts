@@ -49,7 +49,7 @@ Deno.test("action policy targets require every resolved read", () => {
       kind: "resource" as const,
       publisher: "optd",
       pack: "projects",
-      name: "project_stage",
+      name: "workspace_stage",
     },
     objectId: "019b7a2e-7c10-7000-8000-000000000002",
   };

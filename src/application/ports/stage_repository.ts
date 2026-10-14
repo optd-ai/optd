@@ -12,7 +12,7 @@ export type StageSource = Readonly<{
   kind: "direct" | "action" | "seed";
   identity: Readonly<Record<string, unknown>>;
   authority?: Readonly<{
-    project_id: string;
+    workspace_id: string;
     actions: readonly string[];
     revision_id: string;
     effects: readonly Readonly<
@@ -22,7 +22,7 @@ export type StageSource = Readonly<{
     targeted?: Readonly<{
       action: string;
       targets: readonly Readonly<{
-        project_id: string;
+        workspace_id: string;
         resource: string;
         object_id?: string;
         object_version_id?: string;
@@ -74,7 +74,7 @@ export type StageDto = {
   created_auth_context_id: string;
   operation_graph_digest: string;
   stage_digest: string;
-  projects: unknown[];
+  workspaces: unknown[];
   pack_revisions: unknown[];
   operations: CanonicalOperation[];
   dependencies: unknown[];

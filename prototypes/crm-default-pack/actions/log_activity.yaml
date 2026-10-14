@@ -26,6 +26,6 @@ spec:
       - Use optd/crm:log_activity when its declared operation should be staged.
     stageFirst: true
     examples:
-      - optctl --project ${project} action stage optd/crm:log_activity --input action.json
+      - optctl --workspace ${workspace} action stage optd/crm:log_activity --input action.json
     successHelp:
       - optctl changeset inspect ${stage_id}

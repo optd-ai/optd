@@ -8,7 +8,7 @@ import type {
 export type CanonicalOperation = Record<string, unknown> & {
   op: string;
   key: string;
-  project_id: string;
+  workspace_id: string;
 };
 export type OperationLimits = {
   maxOperations: number;
@@ -27,7 +27,7 @@ const PLATFORM_FIELDS = new Set([
   "object_id",
   "relationship_id",
   "comment_id",
-  "project_id",
+  "workspace_id",
   "version",
   "object_version_id",
   "created_at",
@@ -57,7 +57,7 @@ export async function normalizeOperations(
     source,
     ordinal,
     key: source.key ?? `op_${String(ordinal + 1).padStart(6, "0")}`,
-    project_id: resolveProject(source, request.project_id, ordinal),
+    workspace_id: resolveWorkspace(source, request.workspace_id, ordinal),
   }));
   const keys = new Map<string, typeof entries[number]>();
   for (const entry of entries) {
@@ -72,7 +72,7 @@ export async function normalizeOperations(
   }
   const produced = new Map<
     string,
-    { property: string; id: string; project_id: string }
+    { property: string; id: string; workspace_id: string }
   >();
   for (const entry of entries) {
     const property = entry.source.op === "create"
@@ -86,7 +86,7 @@ export async function normalizeOperations(
       produced.set(entry.key, {
         property,
         id: idAllocator(),
-        project_id: entry.project_id,
+        workspace_id: entry.workspace_id,
       });
     }
   }
@@ -111,7 +111,7 @@ export function resolveAddedOperations(
 ): CanonicalOperation[] {
   const produced = new Map<
     string,
-    { property: string; id: string; project_id: string }
+    { property: string; id: string; workspace_id: string }
   >();
   for (const operation of base) {
     const property = operation.op === "create"
@@ -125,7 +125,7 @@ export function resolveAddedOperations(
       produced.set(operation.key, {
         property,
         id: String(operation[property]),
-        project_id: operation.project_id,
+        workspace_id: operation.workspace_id,
       });
     }
   }
@@ -134,14 +134,14 @@ export function resolveAddedOperations(
     ordinal: base.length + ordinal,
     key: source.key ??
       `op_${String(base.length + ordinal + 1).padStart(6, "0")}`,
-    project_id: source.project_id ?? "",
+    workspace_id: source.workspace_id ?? "",
   }));
   for (const entry of entries) {
-    if (!entry.project_id) {
+    if (!entry.workspace_id) {
       throw new OperationError(
-        "project_required",
-        `/operations/${entry.ordinal}/project_id`,
-        "coordinator-added operations require explicit project_id",
+        "workspace_required",
+        `/operations/${entry.ordinal}/workspace_id`,
+        "coordinator-added operations require explicit workspace_id",
       );
     }
     if (
@@ -165,7 +165,7 @@ export function resolveAddedOperations(
       produced.set(entry.key, {
         property,
         id: allocate(),
-        project_id: entry.project_id,
+        workspace_id: entry.workspace_id,
       });
     }
   }
@@ -204,27 +204,27 @@ export async function canonicalizeResolvedOperations(
   };
 }
 
-function resolveProject(
+function resolveWorkspace(
   source: AuthoredOperation,
   inherited: string | undefined,
   ordinal: number,
 ): string {
-  if (source.project_id && inherited && source.project_id !== inherited) {
+  if (source.workspace_id && inherited && source.workspace_id !== inherited) {
     throw new OperationError(
-      "project_conflict",
-      `/operations/${ordinal}/project_id`,
-      "operation project conflicts with request project",
+      "workspace_conflict",
+      `/operations/${ordinal}/workspace_id`,
+      "operation workspace conflicts with request workspace",
     );
   }
-  const project = source.project_id ?? inherited;
-  if (!project) {
+  const workspace = source.workspace_id ?? inherited;
+  if (!workspace) {
     throw new OperationError(
-      "project_required",
-      `/operations/${ordinal}/project_id`,
-      "project_id is required without request inheritance",
+      "workspace_required",
+      `/operations/${ordinal}/workspace_id`,
+      "workspace_id is required without request inheritance",
     );
   }
-  return project;
+  return workspace;
 }
 
 function resolveEntry(
@@ -232,16 +232,29 @@ function resolveEntry(
     source: AuthoredOperation;
     ordinal: number;
     key: string;
-    project_id: string;
+    workspace_id: string;
   },
-  produced: Map<string, { property: string; id: string; project_id: string }>,
+  produced: Map<string, { property: string; id: string; workspace_id: string }>,
 ): CanonicalOperation {
   const source = entry.source as Record<string, unknown>;
   const output: Record<string, unknown> = {
     ...source,
     key: entry.key,
-    project_id: entry.project_id,
+    workspace_id: entry.workspace_id,
   };
+  if (
+    source.op === "create" &&
+    ((source.initial_state !== undefined) !==
+        (source.import_reason !== undefined) ||
+      (source.import_reason !== undefined &&
+        !String(source.import_reason).trim()))
+  ) {
+    throw new OperationError(
+      "validation_failed",
+      `/operations/${entry.ordinal}`,
+      "initial_state and a nonblank import_reason must be supplied together",
+    );
+  }
   const own = produced.get(entry.key);
   if (own) output[own.property] = own.id;
   for (const field of ["fields", "set"] as const) {
@@ -276,20 +289,20 @@ function resolveEntry(
   return resolveValue(
     output,
     produced,
-    entry.project_id,
+    entry.workspace_id,
     `/operations/${entry.ordinal}`,
   ) as CanonicalOperation;
 }
 
 function resolveValue(
   value: unknown,
-  produced: Map<string, { property: string; id: string; project_id: string }>,
-  project: string,
+  produced: Map<string, { property: string; id: string; workspace_id: string }>,
+  workspace: string,
   path: string,
 ): unknown {
   if (Array.isArray(value)) {
     return value.map((item, i) =>
-      resolveValue(item, produced, project, `${path}/${i}`)
+      resolveValue(item, produced, workspace, `${path}/${i}`)
     );
   }
   if (!isObject(value)) return value;
@@ -318,11 +331,11 @@ function resolveValue(
         "producer does not expose the referenced property",
       );
     }
-    if (producer.project_id !== project) {
+    if (producer.workspace_id !== workspace) {
       throw new OperationError(
-        "project_conflict",
+        "workspace_conflict",
         path,
-        "cross-project references are forbidden",
+        "cross-workspace references are forbidden",
       );
     }
     return producer.id;
@@ -332,7 +345,7 @@ function resolveValue(
       [key, item],
     ) => [
       key,
-      resolveValue(item, produced, project, `${path}/${escapePointer(key)}`),
+      resolveValue(item, produced, workspace, `${path}/${escapePointer(key)}`),
     ]),
   );
 }
@@ -374,7 +387,7 @@ function mergeMutations(
       continue;
     }
     const target = String(operation.object_id);
-    const groupKey = `${operation.project_id}\u0000${
+    const groupKey = `${operation.workspace_id}\u0000${
       String(operation.resource)
     }\u0000${target}`;
     const existingIndex = groups.get(groupKey);

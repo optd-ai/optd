@@ -220,7 +220,7 @@ Deno.test("doctor reports references, liveness, partitions, orphans, temp files,
     const serverRecord = JSON.parse(serverValue);
     await Deno.writeTextFile(
       layout.server,
-      JSON.stringify({ ...serverRecord, state: { projectId: 42 } }),
+      JSON.stringify({ ...serverRecord, state: { workspaceId: 42 } }),
       { mode: 0o600 },
     );
     assert(

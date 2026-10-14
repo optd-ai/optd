@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-vision; contract: 1; input: sha256:3ac5930a89c1847155766d1c13e19d2e2c49053fc9ebf7953ba1068b77385c51 -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-vision; contract: 1; input: sha256:c138d91e2931d08993c0ba03405ae65c611610d4bcb0a7784902417cf80a91d6 -->
 
 # Vision
 
@@ -15,7 +15,7 @@ Generated exact-contract projection imported into project-model/model.json from 
 ## One-Line Vision
 
 An API-first operational data platform for AI agents: the correctness-enforcing
-control plane underneath CRMs, support tools, project tools, workflows, and
+control plane underneath CRMs, support tools, workspace tools, workflows, and
 agentic business applications.
 
 ## Philosophy

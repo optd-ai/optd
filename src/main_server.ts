@@ -99,7 +99,7 @@ export async function createFetchHandler(
     bootstrap: application.bootstrap,
     humanAuth: application.humanAuth,
     agentAuth: application.agentAuth,
-    projects: application.projects,
+    workspaces: application.workspaces,
     authorization: application.authorization,
     metadata: application.metadata,
     objectReads: application.objectReads,

@@ -23,7 +23,7 @@ spec:
         - id
         - version
         - state
-        - work_project_id
+        - project_id
         - assignee_id
       required: true
   availability:
@@ -37,6 +37,6 @@ spec:
       - Use optd/projects:block_task when its declared operation should be staged.
     stageFirst: true
     examples:
-      - optctl --project ${project} action stage optd/projects:block_task --input action.json
+      - optctl --workspace ${workspace} action stage optd/projects:block_task --input action.json
     successHelp:
       - optctl changeset inspect ${stage_id}

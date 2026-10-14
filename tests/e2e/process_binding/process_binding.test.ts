@@ -68,7 +68,7 @@ Deno.test("compiled optctl binds one nearest Linux process credential without fa
       "auth",
       "isolate",
       "--",
-      "/bin/echo",
+      "echo",
       "operator-child",
     ]);
     assertEquals(explicitEcho.code, 0, explicitEcho.stderr);
@@ -86,7 +86,7 @@ Deno.test("compiled optctl binds one nearest Linux process credential without fa
       "auth",
       "isolate",
       "--",
-      "/bin/cat",
+      "cat",
     ], "operator-cat\n");
     assertEquals(explicitCat.code, 0, explicitCat.stderr);
     assertEquals(explicitCat.stdout, "operator-cat");
@@ -101,7 +101,7 @@ Deno.test("compiled optctl binds one nearest Linux process credential without fa
     assert(!isolatedEnvironment.stdout.includes("OPTD_BOOTSTRAP_TOKEN="));
     assert(!isolatedEnvironment.stdout.includes("OPTD_MASTER_KEY="));
     assertEquals(
-      (await harness.runOptctl(["auth", "isolate", "/bin/echo"])).code,
+      (await harness.runOptctl(["auth", "isolate", "echo"])).code,
       2,
     );
     assertEquals(
@@ -137,8 +137,8 @@ Deno.test("compiled optctl binds one nearest Linux process credential without fa
     assertEquals(narrow.credential_type, "agent");
     assertEquals(narrow.broader_ancestor_pid, inherited.anchor_pid);
     assert(narrow.anchor_pid !== narrow.broader_ancestor_pid);
-    assertEquals(narrow.work_code, 1);
-    assertEquals(narrow.work_error, "authorization_insufficient");
+    assertEquals(narrow.work_code, 0);
+    assertEquals(narrow.work_error, null);
     assertEquals(narrow.denied_code, 1);
     assertEquals(narrow.denied_error, "authorization_insufficient");
     assertEquals(narrow.revoked_code, 0);
@@ -146,7 +146,7 @@ Deno.test("compiled optctl binds one nearest Linux process credential without fa
     assertEquals(
       await authContextCount(harness) - contextsBefore,
       6,
-      "one denied work request plus watch ticket, redeem, request, decision, and revoke; no broader credential retry",
+      "one policy-authorized work request plus watch ticket, redeem, request, decision, and revoke; no broader credential retry",
     );
 
     const otherOrigin = await harness.runOptctl([
@@ -384,6 +384,7 @@ async function proveSignalForwarding(harness: LiveHarness): Promise<void> {
     env: {
       ...Deno.env.toObject(),
       HOME: harness.homeDir,
+      XDG_DATA_HOME: join(harness.homeDir, ".local", "share"),
       XDG_CONFIG_HOME: join(harness.rootDir, "xdg-config"),
       XDG_STATE_HOME: join(harness.rootDir, "xdg-state"),
     },
@@ -434,7 +435,7 @@ async function runHelper(
     "--",
     Deno.execPath(),
     "run",
-    `--allow-run=${harness.binaryPath},/bin/cat`,
+    `--allow-run=${harness.binaryPath},cat`,
     "--allow-read",
     "--allow-write",
     "--allow-env",
@@ -459,6 +460,7 @@ async function runDirect(
     env: {
       ...Deno.env.toObject(),
       HOME: home,
+      XDG_DATA_HOME: join(home, ".local", "share"),
       XDG_CONFIG_HOME: join(root, "xdg-config"),
       XDG_STATE_HOME: join(root, "xdg-state"),
     },
@@ -517,6 +519,8 @@ function narrowAgentHelper(): string {
     const [binary, server, requestPath, resultPath, mode] = Deno.args;
     const run = async (args) => {
       const env = {
+        PATH: Deno.env.get("PATH"),
+        XDG_DATA_HOME: Deno.env.get("XDG_DATA_HOME"),
         HOME: Deno.env.get("HOME"),
         XDG_CONFIG_HOME: Deno.env.get("XDG_CONFIG_HOME"),
         XDG_STATE_HOME: Deno.env.get("XDG_STATE_HOME"),
@@ -554,7 +558,7 @@ function narrowAgentHelper(): string {
     const waited = await run(["auth", "wait", requestId]);
     if (waited.code !== 0) throw new Error(waited.stderr);
     const status = JSON.parse((await run(["auth", "status"])).stdout).data;
-    const allowed = await run(["project", "list"]);
+    const allowed = await run(["workspace", "list"]);
     const broad = await run(["auth", "request", "--role", "system:super_admin", "--boundary", "system", "--reason", "must not fallback"]);
     if (broad.code !== 0) throw new Error(broad.stderr);
     const broadId = JSON.parse(broad.stdout).data.id;
@@ -563,6 +567,8 @@ function narrowAgentHelper(): string {
       args: ["--server", server, "--json", "auth", "status"],
       clearEnv: true,
       env: {
+        PATH: Deno.env.get("PATH"),
+        XDG_DATA_HOME: Deno.env.get("XDG_DATA_HOME"),
         HOME: Deno.env.get("HOME"),
         XDG_CONFIG_HOME: Deno.env.get("XDG_CONFIG_HOME"),
         XDG_STATE_HOME: Deno.env.get("XDG_STATE_HOME"),
@@ -572,10 +578,10 @@ function narrowAgentHelper(): string {
     }).output();
     const invalidStopBody = JSON.parse(new TextDecoder().decode(invalidStop.stderr));
     const revoked = await run(["auth", "revoke", status.authorization_id]);
-    const isolateStatOutput = await new Deno.Command("/bin/cat", {
+    const isolateStatOutput = await new Deno.Command("cat", {
       args: ["/proc/" + Deno.ppid + "/stat"],
       clearEnv: true,
-      env: {},
+      env: { PATH: Deno.env.get("PATH") },
       stdout: "piped",
       stderr: "null",
     }).output();
@@ -588,7 +594,7 @@ function narrowAgentHelper(): string {
       anchor_pid: status.anchor_pid,
       broader_ancestor_pid: broaderAncestorPid,
       work_code: allowed.code,
-      work_error: JSON.parse(allowed.stderr).error.code,
+      work_error: allowed.stderr ? JSON.parse(allowed.stderr).error.code : null,
       denied_code: denied.code,
       denied_error: JSON.parse(denied.stderr).error.code,
       revoked_code: revoked.code,

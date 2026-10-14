@@ -85,9 +85,9 @@ Deno.test("exact multi-target authority rows lock in canonical table and UUID or
   );
 });
 
-Deno.test("query contract is strict, Project-scoped, and bounded", () => {
+Deno.test("query contract is strict, Workspace-scoped, and bounded", () => {
   const valid = {
-    project_id: "019b7a2e-7c10-7000-8000-000000000002",
+    workspace_id: "019b7a2e-7c10-7000-8000-000000000002",
     definition: {
       kind: "resource",
       publisher: "optd",
@@ -129,7 +129,7 @@ Deno.test("query application owns definition-aware projection and sort validatio
   const service = makeQueryObjectsService({
     async execute(_call, work) {
       return await work({
-        projectExists: true,
+        workspaceExists: true,
         definition: () => Promise.resolve(definition),
         authorize: () =>
           Promise.resolve({
@@ -161,7 +161,7 @@ Deno.test("query application owns definition-aware projection and sort validatio
   });
   assertEquals(cursorFactoryCalls, 0);
   const base = {
-    project_id: "019b7a2e-7c10-7000-8000-000000000002",
+    workspace_id: "019b7a2e-7c10-7000-8000-000000000002",
     definition: {
       kind: "resource" as const,
       publisher: "optd",
@@ -196,7 +196,7 @@ const auth: AuthContext = {
   roles: [],
   createdAt: "2026-01-01T00:00:00.000Z",
 };
-const projectId = "019b7a2e-7c10-7000-8000-000000000020";
+const workspaceId = "019b7a2e-7c10-7000-8000-000000000020";
 const objectId = "019b7a2e-7c10-7000-8000-000000000021";
 const action = "action:optd/projects:start_task";
 const taskTarget = {
@@ -257,8 +257,8 @@ function policySql(options: {
           role_version_active: true,
           role_candidate_revision_id: null,
           role_definition_name: null,
-          boundary_type: "all_projects",
-          project_id: null,
+          boundary_type: "all_workspaces",
+          workspace_id: null,
         }];
       }
       if (text.includes("from policy_rules pr join")) {
@@ -292,8 +292,8 @@ function policySql(options: {
           policy_candidate_active: true,
           assignment_id: "assignment",
           assignment_version: 1,
-          assignment_boundary_type: "all_projects",
-          assignment_project_id: null,
+          assignment_boundary_type: "all_workspaces",
+          assignment_workspace_id: null,
           assignment_active: true,
           evaluation_order: 0,
         }];
@@ -324,7 +324,7 @@ Deno.test("targeted semantic policy allows the exact task object", async () => {
   const sql = policySql({ resource: "optd/projects:task" });
   const result = await evaluateTargetedActionPolicy(
     sql,
-    { projectId, action, targets: [taskTarget] },
+    { workspaceId, action, targets: [taskTarget] },
     auth,
   );
   assertEquals(result.allowed, true);
@@ -334,27 +334,27 @@ Deno.test("targeted semantic policy allows the exact task object", async () => {
   assertEquals(policyQuery.params.slice(1, 5), [
     action,
     "optd/projects:task",
-    projectId,
+    workspaceId,
     true,
   ]);
   assertEquals(policyQuery.text.includes("pr.resource='*'"), true);
 });
 
-Deno.test("Project policy SQL keeps system boundaries isolated", async () => {
+Deno.test("Workspace policy SQL keeps system boundaries isolated", async () => {
   const humanSql = policySql({ resource: "optd/projects:task" });
   await evaluateTargetedActionPolicy(
     humanSql,
-    { projectId, action, targets: [taskTarget] },
+    { workspaceId, action, targets: [taskTarget] },
     auth,
   );
   const humanRoles =
     humanSql.statements.find((item) =>
       item.text.includes("from role_assignments ra")
     )!.text;
-  assertEquals(humanRoles.includes("ra.boundary_type='all_projects'"), true);
+  assertEquals(humanRoles.includes("ra.boundary_type='all_workspaces'"), true);
   assertEquals(
     humanRoles.includes(
-      "ra.boundary_type='project' and ra.project_id=$2",
+      "ra.boundary_type='workspace' and ra.workspace_id=$2",
     ),
     true,
   );
@@ -365,14 +365,14 @@ Deno.test("Project policy SQL keeps system boundaries isolated", async () => {
     true,
   );
   assertEquals(
-    humanRoles.includes("ra.boundary_type in ('system','all_projects')"),
+    humanRoles.includes("ra.boundary_type in ('system','all_workspaces')"),
     false,
   );
 
   const agentSql = policySql({ resource: "optd/projects:task" });
   await evaluateTargetedActionPolicy(
     agentSql,
-    { projectId, action, targets: [taskTarget] },
+    { workspaceId, action, targets: [taskTarget] },
     {
       ...auth,
       principalType: "agent_user",
@@ -384,10 +384,10 @@ Deno.test("Project policy SQL keeps system boundaries isolated", async () => {
     agentSql.statements.find((item) =>
       item.text.includes("from agent_authorization_roles ar")
     )!.text;
-  assertEquals(agentRoles.includes("ar.boundary_type='all_projects'"), true);
+  assertEquals(agentRoles.includes("ar.boundary_type='all_workspaces'"), true);
   assertEquals(
     agentRoles.includes(
-      "ar.boundary_type='project' and ar.project_id=$2",
+      "ar.boundary_type='workspace' and ar.workspace_id=$2",
     ),
     true,
   );
@@ -398,7 +398,7 @@ Deno.test("Project policy SQL keeps system boundaries isolated", async () => {
     true,
   );
   assertEquals(
-    agentRoles.includes("ar.boundary_type in ('system','all_projects')"),
+    agentRoles.includes("ar.boundary_type in ('system','all_workspaces')"),
     false,
   );
 
@@ -406,10 +406,10 @@ Deno.test("Project policy SQL keeps system boundaries isolated", async () => {
     humanSql.statements.find((item) =>
       item.text.includes("from policy_rules pr join")
     )!.text;
-  assertEquals(policy.includes("pa.boundary_type='all_projects'"), true);
+  assertEquals(policy.includes("pa.boundary_type='all_workspaces'"), true);
   assertEquals(
     policy.includes(
-      "pa.boundary_type='project' and pa.project_id=$4",
+      "pa.boundary_type='workspace' and pa.workspace_id=$4",
     ),
     true,
   );
@@ -419,7 +419,7 @@ Deno.test("Project policy SQL keeps system boundaries isolated", async () => {
 Deno.test("targeted semantic policy rejects wrong resources and ABAC false", async () => {
   const wrong = await evaluateTargetedActionPolicy(
     policySql({ resource: "optd/projects:project" }),
-    { projectId, action, targets: [taskTarget] },
+    { workspaceId, action, targets: [taskTarget] },
     auth,
   );
   assertEquals(wrong.allowed, false);
@@ -429,7 +429,7 @@ Deno.test("targeted semantic policy rejects wrong resources and ABAC false", asy
       mode: "abac",
       objectAllowed: false,
     }),
-    { projectId, action, targets: [taskTarget] },
+    { workspaceId, action, targets: [taskTarget] },
     auth,
   );
   assertEquals(abac.allowed, false);
@@ -439,7 +439,7 @@ Deno.test("targeted semantic policy lowers direct ReBAC with the server actor", 
   const sql = policySql({ resource: "optd/projects:task", mode: "rebac" });
   const result = await evaluateTargetedActionPolicy(
     sql,
-    { projectId, action, targets: [taskTarget] },
+    { workspaceId, action, targets: [taskTarget] },
     auth,
   );
   assertEquals(result.allowed, true);
@@ -454,7 +454,7 @@ Deno.test("targeted semantic policy requires all targets and exact unconditional
   const multi = await evaluateTargetedActionPolicy(
     policySql({ resource: "optd/projects:task" }),
     {
-      projectId,
+      workspaceId,
       action,
       targets: [taskTarget, {
         definition: { ...taskTarget.definition, name: "other" },
@@ -467,13 +467,13 @@ Deno.test("targeted semantic policy requires all targets and exact unconditional
 
   const unconditional = await evaluateTargetedActionPolicy(
     policySql({ resource: "optd/projects:task" }),
-    { projectId, action, targets: [{ definition: taskTarget.definition }] },
+    { workspaceId, action, targets: [{ definition: taskTarget.definition }] },
     auth,
   );
   assertEquals(unconditional.allowed, true);
   const conditional = await evaluateTargetedActionPolicy(
     policySql({ resource: "optd/projects:task", mode: "abac" }),
-    { projectId, action, targets: [{ definition: taskTarget.definition }] },
+    { workspaceId, action, targets: [{ definition: taskTarget.definition }] },
     auth,
   );
   assertEquals(conditional.allowed, false);

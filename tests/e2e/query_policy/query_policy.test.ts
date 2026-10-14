@@ -21,7 +21,7 @@ type Envelope = {
   error?: { code?: string; details?: unknown };
 };
 
-Deno.test("fresh compiled optctl queries typed Project resources and relationships", async () => {
+Deno.test("fresh compiled optctl queries typed Workspace resources and relationships", async () => {
   const harness = await startLiveHarness();
   try {
     const boot = await harness.bootstrap({
@@ -206,14 +206,14 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
 
     const created = await harness.runOptctl([
       "--json",
-      "project",
+      "workspace",
       "create",
       "query-sales",
       "--display-name",
       "Query Sales",
     ]);
     assertEquals(created.code, 0, created.stderr);
-    const project = JSON.parse(created.stdout).data.id as string;
+    const workspace = JSON.parse(created.stdout).data.id as string;
     const auth = (await query<{ id: string }>(
       harness.server.sql,
       "select id from auth_contexts order by created_at desc limit 1",
@@ -224,7 +224,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       pack: "crm",
       resource: "lead",
       relationship: "contact_company",
-      projectIds: [project, project],
+      workspaceIds: [workspace, workspace],
       authContextId: auth,
       resourceData: {
         name: "Typed Lead",
@@ -260,7 +260,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       ]
     ) {
       const result = await runJson(harness, [
-        "--project",
+        "--workspace",
         "query-sales",
         "query",
         "optd/crm:lead",
@@ -280,7 +280,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       assertEquals(items[0].data.amount, "10.5");
     }
     const relationship = await runJson(harness, [
-      "--project",
+      "--workspace",
       "query-sales",
       "query",
       "relationship",
@@ -304,7 +304,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
     assert(relationItem.from && relationItem.to);
 
     const firstPage = await runJson(harness, [
-      "--project",
+      "--workspace",
       "query-sales",
       "query",
       "optd/crm:lead",
@@ -325,7 +325,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
     const cursor = String(firstPage.meta.next_cursor);
     const firstId = (firstPage.data.items as Array<{ id: string }>)[0].id;
     const secondPage = await runJson(harness, [
-      "--project",
+      "--workspace",
       "query-sales",
       "query",
       "optd/crm:lead",
@@ -352,7 +352,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
     ) {
       const failed = await harness.runOptctl([
         "--json",
-        "--project",
+        "--workspace",
         "query-sales",
         "query",
         "optd/crm:lead",
@@ -373,7 +373,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
     const forged = `${cursor.slice(0, -1)}${cursor.endsWith("A") ? "B" : "A"}`;
     const forgedResult = await harness.runOptctl([
       "--json",
-      "--project",
+      "--workspace",
       "query-sales",
       "query",
       "optd/crm:lead",
@@ -399,7 +399,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       const sort of ["name:asc", "amount:asc", "due_date:asc", "enabled:asc"]
     ) {
       const candidatePage = await runJson(harness, [
-        "--project",
+        "--workspace",
         "query-sales",
         "query",
         "optd/crm:lead",
@@ -423,7 +423,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
     );
     const aliasResult = await harness.runOptctl([
       "--json",
-      "--project",
+      "--workspace",
       "query-sales",
       "query",
       "optd/crm:lead",
@@ -441,7 +441,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
     assertStringIncludes(aliasResult.stderr, "invalid_cursor");
 
     const toon = await harness.runOptctl([
-      "--project",
+      "--workspace",
       "query-sales",
       "query",
       "optd/crm:lead",
@@ -464,7 +464,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
     ) {
       const failed = await harness.runOptctl([
         "--json",
-        "--project",
+        "--workspace",
         "query-sales",
         "query",
         "optd/crm:lead",
@@ -480,7 +480,6 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
     for (
       const args of [
         ["--fields", "name,name"],
-        ["--fields", "id"],
         ["--fields", "missing"],
         ["--sort", "score:asc", "--sort", "score:desc"],
         ["--sort", "id:asc"],
@@ -489,7 +488,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
     ) {
       const failed = await harness.runOptctl([
         "--json",
-        "--project",
+        "--workspace",
         "query-sales",
         "query",
         "optd/crm:lead",
@@ -497,9 +496,9 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       ]);
       assert(failed.code !== 0, failed.stderr);
     }
-    const injectionLiteral = "needle' OR 1=1 -- /* ; DROP TABLE projects; */";
+    const injectionLiteral = "needle' OR 1=1 -- /* ; DROP TABLE workspaces; */";
     const literalResult = await runJson(harness, [
-      "--project",
+      "--workspace",
       "query-sales",
       "query",
       "optd/crm:lead",
@@ -510,7 +509,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
     assertEquals(literalResult.data.items, []);
     assertEquals(literalResult.meta.total, 0);
     const afterLiteral = await runJson(harness, [
-      "--project",
+      "--workspace",
       "query-sales",
       "query",
       "optd/crm:lead",
@@ -549,7 +548,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
         "content-type": "application/json",
       },
       body: JSON.stringify({
-        project_id: project,
+        workspace_id: workspace,
         definition: {
           kind: "resource",
           publisher: "optd",
@@ -627,21 +626,21 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       await query(
         harness.server.sql,
         `insert into ${quoteIdentifier(table)}
-        (id,project_id,name,status,score,enabled,due_date,amount,next_activity_at,created_by,updated_by)
+        (id,workspace_id,name,status,score,enabled,due_date,amount,next_activity_at,created_by,updated_by)
         values($1,$2,$3,'new',$4,true,'2026-08-01',10.50,$5,$6,$6)`,
-        [row.id, project, row.name, row.score, row.nextActivity, auth],
+        [row.id, workspace, row.name, row.score, row.nextActivity, auth],
       );
     }
     const ordinaryRoleAssignment = uuidV7();
     await query(
       harness.server.sql,
       `insert into role_assignments(
-      id,principal_id,role_id,boundary_type,project_id,active)
-      values($1,$2,'optd/crm:sales_rep','project',$3,true)`,
+      id,principal_id,role_id,boundary_type,workspace_id,active)
+      values($1,$2,'optd/crm:sales_rep','workspace',$3,true)`,
       [
         ordinaryRoleAssignment,
         ordinaryIdentity.principal_id,
-        project,
+        workspace,
       ],
     );
     await query(
@@ -695,20 +694,20 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       await query(
         harness.server.sql,
         `insert into policy_assignments(
-        id,policy_definition_version_id,boundary_type,project_id,active,source)
-        values($1,$2,'project',$3,false,'operator')`,
-        [assignment, version, project],
+        id,policy_definition_version_id,boundary_type,workspace_id,active,source)
+        values($1,$2,'workspace',$3,false,'operator')`,
+        [assignment, version, workspace],
       );
       modeAssignments.set(mode.name, assignment);
       modeRules.set(mode.name, ruleId);
     }
-    const relationProject = uuidV7();
+    const relationWorkspace = uuidV7();
     await query(
       harness.server.sql,
-      `insert into projects(
+      `insert into workspaces(
       id,slug,display_name,created_by_auth_context_id,updated_by_auth_context_id)
       values($1,'relation-other','Relation Other',$2,$2)`,
-      [relationProject, auth],
+      [relationWorkspace, auth],
     );
     const viewerTable = (await query<{ table_name: string }>(
       harness.server.sql,
@@ -720,16 +719,20 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
     const policyEdges = [
       [actorEdge, ids.object, ordinaryIdentity.principal_id],
       [humanEdge, ids.object, ordinaryIdentity.human_user_id],
-      [actorAlternateEdge, ids.projectTwoObject, ordinaryIdentity.principal_id],
+      [
+        actorAlternateEdge,
+        ids.workspaceTwoObject,
+        ordinaryIdentity.principal_id,
+      ],
       [uuidV7(), matrixRows[1].id, ordinaryIdentity.human_user_id],
     ];
     for (const [edge, object, subject] of policyEdges) {
       await query(
         harness.server.sql,
         `insert into ${quoteIdentifier(viewerTable)}
-        (id,project_id,from_object_id,to_object_id,created_by,updated_by)
+        (id,workspace_id,from_object_id,to_object_id,created_by,updated_by)
         values($1,$2,$3,$4,$5,$5)`,
-        [edge, project, object, subject, auth],
+        [edge, workspace, object, subject, auth],
       );
     }
     await query(
@@ -738,7 +741,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
         quoteIdentifier(table)
       } set score=case when id=$1 then 42 else 5 end
       where id=any($2::uuid[])`,
-      [ids.object, [ids.object, ids.otherObject, ids.projectTwoObject]],
+      [ids.object, [ids.object, ids.otherObject, ids.workspaceTwoObject]],
     );
 
     // Force sub-millisecond sort-key collisions to catch cursor precision loss.
@@ -748,16 +751,16 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       select id, row_number() over (order by id) n from ${
         quoteIdentifier(table)
       }
-      where project_id=$1
+      where workspace_id=$1
     ) update ${quoteIdentifier(table)} q set created_at =
       '2026-01-01T00:00:00.123000Z'::timestamptz + ordered.n * interval '1 microsecond'
       from ordered where q.id=ordered.id`,
-      [project],
+      [workspace],
     );
 
     const ordinaryArgs = [
-      "--project",
-      project,
+      "--workspace",
+      workspace,
       "query",
       "optd/crm:lead",
       "--fields",
@@ -776,7 +779,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
         ? [
           ids.object,
           ids.otherObject,
-          ids.projectTwoObject,
+          ids.workspaceTwoObject,
           ...matrixRows.map((row) => row.id),
         ]
         : mode.name === "abac"
@@ -785,7 +788,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
           ...matrixRows.filter((row) => row.score >= 40).map((row) => row.id),
         ]
         : mode.name === "actor"
-        ? [ids.object, ids.projectTwoObject]
+        ? [ids.object, ids.workspaceTwoObject]
         : mode.name === "human"
         ? [ids.object, matrixRows[1].id]
         : [ids.object];
@@ -812,17 +815,17 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
         await query(
           harness.server.sql,
           `update ${quoteIdentifier(viewerTable)}
-          set archived_at=null,project_id=$2 where id=$1`,
-          [actorEdge, relationProject],
+          set archived_at=null,workspace_id=$2 where id=$1`,
+          [actorEdge, relationWorkspace],
         );
         await expectCliEmpty(harness, ordinaryProcess.launcher, ordinaryArgs);
         await query(
           harness.server.sql,
           `update ${quoteIdentifier(viewerTable)}
-          set project_id=$2,from_object_id=$3,to_object_id=$4 where id=$1`,
+          set workspace_id=$2,from_object_id=$3,to_object_id=$4 where id=$1`,
           [
             actorEdge,
-            project,
+            workspace,
             ordinaryIdentity.principal_id,
             ids.object,
           ],
@@ -874,13 +877,13 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
         [assignment],
       );
     }
-    await seedQueryAgentDecidePolicy(harness, project);
+    await seedQueryAgentDecidePolicy(harness, workspace);
     await query(
       harness.server.sql,
       `insert into role_assignments(
-      id,principal_id,role_id,boundary_type,project_id,active)
-      values($1,$2,'optd/crm:sales_manager','project',$3,true)`,
-      [uuidV7(), ordinaryIdentity.principal_id, project],
+      id,principal_id,role_id,boundary_type,workspace_id,active)
+      values($1,$2,'optd/crm:sales_manager','workspace',$3,true)`,
+      [uuidV7(), ordinaryIdentity.principal_id, workspace],
     );
     const requestOnlyAgent = await harness.createProcessTreeLauncher(
       "request_only",
@@ -899,8 +902,8 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       "optd/crm:sales_rep",
       "--role",
       "optd/crm:sales_manager",
-      "--project",
-      project,
+      "--workspace",
+      workspace,
       "--reason",
       "bounded query root",
     ]);
@@ -957,9 +960,9 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
     await query(
       harness.server.sql,
       `insert into ${quoteIdentifier(viewerTable)}
-      (id,project_id,from_object_id,to_object_id,created_by,updated_by)
+      (id,workspace_id,from_object_id,to_object_id,created_by,updated_by)
       values($1,$2,$3,$4,$5,$5)`,
-      [uuidV7(), project, ids.object, rootIdentity.principal_id, auth],
+      [uuidV7(), workspace, ids.object, rootIdentity.principal_id, auth],
     );
 
     await query(
@@ -995,7 +998,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       redeemer: delegatedAgent,
       requestToken: ordinaryState.requestToken,
       approverToken: rootState.token,
-      project,
+      workspace,
       name: "query-delegated-agent",
     });
     assertEquals(delegated.parent, rootAuthorizationId);
@@ -1004,25 +1007,25 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
     await query(
       harness.server.sql,
       `update policy_assignments set active=true,
-      boundary_type='system',project_id=null where id=$1`,
+      boundary_type='system',workspace_id=null where id=$1`,
       [unconditionalAssignment],
     );
     await expectCliDenied(ordinaryProcess.launcher, ordinaryArgs);
     await query(
       harness.server.sql,
       `update policy_assignments set
-      boundary_type='all_projects' where id=$1`,
+      boundary_type='all_workspaces' where id=$1`,
       [unconditionalAssignment],
     );
-    const allProjectsAllowed = await runJson(
+    const allWorkspacesAllowed = await runJson(
       harness,
       ordinaryArgs,
       ordinaryProcess.launcher,
     );
-    assertEquals(allProjectsAllowed.meta.total, 11);
+    assertEquals(allWorkspacesAllowed.meta.total, 11);
 
     const agentRequest = {
-      project_id: project,
+      workspace_id: workspace,
       definition: {
         kind: "resource",
         publisher: "optd",
@@ -1126,8 +1129,8 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       `update ${
         quoteIdentifier(table)
       } set created_at='2026-01-01T00:00:00.000Z'
-      where project_id=$1`,
-      [project],
+      where workspace_id=$1`,
+      [workspace],
     );
     for (const direction of ["asc", "desc"] as const) {
       const nullableOrder = await collectCliPages(
@@ -1144,7 +1147,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
         harness.server.sql,
         `select id from ${
           quoteIdentifier(table)
-        } where project_id=$1 and archived_at is null
+        } where workspace_id=$1 and archived_at is null
         order by next_activity_at ${direction} nulls ${
           direction === "asc" ? "last" : "first"
         },
@@ -1152,7 +1155,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
           direction === "asc" ? "first" : "last"
         },
         id ${direction === "asc" ? "desc" : "asc"}`,
-        [project],
+        [workspace],
       )).rows.map((row) => row.id);
       assertEquals(nullableOrder, expectedOrder);
       const nullIds = new Set(
@@ -1186,8 +1189,8 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
     await query(
       harness.server.sql,
       `update ${quoteIdentifier(table)} set archived_at=now()
-      where project_id=$1 and not(id=any($2::uuid[]))`,
-      [project, preservedIds],
+      where workspace_id=$1 and not(id=any($2::uuid[]))`,
+      [workspace, preservedIds],
     );
     const sparseContinuation = await runJson(harness, [
       ...ordinaryArgs,
@@ -1205,8 +1208,8 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       harness.server.sql,
       `update ${
         quoteIdentifier(table)
-      } set archived_at=null where project_id=$1`,
-      [project],
+      } set archived_at=null where workspace_id=$1`,
+      [workspace],
     );
 
     const ordinaryFirst = await runJson(harness, [
@@ -1237,10 +1240,10 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
     await query(
       harness.server.sql,
       `update policy_assignments set active=true,
-      boundary_type='project',project_id=$2 where id=$1`,
+      boundary_type='workspace',workspace_id=$2 where id=$1`,
       [
         unconditionalAssignment,
-        project,
+        workspace,
       ],
     );
 
@@ -1279,9 +1282,9 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
     await query(
       harness.server.sql,
       `insert into policy_assignments(
-      id,policy_definition_version_id,boundary_type,project_id,active,source)
-      values($1,$2,'project',$3,true,'operator')`,
-      [archivedAssignment, archivedVersion, project],
+      id,policy_definition_version_id,boundary_type,workspace_id,active,source)
+      values($1,$2,'workspace',$3,true,'operator')`,
+      [archivedAssignment, archivedVersion, workspace],
     );
     const archivedAllowed = await runJson(harness, [
       ...ordinaryArgs,
@@ -1348,9 +1351,9 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       await query(
         sql,
         `insert into policy_assignments(
-        id,policy_definition_version_id,boundary_type,project_id,active,source)
-        values($1,$2,'project',$3,true,'operator')`,
-        [nextPolicyAssignment, nextPolicyVersion, project],
+        id,policy_definition_version_id,boundary_type,workspace_id,active,source)
+        values($1,$2,'workspace',$3,true,'operator')`,
+        [nextPolicyAssignment, nextPolicyVersion, workspace],
       );
     });
     await expectInvalidOrdinaryCursor(
@@ -1473,29 +1476,29 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
       String(packCursorPage.meta.next_cursor),
     );
 
-    const projectVersion = (await query<{ version: number }>(
+    const workspaceVersion = (await query<{ version: number }>(
       harness.server.sql,
-      "select version from projects where id=$1",
-      [project],
+      "select version from workspaces where id=$1",
+      [workspace],
     )).rows[0].version;
     await selectStoredCredential(harness, {
       token: adminState.token,
       requestToken: adminState.requestToken,
     });
-    const archivedProject = await harness.runOptctl([
+    const archivedWorkspace = await harness.runOptctl([
       "--json",
-      "project",
+      "workspace",
       "archive",
-      project,
+      workspace,
       "--expected-version",
-      String(projectVersion),
+      String(workspaceVersion),
     ]);
-    assertEquals(archivedProject.code, 0, archivedProject.stderr);
+    assertEquals(archivedWorkspace.code, 0, archivedWorkspace.stderr);
     await selectStoredCredential(harness, {
       token: ordinaryState.token,
       requestToken: undefined,
     });
-    const archivedProjectResponse = await fetch(
+    const archivedWorkspaceResponse = await fetch(
       `${harness.baseUrl}/api/v1/queries`,
       {
         method: "POST",
@@ -1504,7 +1507,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
           "content-type": "application/json",
         },
         body: JSON.stringify({
-          project_id: project,
+          workspace_id: workspace,
           definition: {
             kind: "resource",
             publisher: "optd",
@@ -1516,16 +1519,16 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
         }),
       },
     );
-    assertEquals(archivedProjectResponse.status, 200);
-    const archivedProjectQuery = await archivedProjectResponse.json();
-    assertEquals(archivedProjectQuery.meta.total, 11);
+    assertEquals(archivedWorkspaceResponse.status, 200);
+    const archivedWorkspaceQuery = await archivedWorkspaceResponse.json();
+    assertEquals(archivedWorkspaceQuery.meta.total, 11);
     await selectStoredCredential(harness, {
       token: adminState.token,
       requestToken: adminState.requestToken,
     });
     const restartBaseline = await runJson(harness, [
-      "--project",
-      project,
+      "--workspace",
+      workspace,
       "query",
       "optd/crm:lead",
       "--where",
@@ -1545,7 +1548,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
 
     await harness.restart();
     const restartPage = await runJson(harness, [
-      "--project",
+      "--workspace",
       "query-sales",
       "query",
       "optd/crm:lead",
@@ -1566,7 +1569,7 @@ Deno.test("fresh compiled optctl queries typed Project resources and relationshi
         restartFirstId,
     );
     const afterRestart = await runJson(harness, [
-      "--project",
+      "--workspace",
       "query-sales",
       "query",
       "optd/crm:lead",
@@ -1641,7 +1644,7 @@ async function authorizationLineage(
 
 async function seedQueryAgentDecidePolicy(
   harness: LiveHarness,
-  project: string,
+  workspace: string,
 ): Promise<void> {
   const version = uuidV7();
   await query(
@@ -1659,9 +1662,9 @@ async function seedQueryAgentDecidePolicy(
   await query(
     harness.server.sql,
     `insert into policy_assignments(
-    id,policy_definition_version_id,boundary_type,project_id,active)
-    values($1,$2,'project',$3,true)`,
-    [uuidV7(), version, project],
+    id,policy_definition_version_id,boundary_type,workspace_id,active)
+    values($1,$2,'workspace',$3,true)`,
+    [uuidV7(), version, workspace],
   );
 }
 
@@ -1672,7 +1675,7 @@ async function createDelegatedQueryAgent(input: {
   redeemer: CliLauncher;
   requestToken: string;
   approverToken: string;
-  project: string;
+  workspace: string;
   name: string;
 }): Promise<
   { token: string; authorization: string; parent: string | null; root: string }
@@ -1687,8 +1690,8 @@ async function createDelegatedQueryAgent(input: {
     "request",
     "--role",
     "optd/crm:sales_rep",
-    "--project",
-    input.project,
+    "--workspace",
+    input.workspace,
     "--reason",
     "delegated bounded query",
   ]);

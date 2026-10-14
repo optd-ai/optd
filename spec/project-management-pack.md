@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-project-management-pack; contract: 1; input: sha256:7be8a0236acaf41b05e690ab845b3e2fd6ef65d612783d34c0b33470bb734bac -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-project-management-pack; contract: 1; input: sha256:b7520dfe90af472fe4cf901d1c368cfb4d87fbafc86246c3c41d8373c1fe6bbd -->
 
 # Project Management Proof-Pack Requirements
 
@@ -13,15 +13,15 @@ Generated exact-contract projection imported into project-model/model.json from 
 **Migration provenance.** Exact normative contract imported from `spec/project-management-pack.md` at `sha256:899349a5c143cd03d41de97f390ed218a90aabd0197c6d22905566367dc140d3`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
 
 > **Status:** normative proof-pack domain requirements. Runtime platform
-> projects remain separate from the pack resource `optd/projects:project`;
-> every pack object also carries an explicit platform project ID.
+> workspaces remain separate from the pack resource `optd/projects:project`;
+> every pack object also carries an explicit platform workspace ID.
 
 ## Purpose
 
-The MVP should include a second bundled pack inspired by Odoo's Project app to
+The MVP should include a second bundled pack inspired by Odoo's Workspace app to
 prove that the platform is generic and not CRM-specific.
 
-This pack should model projects, tasks, stages, milestones, tags, and timesheet
+This pack should model workspaces, tasks, stages, milestones, tags, and timesheet
 entries. It should be authored as normal pack files and must not require engine
 special cases.
 
@@ -32,14 +32,14 @@ kind: Pack
 apiVersion: optd.dev/v1
 metadata:
   publisher: optd
-  name: projects
+  name: workspaces
   version: 0.1.0
 spec:
-  purpose: Project and task management resources for agent-operated work tracking.
+  purpose: Workspace and task management resources for agent-operated work tracking.
   axi:
     home:
       resources: [optd/projects:project, optd/projects:task]
-      help: ["optctl --project ${project} list optd/projects:task"]
+      help: ["optctl --workspace ${workspace} list optd/projects:task"]
 ```
 
 The global pack identity is `optd/projects`; child definitions use canonical
@@ -59,8 +59,8 @@ Fields:
 - `start_date`: date, optional
 - `target_date`: date, optional
 
-AXI guidance should explain how agents create projects, find active work, and
-inspect project health.
+AXI guidance should explain how agents create workspaces, find active work, and
+inspect workspace health.
 
 ### `optd/projects:task`
 
@@ -68,7 +68,7 @@ Fields:
 
 - `title`: string, required
 - `description`: string, optional
-- `work_project_id`: reference to `optd/projects:project`, required
+- `project_id`: reference to `optd/projects:project`, required
 - `stage_id`: reference to `optd/projects:task_stage`, required
 - `state`: required string enum `todo|in_progress|blocked|done`; lifecycle field
 - `assignee_id`: string with UUID format, optional
@@ -101,7 +101,7 @@ Required seed records:
 Fields:
 
 - `name`: string, required
-- `work_project_id`: reference to `optd/projects:project`, required
+- `project_id`: reference to `optd/projects:project`, required
 - `deadline`: date, optional
 - `status`: string enum, e.g. `planned|at_risk|done`
 
@@ -118,12 +118,12 @@ Fields:
 
 Fields:
 
-- `work_project_id`: reference to `optd/projects:project`, required
+- `project_id`: reference to `optd/projects:project`, required
 - `principal_id`: string with UUID format, required
 - `member_role`: string enum `manager|member|viewer`, required
 
-A project-scoped composite unique constraint covers
-`work_project_id + principal_id`.
+A workspace-scoped composite unique constraint covers
+`project_id + principal_id`.
 
 ### `optd/projects:timesheet`
 
@@ -143,7 +143,7 @@ Minimum relationships:
 - `optd/projects:task_milestone`: task to milestone.
 - `optd/projects:task_tag_assignment`: task to tag.
 
-Project-to-task uses the required direct `task.work_project_id`; it is not also
+Workspace-to-task uses the required direct `task.project_id`; it is not also
 duplicated as a relationship row. Membership is the explicit
 `optd/projects:project_member` resource because membership carries domain
 role, uniqueness, object history, and policy-visible lifecycle. The generic
@@ -198,11 +198,11 @@ Minimum policy rules:
 
 - Built-in `system:super_admin` remains the platform bypass and is not a pack
   policy wildcard.
-- `optd/projects:project_manager` can create/update/archive project-domain
-  objects and tasks in platform projects where assigned.
-- Project members can read project tasks and update tasks assigned to them.
+- `optd/projects:project_manager` can create/update/archive workspace-domain
+  objects and tasks in platform workspaces where assigned.
+- Workspace members can read workspace tasks and update tasks assigned to them.
 - Assignees can start/block/complete their assigned tasks.
-- Viewers can read visible projects/tasks.
+- Viewers can read visible workspaces/tasks.
 
 Use RBAC/ABAC and one-hop ReBAC only. Deep ReBAC is out of scope.
 
@@ -218,12 +218,16 @@ Seeds use the exact changeset-backed reconcile route and
 
 ## Acceptance
 
-The project-management pack is accepted when:
+The workspace-management pack is accepted when:
 
 1. It applies on a fresh MVP server without special-case code.
 2. `optctl metadata resource optd/projects:task` exposes fields, lifecycle,
    policy hints, and AXI guidance.
-3. A test creates a project, creates a task, starts it, blocks it, unblocks it,
+3. A test creates a workspace, creates a task, starts it, blocks it, unblocks it,
    completes it, logs a timesheet entry, and reads history.
 4. Policy prevents a non-member/non-assignee from updating the task.
 5. The after-commit hook writes an outbox/hook execution record.
+
+## Onboarding and completion
+
+Each Workspace explicitly initializes its reference data using seed commit optd/projects --all. Projects administrators can initialize these seeds, import historical objects with an audit reason, manage relationships and decide approvals; seed execution does not require platform super-admin. An authorized human or agent may complete its own task without a separate approval. Completion hours and work_date are jointly optional; omitting both emits no timesheet, while supplying one without the other is invalid. Required-field and action-read metadata must be discoverable.

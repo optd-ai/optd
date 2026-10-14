@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-mvp-policy-schema; contract: 1; input: sha256:ceebccffb053352dd5df0fb3040e74919073e7261cc138dabc6c5cf747c4ae3b -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-mvp-policy-schema; contract: 1; input: sha256:b55aff5f70d3d73d721e3fe15dba0958918d88161a8c79898f252f93f082647f -->
 
 # MVP Policy Schema v1
 
@@ -24,7 +24,7 @@ apiVersion: optd.dev/v1
 metadata:
   name: sales_access
 spec:
-  default_assignment: all_projects
+  default_assignment: all_workspaces
   rules:
     - name: sales_rep_own_leads
       effect: allow
@@ -58,8 +58,8 @@ Pack-local role/resource/action/relationship references may be abbreviated in
 source and are canonicalized against the owning pack during preview. Persisted
 policy definitions contain only publisher-qualified identities.
 
-`spec.default_assignment` is required and is `none|all_projects`. Pack policies
-cannot default-activate at `system` or one project. `all_projects` activation is
+`spec.default_assignment` is required and is `none|all_workspaces`. Pack policies
+cannot default-activate at `system` or one workspace. `all_workspaces` activation is
 security-relevant, shown in preview, and atomically tied to the exact active
 pack revision. It grants no role by itself.
 
@@ -105,7 +105,7 @@ seed:optd/crm:lead_statuses
 ```
 
 Semantic action/seed permission covers only its reviewed declared/generated
-effect manifest in the one request project; it is not a wildcard over the
+effect manifest in the one request workspace; it is not a wildcard over the
 underlying resources.
 
 System API capabilities use exact dotted identities owned by the platform rather
@@ -113,10 +113,10 @@ than generic `manage_*` aliases. The initial set includes the frozen API
 contracts, for example:
 
 ```text
-project.read
-project.create
-project.update
-project.archive
+workspace.read
+workspace.create
+workspace.update
+workspace.archive
 pack.preview
 pack.apply
 pack.inspect_security
@@ -168,8 +168,8 @@ Conceptually, policy evaluation receives:
     "human_user_id": "019a..."
   },
   "boundary": {
-    "type": "project",
-    "project_id": "019c..."
+    "type": "workspace",
+    "workspace_id": "019c..."
   },
   "roles": ["optd/crm:sales_rep"],
   "attributes": {
@@ -183,8 +183,8 @@ Conceptually, policy evaluation receives:
 CEL exposes only curated immutable principal aliases in v1: `actor.id`,
 `actor.principal_type`, and nullable `actor.human_user_id`; the transport object
 above is not caller input. Arbitrary assignment/user metadata arrays are not
-policy attributes. Role and policy assignments use exactly one `project`,
-`all_projects`, or `system` boundary as defined in
+policy attributes. Role and policy assignments use exactly one `workspace`,
+`all_workspaces`, or `system` boundary as defined in
 [Authorization Definitions and Assignments](authorization-assignments.md).
 
 `system:super_admin` is a built-in policy bypass, not an ordinary pack rule. It
@@ -212,7 +212,7 @@ for one explicit boundary.
   sorting/pagination.
 - Single-object, semantic action, changeset stage, and commit use targeted SQL
   evaluation.
-- Commit re-evaluates all operation/project boundaries in one SQL statement
+- Commit re-evaluates all operation/workspace boundaries in one SQL statement
   snapshot under [Commit Revalidation](commit-revalidation.md).
 - If no active assigned rule allows the exact action/resource/boundary, deny.
 - Conditional rules remain labeled conditional in role capability summaries.
@@ -233,7 +233,7 @@ recommend roles, auth requests, grant commands, or escalation steps.
     "details": {
       "auth_context_id": "019b...",
       "principal_id": "019a...",
-      "boundary": { "project_id": "019c..." },
+      "boundary": { "workspace_id": "019c..." },
       "resource": "optd/crm:lead",
       "action": "update",
       "checked_policies": ["optd/crm:sales_access"],

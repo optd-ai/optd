@@ -1,7 +1,7 @@
 import type { PolicyActor } from "./policy_actor.ts";
 
 export type ReviewedTarget = Readonly<{
-  projectId: string;
+  workspaceId: string;
   resource: string;
   /** Definition-level targets omit object evidence entirely. */
   object?: Readonly<{
@@ -66,7 +66,7 @@ export type TargetDigestInput = Readonly<{
   authorization_root_id: string;
   authorization_lineage_ids: readonly string[];
   targets: readonly Readonly<{
-    project_id: string;
+    workspace_id: string;
     resource: string;
     object_id?: string;
     object_version_id?: string;
@@ -90,7 +90,7 @@ export function canonicalTargetDigestInput(
   cutoff: AuthorizationCutoff,
 ): TargetDigestInput {
   const targets = cutoff.targets.map((evidence) => ({
-    project_id: evidence.target.projectId,
+    workspace_id: evidence.target.workspaceId,
     resource: evidence.target.resource,
     ...(evidence.target.object
       ? {

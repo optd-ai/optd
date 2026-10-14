@@ -9,7 +9,7 @@ spec:
       required: true
     description:
       type: string
-    work_project_id:
+    project_id:
       type: string
       required: true
       ref: optd/projects:project
@@ -64,27 +64,27 @@ spec:
         - id
         - title
         - description
-        - work_project_id
+        - project_id
         - stage_id
       empty:
         message: No task records found.
         help:
-          - optctl --project ${project} create optd/projects:task --input object.json --stage
+          - optctl --workspace ${workspace} create optd/projects:task --input object.json --stage
     detail:
       sections:
         - title: task
           fields:
             - title
             - description
-            - work_project_id
+            - project_id
             - stage_id
             - state
       help:
-        - optctl --project ${project} query optd/projects:task --where 'id == "${id}"'
+        - optctl --workspace ${workspace} query optd/projects:task --where 'id == "${id}"'
     help:
       list:
-        - optctl --project ${project} query optd/projects:task
+        - optctl --workspace ${workspace} query optd/projects:task
       view:
-        - optctl --project ${project} view optd/projects:task ${id}
+        - optctl --workspace ${workspace} view optd/projects:task ${id}
       created:
-        - optctl --project ${project} view optd/projects:task ${id}
+        - optctl --workspace ${workspace} view optd/projects:task ${id}

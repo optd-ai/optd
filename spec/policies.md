@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-policies; contract: 1; input: sha256:76174b92d7472c76c88cf8238db30422f98cdef84844a37fc771312bf09f6fd1 -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-policies; contract: 1; input: sha256:4e54760d13a4eabe89adecd2e99334f0456733a76651db94ef061ec578aa7fa5 -->
 
 # Policies and Authorization
 
@@ -16,7 +16,7 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 Role and policy definitions are globally registered, while explicit assignments
 control where they apply. Role assignments, policy assignments, and agent
-authorizations must select exactly one `project`, `all_projects`, or `system`
+authorizations must select exactly one `workspace`, `all_workspaces`, or `system`
 boundary. Missing boundary never implies global authority. See
 [Authorization Definitions and Assignments](authorization-assignments.md) for
 the normative model.
@@ -57,9 +57,9 @@ undeclared/unavailable capability. System hook executors never imply
 super-admin. Authorization denials explain current roles/boundary/failed
 capability without recommending escalation.
 
-For multi-project changesets, the server resolves one token and computes the
+For multi-workspace changesets, the server resolves one token and computes the
 actor's effective bounded roles plus active policies independently for every
-operation/project. The whole changeset remains atomic.
+operation/workspace. The whole changeset remains atomic.
 
 ## Authorization Questions
 
@@ -128,7 +128,7 @@ arbitrary user-authored code part of the initial trusted policy path.
 ## ReBAC / Relationship-Based Access
 
 Relationship-based access checks permissions through graph relationships: user
-is member of team, team owns project, project contains task, etc.
+is member of team, team owns workspace, workspace contains task, etc.
 
 Hard v1 constraint: ReBAC is limited to one relationship hop. If users need
 deeper transitive access, they should denormalize or link the relevant object
@@ -178,7 +178,7 @@ separate contract; policy controls who may decide.
 ## Enforcement points
 
 - Protected system API admission uses exact dotted system capabilities.
-- Direct stage evaluates each operation/project; action/seed stage evaluates its
+- Direct stage evaluates each operation/workspace; action/seed stage evaluates its
   exact semantic permission and reviewed effect manifest.
 - Commit rechecks current authorization in one SQL-statement snapshot under the
   canonical locks.

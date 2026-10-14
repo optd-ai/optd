@@ -1,8 +1,8 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-packs-projects; contract: 1; input: sha256:822c1f26be504f5b3678cb497c954b0c837b71c02b06d42dc55faa3c81f13c4e -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-packs-projects; contract: 1; input: sha256:95ba79335dd6dccc2eddfaf39252e2e637097c499fa7f7da562f870f698748a8 -->
 
-# Packs, Projects, and resources
+# Packs, Workspaces, and resources
 
-Canonical packs, projects, and resources decisions and contracts projected from project-model/model.json.
+Canonical packs, workspaces, and resources decisions and contracts projected from project-model/model.json.
 
 ## Outcomes and intent
 
@@ -34,21 +34,21 @@ A globally installed immutable definition bundle identified by publisher/pack, w
 
 <a id="obj-con-platform-project"></a>
 
-### Platform Project
+### Platform Workspace
 
-A built-in UUIDv7 runtime data and authorization boundary, distinct from pack publisher and from any proof-pack domain project resource.
+A built-in UUIDv7 runtime data and authorization boundary, distinct from pack publisher and from any proof-pack domain workspace resource.
 
 <a id="obj-con-resource-object-version"></a>
 
 ### Resource, object, and version
 
-A resource is a global definition; an object is a Project-scoped UUIDv7 current projection; object versions are immutable committed snapshots.
+A resource is a global definition; an object is a Workspace-scoped UUIDv7 current projection; object versions are immutable committed snapshots.
 
 <a id="obj-con-seed-reconciliation"></a>
 
 ### Active-only seed reconciliation
 
-Seed business keys are Project-scoped and unique only among active rows; archived matches are absent and create fresh active UUIDv7 objects.
+Seed business keys are Workspace-scoped and unique only among active rows; archived matches are absent and create fresh active UUIDv7 objects.
 
 <a id="obj-con-migration-plan"></a>
 
@@ -74,7 +74,7 @@ A strict local pack source targets the global server. An authorized actor previe
 
 ### Reconcile a seed whose business key exists only archived
 
-Only archived generations match the Project-scoped seed key. Seed staging/reconciliation runs. A new active UUIDv7 object is created; archived rows/history remain immutable; repeat is unchanged.
+Only archived generations match the Workspace-scoped seed key. Seed staging/reconciliation runs. A new active UUIDv7 object is created; archived rows/history remain immutable; repeat is unchanged.
 
 **Context.** Only archived generations match the Project-scoped seed key.
 
@@ -98,9 +98,9 @@ A live CRM v1 schema needs a destructive v2 change. Apply an additive transition
 
 <a id="obj-dec-global-packs-project-facts"></a>
 
-### Install one global pack revision and scope runtime facts by Project
+### Install one global pack revision and scope runtime facts by Workspace
 
-Publisher-qualified packs and definitions are global with one active revision; runtime objects, relationships, changesets, assignments, and policy evaluation carry explicit UUIDv7 Project scope.
+Publisher-qualified packs and definitions are global with one active revision; runtime objects, relationships, changesets, assignments, and policy evaluation carry explicit UUIDv7 Workspace scope.
 
 <a id="obj-dec-qualified-identity"></a>
 
@@ -136,7 +136,7 @@ The Projects proof pack uses the publisher-qualified resource identity optd/proj
 
 <a id="obj-dec-project-member-resource"></a>
 
-### Model Projects membership as a domain resource
+### Model Workspaces membership as a domain resource
 
 optd/projects:project_member remains an explicit resource because membership carries role, active uniqueness, history, and policy-visible lifecycle. Generic relationships may target read-only system:principal, but that does not replace the richer membership object.
 
@@ -160,4 +160,4 @@ Strict optd Pack documents use apiVersion optd.dev/v1. The user controls optd.de
 
 ### Replace archived seed matches with fresh active UUIDv7 objects
 
-Named Project-scoped business-key uniqueness applies only where active. Archived matches are absent; reconciliation creates a fresh active UUIDv7, preserves history, and deterministic races yield one winner and zero loser facts.
+Named Workspace-scoped business-key uniqueness applies only where active. Archived matches are absent; reconciliation creates a fresh active UUIDv7, preserves history, and deterministic races yield one winner and zero loser facts.

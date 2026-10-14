@@ -48,7 +48,7 @@ spec:
       empty:
         message: No lead records found.
         help:
-          - optctl --project ${project} create optd/crm:lead --input object.json --stage
+          - optctl --workspace ${workspace} create optd/crm:lead --input object.json --stage
     detail:
       sections:
         - title: lead
@@ -59,11 +59,11 @@ spec:
             - company_name
             - source
       help:
-        - optctl --project ${project} query optd/crm:lead --where 'id == "${id}"'
+        - optctl --workspace ${workspace} query optd/crm:lead --where 'id == "${id}"'
     help:
       list:
-        - optctl --project ${project} query optd/crm:lead
+        - optctl --workspace ${workspace} query optd/crm:lead
       view:
-        - optctl --project ${project} view optd/crm:lead ${id}
+        - optctl --workspace ${workspace} view optd/crm:lead ${id}
       created:
-        - optctl --project ${project} view optd/crm:lead ${id}
+        - optctl --workspace ${workspace} view optd/crm:lead ${id}

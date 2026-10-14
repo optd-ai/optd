@@ -6,7 +6,7 @@ Deno.test("public API source contains canonical routes and no superseded aliases
     "app.ts",
     "auth_routes.ts",
     "authorization_routes.ts",
-    "project_routes.ts",
+    "workspace_routes.ts",
   ].map((file) => Deno.readTextFile(`src/adapters/inbound/http-hono/${file}`)));
   const app = files[0];
   const source = files.join("\n");
@@ -68,7 +68,7 @@ Deno.test("normative packs avoid legacy identities and authority fields", async 
         if (child.name.endsWith(".yaml")) {
           assertStringIncludes(source, "apiVersion: optd.dev/v1");
           assert(
-            !/optd\.(?:crm|projects)/.test(source),
+            !/optd\.(?:crm|workspaces)/.test(source),
             `${child.name} has dotted identity`,
           );
         } else {
@@ -80,15 +80,15 @@ Deno.test("normative packs avoid legacy identities and authority fields", async 
       }
     }
   }
-  const projects = await Array.fromAsync(
+  const workspaces = await Array.fromAsync(
     Deno.readDir("prototypes/project-management-pack/relationships"),
   );
   assertEquals(
-    projects.some((entry) => entry.name === "project_member.yaml"),
+    workspaces.some((entry) => entry.name === "project_member.yaml"),
     false,
   );
   assertEquals(
-    projects.some((entry) => entry.name === "project_task.yaml"),
+    workspaces.some((entry) => entry.name === "project_task.yaml"),
     false,
   );
   await Deno.stat(

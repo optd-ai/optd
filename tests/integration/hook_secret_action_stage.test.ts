@@ -51,17 +51,17 @@ Deno.test({
         "--safe",
       ]);
       assertEquals(apply.code, 0, apply.stderr);
-      const project = await harness.runOptctl([
+      const workspace = await harness.runOptctl([
         "--json",
-        "project",
+        "workspace",
         "create",
-        "action-stage-project",
+        "action-stage-workspace",
         "--display-name",
-        "Action Stage Project",
+        "Action Stage Workspace",
       ]);
-      assertEquals(project.code, 0, project.stderr);
-      const projectId = JSON.parse(project.stdout).data.id as string;
-      const read = await seedRead(harness, projectId);
+      assertEquals(workspace.code, 0, workspace.stderr);
+      const workspaceId = JSON.parse(workspace.stdout).data.id as string;
+      const read = await seedRead(harness, workspaceId);
       const declaration = await storedDeclaration(harness, provider.url);
       const auth = (await query<{
         id: string;
@@ -87,7 +87,7 @@ Deno.test({
       };
       const dependency = {
         name: "source",
-        project_id: projectId,
+        workspace_id: workspaceId,
         resource_identity: "test/actionproof:source",
         object_id: read.id,
         object_version_id: read.object_version_id,
@@ -98,7 +98,7 @@ Deno.test({
           id: "0198c4ba-42b8-7000-8000-000000000011",
           principal_type: "human_user",
         },
-        project_id: projectId,
+        workspace_id: workspaceId,
         input: {
           source_id: read.id,
           actor: {
@@ -136,35 +136,38 @@ Deno.test({
       );
       assertEquals(result.operation_graph_digest.startsWith("sha256:"), true);
       assertEquals(
-        "project_id" in
+        "workspace_id" in
           (result.hook_executions[0].output.operations as Record<
             string,
             unknown
           >[])[0],
         false,
       );
-      assertEquals(result.added_operations[0].project_id, projectId);
+      assertEquals(result.added_operations[0].workspace_id, workspaceId);
 
-      const explicitProject = await coordinator.runActionStage({
+      const explicitWorkspace = await coordinator.runActionStage({
         action: "test/actionproof:generate",
         actor: {
           id: "0198c4ba-42b8-7000-8000-000000000011",
           principal_type: "human_user",
         },
-        project_id: projectId,
+        workspace_id: workspaceId,
         input: { source_id: read.id },
         reads: { source: { name: read.name, status: read.status } },
         read_dependencies: [dependency],
         declarations: [{
           ...declaration,
           script_content:
-            `console.log(JSON.stringify({operations:[{op:"create",project_id:"${projectId}",resource:"test/actionproof:target",fields:{name:"same project",status:"ready"}}]}));`,
+            `console.log(JSON.stringify({operations:[{op:"create",workspace_id:"${workspaceId}",resource:"test/actionproof:target",fields:{name:"same workspace",status:"ready"}}]}));`,
         }],
         authority_snapshot: authority,
       });
-      assertEquals(explicitProject.added_operations[0].project_id, projectId);
+      assertEquals(
+        explicitWorkspace.added_operations[0].workspace_id,
+        workspaceId,
+      );
 
-      const otherProjectId = uuidV7();
+      const otherWorkspaceId = uuidV7();
       await assertStageError(
         () =>
           coordinator.runActionStage({
@@ -173,14 +176,14 @@ Deno.test({
               id: "0198c4ba-42b8-7000-8000-000000000011",
               principal_type: "human_user",
             },
-            project_id: projectId,
+            workspace_id: workspaceId,
             input: { source_id: read.id },
             reads: { source: { name: read.name, status: read.status } },
             read_dependencies: [dependency],
             declarations: [{
               ...declaration,
               script_content:
-                `console.log(JSON.stringify({operations:[{op:"create",project_id:"${otherProjectId}",resource:"test/actionproof:target",fields:{name:"cross project",status:"ready"}}]}));`,
+                `console.log(JSON.stringify({operations:[{op:"create",workspace_id:"${otherWorkspaceId}",resource:"test/actionproof:target",fields:{name:"cross workspace",status:"ready"}}]}));`,
             }],
             authority_snapshot: authority,
           }),
@@ -189,8 +192,8 @@ Deno.test({
 
       const publicStage = await harness.runOptctl([
         "--json",
-        "--project",
-        "action-stage-project",
+        "--workspace",
+        "action-stage-workspace",
         "action",
         "stage",
         "test/actionproof:generate",
@@ -201,8 +204,8 @@ Deno.test({
       for (const field of ["principal_id", "actor", "roles"]) {
         const spoofed = await harness.runOptctl([
           "--json",
-          "--project",
-          "action-stage-project",
+          "--workspace",
+          "action-stage-workspace",
           "action",
           "stage",
           "test/actionproof:generate",
@@ -239,8 +242,8 @@ Deno.test({
       );
       const unavailable = await harness.runOptctl([
         "--json",
-        "--project",
-        "action-stage-project",
+        "--workspace",
+        "action-stage-workspace",
         "action",
         "stage",
         "test/actionproof:generate",
@@ -258,8 +261,8 @@ Deno.test({
 
       const seedStage = await harness.runOptctl([
         "--json",
-        "--project",
-        "action-stage-project",
+        "--workspace",
+        "action-stage-workspace",
         "seed",
         "stage",
         "test/actionproof",
@@ -280,7 +283,7 @@ Deno.test({
               id: "0198c4ba-42b8-7000-8000-000000000011",
               principal_type: "human_user",
             },
-            project_id: projectId,
+            workspace_id: workspaceId,
             input: { source_id: read.id },
             reads: {},
             read_dependencies: [dependency],
@@ -299,7 +302,7 @@ Deno.test({
               id: "0198c4ba-42b8-7000-8000-000000000011",
               principal_type: "human_user",
             },
-            project_id: projectId,
+            workspace_id: workspaceId,
             input: { source_id: read.id },
             reads: {
               source: {
@@ -323,7 +326,7 @@ Deno.test({
               id: "0198c4ba-42b8-7000-8000-000000000011",
               principal_type: "human_user",
             },
-            project_id: projectId,
+            workspace_id: workspaceId,
             input: { source_id: read.id },
             reads: {
               source: {
@@ -354,7 +357,7 @@ Deno.test({
 
 Deno.test({
   name:
-    "Project semantic actions reject ordinary system boundaries for humans, agents, and policies",
+    "Workspace semantic actions reject ordinary system boundaries for humans, agents, and policies",
   sanitizeOps: false,
   sanitizeResources: false,
   async fn() {
@@ -371,17 +374,17 @@ Deno.test({
         "--safe",
       ]);
       assertEquals(apply.code, 0, apply.stderr);
-      const project = await harness.runOptctl([
+      const workspace = await harness.runOptctl([
         "--json",
-        "project",
+        "workspace",
         "create",
         "action-boundaries",
         "--display-name",
         "Action Boundaries",
       ]);
-      assertEquals(project.code, 0, project.stderr);
-      const projectId = JSON.parse(project.stdout).data.id as string;
-      const read = await seedRead(harness, projectId);
+      assertEquals(workspace.code, 0, workspace.stderr);
+      const workspaceId = JSON.parse(workspace.stdout).data.id as string;
+      const read = await seedRead(harness, workspaceId);
       const human = (await query<{
         id: string;
         principal_id: string;
@@ -407,8 +410,8 @@ Deno.test({
       const humanStage = () =>
         harness.runOptctl([
           "--json",
-          "--project",
-          projectId,
+          "--workspace",
+          workspaceId,
           "action",
           "stage",
           "test/actionproof:generate",
@@ -450,46 +453,46 @@ Deno.test({
       await query(
         harness.server.sql,
         `update role_assignments set role_id='test/actionproof:operator',
-          boundary_type='system',project_id=null where id=$1`,
+          boundary_type='system',workspace_id=null where id=$1`,
         [humanRoleAssignment],
       );
       await assertAttempt("human-system", humanStage, false);
       await query(
         harness.server.sql,
-        `update role_assignments set boundary_type='project',project_id=$2
+        `update role_assignments set boundary_type='workspace',workspace_id=$2
           where id=$1`,
-        [humanRoleAssignment, projectId],
+        [humanRoleAssignment, workspaceId],
       );
-      await assertAttempt("human-exact-project", humanStage, true);
+      await assertAttempt("human-exact-workspace", humanStage, true);
       await query(
         harness.server.sql,
-        `update role_assignments set boundary_type='all_projects',project_id=null
+        `update role_assignments set boundary_type='all_workspaces',workspace_id=null
           where id=$1`,
         [humanRoleAssignment],
       );
-      await assertAttempt("human-all-projects", humanStage, true);
+      await assertAttempt("human-all-workspaces", humanStage, true);
 
       await query(
         harness.server.sql,
-        `update policy_assignments set boundary_type='system',project_id=null
+        `update policy_assignments set boundary_type='system',workspace_id=null
           where id=$1`,
         [policyAssignment],
       );
       await assertAttempt("policy-system", humanStage, false);
       await query(
         harness.server.sql,
-        `update policy_assignments set boundary_type='project',project_id=$2
+        `update policy_assignments set boundary_type='workspace',workspace_id=$2
           where id=$1`,
-        [policyAssignment, projectId],
+        [policyAssignment, workspaceId],
       );
-      await assertAttempt("policy-exact-project", humanStage, true);
+      await assertAttempt("policy-exact-workspace", humanStage, true);
       await query(
         harness.server.sql,
-        `update policy_assignments set boundary_type='all_projects',project_id=null
+        `update policy_assignments set boundary_type='all_workspaces',workspace_id=null
           where id=$1`,
         [policyAssignment],
       );
-      await assertAttempt("policy-all-projects", humanStage, true);
+      await assertAttempt("policy-all-workspaces", humanStage, true);
 
       const agent = await createActionAgent(
         harness.server.sql,
@@ -500,25 +503,25 @@ Deno.test({
         stageActionWithToken(
           harness.baseUrl,
           agent.token,
-          projectId,
+          workspaceId,
           read.id,
         );
       await assertAttempt("agent-system", agentStage, false);
       await query(
         harness.server.sql,
         `update agent_authorization_roles
-          set boundary_type='project',project_id=$2 where id=$1`,
-        [agent.roleAssignmentId, projectId],
+          set boundary_type='workspace',workspace_id=$2 where id=$1`,
+        [agent.roleAssignmentId, workspaceId],
       );
-      await assertAttempt("agent-exact-project", agentStage, true);
+      await assertAttempt("agent-exact-workspace", agentStage, true);
       await query(
         harness.server.sql,
         `update agent_authorization_roles
-          set boundary_type='all_projects',project_id=null where id=$1`,
+          set boundary_type='all_workspaces',workspace_id=null where id=$1`,
         [agent.roleAssignmentId],
       );
       const stagedAgent = await assertAttempt(
-        "agent-all-projects",
+        "agent-all-workspaces",
         agentStage,
         true,
       );
@@ -535,7 +538,7 @@ Deno.test({
       await query(
         harness.server.sql,
         `update agent_authorization_roles
-          set boundary_type='system',project_id=null where id=$1`,
+          set boundary_type='system',workspace_id=null where id=$1`,
         [agent.roleAssignmentId],
       );
       provider.release(postHookToken);
@@ -547,7 +550,7 @@ Deno.test({
       await query(
         harness.server.sql,
         `update agent_authorization_roles
-          set boundary_type='all_projects',project_id=null where id=$1`,
+          set boundary_type='all_workspaces',workspace_id=null where id=$1`,
         [agent.roleAssignmentId],
       );
 
@@ -555,7 +558,7 @@ Deno.test({
       await query(
         harness.server.sql,
         `update agent_authorization_roles
-          set boundary_type='system',project_id=null where id=$1`,
+          set boundary_type='system',workspace_id=null where id=$1`,
         [agent.roleAssignmentId],
       );
       const commit = await commitActionWithToken(
@@ -605,28 +608,28 @@ Deno.test({
         "--safe",
       ]);
       assertEquals(apply.code, 0, apply.stderr);
-      const project = await harness.runOptctl([
+      const workspace = await harness.runOptctl([
         "--json",
-        "project",
+        "workspace",
         "create",
         "action-races",
         "--display-name",
         "Action Races",
       ]);
-      assertEquals(project.code, 0, project.stderr);
-      const projectId = JSON.parse(project.stdout).data.id as string;
-      const unrelatedProject = await harness.runOptctl([
+      assertEquals(workspace.code, 0, workspace.stderr);
+      const workspaceId = JSON.parse(workspace.stdout).data.id as string;
+      const unrelatedWorkspace = await harness.runOptctl([
         "--json",
-        "project",
+        "workspace",
         "create",
         "action-races-unrelated",
         "--display-name",
         "Unrelated Action Races",
       ]);
-      assertEquals(unrelatedProject.code, 0, unrelatedProject.stderr);
-      const unrelatedProjectId = JSON.parse(unrelatedProject.stdout).data
+      assertEquals(unrelatedWorkspace.code, 0, unrelatedWorkspace.stderr);
+      const unrelatedWorkspaceId = JSON.parse(unrelatedWorkspace.stdout).data
         .id as string;
-      const read = await seedRead(harness, projectId);
+      const read = await seedRead(harness, workspaceId);
       const auth = (await query<{
         id: string;
         principal_id: string;
@@ -666,11 +669,11 @@ Deno.test({
           and definition_name='source_actor'`,
       )).rows[0].table_name;
       const linked = await harness.runJson(["--json", "changeset", "stage"], {
-        project_id: projectId,
+        workspace_id: workspaceId,
         operations: [{
           op: "link",
           key: "actor-link",
-          project_id: projectId,
+          workspace_id: workspaceId,
           relationship: "test/actionproof:source_actor",
           from: read.id,
           to: auth.principal_id,
@@ -689,7 +692,7 @@ Deno.test({
       assertEquals(relationshipCommit.code, 0, relationshipCommit.stderr);
       await query(
         harness.server.sql,
-        "update role_assignments set role_id='test/actionproof:operator',boundary_type='all_projects' where id=$1",
+        "update role_assignments set role_id='test/actionproof:operator',boundary_type='all_workspaces' where id=$1",
         [roleAssignment],
       );
       await query(
@@ -709,8 +712,8 @@ Deno.test({
       );
       const inactiveRole = await harness.runOptctl([
         "--json",
-        "--project",
-        projectId,
+        "--workspace",
+        workspaceId,
         "action",
         "stage",
         "test/actionproof:generate",
@@ -735,8 +738,8 @@ Deno.test({
       provider.enqueueUnkeyed({ kind: "hold", token: "observer-deadline" });
       const deadlineCommand = await harness.startOptctl([
         "--json",
-        "--project",
-        projectId,
+        "--workspace",
+        workspaceId,
         "action",
         "stage",
         "test/actionproof:generate",
@@ -807,15 +810,15 @@ Deno.test({
         name: string,
         mutate: () => Promise<void>,
         restore: () => Promise<void>,
-        expectedCode: "project_conflict" | "policy_denied",
+        expectedCode: "workspace_conflict" | "policy_denied",
       ) => {
         const token = `race-${name}`;
         provider.enqueueUnkeyed({ kind: "hold", token });
         const beforeStages = await evidenceCounts(harness.server.sql);
         const activeCommand = await harness.startOptctl([
           "--json",
-          "--project",
-          projectId,
+          "--workspace",
+          workspaceId,
           "action",
           "stage",
           "test/actionproof:generate",
@@ -910,21 +913,21 @@ Deno.test({
             "update role_assignments set version=version-1 where id=$1",
             [roleAssignment],
           ).then(() => undefined),
-        "project_conflict",
+        "workspace_conflict",
       );
       await race(
         "role-assignment-system-boundary",
         () =>
           query(
             harness.server.sql,
-            `update role_assignments set boundary_type='system',project_id=null
+            `update role_assignments set boundary_type='system',workspace_id=null
               where id=$1`,
             [roleAssignment],
           ).then(() => undefined),
         () =>
           query(
             harness.server.sql,
-            `update role_assignments set boundary_type='all_projects',project_id=null
+            `update role_assignments set boundary_type='all_workspaces',workspace_id=null
               where id=$1`,
             [roleAssignment],
           ).then(() => undefined),
@@ -944,7 +947,7 @@ Deno.test({
             "update role_definition_versions set version=version-1 where id=$1",
             [roleVersionId],
           ).then(() => undefined),
-        "project_conflict",
+        "workspace_conflict",
       );
       await race(
         "policy-assignment-disable",
@@ -979,34 +982,34 @@ Deno.test({
         "policy_denied",
       );
       await race(
-        "policy-assignment-boundary-project",
+        "policy-assignment-boundary-workspace",
         () =>
           query(
             harness.server.sql,
-            "update policy_assignments set boundary_type='project',project_id=$2 where id=$1",
-            [policy.assignment_id, projectId],
+            "update policy_assignments set boundary_type='workspace',workspace_id=$2 where id=$1",
+            [policy.assignment_id, workspaceId],
           ).then(() => undefined),
         () =>
           query(
             harness.server.sql,
-            "update policy_assignments set boundary_type='all_projects',project_id=null where id=$1",
+            "update policy_assignments set boundary_type='all_workspaces',workspace_id=null where id=$1",
             [policy.assignment_id],
           ).then(() => undefined),
-        "project_conflict",
+        "workspace_conflict",
       );
       await race(
         "policy-assignment-system-boundary",
         () =>
           query(
             harness.server.sql,
-            `update policy_assignments set boundary_type='system',project_id=null
+            `update policy_assignments set boundary_type='system',workspace_id=null
               where id=$1`,
             [policy.assignment_id],
           ).then(() => undefined),
         () =>
           query(
             harness.server.sql,
-            `update policy_assignments set boundary_type='all_projects',project_id=null
+            `update policy_assignments set boundary_type='all_workspaces',workspace_id=null
               where id=$1`,
             [policy.assignment_id],
           ).then(() => undefined),
@@ -1026,7 +1029,7 @@ Deno.test({
             "update policy_rules set condition_kind='rebac' where id=$1",
             [policy.rule_id],
           ).then(() => undefined),
-        "project_conflict",
+        "workspace_conflict",
       );
       await race(
         "rebac-archive",
@@ -1049,10 +1052,10 @@ Deno.test({
       const replacementVersion = uuidV7();
       await query(
         harness.server.sql,
-        `insert into object_versions(id,project_id,definition_kind,resource_identity,
+        `insert into object_versions(id,workspace_id,definition_kind,resource_identity,
           object_id,version,previous_version_id,changeset_commit_id,operation,
           resource_revision,snapshot_json,changed_fields,auth_context_id)
-         select $1,project_id,definition_kind,resource_identity,object_id,version+1,id,
+         select $1,workspace_id,definition_kind,resource_identity,object_id,version+1,id,
           changeset_commit_id,'update',resource_revision,snapshot_json,'{}'::text[],auth_context_id
          from object_versions where id=$2`,
         [replacementVersion, originalVersion],
@@ -1077,7 +1080,7 @@ Deno.test({
             `update "${sourceTable}" set version=1,current_object_version_id=$1 where id=$2`,
             [originalVersion, read.id],
           ).then(() => undefined),
-        "project_conflict",
+        "workspace_conflict",
       );
 
       const control = async (unrelated = false) => {
@@ -1087,8 +1090,8 @@ Deno.test({
         );
         const activeCommand = await harness.startOptctl([
           "--json",
-          "--project",
-          projectId,
+          "--workspace",
+          workspaceId,
           "action",
           "stage",
           "test/actionproof:generate",
@@ -1116,8 +1119,8 @@ Deno.test({
             );
             await query(
               harness.server.sql,
-              "insert into role_assignments(id,principal_id,role_id,boundary_type,project_id,active) values($1,$2,'test/actionproof:operator','project',$3,true)",
-              [uuidV7(), auth.principal_id, unrelatedProjectId],
+              "insert into role_assignments(id,principal_id,role_id,boundary_type,workspace_id,active) values($1,$2,'test/actionproof:operator','workspace',$3,true)",
+              [uuidV7(), auth.principal_id, unrelatedWorkspaceId],
             );
           } finally {
             persistenceBarrier.release();
@@ -1137,7 +1140,7 @@ Deno.test({
       const evidence = unchanged.source.identity.authority_evidence;
       assertEquals(evidence.action, "action:test/actionproof:generate");
       assertEquals(evidence.targets.length, 1);
-      assertEquals(evidence.targets[0].project_id, projectId);
+      assertEquals(evidence.targets[0].workspace_id, workspaceId);
       assertEquals(
         evidence.targets[0].resource,
         "test/actionproof:source",
@@ -1159,8 +1162,8 @@ Deno.test({
       }) => dependency.target_dependency === "role_assignment");
       assertEquals(roleFact.assignment_owner_id, auth.principal_id);
       assertEquals(roleFact.assignment_role_id, "test/actionproof:operator");
-      assertEquals(roleFact.assignment_boundary_type, "all_projects");
-      assertEquals(roleFact.assignment_project_id, null);
+      assertEquals(roleFact.assignment_boundary_type, "all_workspaces");
+      assertEquals(roleFact.assignment_workspace_id, null);
       assertEquals(roleFact.assignment_active, true);
       assertEquals(roleFact.assignment_version, 1);
       assertEquals(roleFact.system_role_active, true);
@@ -1169,8 +1172,11 @@ Deno.test({
       const policyFact = unchanged.dependencies.find((dependency: {
         target_dependency?: string;
       }) => dependency.target_dependency === "policy_rule");
-      assertEquals(policyFact.policy_assignment_boundary_type, "all_projects");
-      assertEquals(policyFact.policy_assignment_project_id, null);
+      assertEquals(
+        policyFact.policy_assignment_boundary_type,
+        "all_workspaces",
+      );
+      assertEquals(policyFact.policy_assignment_workspace_id, null);
       assertEquals(policyFact.policy_assignment_active, true);
       assertEquals(policyFact.policy_assignment_version, 1);
       assertEquals(policyFact.policy_version_active, true);
@@ -1186,7 +1192,7 @@ Deno.test({
       const relationshipFact = unchanged.dependencies.find((dependency: {
         target_dependency?: string;
       }) => dependency.target_dependency === "relationship");
-      assertEquals(relationshipFact.relationship_project_id, projectId);
+      assertEquals(relationshipFact.relationship_workspace_id, workspaceId);
       assertEquals(relationshipFact.from_object_id, read.id);
       assertEquals(relationshipFact.to_object_id, auth.principal_id);
       assertEquals(relationshipFact.archived_at, null);
@@ -1254,31 +1260,31 @@ Deno.test({
         () =>
           query(
             harness.server.sql,
-            `update role_assignments set boundary_type='system',project_id=null
+            `update role_assignments set boundary_type='system',workspace_id=null
               where id=$1`,
             [roleAssignment],
           ).then(() => undefined),
         () =>
           query(
             harness.server.sql,
-            `update role_assignments set boundary_type='all_projects',project_id=null
+            `update role_assignments set boundary_type='all_workspaces',workspace_id=null
               where id=$1`,
             [roleAssignment],
           ).then(() => undefined),
         "authorization_changed",
       );
       await commitBarrier(
-        "commit-policy-assignment-boundary-project",
+        "commit-policy-assignment-boundary-workspace",
         () =>
           query(
             harness.server.sql,
-            "update policy_assignments set boundary_type='project',project_id=$2 where id=$1",
-            [policy.assignment_id, projectId],
+            "update policy_assignments set boundary_type='workspace',workspace_id=$2 where id=$1",
+            [policy.assignment_id, workspaceId],
           ).then(() => undefined),
         () =>
           query(
             harness.server.sql,
-            "update policy_assignments set boundary_type='all_projects',project_id=null where id=$1",
+            "update policy_assignments set boundary_type='all_workspaces',workspace_id=null where id=$1",
             [policy.assignment_id],
           ).then(() => undefined),
         "policy_changed",
@@ -1288,14 +1294,14 @@ Deno.test({
         () =>
           query(
             harness.server.sql,
-            `update policy_assignments set boundary_type='system',project_id=null
+            `update policy_assignments set boundary_type='system',workspace_id=null
               where id=$1`,
             [policy.assignment_id],
           ).then(() => undefined),
         () =>
           query(
             harness.server.sql,
-            `update policy_assignments set boundary_type='all_projects',project_id=null
+            `update policy_assignments set boundary_type='all_workspaces',workspace_id=null
               where id=$1`,
             [policy.assignment_id],
           ).then(() => undefined),
@@ -1754,7 +1760,7 @@ async function createActionAgent(
 async function stageActionWithToken(
   baseUrl: string,
   token: string,
-  projectId: string,
+  workspaceId: string,
   sourceId: string,
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   const response = await fetch(
@@ -1766,7 +1772,7 @@ async function stageActionWithToken(
         "content-type": "application/json",
       },
       body: JSON.stringify({
-        project_id: projectId,
+        workspace_id: workspaceId,
         input: { source_id: sourceId },
       }),
     },
@@ -1891,7 +1897,7 @@ async function storedDeclaration(
 
 export async function seedRead(
   harness: Awaited<ReturnType<typeof startAuthenticatedHarness>>,
-  projectId: string,
+  workspaceId: string,
 ) {
   const metadata = (await query<{ candidate: string; table_name: string }>(
     harness.server.sql,
@@ -1913,7 +1919,7 @@ export async function seedRead(
   await harness.server.sql.begin(async (tx) => {
     await query(
       tx,
-      `insert into staged_changesets(id,schema_version,source_kind,source_identity_json,created_auth_context_id,created_principal_id,creating_context_json,operation_graph_digest,stage_digest,canonical_graph_json,projects_json,pack_revisions_json,warnings_json,planned_events_json,planned_deliveries_json) values($1,1,'seed','{}',$2,(select principal_id from auth_contexts where id=$2),'{}',$3,$3,'{}','[]','[]','[]','[]','[]')`,
+      `insert into staged_changesets(id,schema_version,source_kind,source_identity_json,created_auth_context_id,created_principal_id,creating_context_json,operation_graph_digest,stage_digest,canonical_graph_json,workspaces_json,pack_revisions_json,warnings_json,planned_events_json,planned_deliveries_json) values($1,1,'seed','{}',$2,(select principal_id from auth_contexts where id=$2),'{}',$3,$3,'{}','[]','[]','[]','[]','[]')`,
       [stageId, auth, digest],
     );
     await query(
@@ -1928,10 +1934,10 @@ export async function seedRead(
     );
     await query(
       tx,
-      `insert into object_versions(id,project_id,definition_kind,resource_identity,object_id,version,changeset_commit_id,operation,resource_revision,snapshot_json,changed_fields,auth_context_id) values($1,$2,'resource','test/actionproof:source',$3,1,$4,'create',$5,$6::jsonb,array['name','status'],$7)`,
+      `insert into object_versions(id,workspace_id,definition_kind,resource_identity,object_id,version,changeset_commit_id,operation,resource_revision,snapshot_json,changed_fields,auth_context_id) values($1,$2,'resource','test/actionproof:source',$3,1,$4,'create',$5,$6::jsonb,array['name','status'],$7)`,
       [
         versionId,
-        projectId,
+        workspaceId,
         objectId,
         commitId,
         metadata.candidate,
@@ -1944,8 +1950,8 @@ export async function seedRead(
     );
     await query(
       tx,
-      `insert into "${metadata.table_name}"(id,project_id,version,current_object_version_id,created_by,updated_by,name,status) values($1,$2,1,$3,$4,$4,'Pinned Source','ready')`,
-      [objectId, projectId, versionId, auth],
+      `insert into "${metadata.table_name}"(id,workspace_id,version,current_object_version_id,created_by,updated_by,name,status) values($1,$2,1,$3,$4,$4,'Pinned Source','ready')`,
+      [objectId, workspaceId, versionId, auth],
     );
   });
   return {
@@ -1996,7 +2002,7 @@ export async function writePack(
   );
   await Deno.writeTextFile(
     `${root}/policies/action_access.yaml`,
-    `kind: Policy\napiVersion: optd.dev/v1\nmetadata: { name: action_access }\nspec:\n  default_assignment: all_projects\n  rules:\n    - name: action_operator\n      effect: allow\n      roles: [test/actionproof:operator]\n      actions: [read, action:test/actionproof:generate]\n      resources: [test/actionproof:source]\n      axi: { summary: Action operators may exercise the exact reviewed source. }\n    - name: effect_operator\n      effect: allow\n      roles: [test/actionproof:operator]\n      actions: [create, update]\n      resources: [test/actionproof:target]\n      axi: { summary: Direct changes may mutate fixture targets. }\n    - name: relationship_operator\n      effect: allow\n      roles: [test/actionproof:operator]\n      actions: [link, unlink]\n      resources: [test/actionproof:source_actor]\n      axi: { summary: Action operators may manage fixture relationships. }\n  axi: {}\n`,
+    `kind: Policy\napiVersion: optd.dev/v1\nmetadata: { name: action_access }\nspec:\n  default_assignment: all_workspaces\n  rules:\n    - name: action_operator\n      effect: allow\n      roles: [test/actionproof:operator]\n      actions: [read, action:test/actionproof:generate]\n      resources: [test/actionproof:source]\n      axi: { summary: Action operators may exercise the exact reviewed source. }\n    - name: effect_operator\n      effect: allow\n      roles: [test/actionproof:operator]\n      actions: [create, update]\n      resources: [test/actionproof:target]\n      axi: { summary: Direct changes may mutate fixture targets. }\n    - name: relationship_operator\n      effect: allow\n      roles: [test/actionproof:operator]\n      actions: [link, unlink]\n      resources: [test/actionproof:source_actor]\n      axi: { summary: Action operators may manage fixture relationships. }\n  axi: {}\n`,
   );
   await Deno.writeTextFile(
     `${root}/lifecycles/source_status.yaml`,
@@ -2020,7 +2026,7 @@ export async function writePack(
   );
   await Deno.writeTextFile(
     `${root}/hooks/generate.ts`,
-    `const envelope=JSON.parse(await new Response(Deno.stdin.readable).text()); const read=envelope.input.read; const actor=envelope.input.actor; if (Object.keys(read).sort().join(',')!=="name,status" || read.status!=="ready" || "project_id" in envelope.input.request || JSON.stringify(Object.keys(actor).sort())!==JSON.stringify(["id","principal_type"]) || !/^[0-9a-f-]{36}$/.test(actor.id) || !["human_user","agent_user"].includes(actor.principal_type) || actor.id===envelope.input.request.actor?.id || envelope.authority_snapshot!==undefined || envelope.grant_snapshot!==undefined) throw new Error("uncurated input"); await fetch(${
+    `const envelope=JSON.parse(await new Response(Deno.stdin.readable).text()); const read=envelope.input.read; const actor=envelope.input.actor; if (Object.keys(read).sort().join(',')!=="name,status" || read.status!=="ready" || "workspace_id" in envelope.input.request || JSON.stringify(Object.keys(actor).sort())!==JSON.stringify(["id","principal_type"]) || !/^[0-9a-f-]{36}$/.test(actor.id) || !["human_user","agent_user"].includes(actor.principal_type) || actor.id===envelope.input.request.actor?.id || envelope.authority_snapshot!==undefined || envelope.grant_snapshot!==undefined) throw new Error("uncurated input"); await fetch(${
       JSON.stringify(providerUrl)
     }); console.log(JSON.stringify({operations:[{op:"create",key:"made",resource:"test/actionproof:target",fields:{name:read.name}},{op:"update",resource:"test/actionproof:target",object_id:{$ref:"made.object_id"},set:{status:"converted"}}]}));`,
   );

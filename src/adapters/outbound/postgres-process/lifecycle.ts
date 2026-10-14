@@ -505,7 +505,7 @@ async function readProcCmdline(pid: number): Promise<Uint8Array | null> {
   const output = await new Deno.Command("/bin/sh", {
     args: [
       "-c",
-      `if [ "$$" -eq ${fixedPid} ]; then exit 2; fi; exec /bin/cat /proc/${fixedPid}/cmdline`,
+      `if [ "$$" -eq ${fixedPid} ]; then exit 2; fi; exec cat /proc/${fixedPid}/cmdline`,
     ],
     stdout: "piped",
     stderr: "piped",
@@ -536,7 +536,7 @@ async function readProcCwdIdentity(
     const output = await new Deno.Command("/bin/sh", {
       args: [
         "-c",
-        `if [ "$$" -eq ${fixedPid} ]; then exit 2; fi; exec /bin/readlink -e /proc/${fixedPid}/cwd`,
+        `if [ "$$" -eq ${fixedPid} ]; then exit 2; fi; exec readlink -e /proc/${fixedPid}/cwd`,
       ],
       stdout: "piped",
       stderr: "piped",

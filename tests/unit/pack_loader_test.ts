@@ -32,16 +32,16 @@ spec:
     whenToUse: [Use test leads.]
     identity: { title: "\${name}", labelFields: [name] }
     list:
-      defaultFields: [id, project, name]
+      defaultFields: [id, workspace, name]
       empty:
         message: No test leads found.
-        help: ["optctl --project \${project} create optd/test:lead --input object.json --stage"]
+        help: ["optctl --workspace \${workspace} create optd/test:lead --input object.json --stage"]
     detail:
-      help: ["optctl --project \${project} view optd/test:lead \${id}"]
+      help: ["optctl --workspace \${workspace} view optd/test:lead \${id}"]
     help:
-      list: ["optctl --project \${project} query optd/test:lead"]
-      view: ["optctl --project \${project} view optd/test:lead \${id}"]
-      created: ["optctl --project \${project} view optd/test:lead \${id}"]
+      list: ["optctl --workspace \${workspace} query optd/test:lead"]
+      view: ["optctl --workspace \${workspace} view optd/test:lead \${id}"]
+      created: ["optctl --workspace \${workspace} view optd/test:lead \${id}"]
 `;
 
 Deno.test("strict pack loader rejects legacy identities and unknown fields", async () => {
@@ -158,7 +158,7 @@ Deno.test("seed keys require exactly one named active-only uniqueness constraint
   const ddl =
     (await compilePackDdl(loaded)).find((item) => item.name === "lead")!.ddl;
   assert(ddl.includes('create unique index "lead_active_name"'));
-  assert(ddl.includes('("project_id", "name")'));
+  assert(ddl.includes('("workspace_id", "name")'));
   assert(ddl.includes('where "archived_at" is null'));
 
   const invalid = [
@@ -293,7 +293,7 @@ Deno.test("strict pack loader broadly rejects superseded schema and unsafe sourc
       name: "reserved platform fields",
       files: [{ path: "pack.yaml", text: root }, {
         path: "resources/lead.yaml",
-        text: resource.replace("name: {", "project_id: {"),
+        text: resource.replace("name: {", "workspace_id: {"),
       }],
       message: "reserved platform field",
     },
@@ -380,7 +380,7 @@ spec:
 apiVersion: optd.dev/v1
 metadata: {name: access}
 spec:
-  default_assignment: all_projects
+  default_assignment: all_workspaces
   rules:
     - name: manage_links
       effect: allow
@@ -489,7 +489,7 @@ spec:
 apiVersion: optd.dev/v1
 metadata: {name: approval}
 spec:
-  default_assignment: all_projects
+  default_assignment: all_workspaces
   rules:
     - name: decide
       effect: allow
@@ -572,7 +572,7 @@ spec:
 
 Deno.test("lifecycle cross-invariants reject every invalid graph and mutation", async () => {
   const lifecycleResource =
-    `kind: Resource\napiVersion: optd.dev/v1\nmetadata: {name: ticket}\nspec:\n  fields:\n    state: {type: string, required: true, enum: [open, closed]}\n    title: {type: string, required: true, maxLength: 8}\n    count: {type: integer, minimum: 0, maximum: 10}\n    amount: {type: decimal, precision: 4, scale: 2}\n    note: {type: string}\n  axi:\n    purpose: Test tickets.\n    whenToUse: [Use test tickets.]\n    identity: {title: "\${title}", labelFields: [title]}\n    list:\n      defaultFields: [id, state, title]\n      empty: {message: No tickets found., help: ["optctl --project \${project} create optd/test:ticket --input object.json --stage"]}\n    detail: {help: ["optctl --project \${project} view optd/test:ticket \${id}"]}\n    help:\n      list: ["optctl --project \${project} query optd/test:ticket"]\n      view: ["optctl --project \${project} view optd/test:ticket \${id}"]\n      created: ["optctl --project \${project} view optd/test:ticket \${id}"]\n`;
+    `kind: Resource\napiVersion: optd.dev/v1\nmetadata: {name: ticket}\nspec:\n  fields:\n    state: {type: string, required: true, enum: [open, closed]}\n    title: {type: string, required: true, maxLength: 8}\n    count: {type: integer, minimum: 0, maximum: 10}\n    amount: {type: decimal, precision: 4, scale: 2}\n    note: {type: string}\n  axi:\n    purpose: Test tickets.\n    whenToUse: [Use test tickets.]\n    identity: {title: "\${title}", labelFields: [title]}\n    list:\n      defaultFields: [id, state, title]\n      empty: {message: No tickets found., help: ["optctl --workspace \${workspace} create optd/test:ticket --input object.json --stage"]}\n    detail: {help: ["optctl --workspace \${workspace} view optd/test:ticket \${id}"]}\n    help:\n      list: ["optctl --workspace \${workspace} query optd/test:ticket"]\n      view: ["optctl --workspace \${workspace} view optd/test:ticket \${id}"]\n      created: ["optctl --workspace \${workspace} view optd/test:ticket \${id}"]\n`;
   const lifecycle = (
     states: string,
     transitions: string,
@@ -922,12 +922,12 @@ Deno.test("strict pack loader accepts both publisher-qualified proof packs", asy
       const member = ddl.find((object) => object.name === "project_member")!;
       assert(
         member.ddl.includes(
-          'constraint "project_principal_membership" unique ("project_id", "work_project_id", "principal_id")',
+          'constraint "project_principal_membership" unique ("workspace_id", "project_id", "principal_id")',
         ),
       );
       assertEquals(
         member.ddl.includes(
-          '"project_principal_membership"',
+          '"workspace_principal_membership"',
         ) &&
           member.ddl.includes('where "archived_at" is null'),
         false,

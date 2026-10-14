@@ -134,9 +134,9 @@ Deno.test("seed presence freezes immutable version identity and detects change",
 
 Deno.test("concurrent archived-seed replacement has one winner and one stable loser", () => {
   const constraint = {
-    name: "lead_status_project_key_active_uidx",
-    projectScoped: true as const,
-    fields: ["project_id", "key"],
+    name: "lead_status_workspace_key_active_uidx",
+    workspaceScoped: true as const,
+    fields: ["workspace_id", "key"],
     predicate: "active()" as const,
   };
   assertEquals(

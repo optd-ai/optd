@@ -3,7 +3,7 @@ apiVersion: optd.dev/v1
 metadata:
   publisher: optd
   name: crm
-  version: 0.1.0
+  version: 0.2.0
 spec:
   purpose: Prototype headless CRM pack for leads, contacts, companies, opportunities, activities,
     tasks, and safe agent operations.
@@ -31,5 +31,5 @@ spec:
         - optd/crm:mark_won
       help:
         - optctl resources
-        - optctl --project ${project} query optd/crm:activity
+        - optctl --workspace ${workspace} query optd/crm:activity
         - optctl metadata pack optd/crm

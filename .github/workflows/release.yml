@@ -51,6 +51,7 @@ jobs:
         env:
           OPTD_PG_BIN_DIR: /usr/lib/postgresql/18/bin
           OPTD_RELEASE_EXPORT_DIR: ${{ runner.temp }}/release-export
+          OPTD_RELEASE_VERSION: ${{ github.ref_name }}
         run: bash scripts/release-gate.sh 2>&1 | tee "$RUNNER_TEMP/release-gate.log"
       - name: Retain release gate log
         if: always()

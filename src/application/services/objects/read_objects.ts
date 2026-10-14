@@ -40,7 +40,7 @@ export function makeObjectReadService(deps: {
               ? ["read"]
               : ["read", "read_archived"];
             const policyInput = {
-              projectId: address.projectId,
+              workspaceId: address.workspaceId,
               objectId: address.objectId,
               definition: address.definition,
               actions,
@@ -91,7 +91,7 @@ export function makeObjectReadService(deps: {
               ? ["read", "history.read"]
               : ["read", "history.read", "read_archived"];
             const policyInput = {
-              projectId: address.projectId,
+              workspaceId: address.workspaceId,
               objectId: address.objectId,
               definition: address.definition,
               actions,
@@ -152,7 +152,7 @@ export function makeObjectReadService(deps: {
 
 function assertAddress(address: ReadAddress) {
   assertReadAddress({
-    projectId: address.projectId,
+    workspaceId: address.workspaceId,
     objectId: address.objectId,
     ...address.definition,
   });
@@ -178,7 +178,7 @@ function binding(
   const actor = policyActorFromAuthContext(auth);
   return {
     v: 1,
-    project_id: address.projectId,
+    workspace_id: address.workspaceId,
     definition: address.definition,
     object_id: address.objectId,
     principal_id: actor.id,

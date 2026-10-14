@@ -427,7 +427,7 @@ export const PolicySchema = Type.Object({
   spec: Type.Object({
     default_assignment: Type.Union([
       Type.Literal("none"),
-      Type.Literal("all_projects"),
+      Type.Literal("all_workspaces"),
     ]),
     rules: Type.Array(PolicyRule, { minItems: 1 }),
     axi: DefinitionAxi,

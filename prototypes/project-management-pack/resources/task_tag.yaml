@@ -30,7 +30,7 @@ spec:
       empty:
         message: No task tag records found.
         help:
-          - optctl --project ${project} create optd/projects:task_tag --input object.json --stage
+          - optctl --workspace ${workspace} create optd/projects:task_tag --input object.json --stage
     detail:
       sections:
         - title: task tag
@@ -38,11 +38,11 @@ spec:
             - name
             - color
       help:
-        - optctl --project ${project} query optd/projects:task_tag --where 'id == "${id}"'
+        - optctl --workspace ${workspace} query optd/projects:task_tag --where 'id == "${id}"'
     help:
       list:
-        - optctl --project ${project} query optd/projects:task_tag
+        - optctl --workspace ${workspace} query optd/projects:task_tag
       view:
-        - optctl --project ${project} view optd/projects:task_tag ${id}
+        - optctl --workspace ${workspace} view optd/projects:task_tag ${id}
       created:
-        - optctl --project ${project} view optd/projects:task_tag ${id}
+        - optctl --workspace ${workspace} view optd/projects:task_tag ${id}

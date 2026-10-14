@@ -58,8 +58,8 @@ type PolicyRow = {
   policy_candidate_active: boolean;
   assignment_id: string;
   assignment_version: number;
-  assignment_boundary_type: "system" | "all_projects" | "project";
-  assignment_project_id: string | null;
+  assignment_boundary_type: "system" | "all_workspaces" | "workspace";
+  assignment_workspace_id: string | null;
   assignment_active: boolean;
 };
 type EffectiveRole = {
@@ -74,8 +74,8 @@ type EffectiveRole = {
   role_version_active: boolean;
   role_candidate_revision_id: string | null;
   role_definition_name: string | null;
-  boundary_type: "system" | "all_projects" | "project";
-  project_id: string | null;
+  boundary_type: "system" | "all_workspaces" | "workspace";
+  workspace_id: string | null;
 };
 
 export type ExactTargetAuthorityEvaluation = Readonly<{
@@ -119,20 +119,20 @@ export function makePostgresQueryObjectRepository(
     ): Promise<T> {
       try {
         return await deps.sql.begin(async (tx) => {
-          await lockReadAuthority(tx, call.auth, call.input.project_id);
-          const project = await query(
+          await lockReadAuthority(tx, call.auth, call.input.workspace_id);
+          const workspace = await query(
             tx,
-            "select id from projects where id=$1 for share",
-            [call.input.project_id],
+            "select id from workspaces where id=$1 for share",
+            [call.input.workspace_id],
           );
-          const projectExists = project.rows.length > 0;
+          const workspaceExists = workspace.rows.length > 0;
           let definition: Definition | null | undefined;
           let prepared: PreparedQuery | undefined;
           try {
             return await work(Object.freeze({
-              projectExists,
+              workspaceExists,
               async definition(): Promise<QueryDefinition | null> {
-                if (!projectExists) return null;
+                if (!workspaceExists) return null;
                 definition ??= await resolveDefinition(tx, call.input);
                 if (!definition) return null;
                 const { table: _table, ...publicDefinition } = definition;
@@ -221,7 +221,7 @@ async function prepareQuery(
   auth: AuthContext,
   definition: Definition,
 ): Promise<PreparedQuery> {
-  const params: unknown[] = [request.project_id];
+  const params: unknown[] = [request.workspace_id];
   const user = lowerExpression(request.where ?? "true", {
     fields: definition.fields,
     alias: "q",
@@ -230,7 +230,7 @@ async function prepareQuery(
   params.push(...user.params);
   const policy = await resolvePolicyAuthorization(
     sql,
-    request.project_id,
+    request.workspace_id,
     definition,
     auth,
     request.include_archived ? ["read", "read_archived"] : ["read"],
@@ -285,7 +285,7 @@ async function executePage(
   const statement = `with eligible as materialized (
     select q.* from ${
     qi(definition.table)
-  } q where q.project_id=$1 and (${user.sql}) and (${archivePredicate}) and (${readPredicate})
+  } q where q.workspace_id=$1 and (${user.sql}) and (${archivePredicate}) and (${readPredicate})
   ), tally as (select count(*)::bigint total from eligible), page as (
     select q.* from eligible q where ${keyset} order by ${order} limit $${params.length}
   ) select ${rowJson} row_data,tally.total::text total from tally left join page on true order by ${
@@ -387,7 +387,7 @@ async function resolveDefinition(
 export async function evaluateObjectPolicy(
   sql: Queryable,
   input: {
-    projectId: string;
+    workspaceId: string;
     objectId: string;
     definition: DefinitionIdentity;
     actions: string[];
@@ -395,16 +395,16 @@ export async function evaluateObjectPolicy(
   auth: AuthContext,
 ): Promise<ObjectPolicyEvaluation> {
   const request = {
-    project_id: input.projectId,
+    workspace_id: input.workspaceId,
     definition: input.definition,
   } as QueryRequest;
   const definition = await resolveDefinition(sql, request);
   if (!definition) return { allowed: false, policyDigest: await digest(null) };
   try {
-    const params: unknown[] = [input.projectId, input.objectId];
+    const params: unknown[] = [input.workspaceId, input.objectId];
     const policy = await resolvePolicyAuthorization(
       sql,
-      input.projectId,
+      input.workspaceId,
       definition,
       auth,
       input.actions,
@@ -416,7 +416,7 @@ export async function evaluateObjectPolicy(
     const result = await query<{ allowed: boolean }>(
       sql,
       `select exists(select 1 from ${qi(definition.table)} q
-        where q.project_id=$1 and q.id=$2 and ${
+        where q.workspace_id=$1 and q.id=$2 and ${
         predicates.join(" and ")
       }) allowed`,
       params,
@@ -435,7 +435,7 @@ export async function evaluateObjectPolicy(
 
 export async function targetedActionAuthorityFactsDigest(
   sql: Queryable,
-  projectId: string,
+  workspaceId: string,
   targets: readonly TargetedActionPolicyTarget[],
   auth: AuthContext,
 ): Promise<string> {
@@ -449,10 +449,10 @@ export async function targetedActionAuthorityFactsDigest(
     sql,
     `select to_jsonb(a) fact from ${qi(assignmentTable)} a where ${
       qi(assignmentColumn)
-    }=$1 and (boundary_type='all_projects' or
-      (boundary_type='project' and project_id=$2) or
+    }=$1 and (boundary_type='all_workspaces' or
+      (boundary_type='workspace' and workspace_id=$2) or
       (role_id='system:super_admin' and boundary_type='system')) order by id`,
-    [auth.authorizationId ?? auth.principalId, projectId],
+    [auth.authorizationId ?? auth.principalId, workspaceId],
   )).rows.map((row) => row.fact);
   const roles = (await query<Record<string, unknown>>(
     sql,
@@ -469,10 +469,10 @@ export async function targetedActionAuthorityFactsDigest(
        from policy_assignments pa
        join policy_definition_versions pd on pd.id=pa.policy_definition_version_id
        join policy_rules pr on pr.policy_definition_version_id=pd.id
-      where pa.boundary_type='all_projects' or
-        (pa.boundary_type='project' and pa.project_id=$1)
+      where pa.boundary_type='all_workspaces' or
+        (pa.boundary_type='workspace' and pa.workspace_id=$1)
       order by pa.id,pd.id,pr.id`,
-    [projectId],
+    [workspaceId],
   )).rows;
   const relationships: unknown[] = [];
   const packs = [
@@ -494,8 +494,8 @@ export async function targetedActionAuthorityFactsDigest(
         sql,
         `select to_jsonb(r) fact from ${
           qi(row.table_name)
-        } r where project_id=$1 order by id`,
-        [projectId],
+        } r where workspace_id=$1 order by id`,
+        [workspaceId],
       )).rows.map((fact) => fact.fact);
       relationships.push({ table: row.table_name, facts });
     }
@@ -605,7 +605,7 @@ export async function lockExactTargetAuthorityDependencies(
 export async function evaluateExactTargetedActionAuthority(
   sql: Queryable,
   input: {
-    projectId: string;
+    workspaceId: string;
     action: string;
     targets: readonly ReviewedTarget[];
   },
@@ -617,7 +617,7 @@ export async function evaluateExactTargetedActionAuthority(
     const parsed =
       /^([a-z][a-z0-9-]{0,62})\/([a-z][a-z0-9_]{0,62}):([a-z][a-z0-9_]{0,62})$/
         .exec(reviewed.resource);
-    if (!parsed || reviewed.projectId !== input.projectId) {
+    if (!parsed || reviewed.workspaceId !== input.workspaceId) {
       return { allowed: false, targets: [], dependencies: [] };
     }
     const target: TargetedActionPolicyTarget = {
@@ -630,18 +630,18 @@ export async function evaluateExactTargetedActionAuthority(
       ...(reviewed.object ? { objectId: reviewed.object.id } : {}),
     };
     const definition = await resolveDefinition(sql, {
-      project_id: input.projectId,
+      workspace_id: input.workspaceId,
       definition: target.definition,
     } as QueryRequest);
     if (!definition) return { allowed: false, targets: [], dependencies: [] };
-    const roles = await effectiveRoles(sql, auth, input.projectId);
+    const roles = await effectiveRoles(sql, auth, input.workspaceId);
     const superAdminRoles = roles.filter((role) =>
       role.role_id === "system:super_admin" && role.boundary_type === "system"
     );
     const rows = superAdminRoles.length ? [] : await policyRows(
       sql,
       roles.map((role) => role.role_id),
-      input.projectId,
+      input.workspaceId,
       reviewed.resource,
       input.action,
       true,
@@ -653,15 +653,15 @@ export async function evaluateExactTargetedActionAuthority(
         continue;
       }
       const params: unknown[] = reviewed.object
-        ? [input.projectId, reviewed.object.id]
-        : [input.projectId];
+        ? [input.workspaceId, reviewed.object.id]
+        : [input.workspaceId];
       const predicate = reviewed.object
         ? await compilePolicy(
           sql,
           [rule],
           definition,
           auth,
-          input.projectId,
+          input.workspaceId,
           params,
         )
         : "true";
@@ -669,7 +669,7 @@ export async function evaluateExactTargetedActionAuthority(
         ? (await query<{ allowed: boolean }>(
           sql,
           `select exists(select 1 from ${qi(definition.table)} q
-             where q.project_id=$1 and q.id=$2 and q.archived_at is null
+             where q.workspace_id=$1 and q.id=$2 and q.archived_at is null
                and (${predicate})) allowed`,
           params,
         )).rows[0]?.allowed === true
@@ -683,7 +683,7 @@ export async function evaluateExactTargetedActionAuthority(
             rule,
             definition,
             auth,
-            input.projectId,
+            input.workspaceId,
             reviewed.object.id,
           )
         ) {
@@ -691,11 +691,11 @@ export async function evaluateExactTargetedActionAuthority(
           dependencies.push({
             kind: "relationship",
             target_dependency: "relationship",
-            project_id: input.projectId,
+            workspace_id: input.workspaceId,
             resource_identity: rule.relation_relationship,
             object_id: relationship.id,
             expected_version_id: relationship.current_object_version_id,
-            relationship_project_id: relationship.project_id,
+            relationship_workspace_id: relationship.workspace_id,
             from_object_id: relationship.from_object_id,
             to_object_id: relationship.to_object_id,
             archived_at: relationship.archived_at,
@@ -718,7 +718,7 @@ export async function evaluateExactTargetedActionAuthority(
         ? [{
           kind: "object_version",
           target_dependency: "object_version",
-          project_id: input.projectId,
+          workspace_id: input.workspaceId,
           resource_identity: reviewed.resource,
           object_id: reviewed.object.id,
           expected_version_id: reviewed.object.versionId,
@@ -728,7 +728,7 @@ export async function evaluateExactTargetedActionAuthority(
         (role) => ({
           kind: "assignment",
           target_dependency: "role_assignment",
-          project_id: input.projectId,
+          workspace_id: input.workspaceId,
           assignment_table: auth.authorizationId
             ? "agent_authorization_roles"
             : "role_assignments",
@@ -736,7 +736,7 @@ export async function evaluateExactTargetedActionAuthority(
           assignment_owner_id: role.assignment_owner_id,
           assignment_role_id: role.role_id,
           assignment_boundary_type: role.boundary_type,
-          assignment_project_id: role.project_id,
+          assignment_workspace_id: role.workspace_id,
           assignment_active: role.assignment_active,
           assignment_version: role.assignment_version === null
             ? null
@@ -754,11 +754,11 @@ export async function evaluateExactTargetedActionAuthority(
       ...matched.map((rule) => ({
         kind: "policy",
         target_dependency: "policy_rule",
-        project_id: input.projectId,
+        workspace_id: input.workspaceId,
         policy_assignment_id: rule.assignment_id,
         policy_assignment_policy_version_id: rule.policy_version_id,
         policy_assignment_boundary_type: rule.assignment_boundary_type,
-        policy_assignment_project_id: rule.assignment_project_id,
+        policy_assignment_workspace_id: rule.assignment_workspace_id,
         policy_assignment_active: rule.assignment_active,
         policy_assignment_version: Number(rule.assignment_version),
         policy: rule.policy_id,
@@ -829,12 +829,12 @@ async function directRelationshipEvidence(
   rule: PolicyRow,
   definition: Definition,
   auth: AuthContext,
-  projectId: string,
+  workspaceId: string,
   objectId: string,
 ): Promise<
   readonly {
     id: string;
-    project_id: string;
+    workspace_id: string;
     from_object_id: string;
     to_object_id: string;
     current_object_version_id: string;
@@ -878,19 +878,21 @@ async function directRelationshipEvidence(
     : "to_object_id";
   return (await query<{
     id: string;
-    project_id: string;
+    workspace_id: string;
     from_object_id: string;
     to_object_id: string;
     current_object_version_id: string;
     archived_at: string | null;
   }>(
     sql,
-    `select id,project_id,from_object_id,to_object_id,current_object_version_id,
+    `select id,workspace_id,from_object_id,to_object_id,current_object_version_id,
             archived_at::text archived_at
        from ${qi(found.table_name)}
-      where project_id=$1 and ${qi(objectColumn)}=$2 and ${qi(subjectColumn)}=$3
+      where workspace_id=$1 and ${qi(objectColumn)}=$2 and ${
+      qi(subjectColumn)
+    }=$3
         and archived_at is null order by id`,
-    [projectId, objectId, subjectId],
+    [workspaceId, objectId, subjectId],
   )).rows;
 }
 
@@ -909,7 +911,7 @@ function parseResource(value: string): [string, string, string] | null {
 export async function evaluateTargetedActionPolicy(
   sql: Queryable,
   input: {
-    projectId: string;
+    workspaceId: string;
     action: string;
     targets: TargetedActionPolicyTarget[];
   },
@@ -922,7 +924,7 @@ export async function evaluateTargetedActionPolicy(
     const evaluations: Array<{ target: string; digest: string }> = [];
     for (const target of input.targets) {
       const request = {
-        project_id: input.projectId,
+        workspace_id: input.workspaceId,
         definition: target.definition,
       } as QueryRequest;
       const definition = await resolveDefinition(sql, request);
@@ -930,7 +932,7 @@ export async function evaluateTargetedActionPolicy(
         await auditTargetedActionDecision(
           sql,
           auth,
-          input.projectId,
+          input.workspaceId,
           input.action,
           target,
           "policy.denied",
@@ -939,11 +941,11 @@ export async function evaluateTargetedActionPolicy(
         return { allowed: false, policyDigest: await digest(null) };
       }
       const params: unknown[] = target.objectId
-        ? [input.projectId, target.objectId]
-        : [input.projectId];
+        ? [input.workspaceId, target.objectId]
+        : [input.workspaceId];
       const policy = await resolvePolicyAuthorization(
         sql,
-        input.projectId,
+        input.workspaceId,
         definition,
         auth,
         [input.action],
@@ -955,7 +957,7 @@ export async function evaluateTargetedActionPolicy(
         const result = await query<{ allowed: boolean }>(
           sql,
           `select exists(select 1 from ${qi(definition.table)} q
-            where q.project_id=$1 and q.id=$2 and q.archived_at is null
+            where q.workspace_id=$1 and q.id=$2 and q.archived_at is null
             and (${policy.predicates[input.action]})) allowed`,
           params,
         );
@@ -968,7 +970,7 @@ export async function evaluateTargetedActionPolicy(
       await auditTargetedActionDecision(
         sql,
         auth,
-        input.projectId,
+        input.workspaceId,
         input.action,
         target,
         policy.superAdmin
@@ -999,7 +1001,7 @@ export async function evaluateTargetedActionPolicy(
 async function auditTargetedActionDecision(
   sql: Queryable,
   auth: AuthContext,
-  projectId: string,
+  workspaceId: string,
   action: string,
   target: TargetedActionPolicyTarget,
   eventType: "policy.allowed" | "policy.denied" | "policy.bypassed",
@@ -1016,7 +1018,7 @@ async function auditTargetedActionDecision(
       JSON.stringify({
         principal_id: actor.id,
         actor,
-        boundary: { type: "project", project_id: projectId },
+        boundary: { type: "workspace", workspace_id: workspaceId },
         action,
         resource:
           `${target.definition.publisher}/${target.definition.pack}:${target.definition.name}`,
@@ -1036,14 +1038,14 @@ function targetKey(target: TargetedActionPolicyTarget): string {
 
 async function resolvePolicyAuthorization(
   sql: Queryable,
-  project: string,
+  workspace: string,
   definition: Definition,
   auth: AuthContext,
   actions: string[],
   params: unknown[],
   exactResource = false,
 ): Promise<PolicyAuthorization> {
-  const roles = await effectiveRoles(sql, auth, project);
+  const roles = await effectiveRoles(sql, auth, workspace);
   const superAdmin = roles.some((role) =>
     role.role_id === "system:super_admin" && role.boundary_type === "system"
   );
@@ -1053,7 +1055,7 @@ async function resolvePolicyAuthorization(
     rules[action] = superAdmin ? [] : await policyRows(
       sql,
       roles.map((role) => role.role_id),
-      project,
+      workspace,
       definition.identity,
       action,
       exactResource,
@@ -1063,11 +1065,11 @@ async function resolvePolicyAuthorization(
       rules[action],
       definition,
       auth,
-      project,
+      workspace,
       params,
     );
   }
-  const anchor = await lockReadAuthority(sql, auth, project);
+  const anchor = await lockReadAuthority(sql, auth, workspace);
   return {
     predicates,
     rules,
@@ -1098,7 +1100,7 @@ async function resolvePolicyAuthorization(
 async function effectiveRoles(
   sql: Queryable,
   auth: AuthContext,
-  project: string,
+  workspace: string,
 ): Promise<EffectiveRole[]> {
   return (await query<EffectiveRole>(
     sql,
@@ -1107,35 +1109,35 @@ async function effectiveRoles(
           true assignment_active,null::bigint assignment_version,
           ar.role_id,sr.active system_role_active,rv.id version_id,rv.version,
           rv.active role_version_active,rv.candidate_revision_id role_candidate_revision_id,
-          rv.definition_name role_definition_name,ar.boundary_type,ar.project_id
+          rv.definition_name role_definition_name,ar.boundary_type,ar.workspace_id
          from agent_authorization_roles ar
          join system_roles sr on sr.id=ar.role_id and sr.active
          join role_definition_versions rv on rv.role_id=ar.role_id and rv.active
         where ar.authorization_id=$1 and
-          (ar.boundary_type='all_projects' or
-            (ar.boundary_type='project' and ar.project_id=$2) or
+          (ar.boundary_type='all_workspaces' or
+            (ar.boundary_type='workspace' and ar.workspace_id=$2) or
             (ar.role_id='system:super_admin' and ar.boundary_type='system'))
         order by ar.role_id,ar.id,rv.id`
       : `select ra.id assignment_id,ra.principal_id assignment_owner_id,
           ra.active assignment_active,ra.version assignment_version,
           ra.role_id,sr.active system_role_active,rv.id version_id,rv.version,
           rv.active role_version_active,rv.candidate_revision_id role_candidate_revision_id,
-          rv.definition_name role_definition_name,ra.boundary_type,ra.project_id
+          rv.definition_name role_definition_name,ra.boundary_type,ra.workspace_id
          from role_assignments ra
          join system_roles sr on sr.id=ra.role_id and sr.active
          join role_definition_versions rv on rv.role_id=ra.role_id and rv.active
         where ra.principal_id=$1 and ra.active and
-          (ra.boundary_type='all_projects' or
-            (ra.boundary_type='project' and ra.project_id=$2) or
+          (ra.boundary_type='all_workspaces' or
+            (ra.boundary_type='workspace' and ra.workspace_id=$2) or
             (ra.role_id='system:super_admin' and ra.boundary_type='system'))
         order by ra.role_id,ra.id,rv.id`,
-    [auth.authorizationId ?? auth.principalId, project],
+    [auth.authorizationId ?? auth.principalId, workspace],
   )).rows;
 }
 async function policyRows(
   sql: Queryable,
   roles: string[],
-  project: string,
+  workspace: string,
   resource: string,
   action: string,
   exactResource = false,
@@ -1152,18 +1154,18 @@ async function policyRows(
       pd.definition_name policy_definition_name,
       (pd.candidate_revision_id is null or ar.candidate_revision_id is not null) policy_candidate_active,
       pa.id assignment_id,pa.version assignment_version,
-      pa.boundary_type assignment_boundary_type,pa.project_id assignment_project_id,
+      pa.boundary_type assignment_boundary_type,pa.workspace_id assignment_workspace_id,
       pa.active assignment_active
  from policy_rules pr join policy_definition_versions pd on pd.id=pr.policy_definition_version_id and pd.active
  join policy_assignments pa on pa.policy_definition_version_id=pd.id and pa.active
  left join pack_active_revisions ar on ar.candidate_revision_id=pd.candidate_revision_id
  where pr.role_id=any($1::text[]) and pr.capability=$2
  and (pr.resource=$3 or (not $5::boolean and pr.resource='*'))
- and (pa.boundary_type='all_projects' or
-      (pa.boundary_type='project' and pa.project_id=$4))
+ and (pa.boundary_type='all_workspaces' or
+      (pa.boundary_type='workspace' and pa.workspace_id=$4))
  and (pd.candidate_revision_id is null or ar.candidate_revision_id is not null)
  order by pd.policy_id,pr.rule_name,pr.id,pa.id`,
-    [roles, action, resource, project, exactResource],
+    [roles, action, resource, workspace, exactResource],
   )).rows;
 }
 
@@ -1172,7 +1174,7 @@ async function compilePolicy(
   rules: PolicyRow[],
   definition: Definition,
   auth: AuthContext,
-  project: string,
+  workspace: string,
   params: unknown[],
 ): Promise<string> {
   const actor = policyActorFromAuthContext(auth);
@@ -1206,7 +1208,7 @@ async function compilePolicy(
     }
     if (rule.relation_relationship) {
       parts.push(
-        await relationSql(sql, rule, definition, auth, project, params),
+        await relationSql(sql, rule, definition, auth, workspace, params),
       );
     }
     candidates.push(parts.length ? `(${parts.join(" and ")})` : "true");
@@ -1218,7 +1220,7 @@ async function relationSql(
   rule: PolicyRow,
   definition: Definition,
   auth: AuthContext,
-  project: string,
+  workspace: string,
   params: unknown[],
 ): Promise<string> {
   if (
@@ -1252,7 +1254,7 @@ async function relationSql(
   const subjectId = rule.relation_subject === "actor.id"
     ? actor.id
     : actor.human_user_id;
-  const projectParam = params.push(project);
+  const workspaceParam = params.push(workspace);
   const subjectParam = params.push(subjectId);
   const objectCol = rule.relation_object_side === "from"
       ? "from_object_id"
@@ -1262,7 +1264,7 @@ async function relationSql(
       : "to_object_id";
   return `exists(select 1 from ${
     qi(found.table_name)
-  } rel where rel.project_id=$${projectParam}::uuid and rel.${
+  } rel where rel.workspace_id=$${workspaceParam}::uuid and rel.${
     qi(objectCol)
   }=q.id and rel.${
     qi(subjectCol)

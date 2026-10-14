@@ -10,7 +10,7 @@ export const AFTER_COMMIT_CONDITION_FIELDS: Readonly<
 > = {
   event_id: { type: "string", format: "uuid" },
   event_type: { type: "string" },
-  project_id: { type: "string", nullable: true, format: "uuid" },
+  workspace_id: { type: "string", nullable: true, format: "uuid" },
   resource: { type: "string", nullable: true },
   object_id: { type: "string", nullable: true, format: "uuid" },
   object_version_id: { type: "string", nullable: true, format: "uuid" },

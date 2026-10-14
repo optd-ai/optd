@@ -36,10 +36,10 @@ Deno.test({
       ]);
 
       const source = await matrix.stage([
-        alpha(matrix.projectId, "replacement-actor", principal),
-        alpha(matrix.projectId, "replacement-human", human),
-        alpha(matrix.projectId, "replacement-rebac", "unrelated"),
-        alpha(matrix.projectId, "replacement-rebac-stale", "unrelated"),
+        alpha(matrix.workspaceId, "replacement-actor", principal),
+        alpha(matrix.workspaceId, "replacement-human", human),
+        alpha(matrix.workspaceId, "replacement-rebac", "unrelated"),
+        alpha(matrix.workspaceId, "replacement-rebac-stale", "unrelated"),
       ], auth);
       assertEquals((await matrix.commit(source.id, auth)).ok, true);
       const [actorObject, humanObject, rebacObject, staleRebacObject] = source
@@ -52,12 +52,12 @@ Deno.test({
       await query(
         matrix.harness.server.sql,
         `insert into ${quoteIdentifier(relationshipTable)}
-          (id,project_id,from_object_id,to_object_id,created_by,updated_by)
+          (id,workspace_id,from_object_id,to_object_id,created_by,updated_by)
          values($1,$3,$4,$5,$6,$6),($2,$3,$7,$5,$6,$6)`,
         [
           uuidV7(),
           uuidV7(),
-          matrix.projectId,
+          matrix.workspaceId,
           rebacObject,
           principal,
           auth.id,
@@ -73,7 +73,7 @@ Deno.test({
       );
 
       const listed = await api(matrix, token, "/api/v1/queries", {
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         definition: {
           kind: "resource",
           publisher: "test",
@@ -102,20 +102,20 @@ Deno.test({
         const current = await api(
           matrix,
           token,
-          objectPath(matrix.projectId, objectId),
+          objectPath(matrix.workspaceId, objectId),
         );
         assertEquals(current.status, 200, JSON.stringify(current.body));
       }
       const history = await api(
         matrix,
         token,
-        `${objectPath(matrix.projectId, humanObject)}/history`,
+        `${objectPath(matrix.workspaceId, humanObject)}/history`,
       );
       assertEquals(history.status, 200, JSON.stringify(history.body));
       assertEquals(history.body.data.items.length, 1);
 
       const direct = await api(matrix, token, "/api/v1/changesets/stage", {
-        operations: [alpha(matrix.projectId, "replacement-direct", human)],
+        operations: [alpha(matrix.workspaceId, "replacement-direct", human)],
       });
       assertEquals(direct.status, 201, JSON.stringify(direct.body));
       const directCommit = await api(
@@ -224,7 +224,7 @@ Deno.test({
         {
           operations: [{
             op: "update",
-            project_id: matrix.projectId,
+            workspace_id: matrix.workspaceId,
             resource: "test/commitmatrix:alpha",
             object_id: staleRebacObject,
             set: { note: "still-related" },
@@ -240,8 +240,8 @@ Deno.test({
       await query(
         matrix.harness.server.sql,
         `update ${quoteIdentifier(relationshipTable)} set archived_at=now()
-          where project_id=$1 and from_object_id=$2 and to_object_id=$3`,
-        [matrix.projectId, staleRebacObject, principal],
+          where workspace_id=$1 and from_object_id=$2 and to_object_id=$3`,
+        [matrix.workspaceId, staleRebacObject, principal],
       );
       const staleRelationCommit = await api(
         matrix,
@@ -258,14 +258,14 @@ Deno.test({
       await query(
         matrix.harness.server.sql,
         `update ${quoteIdentifier(relationshipTable)} set archived_at=null
-          where project_id=$1 and from_object_id=$2 and to_object_id=$3`,
-        [matrix.projectId, staleRebacObject, principal],
+          where workspace_id=$1 and from_object_id=$2 and to_object_id=$3`,
+        [matrix.workspaceId, staleRebacObject, principal],
       );
 
       for (const mutation of ["revoked_at", "superseded_at"] as const) {
         const pending = await api(matrix, token, "/api/v1/changesets/stage", {
           operations: [
-            alpha(matrix.projectId, `replacement-${mutation}`, human),
+            alpha(matrix.workspaceId, `replacement-${mutation}`, human),
           ],
         });
         assertEquals(pending.status, 201, JSON.stringify(pending.body));
@@ -304,10 +304,10 @@ Deno.test({
   },
 });
 
-function alpha(projectId: string, key: string, note: string) {
+function alpha(workspaceId: string, key: string, note: string) {
   return {
     op: "create",
-    project_id: projectId,
+    workspace_id: workspaceId,
     resource: "test/commitmatrix:alpha",
     fields: { key, status: "ready", note },
   };
@@ -412,9 +412,9 @@ async function installReplacementPolicies(
   await query(
     matrix.harness.server.sql,
     `insert into agent_authorization_roles(
-       id,authorization_id,role_id,boundary_type,project_id)
-     values($1,$2,'test/commitmatrix:reviewer','project',$3)`,
-    [uuidV7(), authorizationId, matrix.projectId],
+       id,authorization_id,role_id,boundary_type,workspace_id)
+     values($1,$2,'test/commitmatrix:reviewer','workspace',$3)`,
+    [uuidV7(), authorizationId, matrix.workspaceId],
   );
   await query(
     matrix.harness.server.sql,
@@ -526,9 +526,9 @@ async function installReplacementPolicies(
   await query(
     matrix.harness.server.sql,
     `insert into policy_assignments(
-       id,policy_definition_version_id,boundary_type,project_id,active,source)
-     values($1,$2,'project',$3,true,'operator')`,
-    [uuidV7(), policy, matrix.projectId],
+       id,policy_definition_version_id,boundary_type,workspace_id,active,source)
+     values($1,$2,'workspace',$3,true,'operator')`,
+    [uuidV7(), policy, matrix.workspaceId],
   );
 }
 
@@ -542,14 +542,14 @@ async function stageAction(
     token,
     "/api/v1/actions/test/commitmatrix/generate/stage",
     {
-      project_id: matrix.projectId,
-      input: { project_id: matrix.projectId, source_id: sourceId },
+      workspace_id: matrix.workspaceId,
+      input: { workspace_id: matrix.workspaceId, source_id: sourceId },
     },
   );
 }
 
-function objectPath(projectId: string, objectId: string): string {
-  return `/api/v1/projects/${projectId}/objects/test/commitmatrix/alpha/${objectId}`;
+function objectPath(workspaceId: string, objectId: string): string {
+  return `/api/v1/workspaces/${workspaceId}/objects/test/commitmatrix/alpha/${objectId}`;
 }
 
 async function runtimeTable(

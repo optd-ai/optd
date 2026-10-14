@@ -87,8 +87,8 @@ export function makePostgresActionStageRepository(
         sql,
         `select ${columns} from ${
           quoteIdentifier(table)
-        } where project_id=$1 and id=$2 and archived_at is null`,
-        [request.projectId, request.objectId],
+        } where workspace_id=$1 and id=$2 and archived_at is null`,
+        [request.workspaceId, request.objectId],
       )).rows[0];
       if (!row) return null;
       return {
@@ -108,8 +108,8 @@ export function makePostgresActionStageRepository(
         sql,
         `select ${quoteIdentifier(request.field)} state from ${
           quoteIdentifier(table)
-        } where project_id=$1 and id=$2 and archived_at is null`,
-        [request.projectId, request.objectId],
+        } where workspace_id=$1 and id=$2 and archived_at is null`,
+        [request.workspaceId, request.objectId],
       )).rows[0]?.state;
     },
 
@@ -147,8 +147,8 @@ export function makePostgresActionStageRepository(
         sql,
         `select coalesce((${lowered.sql}),false) allowed from ${
           quoteIdentifier(table)
-        } candidate where project_id=$1 and id=$2 and archived_at is null`,
-        [request.projectId, request.objectId, ...lowered.params],
+        } candidate where workspace_id=$1 and id=$2 and archived_at is null`,
+        [request.workspaceId, request.objectId, ...lowered.params],
       )).rows[0]?.allowed === true;
     },
 
@@ -174,7 +174,7 @@ export function makePostgresActionStageRepository(
         const anchor = await lockReadAuthority(
           tx,
           request.auth,
-          request.projectId,
+          request.workspaceId,
         );
         const physicalTargets = request.targets.map((target) => {
           const parsed = parseTarget(target.resource);
@@ -185,7 +185,7 @@ export function makePostgresActionStageRepository(
         });
         await lockTargetedActionAuthority(tx, physicalTargets);
         let evaluation = await evaluateExactTargetedActionAuthority(tx, {
-          projectId: request.projectId,
+          workspaceId: request.workspaceId,
           action: request.action,
           targets: request.targets,
         }, request.auth);
@@ -195,7 +195,7 @@ export function makePostgresActionStageRepository(
           evaluation.dependencies,
         );
         evaluation = await evaluateExactTargetedActionAuthority(tx, {
-          projectId: request.projectId,
+          workspaceId: request.workspaceId,
           action: request.action,
           targets: request.targets,
         }, request.auth);

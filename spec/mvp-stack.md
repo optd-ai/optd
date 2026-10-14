@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-mvp-stack; contract: 1; input: sha256:feac99aff9a1fa2b2aa004c8bada14bab9a69bfee5942cf5e87d0b9624fe66e6 -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-mvp-stack; contract: 1; input: sha256:32d75d06ebaa786999db8ef77e5e397bb3f672dd5391c94cd7ae0996907ba9f7 -->
 
 # MVP Stack Decisions
 
@@ -26,7 +26,7 @@ Rationale:
 - Keeps server iteration fast while core semantics stabilize.
 - Does not prevent a later Rust server if performance requirements demand it.
 
-Avoid NestJS for the MVP unless the project later needs its module/decorator/DI
+Avoid NestJS for the MVP unless the workspace later needs its module/decorator/DI
 model. The platform's hard problems are storage correctness, policy/query
 lowering, changesets, hooks, migrations, and outbox behavior; a heavy HTTP
 framework does not solve those.

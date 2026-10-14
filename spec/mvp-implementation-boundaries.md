@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-mvp-implementation-boundaries; contract: 1; input: sha256:3a3237bbad85c5815e4f63ee6769f23a38f453b4fd979295db60d9cb3f21c3b3 -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-mvp-implementation-boundaries; contract: 1; input: sha256:03e124951d3110dd4afe873c72cb21b6958837814eade2d18e64f03cdd50cf89 -->
 
 # MVP Implementation Boundaries
 
@@ -23,7 +23,7 @@ not collapse across these layers.
 ```text
 src/
   domain/
-    auth/ authorization/ projects/
+    auth/ authorization/ workspaces/
     packs/ definitions/ migrations/
     changesets/ approvals/ operations/
     objects/ relationships/ comments/ history/
@@ -33,7 +33,7 @@ src/
 
   application/
     services/
-      auth/ projects/ packs/ migrations/
+      auth/ workspaces/ packs/ migrations/
       changesets/ actions/ seeds/
       queries/ history/ metadata/
       policies/ secrets/ outbox/
@@ -41,7 +41,7 @@ src/
       transactions + clock + UUIDv7
       auth/session/authorization/request repositories
       role/policy assignment repositories
-      project/pack/definition/migration repositories
+      workspace/pack/definition/migration repositories
       stage/object/history/event/audit repositories
       expression lowerer + policy evaluator
       hook runner + secret cryptography/store/grant resolver
@@ -114,7 +114,7 @@ single-process state.
 Explicit transactions are required for:
 
 - bootstrap/recovery/session/authorization/assignment mutations;
-- project create/update/archive;
+- workspace create/update/archive;
 - final successful stage persistence and lifecycle/approval/cancel mutation;
 - changeset commit under the canonical lock protocol;
 - whole-plan migration apply and active-pack activation;
@@ -147,7 +147,7 @@ Postgres `SKIP LOCKED`; horizontally scaled loops share the same protocol.
 - Direct staging, semantic actions, and seed reconcile all converge on one
   operation normalization/validation/persistence service.
 - Action hooks and seed expansion can author operations only within reviewed
-  manifests and one project; direct changesets may span projects.
+  manifests and one workspace; direct changesets may span workspaces.
 - No service regenerates operations or reruns synchronous hooks at commit.
 - Stage immutable evidence and lifecycle coordination use the exact storage
   split in `staged-changeset-storage.md`.
@@ -162,7 +162,7 @@ Postgres `SKIP LOCKED`; horizontally scaled loops share the same protocol.
   before sort/keyset/limit/count. No application post-filter pagination is
   permitted.
 - Route/CLI adapters pass the same strict query DTO; CLI only resolves local
-  project context and renders DTOs.
+  workspace context and renders DTOs.
 - Policy definitions/assignments and current authorization are loaded by ports;
   role strings supplied in request DTOs are rejected before evaluation.
 
@@ -180,8 +180,8 @@ Postgres `SKIP LOCKED`; horizontally scaled loops share the same protocol.
 
 - Server HTTP JSON is canonical; `optctl --json` preserves it and default output
   renders TOON.
-- CLI sends publisher-qualified definition identities plus explicit project UUID
-  resolved from context. Dotted namespace/project aliases are unsupported.
+- CLI sends publisher-qualified definition identities plus explicit workspace UUID
+  resolved from context. Dotted namespace/workspace aliases are unsupported.
 - Direct commit commands are client orchestration of stage then commit; there is
   no combined server use case.
 - CLI must not duplicate schema, policy, migration, hook, seed, or changeset
@@ -198,7 +198,7 @@ Postgres `SKIP LOCKED`; horizontally scaled loops share the same protocol.
   staging persistence, lock races, exactly-once commit, history/events, secrets,
   and outbox leases/retries.
 - Public compiled-CLI scenarios cover bootstrap/login/agent request, CRM and
-  project packs, multi-project changesets, approvals, revocation, migration,
+  workspace packs, multi-workspace changesets, approvals, revocation, migration,
   seeds, queries/history, and delivery.
 - Container smoke covers app-managed and external Postgres. PGlite remains
   prototype evidence only.

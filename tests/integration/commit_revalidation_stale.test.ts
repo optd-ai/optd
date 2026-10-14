@@ -17,14 +17,14 @@ Deno.test({
     try {
       const base = await createGraph(matrix, "observed-dependencies");
       const object = await matrix.stage([
-        update(matrix.projectId, base.alpha, "observed-object"),
+        update(matrix.workspaceId, base.alpha, "observed-object"),
       ]);
       await assertObservedOutcome(
         matrix,
         object.id,
         async () => {
           await commitOne(matrix, [
-            update(matrix.projectId, base.alpha, "object-current-mutated"),
+            update(matrix.workspaceId, base.alpha, "object-current-mutated"),
           ]);
         },
         "stage_stale",
@@ -34,14 +34,14 @@ Deno.test({
       const actionBase = await createGraph(matrix, "observed-action", false);
       const action = await matrix.harness.runOptctl([
         "--json",
-        "--project",
-        matrix.projectId,
+        "--workspace",
+        matrix.workspaceId,
         "action",
         "stage",
         "test/commitmatrix:generate",
         "--input",
         JSON.stringify({
-          project_id: matrix.projectId,
+          workspace_id: matrix.workspaceId,
           source_id: actionBase.alpha,
         }),
       ]);
@@ -52,7 +52,7 @@ Deno.test({
         actionStage,
         async () => {
           await commitOne(matrix, [
-            update(matrix.projectId, actionBase.alpha, "action-read-current"),
+            update(matrix.workspaceId, actionBase.alpha, "action-read-current"),
           ]);
         },
         "stage_stale",
@@ -65,7 +65,7 @@ Deno.test({
       );
       const relationship = await matrix.stage([{
         op: "unlink",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         relationship: "test/commitmatrix:alpha_beta",
         relationship_id: relationshipBase.relationship,
       }]);
@@ -75,7 +75,7 @@ Deno.test({
         async () => {
           await commitOne(matrix, [{
             op: "unlink",
-            project_id: matrix.projectId,
+            workspace_id: matrix.workspaceId,
             relationship: "test/commitmatrix:alpha_beta",
             relationship_id: relationshipBase.relationship,
           }]);
@@ -92,7 +92,7 @@ Deno.test({
         );
         const link = await matrix.stage([{
           op: "link",
-          project_id: matrix.projectId,
+          workspace_id: matrix.workspaceId,
           relationship: "test/commitmatrix:alpha_beta",
           from: graph.alpha,
           to: graph.beta,
@@ -104,8 +104,12 @@ Deno.test({
           async () => {
             await commitOne(matrix, [
               endpoint === "alpha"
-                ? update(matrix.projectId, graph.alpha, "endpoint-current")
-                : updateBeta(matrix.projectId, graph.beta, "endpoint-current"),
+                ? update(matrix.workspaceId, graph.alpha, "endpoint-current")
+                : updateBeta(
+                  matrix.workspaceId,
+                  graph.beta,
+                  "endpoint-current",
+                ),
             ]);
           },
           "stage_stale",
@@ -116,7 +120,7 @@ Deno.test({
       const commentBase = await createGraph(matrix, "observed-comment", false);
       const comment = await matrix.stage([{
         op: "comment",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:alpha",
         object_id: commentBase.alpha,
         body: "observed comment target",
@@ -126,7 +130,7 @@ Deno.test({
         comment.id,
         async () => {
           await commitOne(matrix, [
-            update(matrix.projectId, commentBase.alpha, "comment-current"),
+            update(matrix.workspaceId, commentBase.alpha, "comment-current"),
           ]);
         },
         "stage_stale",
@@ -136,7 +140,7 @@ Deno.test({
       const fkBase = await createGraph(matrix, "observed-fk", false);
       const foreignKey = await matrix.stage([{
         op: "create",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:alpha",
         fields: {
           key: "observed-fk-child",
@@ -149,27 +153,27 @@ Deno.test({
         foreignKey.id,
         async () => {
           await commitOne(matrix, [
-            updateBeta(matrix.projectId, fkBase.beta, "fk-current"),
+            updateBeta(matrix.workspaceId, fkBase.beta, "fk-current"),
           ]);
         },
         "stage_stale",
         "object_version_changed",
       );
 
-      const project = await matrix.stage([{
+      const workspace = await matrix.stage([{
         op: "create",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:gamma",
-        fields: { key: "observed-project", status: "ready" },
+        fields: { key: "observed-workspace", status: "ready" },
       }]);
       await assertObservedOutcome(
         matrix,
-        project.id,
+        workspace.id,
         async () => {
           await query(
             matrix.harness.server.sql,
-            "update projects set version=version+1 where id=$1",
-            [matrix.projectId],
+            "update workspaces set version=version+1 where id=$1",
+            [matrix.workspaceId],
           );
         },
         "stage_stale",
@@ -178,8 +182,8 @@ Deno.test({
 
       const seed = await matrix.harness.runOptctl([
         "--json",
-        "--project",
-        matrix.projectId,
+        "--workspace",
+        matrix.workspaceId,
         "seed",
         "stage",
         "test/commitmatrix",
@@ -191,8 +195,8 @@ Deno.test({
       await assertObservedActiveSeedConflict(matrix, seedStage, async () => {
         const winner = await matrix.harness.runOptctl([
           "--json",
-          "--project",
-          matrix.projectId,
+          "--workspace",
+          matrix.workspaceId,
           "seed",
           "stage",
           "test/commitmatrix",
@@ -208,7 +212,7 @@ Deno.test({
 
       const revision = await matrix.stage([{
         op: "create",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:gamma",
         fields: { key: "observed-revision", status: "ready" },
       }]);
@@ -249,22 +253,22 @@ Deno.test({
     try {
       const base = await createGraph(matrix, "dependency");
       const objectStage = await matrix.stage([
-        update(matrix.projectId, base.alpha, "object-stale"),
+        update(matrix.workspaceId, base.alpha, "object-stale"),
       ]);
       await commitOne(matrix, [
-        update(matrix.projectId, base.alpha, "object-winner"),
+        update(matrix.workspaceId, base.alpha, "object-winner"),
       ]);
       await assertStale(matrix, objectStage.id, "object_version_changed");
 
       const unlinkStage = await matrix.stage([{
         op: "unlink",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         relationship: "test/commitmatrix:alpha_beta",
         relationship_id: base.relationship,
       }]);
       await commitOne(matrix, [{
         op: "unlink",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         relationship: "test/commitmatrix:alpha_beta",
         relationship_id: base.relationship,
       }]);
@@ -272,27 +276,27 @@ Deno.test({
 
       const commentStage = await matrix.stage([{
         op: "comment",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:alpha",
         object_id: base.alpha,
         body: "staged before target update",
       }]);
       await commitOne(matrix, [
-        update(matrix.projectId, base.alpha, "comment-winner"),
+        update(matrix.workspaceId, base.alpha, "comment-winner"),
       ]);
       await assertStale(matrix, commentStage.id, "object_version_changed");
 
       const endpointBase = await createGraph(matrix, "endpoint", false);
       const linkStage = await matrix.stage([{
         op: "link",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         relationship: "test/commitmatrix:alpha_beta",
         from: endpointBase.alpha,
         to: endpointBase.beta,
         fields: { label: "staged" },
       }]);
       await commitOne(matrix, [
-        updateBeta(matrix.projectId, endpointBase.beta, "endpoint-winner"),
+        updateBeta(matrix.workspaceId, endpointBase.beta, "endpoint-winner"),
       ]);
       await assertStale(matrix, linkStage.id, "object_version_changed");
       await assertNoIdleClients(matrix.harness.server.sql);
@@ -304,28 +308,28 @@ Deno.test({
 
 Deno.test({
   name:
-    "production commit reports exact Project and referenced pack staleness while unrelated packs are ignored",
+    "production commit reports exact Workspace and referenced pack staleness while unrelated packs are ignored",
   sanitizeOps: false,
   sanitizeResources: false,
   async fn() {
     const matrix = await startCommitMatrix();
     try {
-      const projectStage = await matrix.stage([{
+      const workspaceStage = await matrix.stage([{
         op: "create",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:alpha",
-        fields: { key: "project-stale", status: "ready" },
+        fields: { key: "workspace-stale", status: "ready" },
       }]);
       await query(
         matrix.harness.server.sql,
-        "update projects set version=version+1 where id=$1",
-        [matrix.projectId],
+        "update workspaces set version=version+1 where id=$1",
+        [matrix.workspaceId],
       );
-      await assertStale(matrix, projectStage.id, "project_changed");
+      await assertStale(matrix, workspaceStage.id, "project_changed");
 
       const revisionStage = await matrix.stage([{
         op: "create",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:alpha",
         fields: { key: "revision-stale", status: "ready" },
       }]);
@@ -345,7 +349,7 @@ Deno.test({
 
       const unrelated = await matrix.stage([{
         op: "create",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:alpha",
         fields: { key: "unrelated-success", status: "ready" },
       }]);
@@ -370,13 +374,13 @@ async function createGraph(
   const operations: Record<string, unknown>[] = [{
     op: "create",
     key: "alpha",
-    project_id: matrix.projectId,
+    workspace_id: matrix.workspaceId,
     resource: "test/commitmatrix:alpha",
     fields: { key: `${prefix}-alpha`, status: "ready" },
   }, {
     op: "create",
     key: "beta",
-    project_id: matrix.projectId,
+    workspace_id: matrix.workspaceId,
     resource: "test/commitmatrix:beta",
     fields: { key: `${prefix}-beta`, status: "ready" },
   }];
@@ -384,7 +388,7 @@ async function createGraph(
     operations.push({
       op: "link",
       key: "relationship",
-      project_id: matrix.projectId,
+      workspace_id: matrix.workspaceId,
       relationship: "test/commitmatrix:alpha_beta",
       from: { $ref: "alpha.object_id" },
       to: { $ref: "beta.object_id" },
@@ -414,19 +418,19 @@ async function commitOne(
   const result = await matrix.commit(stage.id);
   assertEquals(result.ok, true);
 }
-function update(projectId: string, objectId: string, note: string) {
+function update(workspaceId: string, objectId: string, note: string) {
   return {
     op: "update",
-    project_id: projectId,
+    workspace_id: workspaceId,
     resource: "test/commitmatrix:alpha",
     object_id: objectId,
     set: { note },
   };
 }
-function updateBeta(projectId: string, objectId: string, note: string) {
+function updateBeta(workspaceId: string, objectId: string, note: string) {
   return {
     op: "update",
-    project_id: projectId,
+    workspace_id: workspaceId,
     resource: "test/commitmatrix:beta",
     object_id: objectId,
     set: { note },

@@ -15,7 +15,7 @@ Deno.test("failed pre-spawn authority never invokes hook coordinator or persiste
         ok: false as const,
         error: {
           code: "forbidden",
-          message: "current Project authority is unavailable",
+          message: "current Workspace authority is unavailable",
           severity: "forbidden" as const,
         },
       }),
@@ -31,9 +31,9 @@ Deno.test("failed pre-spawn authority never invokes hook coordinator or persiste
     },
   } as StageHookCoordinator;
   const service = makeStageChangesetService(repository, coordinator);
-  const projectId = "0198c4ba-42b8-7000-8000-000000000010";
+  const workspaceId = "0198c4ba-42b8-7000-8000-000000000010";
   const result = await service.stage({
-    project_id: projectId,
+    workspace_id: workspaceId,
     operations: [{
       op: "create",
       resource: "optd/test:item",

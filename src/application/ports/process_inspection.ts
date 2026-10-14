@@ -6,7 +6,11 @@ export type ProcessIdentity = {
   bootId: string;
 };
 
-export type ProcessInspectionFailure = "gone" | "denied" | "unsupported";
+export type ProcessInspectionFailure =
+  | "gone"
+  | "denied"
+  | "unsupported"
+  | "unavailable";
 
 export class ProcessInspectionError extends Error {
   constructor(readonly reason: ProcessInspectionFailure, message: string) {

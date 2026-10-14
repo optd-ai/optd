@@ -328,11 +328,11 @@ export const platformMigrations: PlatformMigration[] = [
         id uuid primary key,
         principal_id uuid not null references principals(id),
         role_id text not null references system_roles(id),
-        boundary_type text not null check (boundary_type in ('system', 'all_projects', 'project')),
-        project_id uuid,
+        boundary_type text not null check (boundary_type in ('system', 'all_workspaces', 'workspace')),
+        workspace_id uuid,
         active boolean not null,
         created_at timestamptz not null default now(),
-        check ((boundary_type = 'project') = (project_id is not null))
+        check ((boundary_type = 'workspace') = (workspace_id is not null))
       );
       create table auth_sessions (
         id uuid primary key,
@@ -368,7 +368,7 @@ export const platformMigrations: PlatformMigration[] = [
         completed_by_human_user_id uuid references human_users(id),
         updated_at timestamptz not null default now()
       );
-      create table projects (
+      create table workspaces (
         id uuid primary key,
         slug text not null unique check (slug ~ '^[a-z][a-z0-9-]{0,62}$'),
         display_name text not null,
@@ -381,7 +381,7 @@ export const platformMigrations: PlatformMigration[] = [
         updated_at timestamptz not null default now(),
         archived_at timestamptz
       );
-      alter table role_assignments add constraint role_assignments_project_fk foreign key(project_id) references projects(id);
+      alter table role_assignments add constraint role_assignments_workspace_fk foreign key(workspace_id) references workspaces(id);
       create table auth_audit_events (
         id uuid primary key,
         event_type text not null check (event_type in (
@@ -409,20 +409,20 @@ export const platformMigrations: PlatformMigration[] = [
       create trigger auth_audit_events_immutable
         before update or delete on auth_audit_events
         for each row execute function reject_auth_audit_mutation();
-      create table project_audit_events (
+      create table workspace_audit_events (
         id uuid primary key,
         auth_context_id uuid not null references auth_contexts(id),
-        project_id uuid references projects(id),
-        action text not null check (action in ('project.read', 'project.create', 'project.update', 'project.archive')),
+        workspace_id uuid references workspaces(id),
+        action text not null check (action in ('workspace.read', 'workspace.create', 'workspace.update', 'workspace.archive')),
         decision text not null check (decision in ('allowed', 'denied')),
         details jsonb not null default '{}'::jsonb,
         created_at timestamptz not null default now()
       );
       create index auth_sessions_token_digest_idx on auth_sessions(token_digest) where revoked_at is null;
-      create index projects_status_slug_idx on projects(status, slug);
+      create index workspaces_status_slug_idx on workspaces(status, slug);
       create index auth_audit_human_idx on auth_audit_events(human_user_id, created_at);
       create index auth_audit_session_idx on auth_audit_events(session_id, created_at);
-      create index project_audit_context_idx on project_audit_events(auth_context_id, created_at)
+      create index workspace_audit_context_idx on workspace_audit_events(auth_context_id, created_at)
     `,
   },
   {
@@ -530,10 +530,10 @@ export const platformMigrations: PlatformMigration[] = [
         id uuid primary key,
         authorization_id uuid not null references agent_authorizations(id),
         role_id text not null references system_roles(id),
-        boundary_type text not null check(boundary_type in ('system','all_projects','project')),
-        project_id uuid references projects(id),
-        unique nulls not distinct(authorization_id,role_id,boundary_type,project_id),
-        check((boundary_type='project')=(project_id is not null))
+        boundary_type text not null check(boundary_type in ('system','all_workspaces','workspace')),
+        workspace_id uuid references workspaces(id),
+        unique nulls not distinct(authorization_id,role_id,boundary_type,workspace_id),
+        check((boundary_type='workspace')=(workspace_id is not null))
       );
       create table agent_authorization_requests (
         id uuid primary key,
@@ -542,8 +542,8 @@ export const platformMigrations: PlatformMigration[] = [
         human_user_id uuid not null references human_users(id),
         idempotency_key text not null,
         roles text[] not null,
-        boundary_type text not null check(boundary_type in ('system','all_projects','project')),
-        project_id uuid references projects(id),
+        boundary_type text not null check(boundary_type in ('system','all_workspaces','workspace')),
+        workspace_id uuid references workspaces(id),
         reason text not null,
         agent_name text,
         nonce_digest text not null,
@@ -557,7 +557,7 @@ export const platformMigrations: PlatformMigration[] = [
         decided_at timestamptz,
         redeemed_at timestamptz,
         unique(requester_session_id,idempotency_key),
-        check((boundary_type='project')=(project_id is not null))
+        check((boundary_type='workspace')=(workspace_id is not null))
       );
       create table agent_authorization_watch_tickets (
         token_digest text primary key,
@@ -618,15 +618,15 @@ export const platformMigrations: PlatformMigration[] = [
       create table policy_assignments (
         id uuid primary key,
         policy_definition_version_id uuid not null references policy_definition_versions(id),
-        boundary_type text not null check(boundary_type in ('system','all_projects','project')),
-        project_id uuid references projects(id),
+        boundary_type text not null check(boundary_type in ('system','all_workspaces','workspace')),
+        workspace_id uuid references workspaces(id),
         active boolean not null,
         created_at timestamptz not null default now(),
         disabled_at timestamptz,
-        check((boundary_type='project')=(project_id is not null))
+        check((boundary_type='workspace')=(workspace_id is not null))
       );
       create index policy_assignment_boundary_idx
-        on policy_assignments(boundary_type,project_id) where active;
+        on policy_assignments(boundary_type,workspace_id) where active;
     `,
   },
   {
@@ -639,7 +639,7 @@ export const platformMigrations: PlatformMigration[] = [
       alter table role_assignments add column disabled_by_auth_context_id uuid references auth_contexts(id);
       alter table role_assignments add column disabled_at timestamptz;
       create unique index role_assignment_one_active_idx
-        on role_assignments(principal_id,role_id,boundary_type,project_id) nulls not distinct where active;
+        on role_assignments(principal_id,role_id,boundary_type,workspace_id) nulls not distinct where active;
 
       alter table policy_rules add column resource text not null default '*';
       alter table policy_rules add column condition_kind text not null default 'unconditional'
@@ -655,21 +655,21 @@ export const platformMigrations: PlatformMigration[] = [
       create table auth_context_role_assignments (
         auth_context_id uuid not null references auth_contexts(id),
         role_id text not null references system_roles(id),
-        boundary_type text not null check(boundary_type in ('system','all_projects','project')),
-        project_id uuid references projects(id),
-        check((boundary_type='project')=(project_id is not null))
+        boundary_type text not null check(boundary_type in ('system','all_workspaces','workspace')),
+        workspace_id uuid references workspaces(id),
+        check((boundary_type='workspace')=(workspace_id is not null))
       );
       create unique index auth_context_role_assignment_unique_idx
-        on auth_context_role_assignments(auth_context_id,role_id,boundary_type,project_id) nulls not distinct;
+        on auth_context_role_assignments(auth_context_id,role_id,boundary_type,workspace_id) nulls not distinct;
       create function snapshot_auth_context_roles() returns trigger language plpgsql as $$
       begin
         if new.credential_kind='human_full' then
-          insert into auth_context_role_assignments(auth_context_id,role_id,boundary_type,project_id)
-            select new.id,role_id,boundary_type,project_id from role_assignments
+          insert into auth_context_role_assignments(auth_context_id,role_id,boundary_type,workspace_id)
+            select new.id,role_id,boundary_type,workspace_id from role_assignments
              where principal_id=new.principal_id and active;
         elsif new.credential_kind='agent_authorization' then
-          insert into auth_context_role_assignments(auth_context_id,role_id,boundary_type,project_id)
-            select new.id,role_id,boundary_type,project_id from agent_authorization_roles
+          insert into auth_context_role_assignments(auth_context_id,role_id,boundary_type,workspace_id)
+            select new.id,role_id,boundary_type,workspace_id from agent_authorization_roles
              where authorization_id=new.authorization_id;
         end if;
         return new;
@@ -686,19 +686,19 @@ export const platformMigrations: PlatformMigration[] = [
       update system_roles set description='Unrestricted authenticated platform administrator',
         axi_summary='Reserved for trusted platform administration.' where id='system:super_admin';
       update system_roles set description='Delegated platform administrator',
-        axi_summary='Administers platform and project boundaries through active policy.' where id='system:admin';
+        axi_summary='Administers platform and workspace boundaries through active policy.' where id='system:admin';
       insert into policy_definition_versions(id,policy_id,version,active) values
         ('01900000-0000-7000-8000-000000000201','system:administration',1,true);
       insert into policy_rules(id,policy_definition_version_id,role_id,capability,resource,condition_kind,summary) values
         ('01900000-0000-7000-8000-000000000211','01900000-0000-7000-8000-000000000201','system:admin','role.assignment.manage','*','unconditional','Manage roles already held in this boundary.'),
         ('01900000-0000-7000-8000-000000000212','01900000-0000-7000-8000-000000000201','system:admin','policy.assignment.manage','*','unconditional','Manage policy activation in this boundary.'),
         ('01900000-0000-7000-8000-000000000213','01900000-0000-7000-8000-000000000201','system:admin','auth.request.decide','*','unconditional','Decide same-anchor authorization requests for held roles.'),
-        ('01900000-0000-7000-8000-000000000214','01900000-0000-7000-8000-000000000201','system:admin','project.read','*','unconditional',null),
-        ('01900000-0000-7000-8000-000000000215','01900000-0000-7000-8000-000000000201','system:admin','project.create','*','unconditional',null),
-        ('01900000-0000-7000-8000-000000000216','01900000-0000-7000-8000-000000000201','system:admin','project.update','*','unconditional',null),
-        ('01900000-0000-7000-8000-000000000217','01900000-0000-7000-8000-000000000201','system:admin','project.archive','*','unconditional',null);
-      insert into policy_assignments(id,policy_definition_version_id,boundary_type,project_id,active,source) values
-        ('01900000-0000-7000-8000-000000000222','01900000-0000-7000-8000-000000000201','all_projects',null,true,'platform');
+        ('01900000-0000-7000-8000-000000000214','01900000-0000-7000-8000-000000000201','system:admin','workspace.read','*','unconditional',null),
+        ('01900000-0000-7000-8000-000000000215','01900000-0000-7000-8000-000000000201','system:admin','workspace.create','*','unconditional',null),
+        ('01900000-0000-7000-8000-000000000216','01900000-0000-7000-8000-000000000201','system:admin','workspace.update','*','unconditional',null),
+        ('01900000-0000-7000-8000-000000000217','01900000-0000-7000-8000-000000000201','system:admin','workspace.archive','*','unconditional',null);
+      insert into policy_assignments(id,policy_definition_version_id,boundary_type,workspace_id,active,source) values
+        ('01900000-0000-7000-8000-000000000222','01900000-0000-7000-8000-000000000201','all_workspaces',null,true,'platform');
 
       create table authorization_audit_events (
         id uuid primary key,
@@ -844,9 +844,9 @@ export const platformMigrations: PlatformMigration[] = [
     `,
   },
   {
-    id: "1016_project_object_history",
+    id: "1016_workspace_object_history",
     sql: `
-      -- Pre-Project history was never a supported deployed baseline. Invalidate it
+      -- Pre-Workspace history was never a supported deployed baseline. Invalidate it
       -- rather than retaining ambiguous text identifiers or actor provenance.
       drop table if exists comments;
       alter table audit_events drop constraint if exists audit_events_object_version_id_fkey;
@@ -865,7 +865,7 @@ export const platformMigrations: PlatformMigration[] = [
 
       create table object_versions (
         id uuid primary key,
-        project_id uuid not null references projects(id),
+        workspace_id uuid not null references workspaces(id),
         definition_kind text not null check (definition_kind in ('resource','relationship')),
         resource_identity text not null check (resource_identity ~ '^[a-z][a-z0-9-]{0,62}/[a-z][a-z0-9_]{0,62}:[a-z][a-z0-9_]{0,62}$'),
         object_id uuid not null,
@@ -878,12 +878,12 @@ export const platformMigrations: PlatformMigration[] = [
         changed_fields text[] not null default '{}',
         auth_context_id uuid not null references auth_contexts(id),
         created_at timestamptz not null default now(),
-        unique(project_id, definition_kind, resource_identity, object_id, version),
-        unique(project_id, definition_kind, resource_identity, object_id, id),
-        unique(project_id, object_id, id),
+        unique(workspace_id, definition_kind, resource_identity, object_id, version),
+        unique(workspace_id, definition_kind, resource_identity, object_id, id),
+        unique(workspace_id, object_id, id),
         check ((version = 1 and previous_version_id is null) or (version > 1 and previous_version_id is not null))
       );
-      create index object_versions_timeline_idx on object_versions(project_id,definition_kind,resource_identity,object_id,created_at desc,id desc);
+      create index object_versions_timeline_idx on object_versions(workspace_id,definition_kind,resource_identity,object_id,created_at desc,id desc);
       alter table audit_events add constraint audit_events_object_version_id_fkey
         foreign key(object_version_id) references object_versions(id);
       alter table events add constraint events_object_version_id_fkey
@@ -891,7 +891,7 @@ export const platformMigrations: PlatformMigration[] = [
 
       create table comments (
         id uuid primary key,
-        project_id uuid not null references projects(id),
+        workspace_id uuid not null references workspaces(id),
         definition_kind text not null check (definition_kind in ('resource','relationship')),
         resource_identity text not null check (resource_identity ~ '^[a-z][a-z0-9-]{0,62}/[a-z][a-z0-9_]{0,62}:[a-z][a-z0-9_]{0,62}$'),
         object_id uuid not null,
@@ -900,10 +900,10 @@ export const platformMigrations: PlatformMigration[] = [
         auth_context_id uuid not null references auth_contexts(id),
         body text not null check (body ~ '\\S'),
         created_at timestamptz not null default now(),
-        foreign key(project_id,definition_kind,resource_identity,object_id,target_object_version_id)
-          references object_versions(project_id,definition_kind,resource_identity,object_id,id) deferrable initially deferred
+        foreign key(workspace_id,definition_kind,resource_identity,object_id,target_object_version_id)
+          references object_versions(workspace_id,definition_kind,resource_identity,object_id,id) deferrable initially deferred
       );
-      create index comments_timeline_idx on comments(project_id,definition_kind,resource_identity,object_id,created_at desc,id desc);
+      create index comments_timeline_idx on comments(workspace_id,definition_kind,resource_identity,object_id,created_at desc,id desc);
 
       create function optd_reject_history_mutation() returns trigger language plpgsql as $$
       begin raise exception 'object history and comments are append-only'; end $$;
@@ -916,7 +916,7 @@ export const platformMigrations: PlatformMigration[] = [
       begin
         if new.previous_version_id is not null then
           select * into prior from object_versions where id=new.previous_version_id;
-          if prior.id is null or prior.project_id<>new.project_id or prior.definition_kind<>new.definition_kind
+          if prior.id is null or prior.workspace_id<>new.workspace_id or prior.definition_kind<>new.definition_kind
              or prior.resource_identity<>new.resource_identity or prior.object_id<>new.object_id or prior.version<>new.version-1 then
             raise exception 'invalid object version chain';
           end if;
@@ -979,7 +979,7 @@ export const platformMigrations: PlatformMigration[] = [
         operation_graph_digest text not null check(operation_graph_digest ~ '^sha256:[0-9a-f]{64}$'),
         stage_digest text not null check(stage_digest ~ '^sha256:[0-9a-f]{64}$'),
         canonical_graph_json jsonb not null check(jsonb_typeof(canonical_graph_json)='object'),
-        projects_json jsonb not null check(jsonb_typeof(projects_json)='array'),
+        workspaces_json jsonb not null check(jsonb_typeof(workspaces_json)='array'),
         pack_revisions_json jsonb not null check(jsonb_typeof(pack_revisions_json)='array'),
         warnings_json jsonb not null check(jsonb_typeof(warnings_json)='array'),
         planned_events_json jsonb not null check(jsonb_typeof(planned_events_json)='array'),
@@ -988,7 +988,7 @@ export const platformMigrations: PlatformMigration[] = [
       );
       create table staged_changeset_operations (
         stage_id uuid not null references staged_changesets(id), ordinal integer not null check(ordinal>=0),
-        operation_id uuid not null, project_id uuid not null references projects(id),
+        operation_id uuid not null, workspace_id uuid not null references workspaces(id),
         pack_revision_id uuid not null references pack_candidate_revisions(id),
         resource_revision_id uuid not null references pack_candidate_revisions(id),
         operation_kind text not null check(operation_kind in ('create','update','transition','archive','link','unlink','comment')),
@@ -997,8 +997,8 @@ export const platformMigrations: PlatformMigration[] = [
       );
       create table staged_changeset_dependencies (
         stage_id uuid not null references staged_changesets(id), ordinal integer not null check(ordinal>=0),
-        dependency_kind text not null check(dependency_kind in ('project','pack_revision','resource','lifecycle','object_version','relationship','uniqueness','policy','assignment')),
-        project_id uuid references projects(id), pack_revision_id uuid references pack_candidate_revisions(id),
+        dependency_kind text not null check(dependency_kind in ('workspace','pack_revision','resource','lifecycle','object_version','relationship','uniqueness','policy','assignment')),
+        workspace_id uuid references workspaces(id), pack_revision_id uuid references pack_candidate_revisions(id),
         resource_revision_id uuid references pack_candidate_revisions(id), object_id uuid, expected_version_id uuid references object_versions(id),
         dependency_json jsonb not null check(jsonb_typeof(dependency_json)='object'), primary key(stage_id,ordinal)
       );
@@ -1012,7 +1012,7 @@ export const platformMigrations: PlatformMigration[] = [
       );
       create table staged_policy_decisions (
         id uuid primary key, stage_id uuid not null references staged_changesets(id), ordinal integer not null check(ordinal>=0),
-        project_id uuid not null references projects(id), action text not null, resource_identity text not null,
+        workspace_id uuid not null references workspaces(id), action text not null, resource_identity text not null,
         decision_json jsonb not null check(jsonb_typeof(decision_json)='object'), unique(stage_id,ordinal)
       );
       create table staged_approval_requirements (
@@ -1051,9 +1051,9 @@ export const platformMigrations: PlatformMigration[] = [
       create trigger staged_policy_immutable before update or delete on staged_policy_decisions for each row execute function optd_reject_staged_evidence_mutation();
       create trigger staged_approvals_immutable before update or delete on staged_approval_requirements for each row execute function optd_reject_staged_evidence_mutation();
       create trigger staged_decisions_immutable before update or delete on staged_approval_decisions for each row execute function optd_reject_staged_evidence_mutation();
-      create index staged_operations_project_idx on staged_changeset_operations(stage_id,project_id,ordinal);
+      create index staged_operations_workspace_idx on staged_changeset_operations(stage_id,workspace_id,ordinal);
       create index staged_dependencies_stage_idx on staged_changeset_dependencies(stage_id,dependency_kind,ordinal);
-      create index staged_policy_stage_idx on staged_policy_decisions(stage_id,project_id,ordinal);
+      create index staged_policy_stage_idx on staged_policy_decisions(stage_id,workspace_id,ordinal);
     `,
   },
   {
@@ -1306,15 +1306,15 @@ export const platformMigrations: PlatformMigration[] = [
       alter table audit_events add column stage_id uuid references staged_changesets(id);
       alter table audit_events add column changeset_commit_id uuid references changeset_commits(id);
       alter table audit_events add column auth_context_id uuid references auth_contexts(id);
-      alter table audit_events add column project_id uuid references projects(id);
+      alter table audit_events add column workspace_id uuid references workspaces(id);
       alter table audit_events add column resource_identity text;
       create index audit_events_commit_idx on audit_events(changeset_commit_id,created_at,id);
       create index audit_events_stage_idx on audit_events(stage_id,created_at,id);
-      create index audit_events_object_timeline_idx on audit_events(project_id,resource_identity,object_id,created_at,id);
+      create index audit_events_object_timeline_idx on audit_events(workspace_id,resource_identity,object_id,created_at,id);
 
       alter table events alter column changeset_id drop not null;
       alter table events add column changeset_commit_id uuid references changeset_commits(id);
-      alter table events add column project_id uuid references projects(id);
+      alter table events add column workspace_id uuid references workspaces(id);
       alter table events add column schema_version integer;
       alter table events add column resource_identity text;
       alter table events add constraint events_canonical_or_legacy check(
@@ -1322,7 +1322,7 @@ export const platformMigrations: PlatformMigration[] = [
         (changeset_commit_id is not null and changeset_id is null and schema_version=1)
       );
       create index events_commit_idx on events(changeset_commit_id,occurred_at,id);
-      create index events_object_timeline_idx on events(project_id,resource_identity,object_id,occurred_at,id);
+      create index events_object_timeline_idx on events(workspace_id,resource_identity,object_id,occurred_at,id);
       create trigger events_immutable before update or delete on events
         for each row execute function optd_reject_history_mutation();
 
@@ -1340,15 +1340,15 @@ export const platformMigrations: PlatformMigration[] = [
           auth_context_id is not null and actor_id is null and
           id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' and
           ((event_type='changeset.committed' and stage_id is not null and object_version_id is null) or
-           (event_type<>'changeset.committed' and project_id is not null and resource_identity is not null and object_id is not null))
+           (event_type<>'changeset.committed' and workspace_id is not null and resource_identity is not null and object_id is not null))
         else true end
       );
       alter table events add constraint events_canonical_complete check(
         case when changeset_commit_id is not null then
           id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' and
           schema_version=1 and
-          ((event_type='changeset.committed' and project_id is null and object_version_id is null and resource_identity is null and object_id is null) or
-           (event_type<>'changeset.committed' and project_id is not null and resource_identity is not null and object_id is not null))
+          ((event_type='changeset.committed' and workspace_id is null and object_version_id is null and resource_identity is null and object_id is null) or
+           (event_type<>'changeset.committed' and workspace_id is not null and resource_identity is not null and object_id is not null))
         else true end
       );
       alter table comments add constraint comments_uuidv7 check(uuid_extract_version(id)=7);
@@ -1825,6 +1825,15 @@ export async function applyPlatformMigrations(
   sql: Queryable,
   migrations: readonly PlatformMigration[] = platformMigrations,
 ): Promise<MigrationApplyResult> {
+  const legacy = (await query<{ present: boolean }>(
+    sql,
+    "select to_regclass('public.projects') is not null present",
+  )).rows[0];
+  if (legacy?.present) {
+    throw new Error(
+      "workspace_schema_requires_fresh_database: this breaking release does not upgrade Project-era databases; back up existing data and initialize a fresh database",
+    );
+  }
   await query(
     sql,
     `

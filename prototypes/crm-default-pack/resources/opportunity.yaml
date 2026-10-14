@@ -51,7 +51,7 @@ spec:
       empty:
         message: No opportunity records found.
         help:
-          - optctl --project ${project} create optd/crm:opportunity --input object.json --stage
+          - optctl --workspace ${workspace} create optd/crm:opportunity --input object.json --stage
     detail:
       sections:
         - title: opportunity
@@ -62,11 +62,11 @@ spec:
             - probability
             - company_id
       help:
-        - optctl --project ${project} query optd/crm:opportunity --where 'id == "${id}"'
+        - optctl --workspace ${workspace} query optd/crm:opportunity --where 'id == "${id}"'
     help:
       list:
-        - optctl --project ${project} query optd/crm:opportunity
+        - optctl --workspace ${workspace} query optd/crm:opportunity
       view:
-        - optctl --project ${project} view optd/crm:opportunity ${id}
+        - optctl --workspace ${workspace} view optd/crm:opportunity ${id}
       created:
-        - optctl --project ${project} view optd/crm:opportunity ${id}
+        - optctl --workspace ${workspace} view optd/crm:opportunity ${id}

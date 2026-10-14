@@ -150,17 +150,17 @@ function queryBoundary(urlValue: string) {
   const url = new URL(urlValue);
   const allowed = new Set([
     "boundary_type",
-    "project_id",
+    "workspace_id",
     "include_security",
   ]);
   if ([...url.searchParams.keys()].some((key) => !allowed.has(key))) {
     return undefined;
   }
   const type = url.searchParams.get("boundary_type");
-  const projectId = url.searchParams.get("project_id");
-  return type === "project" && projectId
-    ? { type, project_id: projectId }
-    : type && !projectId
+  const workspaceId = url.searchParams.get("workspace_id");
+  return type === "workspace" && workspaceId
+    ? { type, workspace_id: workspaceId }
+    : type && !workspaceId
     ? { type }
     : undefined;
 }

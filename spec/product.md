@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-product; contract: 1; input: sha256:0281cf56da4ebbaf51910e0344b7b1625319cfa4e776fecf2e74e98c3406706e -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-product; contract: 1; input: sha256:f48c3f5ea8f6b872edb195394f61b05be7f9d26f711464f5ed5db57675cf8444 -->
 
 # Product direction
 
@@ -10,7 +10,7 @@ Canonical product direction decisions and contracts projected from project-model
 
 ### Provide an operational data platform for AI agents
 
-Build an API-first operational data platform that lets agents safely operate structured business data and workflows without making CRM or Projects the product boundary.
+Build an API-first operational data platform that lets agents safely operate structured business data and workflows without making CRM or Workspaces the product boundary.
 
 <a id="obj-int-single-tenant-oss"></a>
 
@@ -46,7 +46,7 @@ Malformed JSON or a non-object transport shape returns HTTP 400 with bad_request
 
 ### Keep the public route inventory aligned with split Hono modules
 
-The canonical route inventory includes current authorization authority/roles and expression help/validate endpoints. Route-source contract tests inspect app, auth, authorization, and project route modules together so split registration cannot hide current public routes.
+The canonical route inventory includes current authorization authority/roles and expression help/validate endpoints. Route-source contract tests inspect app, auth, authorization, and workspace route modules together so split registration cannot hide current public routes.
 
 **Rationale.** API-first clients require discoverable current routes and an inventory that follows actual composition.
 
@@ -60,10 +60,10 @@ The canonical product and repository are optd and optd-ai/optd. The server execu
 
 **Related cross-domain objects**
 
-- affects: [Use publisher/pack:name without aliases](packs-projects.md#obj-dec-qualified-identity)
+- affects: [Use publisher/pack:name without aliases](packs-workspaces.md#obj-dec-qualified-identity)
 - affects: [Build once and clean only exact proven release ownership](runtime-release.md#obj-dec-release-integrity)
 - affects: [Use exactly external or app-managed PostgreSQL runtime modes](runtime-release.md#obj-dec-runtime-modes)
-- supports: [Do not build development-era compatibility](packs-projects.md#obj-int-no-compat)
+- supports: [Do not build development-era compatibility](packs-workspaces.md#obj-int-no-compat)
 
 <a id="obj-dec-optd-license"></a>
 

@@ -19,7 +19,7 @@ import {
   PatchError,
 } from "../../../src/domain/changesets/patch.ts";
 
-const project = "019b7a2e-7c10-7000-8000-000000000001";
+const workspace = "019b7a2e-7c10-7000-8000-000000000001";
 const generated = [
   "019b7a2e-7c10-7000-8000-000000000010",
   "019b7a2e-7c10-7000-8000-000000000011",
@@ -76,7 +76,7 @@ Deno.test("authored operations reject caller IDs and legacy aliases", () => {
   ) {
     const value = {
       op: "create",
-      project_id: project,
+      workspace_id: workspace,
       resource: "optd/crm:lead",
       fields: {},
       [extra]: generated[0],
@@ -85,7 +85,7 @@ Deno.test("authored operations reject caller IDs and legacy aliases", () => {
   }
   assertEquals(
     stageRequestContract.check({
-      project_id: project,
+      workspace_id: workspace,
       operations: [{
         op: "update",
         resource: "optd/crm:lead",
@@ -101,7 +101,7 @@ Deno.test("authored operations reject caller IDs and legacy aliases", () => {
 Deno.test("normalization allocates before resolving forward refs and folds update", async () => {
   let index = 0;
   const result = await normalizeOperations({
-    project_id: project,
+    workspace_id: workspace,
     operations: [
       {
         op: "update",
@@ -124,7 +124,7 @@ Deno.test("normalization allocates before resolving forward refs and folds updat
   assertEquals(result.operationGraphDigest.startsWith("sha256:"), true);
 });
 
-Deno.test("normalization rejects cross-project and conflicting mutation refs", async () => {
+Deno.test("normalization rejects cross-workspace and conflicting mutation refs", async () => {
   await assertRejects(
     () =>
       normalizeOperations({
@@ -132,13 +132,13 @@ Deno.test("normalization rejects cross-project and conflicting mutation refs", a
           {
             op: "create",
             key: "lead",
-            project_id: project,
+            workspace_id: workspace,
             resource: "optd/crm:lead",
             fields: {},
           },
           {
             op: "comment",
-            project_id: "019b7a2e-7c10-7000-8000-000000000002",
+            workspace_id: "019b7a2e-7c10-7000-8000-000000000002",
             resource: "optd/crm:lead",
             object_id: { $ref: "lead.object_id" },
             body: "x",
@@ -146,7 +146,7 @@ Deno.test("normalization rejects cross-project and conflicting mutation refs", a
         ],
       }, () => generated[0]),
     OperationError,
-    "cross-project",
+    "cross-workspace",
   );
 });
 
@@ -175,7 +175,7 @@ Deno.test("patch engine implements pointer escapes and RFC 6902 arrays", () => {
 
 Deno.test("normalization allocates fresh IDs and rejects mutation conflicts", async () => {
   const request = {
-    project_id: project,
+    workspace_id: workspace,
     operations: [
       {
         op: "create" as const,
@@ -205,7 +205,7 @@ Deno.test("normalization allocates fresh IDs and rejects mutation conflicts", as
   await assertRejects(
     () =>
       normalizeOperations({
-        project_id: project,
+        workspace_id: workspace,
         operations: [
           {
             op: "update",
@@ -227,7 +227,7 @@ Deno.test("normalization allocates fresh IDs and rejects mutation conflicts", as
   await assertRejects(
     () =>
       normalizeOperations({
-        project_id: project,
+        workspace_id: workspace,
         operations: [
           {
             op: "archive",
@@ -249,7 +249,7 @@ Deno.test("normalization allocates fresh IDs and rejects mutation conflicts", as
 
 Deno.test("normalization enforces all operational limits", async () => {
   const request = {
-    project_id: project,
+    workspace_id: workspace,
     operations: [{
       op: "create" as const,
       resource: "optd/crm:lead",
@@ -283,7 +283,7 @@ Deno.test("normalization enforces all operational limits", async () => {
 Deno.test("stage digest binds every required evidence category", async () => {
   const base = {
     operation_graph_digest: `sha256:${"1".repeat(64)}`,
-    projects: [{ project_id: project, version: 1, status: "active" }],
+    workspaces: [{ workspace_id: workspace, version: 1, status: "active" }],
     pack_revisions: [{ revision_id: generated[0] }],
     operations: [],
     dependencies: [{ kind: "policy", digest: `sha256:${"2".repeat(64)}` }],

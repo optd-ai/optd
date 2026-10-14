@@ -368,7 +368,7 @@ printf '%s %s\\n' "$cache" "$children"`,
         `select principal_id from auth_contexts where id=${literal(id)}`,
       );
     },
-    async observeCrmLostReasonId(projectId) {
+    async observeCrmLostReasonId(workspaceId) {
       const table = await sqlScalar(
         harness,
         "select table_name from pack_runtime_tables where publisher='optd' and pack_name='crm' and definition_kind='resource' and definition_name='lost_reason'",
@@ -378,12 +378,12 @@ printf '%s %s\\n' "$cache" "$children"`,
       }
       return await sqlScalar(
         harness,
-        `select id from ${table} where project_id=${
-          literal(projectId)
+        `select id from ${table} where workspace_id=${
+          literal(workspaceId)
         } and archived_at is null order by id limit 1`,
       );
     },
-    async observeProjectsTodoStageId(projectId) {
+    async observeProjectsTodoStageId(workspaceId) {
       const table = await sqlScalar(
         harness,
         "select table_name from pack_runtime_tables where publisher='optd' and pack_name='projects' and definition_kind='resource' and definition_name='task_stage'",
@@ -393,12 +393,12 @@ printf '%s %s\\n' "$cache" "$children"`,
       }
       return await sqlScalar(
         harness,
-        `select id from ${table} where project_id=${
-          literal(projectId)
+        `select id from ${table} where workspace_id=${
+          literal(workspaceId)
         } and name='todo' and archived_at is null limit 1`,
       );
     },
-    async observeProjectsTaskCount(projectId, state) {
+    async observeProjectsTaskCount(workspaceId, state) {
       const table = await sqlScalar(
         harness,
         "select table_name from pack_runtime_tables where publisher='optd' and pack_name='projects' and definition_kind='resource' and definition_name='task'",
@@ -407,13 +407,13 @@ printf '%s %s\\n' "$cache" "$children"`,
       return Number(
         await sqlScalar(
           harness,
-          `select count(*)::int from ${table} where project_id=${
-            literal(projectId)
+          `select count(*)::int from ${table} where workspace_id=${
+            literal(workspaceId)
           } and state=${literal(state)} and archived_at is null`,
         ),
       );
     },
-    async observeProjectsTimesheets(projectId, principalId) {
+    async observeProjectsTimesheets(workspaceId, principalId) {
       const table = await sqlScalar(
         harness,
         "select table_name from pack_runtime_tables where publisher='optd' and pack_name='projects' and definition_kind='resource' and definition_name='timesheet'",
@@ -423,8 +423,8 @@ printf '%s %s\\n' "$cache" "$children"`,
       }
       const rows = await sqlJson<Array<{ principalId: string; hours: string }>>(
         harness,
-        `select coalesce(json_agg(json_build_object('principalId',principal_id,'hours',hours::text)),'[]'::json) from ${table} where project_id=${
-          literal(projectId)
+        `select coalesce(json_agg(json_build_object('principalId',principal_id,'hours',hours::text)),'[]'::json) from ${table} where workspace_id=${
+          literal(workspaceId)
         } and principal_id=${literal(principalId)} and archived_at is null`,
       );
       return rows.map((row) => ({
@@ -438,9 +438,9 @@ printf '%s %s\\n' "$cache" "$children"`,
           harness,
           `select count(*)::int from role_assignments ra join policy_rules pr on pr.role_id=ra.role_id join policy_definition_versions pdv on pdv.id=pr.policy_definition_version_id and pdv.active join policy_assignments pa on pa.policy_definition_version_id=pdv.id and pa.active where ra.principal_id=${
             literal(input.principalId)
-          } and ra.active and ra.role_id='optd/crm:crm_admin' and ra.project_id=${
-            literal(input.projectId)
-          } and pr.capability='link' and pr.resource='optd/crm:opportunity_viewer' and pa.boundary_type='all_projects'`,
+          } and ra.active and ra.role_id='optd/crm:crm_admin' and ra.workspace_id=${
+            literal(input.workspaceId)
+          } and pr.capability='link' and pr.resource='optd/crm:opportunity_viewer' and pa.boundary_type='all_workspaces'`,
         ),
       );
     },
@@ -460,8 +460,8 @@ printf '%s %s\\n' "$cache" "$children"`,
       if (!/^[a-z0-9_]+$/.test(table)) return null;
       return await sqlJson(
         harness,
-        `select json_build_object('fromObjectId',from_object_id,'toObjectId',to_object_id) from ${table} where project_id=${
-          literal(input.projectId)
+        `select json_build_object('fromObjectId',from_object_id,'toObjectId',to_object_id) from ${table} where workspace_id=${
+          literal(input.workspaceId)
         } and from_object_id=${
           literal(input.fromObjectId)
         } and archived_at is null limit 1`,
@@ -565,7 +565,7 @@ printf '%s %s\\n' "$cache" "$children"`,
       await lockChild.status.catch(() => undefined);
       lockChild = undefined;
     },
-    async observeMigration(projectId, leadId) {
+    async observeMigration(workspaceId, leadId) {
       const activeRevisionId = await sqlScalar(
         harness,
         "select candidate_revision_id::text from pack_active_revisions where publisher='optd' and pack_name='crm'",
@@ -588,8 +588,8 @@ printf '%s %s\\n' "$cache" "$children"`,
           'physicalColumns',(select coalesce(jsonb_agg(to_jsonb(c) order by c.ordinal_position),'[]'::jsonb)::text from (select ordinal_position,column_name,data_type,udt_name,is_nullable,column_default from information_schema.columns where table_schema='public' and table_name=${
           literal(table)
         }) c),
-          'physicalRows',(select coalesce(jsonb_agg(to_jsonb(r) order by r.id),'[]'::jsonb)::text from ${table} r where r.project_id=${
-          literal(projectId)
+          'physicalRows',(select coalesce(jsonb_agg(to_jsonb(r) order by r.id),'[]'::jsonb)::text from ${table} r where r.workspace_id=${
+          literal(workspaceId)
         } and r.id=${literal(leadId)}))`,
       );
     },

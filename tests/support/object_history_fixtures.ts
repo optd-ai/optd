@@ -23,7 +23,7 @@ export type ObjectHistoryFixtureInput = {
   pack: string;
   resource: string;
   relationship: string;
-  projectIds: readonly [string, string];
+  workspaceIds: readonly [string, string];
   authContextId: string;
   resourceData: Record<string, unknown>;
   relationshipFields?: Record<string, unknown>;
@@ -70,29 +70,29 @@ export async function seedObjectHistoryFixture(
   const toIdentity = String(record(relationshipSpec.to).resource);
   const historyData = uniqueFixtureData(resourceData, "history");
   const otherData = uniqueFixtureData(resourceData, "other");
-  const projectTwoData = uniqueFixtureData(resourceData, "project-two");
+  const workspaceTwoData = uniqueFixtureData(resourceData, "workspace-two");
   const temporaryData = temporaryVersion(historyData);
   const operations: Record<string, unknown>[] = [
     {
       op: "create",
       key: "history_object",
-      project_id: input.projectIds[0],
+      workspace_id: input.workspaceIds[0],
       resource: resourceIdentity,
       fields: temporaryData,
     },
     {
       op: "create",
       key: "other_object",
-      project_id: input.projectIds[0],
+      workspace_id: input.workspaceIds[0],
       resource: resourceIdentity,
       fields: otherData,
     },
     {
       op: "create",
-      key: "project_two_object",
-      project_id: input.projectIds[1],
+      key: "workspace_two_object",
+      workspace_id: input.workspaceIds[1],
       resource: resourceIdentity,
-      fields: projectTwoData,
+      fields: workspaceTwoData,
     },
   ];
   const endpointRefs = new Map<string, unknown>();
@@ -110,7 +110,7 @@ export async function seedObjectHistoryFixture(
     operations.push({
       op: "create",
       key,
-      project_id: input.projectIds[0],
+      workspace_id: input.workspaceIds[0],
       resource: identity,
       fields: minimalResourceData(document, identity),
     });
@@ -119,7 +119,7 @@ export async function seedObjectHistoryFixture(
   operations.push({
     op: "link",
     key: "history_relationship",
-    project_id: input.projectIds[0],
+    workspace_id: input.workspaceIds[0],
     relationship: relationshipIdentity,
     from: endpointRefs.get("from"),
     to: endpointRefs.get("to"),
@@ -129,9 +129,9 @@ export async function seedObjectHistoryFixture(
   const firstOperations = first.operations as CanonicalOperation[];
   const object = produced(firstOperations, "history_object", "object_id");
   const otherObject = produced(firstOperations, "other_object", "object_id");
-  const projectTwoObject = produced(
+  const workspaceTwoObject = produced(
     firstOperations,
-    "project_two_object",
+    "workspace_two_object",
     "object_id",
   );
   const relationshipId = produced(
@@ -144,26 +144,26 @@ export async function seedObjectHistoryFixture(
 
   await stageAndCommit(input.sql, auth, [{
     op: "update",
-    project_id: input.projectIds[0],
+    workspace_id: input.workspaceIds[0],
     resource: resourceIdentity,
     object_id: object,
     set: changedValues(temporaryData, historyData),
   }, {
     op: "unlink",
-    project_id: input.projectIds[0],
+    workspace_id: input.workspaceIds[0],
     relationship: relationshipIdentity,
     relationship_id: relationshipId,
   }]);
   const final = await stageAndCommit(input.sql, auth, [{
     op: "comment",
-    project_id: input.projectIds[0],
+    workspace_id: input.workspaceIds[0],
     resource: resourceIdentity,
     object_id: object,
     body: "fixture comment",
   }, {
     op: "link",
     key: "replacement_relationship",
-    project_id: input.projectIds[0],
+    workspace_id: input.workspaceIds[0],
     relationship: relationshipIdentity,
     from,
     to,
@@ -183,22 +183,22 @@ export async function seedObjectHistoryFixture(
     input.sql,
     `select id,object_id,version,definition_kind from object_versions
      where object_id=any($1::uuid[]) order by object_id,version`,
-    [[object, projectTwoObject, relationshipId]],
+    [[object, workspaceTwoObject, relationshipId]],
   )).rows;
   const comment = (await query<{ id: string }>(
     input.sql,
-    "select id from comments where project_id=$1 and object_id=$2 order by created_at desc,id desc limit 1",
-    [input.projectIds[0], object],
+    "select id from comments where workspace_id=$1 and object_id=$2 order by created_at desc,id desc limit 1",
+    [input.workspaceIds[0], object],
   )).rows[0].id;
   return {
     object,
     otherObject,
-    projectTwoObject,
+    workspaceTwoObject,
     relationship: relationshipId,
     replacementRelationship: replacement,
     objectVersionOne: versionId(versions, object, 1),
     objectVersionTwo: versionId(versions, object, 2),
-    projectTwoVersion: versionId(versions, projectTwoObject, 1),
+    workspaceTwoVersion: versionId(versions, workspaceTwoObject, 1),
     relationshipVersionOne: versionId(versions, relationshipId, 1),
     relationshipVersionTwo: versionId(versions, relationshipId, 2),
     comment,

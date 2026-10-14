@@ -31,20 +31,20 @@ for (const logLevel of ["info", "trace"] as const) {
         await ok(harness, ["--json", "pack", "apply", v1, "--safe"], output),
       );
       const v1Revision = installed.plan.to_pack_revision_id;
-      const project = data(
+      const workspace = data(
         await ok(harness, [
           "--json",
-          "project",
+          "workspace",
           "create",
           "migration",
           "--display-name",
           "Migration",
         ], output),
       );
-      const created = await stage(harness, project.id, [{
+      const created = await stage(harness, workspace.id, [{
         op: "create",
         key: "lead",
-        project_id: project.id,
+        workspace_id: workspace.id,
         resource: `${CRM}:lead`,
         fields: {
           name: "Legacy lead",
@@ -137,9 +137,14 @@ for (const logLevel of ["info", "trace"] as const) {
         "--safe",
       ], output);
 
-      const beforeCleanup = await view(harness, project.id, leadId, output);
+      const beforeCleanup = await view(harness, workspace.id, leadId, output);
       assertEquals(beforeCleanup.data.phone, "555-0100");
-      const beforeHistory = await history(harness, project.id, leadId, output);
+      const beforeHistory = await history(
+        harness,
+        workspace.id,
+        leadId,
+        output,
+      );
       assertEquals(
         beforeHistory.items.filter((x: any) => x.kind === "object_version")
           .length,
@@ -148,9 +153,9 @@ for (const logLevel of ["info", "trace"] as const) {
 
       // All business-data migration work goes through the ordinary immutable
       // changeset stage/inspect/commit surface.
-      const cleanup = await stage(harness, project.id, [{
+      const cleanup = await stage(harness, workspace.id, [{
         op: "update",
-        project_id: project.id,
+        workspace_id: workspace.id,
         resource: `${CRM}:lead`,
         object_id: leadId,
         expected_version: 1,
@@ -166,11 +171,11 @@ for (const logLevel of ["info", "trace"] as const) {
       );
       assertEquals(cleanupInspect, cleanup);
       await ok(harness, ["--json", "changeset", "commit", cleanup.id], output);
-      const cleaned = await view(harness, project.id, leadId, output);
+      const cleaned = await view(harness, workspace.id, leadId, output);
       assertEquals(cleaned.data.normalized_phone, "5550100");
       assertEquals(cleaned.data.phone, null);
       assertEquals(
-        (await history(harness, project.id, leadId, output)).items.filter((
+        (await history(harness, workspace.id, leadId, output)).items.filter((
           x: any,
         ) => x.kind === "object_version").length,
         2,
@@ -229,7 +234,8 @@ for (const logLevel of ["info", "trace"] as const) {
       );
       assert((await metadata(harness, output)).schema.fields.phone);
       assertEquals(
-        (await view(harness, project.id, leadId, output)).data.normalized_phone,
+        (await view(harness, workspace.id, leadId, output)).data
+          .normalized_phone,
         "5550100",
       );
 
@@ -301,11 +307,11 @@ for (const logLevel of ["info", "trace"] as const) {
         await activeRevision(harness),
         finalPlan.to_pack_revision_id,
       );
-      const finalObject = await view(harness, project.id, leadId, output);
+      const finalObject = await view(harness, workspace.id, leadId, output);
       assertEquals(finalObject.data.normalized_phone, "5550100");
       assertEquals(finalObject.data.phone, undefined);
       assertEquals(
-        (await history(harness, project.id, leadId, output)).items.filter((
+        (await history(harness, workspace.id, leadId, output)).items.filter((
           x: any,
         ) => x.kind === "object_version").length,
         2,
@@ -316,10 +322,10 @@ for (const logLevel of ["info", "trace"] as const) {
       );
 
       const rejected = await harness.runJson(["--json", "changeset", "stage"], {
-        project_id: project.id,
+        workspace_id: workspace.id,
         operations: [{
           op: "update",
-          project_id: project.id,
+          workspace_id: workspace.id,
           resource: `${CRM}:lead`,
           object_id: leadId,
           expected_version: 2,
@@ -330,8 +336,8 @@ for (const logLevel of ["info", "trace"] as const) {
       assertEquals(rejected.code, 1);
       assertEquals(JSON.parse(rejected.stderr).error.code, "validation_failed");
       const toon = await ok(harness, [
-        "--project",
-        project.id,
+        "--workspace",
+        workspace.id,
         "view",
         `${CRM}:lead`,
         leadId,
@@ -380,7 +386,7 @@ async function makeRevision(
   await Deno.writeTextFile(
     packPath,
     (await Deno.readTextFile(packPath)).replace(
-      "version: 0.1.0",
+      "version: 0.2.0",
       `version: ${version}`,
     ),
   );
@@ -440,12 +446,12 @@ async function error(
 }
 async function stage(
   h: LiveHarness,
-  projectId: string,
+  workspaceId: string,
   operations: any[],
   out: string[],
 ) {
   const r = await h.runJson(["--json", "changeset", "stage"], {
-    project_id: projectId,
+    workspace_id: workspaceId,
     operations,
   });
   out.push(r.stdout, r.stderr);
@@ -454,29 +460,29 @@ async function stage(
 }
 async function view(
   h: LiveHarness,
-  projectId: string,
+  workspaceId: string,
   id: string,
   out: string[],
 ) {
   return data(
     await ok(
       h,
-      ["--json", "--project", projectId, "view", `${CRM}:lead`, id],
+      ["--json", "--workspace", workspaceId, "view", `${CRM}:lead`, id],
       out,
     ),
   );
 }
 async function history(
   h: LiveHarness,
-  projectId: string,
+  workspaceId: string,
   id: string,
   out: string[],
 ) {
   return data(
     await ok(h, [
       "--json",
-      "--project",
-      projectId,
+      "--workspace",
+      workspaceId,
       "history",
       `${CRM}:lead`,
       id,

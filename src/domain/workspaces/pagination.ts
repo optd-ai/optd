@@ -1,23 +1,23 @@
 import { err, ok, type Result, validationError } from "../errors/result.ts";
-import type { ProjectStatus } from "./model.ts";
+import type { WorkspaceStatus } from "./model.ts";
 
-export type ProjectListFilter = {
-  status: ProjectStatus | "all";
+export type WorkspaceListFilter = {
+  status: WorkspaceStatus | "all";
   slug?: string;
 };
-export type ProjectCursorPosition = { slug: string; id: string };
+export type WorkspaceCursorPosition = { slug: string; id: string };
 
 type CursorPayload = {
   v: 1;
-  status: ProjectStatus | "all";
+  status: WorkspaceStatus | "all";
   filter_slug: string | null;
   last_slug: string;
   last_id: string;
 };
 
-export function encodeProjectCursor(
-  filter: ProjectListFilter,
-  position: ProjectCursorPosition,
+export function encodeWorkspaceCursor(
+  filter: WorkspaceListFilter,
+  position: WorkspaceCursorPosition,
 ): string {
   const payload: CursorPayload = {
     v: 1,
@@ -29,24 +29,24 @@ export function encodeProjectCursor(
   return encodeBase64Url(JSON.stringify(payload));
 }
 
-export function decodeProjectCursor(
+export function decodeWorkspaceCursor(
   cursor: string,
-  filter: ProjectListFilter,
-): Result<ProjectCursorPosition> {
+  filter: WorkspaceListFilter,
+): Result<WorkspaceCursorPosition> {
   let payload: unknown;
   try {
     payload = JSON.parse(decodeBase64Url(cursor));
   } catch {
     return err(validationError(
-      "project_cursor_invalid",
-      "project cursor is malformed",
+      "workspace_cursor_invalid",
+      "workspace cursor is malformed",
       {},
     ));
   }
   if (!isCursorPayload(payload)) {
     return err(validationError(
-      "project_cursor_invalid",
-      "project cursor is malformed",
+      "workspace_cursor_invalid",
+      "workspace cursor is malformed",
       {},
     ));
   }
@@ -55,8 +55,8 @@ export function decodeProjectCursor(
     payload.filter_slug !== (filter.slug ?? null)
   ) {
     return err(validationError(
-      "project_cursor_mismatch",
-      "project cursor does not match the list filters",
+      "workspace_cursor_mismatch",
+      "workspace cursor does not match the list filters",
       {},
     ));
   }

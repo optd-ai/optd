@@ -620,7 +620,7 @@ export async function applyMigrationPlan(
     tokenId = found.id;
   }
   for (const index of statementOrder(plan)) await query(sql, statements[index]);
-  await projectPackAuthorization(
+  await workspacePackAuthorization(
     sql,
     plan.to_pack_revision_id,
     authContextId,
@@ -878,7 +878,7 @@ async function hookSlots(
   }));
 }
 
-async function projectPackAuthorization(
+async function workspacePackAuthorization(
   sql: Queryable,
   candidateRevisionId: string,
   applyAuthContextId: string,
@@ -910,13 +910,13 @@ async function projectPackAuthorization(
   const explicitAssignments = (await query<{
     id: string;
     policy_id: string;
-    boundary_type: "system" | "all_projects" | "project";
-    project_id: string | null;
+    boundary_type: "system" | "all_workspaces" | "workspace";
+    workspace_id: string | null;
     source: "operator";
     created_by_auth_context_id: string | null;
   }>(
     sql,
-    `select pa.id,pd.policy_id,pa.boundary_type,pa.project_id,pa.source,
+    `select pa.id,pd.policy_id,pa.boundary_type,pa.workspace_id,pa.source,
       pa.created_by_auth_context_id
     from policy_assignments pa
     join policy_definition_versions pd on pd.id=pa.policy_definition_version_id
@@ -1045,7 +1045,7 @@ async function projectPackAuthorization(
                 definitionId,
                 roleId,
                 action,
-                resource,
+                action.startsWith("seed:") ? action : resource,
                 relation ? "rebac" : rule.where ? "abac" : "unconditional",
                 asRecord(rule.axi).summary ?? null,
                 rule.where ?? null,
@@ -1068,7 +1068,7 @@ async function projectPackAuthorization(
       await query(
         sql,
         `insert into policy_assignments(id,policy_definition_version_id,
-          boundary_type,project_id,active,source,created_by_auth_context_id)
+          boundary_type,workspace_id,active,source,created_by_auth_context_id)
         values($1,$2,$3,$4,true,$5,$6) on conflict do nothing`,
         [
           await stableProjectionId(
@@ -1077,17 +1077,17 @@ async function projectPackAuthorization(
           ),
           definitionId,
           assignment.boundary_type,
-          assignment.project_id,
+          assignment.workspace_id,
           assignment.source,
           assignment.created_by_auth_context_id,
         ],
       );
     }
-    if (spec.default_assignment === "all_projects") {
+    if (spec.default_assignment === "all_workspaces") {
       await query(
         sql,
-        `insert into policy_assignments(id,policy_definition_version_id,boundary_type,project_id,active,source,created_by_auth_context_id)
-        values($1,$2,'all_projects',null,true,'pack_default',$3) on conflict do nothing`,
+        `insert into policy_assignments(id,policy_definition_version_id,boundary_type,workspace_id,active,source,created_by_auth_context_id)
+        values($1,$2,'all_workspaces',null,true,'pack_default',$3) on conflict do nothing`,
         [
           await stableProjectionId(candidateRevisionId, `default:${name}`),
           definitionId,

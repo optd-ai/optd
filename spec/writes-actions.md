@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-writes-actions; contract: 1; input: sha256:cfe01e4293c3630f3dde82658a9cc8a16a4be5fd5b22aec59cb1d20189656b69 -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-writes-actions; contract: 1; input: sha256:c1dd92dabebcee89b65c5a8520a37c769e18d6c9a4dbd953c393583a167a5561 -->
 
 # Immutable writes, Actions, and approvals
 
@@ -112,7 +112,7 @@ Schema, reference, policy, secret, hook, output, or timeout failure returns a st
 
 ### Revalidate under canonical PostgreSQL locks
 
-Commit acquires canonical advisory/table/row locks, validates exact stage dependencies, Project/pack/object/authorization/approval facts, and writes all committed facts atomically. Busy/stale/conflict outcomes are stable and partial facts are forbidden.
+Commit acquires canonical advisory/table/row locks, validates exact stage dependencies, Workspace/pack/object/authorization/approval facts, and writes all committed facts atomically. Busy/stale/conflict outcomes are stable and partial facts are forbidden.
 
 <a id="obj-com-approval"></a>
 

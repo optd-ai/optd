@@ -42,16 +42,39 @@ async function readProcFile(path: string): Promise<string> {
   // Keep the executable least-privileged by using the already-required
   // subprocess capability (auth isolate launches arbitrary child commands)
   // and a fixed argv, without a shell.
-  const output = await new Deno.Command("/bin/cat", {
-    args: [path],
-    clearEnv: true,
-    env: {},
-    stdin: "null",
-    stdout: "piped",
-    stderr: "null",
-  }).output();
+  let output: Deno.CommandOutput;
+  try {
+    output = await new Deno.Command("cat", {
+      args: [path],
+      clearEnv: true,
+      env: { PATH: Deno.env.get("PATH") ?? "", LC_ALL: "C" },
+      stdin: "null",
+      stdout: "piped",
+      stderr: "piped",
+    }).output();
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) {
+      throw new ProcessInspectionError(
+        "unavailable",
+        "process inspection requires executable cat on PATH",
+      );
+    }
+    throw error;
+  }
   if (!output.success) {
-    throw new Deno.errors.NotFound(`proc record is unavailable: ${path}`);
+    const diagnostic = new TextDecoder().decode(output.stderr);
+    if (diagnostic.includes("No such file or directory")) {
+      throw new Deno.errors.NotFound(`proc record is unavailable: ${path}`);
+    }
+    if (diagnostic.includes("Permission denied")) {
+      throw new Deno.errors.PermissionDenied(
+        `proc record cannot be read: ${path}`,
+      );
+    }
+    throw new ProcessInspectionError(
+      "unavailable",
+      `cat failed reading proc record ${path} (exit ${output.code})`,
+    );
   }
   return new TextDecoder().decode(output.stdout);
 }
@@ -63,11 +86,22 @@ export class LinuxProcessInspector implements ProcessInspector {
   ) {}
 
   async inspect(pid: number): Promise<ProcessIdentity> {
+    let bootId: string;
     try {
-      const [stat, status, bootId] = await Promise.all([
+      bootId = await this.readFile(
+        `${this.procRoot}/sys/kernel/random/boot_id`,
+      );
+    } catch (error) {
+      if (error instanceof ProcessInspectionError) throw error;
+      throw new ProcessInspectionError(
+        "unavailable",
+        "cannot read procfs boot identity",
+      );
+    }
+    try {
+      const [stat, status] = await Promise.all([
         this.readFile(`${this.procRoot}/${pid}/stat`),
         this.readFile(`${this.procRoot}/${pid}/status`),
-        this.readFile(`${this.procRoot}/sys/kernel/random/boot_id`),
       ]);
       return {
         ...parseProcStat(stat),

@@ -8,7 +8,7 @@ const UuidV7 = Type.String({
     "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
 });
 export const QueryRequestSchema = strictObject({
-  project_id: UuidV7,
+  workspace_id: UuidV7,
   definition: strictObject({
     kind: Type.Union([Type.Literal("resource"), Type.Literal("relationship")]),
     publisher: Publisher,

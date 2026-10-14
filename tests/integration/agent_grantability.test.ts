@@ -94,7 +94,7 @@ Deno.test("Postgres grantability revalidates policy, roles, boundary, anchor, an
     const wrongBoundary = await request(harness, "wrong boundary");
     await query(
       harness.server.sql,
-      `update agent_authorization_requests set boundary_type='all_projects' where id=$1`,
+      `update agent_authorization_requests set boundary_type='all_workspaces' where id=$1`,
       [wrongBoundary],
     );
     const boundaryDenied = await decide(
@@ -200,7 +200,7 @@ Deno.test("Postgres grantability revalidates policy, roles, boundary, anchor, an
 
 async function seedDecidePolicy(
   harness: LiveHarness,
-  boundary: "system" | "all_projects",
+  boundary: "system" | "all_workspaces",
 ) {
   const versionId = uuidV7();
   const assignmentId = uuidV7();

@@ -1,5 +1,6 @@
 // deno-lint-ignore-file no-import-prefix no-unversioned-import
 import { Command } from "jsr:@cliffy/command";
+import { configureCommandHelp } from "./command_help.ts";
 import { walk } from "jsr:@std/fs/walk";
 import { relative } from "jsr:@std/path";
 import { formatToon } from "../../outbound/toon/format.ts";
@@ -25,14 +26,17 @@ import {
 } from "./auth_store.ts";
 import { opaqueToken, tokenDigest } from "../../../domain/auth/token.ts";
 import { isUuidV7 } from "../../../domain/ids/uuid_v7.ts";
-import { sameProcess } from "../../../application/ports/process_inspection.ts";
+import {
+  ProcessInspectionError,
+  sameProcess,
+} from "../../../application/ports/process_inspection.ts";
 
 export type OptctlRunResult = { stdout: string; stderr: string; code: number };
 type Parsed = {
   server: string;
   json: boolean;
   verbose: boolean;
-  project?: string;
+  workspace?: string;
   positional: string[];
 };
 class OptctlError extends Error {
@@ -143,7 +147,19 @@ export function authenticatedOutput(
 }
 
 function render(value: unknown, asJson?: boolean): string {
-  return asJson ? JSON.stringify(value, null, 2) : formatToon(value);
+  if (asJson) return JSON.stringify(value, null, 2);
+  const envelope = value as {
+    data?: { items?: unknown[]; has_more?: boolean; total?: number | null };
+    meta?: { has_more?: boolean; total?: number | null };
+  };
+  const data = envelope?.data;
+  const page = envelope?.meta?.has_more !== undefined ? envelope.meta : data;
+  const notice = Array.isArray(data?.items) && page?.has_more
+    ? `\nShowing ${data.items.length}${
+      typeof page.total === "number" ? ` of ${page.total}` : ""
+    }; more results available. Use --cursor with next_cursor to continue (and --include-total for a count).`
+    : "";
+  return formatToon(value) + notice;
 }
 async function readJsonFile(path: string): Promise<unknown> {
   return JSON.parse(await Deno.readTextFile(path));
@@ -186,15 +202,15 @@ function parse(args: string[]): Parsed {
       parsed.server = args[++i] ?? parsed.server;
     } else if (!commandSeen && arg.startsWith("--server=")) {
       parsed.server = arg.slice("--server=".length);
-    } else if (!commandSeen && arg === "--project") {
-      parsed.project = args[++i];
-      if (!parsed.project) {
-        throw usageError("--project requires a UUID or slug");
+    } else if (!commandSeen && arg === "--workspace") {
+      parsed.workspace = args[++i];
+      if (!parsed.workspace) {
+        throw usageError("--workspace requires a UUID or slug");
       }
-    } else if (!commandSeen && arg.startsWith("--project=")) {
-      parsed.project = arg.slice("--project=".length);
-      if (!parsed.project) {
-        throw usageError("--project requires a UUID or slug");
+    } else if (!commandSeen && arg.startsWith("--workspace=")) {
+      parsed.workspace = arg.slice("--workspace=".length);
+      if (!parsed.workspace) {
+        throw usageError("--workspace requires a UUID or slug");
       }
     } else {
       parsed.positional.push(arg);
@@ -206,7 +222,7 @@ function parse(args: string[]): Parsed {
 }
 
 function parseQueryPayload(
-  projectId: string,
+  workspaceId: string,
   kind: "resource" | "relationship",
   identity: string,
   args: string[],
@@ -216,7 +232,7 @@ function parseQueryPayload(
       .exec(identity);
   if (!match) throw usageError("query definition must be publisher/pack:name");
   const payload: Record<string, unknown> = {
-    project_id: projectId,
+    workspace_id: workspaceId,
     definition: { kind, publisher: match[1], pack: match[2], name: match[3] },
   };
   const fields: string[] = [];
@@ -337,7 +353,7 @@ async function stageResourceCommand(
   const identity = parsed.positional[1];
   if (!identity) throw usageError(`${command} requires publisher/pack:name`);
   splitDefinitionIdentity(identity);
-  const projectId = await resolveReadProject(parsed);
+  const workspaceId = await resolveReadWorkspace(parsed);
   const args = parsed.positional.slice(2);
   const commit = commitPayloadOptions(args);
   const remaining = commit.remaining;
@@ -352,11 +368,21 @@ async function stageResourceCommand(
   const after = filtered.slice(inputAt + 2);
   const operation: Record<string, unknown> = {
     op: command,
-    project_id: projectId,
+    workspace_id: workspaceId,
     resource: identity,
   };
-  if (command === "create") operation.fields = fields;
-  else {
+  if (command === "create") {
+    operation.fields = fields;
+    const initialState = option(after, "--initial-state");
+    const importReason = option(after, "--reason");
+    if (initialState || importReason) {
+      if (!initialState || !importReason?.trim()) {
+        throw usageError("imports require --initial-state and --reason");
+      }
+      operation.initial_state = initialState;
+      operation.import_reason = importReason;
+    }
+  } else {
     const objectId = before[0];
     if (!objectId || !isUuidV7(objectId)) {
       throw usageError(`${command} requires a lowercase UUIDv7 object id`);
@@ -376,7 +402,11 @@ async function stageResourceCommand(
       operation.set = fields;
     }
   }
-  const known = new Set(["--version", "--to"]);
+  const known = new Set(
+    command === "create"
+      ? ["--initial-state", "--reason"]
+      : ["--version", "--to"],
+  );
   for (let index = 0; index < after.length; index++) {
     const arg = after[index];
     if (known.has(arg)) index++;
@@ -523,6 +553,12 @@ async function parseSecretValuePayload(
   return payload;
 }
 async function readChangesetInput(args: string[]): Promise<unknown> {
+  if (
+    (args.length === 2 && args[0] === "--input") ||
+    (args.length === 1 && args[0].startsWith("--input="))
+  ) {
+    return await resolveActionInput(args);
+  }
   if (args.length === 1 && !args[0].startsWith("--")) {
     return await readJsonFile(args[0]);
   }
@@ -532,12 +568,15 @@ async function readChangesetInput(args: string[]): Promise<unknown> {
   if (args.length === 1 && args[0].startsWith("--file=")) {
     return await readJsonFile(args[0].slice(7));
   }
-  throw usageError("changeset stage requires exactly one JSON file");
+  throw usageError(
+    "changeset stage requires --input <JSON-or-file> or exactly one JSON file",
+  );
 }
 
-function changesetId(value: string | undefined): string {
-  if (!value || !isUuidV7(value)) {
-    throw usageError("stage id must be a lowercase UUIDv7");
+function changesetId(value: string | undefined, label = "stage id"): string {
+  if (!value) throw usageError(`${label} is required`);
+  if (!isUuidV7(value)) {
+    throw usageError(`${label} must be a lowercase UUIDv7`);
   }
   return value;
 }
@@ -609,12 +648,12 @@ function options(args: string[], name: string): string[] {
   return values;
 }
 function assignmentBoundary(args: string[]): Record<string, string> {
-  const projectId = option(args, "--project");
-  if (projectId) return { type: "project", project_id: projectId };
+  const workspaceId = option(args, "--workspace");
+  if (workspaceId) return { type: "workspace", workspace_id: workspaceId };
   const type = option(args, "--boundary");
-  if (type === "system" || type === "all_projects") return { type };
+  if (type === "system" || type === "all_workspaces") return { type };
   throw usageError(
-    "assignment boundary requires --project <uuid> or --boundary system|all_projects",
+    "assignment boundary requires --workspace <uuid> or --boundary system|all_workspaces",
   );
 }
 
@@ -640,56 +679,58 @@ function envelopeData(value: unknown): Record<string, unknown> {
   }
   return (value as { data: Record<string, unknown> }).data;
 }
-async function resolveProject(
+async function resolveWorkspace(
   server: string,
   value: string,
 ): Promise<Record<string, unknown>> {
   if (isUuidV7(value)) return { id: value };
   if (/^[0-9a-f-]{36}$/.test(value)) {
-    return envelopeData(await getJson(`${server}/api/v1/projects/${value}`));
+    return envelopeData(await getJson(`${server}/api/v1/workspaces/${value}`));
   }
   const list = envelopeData(
     await getJson(
-      `${server}/api/v1/projects?status=all&slug=${encodeURIComponent(value)}`,
+      `${server}/api/v1/workspaces?status=all&slug=${
+        encodeURIComponent(value)
+      }`,
     ),
   );
   const items = list.items;
   if (!Array.isArray(items) || items.length !== 1) {
     throw new OptctlError(
       errorEnvelope({
-        code: "project_not_found",
-        message: "project was not found",
-        details: { project: value },
+        code: "workspace_not_found",
+        message: "workspace was not found",
+        details: { workspace: value },
       }),
     );
   }
   return items[0] as Record<string, unknown>;
 }
 
-async function resolveReadProject(parsed: Parsed): Promise<string> {
+async function resolveReadWorkspace(parsed: Parsed): Promise<string> {
   const selected = await readOrigin(new URL(parsed.server).origin);
-  const selector = parsed.project ?? Deno.env.get("OPTD_PROJECT") ??
-    selected.projectId ?? selected.projectSlug;
+  const selector = parsed.workspace ?? Deno.env.get("OPTD_WORKSPACE") ??
+    selected.workspaceId ?? selected.workspaceSlug;
   if (!selector) {
     throw usageError(
-      "command requires global --project <uuid-or-slug> or an active local Project selection",
+      "command requires global --workspace <uuid-or-slug> or an active local Workspace selection",
     );
   }
-  const project = await resolveProject(parsed.server, selector);
-  if (parsed.project && (selected.projectId || selected.projectSlug)) {
-    const active = await resolveProject(
+  const workspace = await resolveWorkspace(parsed.server, selector);
+  if (parsed.workspace && (selected.workspaceId || selected.workspaceSlug)) {
+    const active = await resolveWorkspace(
       parsed.server,
-      selected.projectId ?? selected.projectSlug!,
+      selected.workspaceId ?? selected.workspaceSlug!,
     );
-    if (String(active.id) !== String(project.id)) {
+    if (String(active.id) !== String(workspace.id)) {
       throw new OptctlError(errorEnvelope({
-        code: "project_conflict",
-        message: "explicit and active selected Projects disagree",
+        code: "workspace_conflict",
+        message: "explicit and active selected Workspaces disagree",
         details: {},
       }));
     }
   }
-  return String(project.id);
+  return String(workspace.id);
 }
 
 async function metadataQuery(parsed: Parsed, args: string[]): Promise<string> {
@@ -699,11 +740,11 @@ async function metadataQuery(parsed: Parsed, args: string[]): Promise<string> {
     else throw usageError(`unknown metadata option ${arg}`);
   }
   const selected = await readOrigin(new URL(parsed.server).origin);
-  const selector = parsed.project ?? Deno.env.get("OPTD_PROJECT") ??
-    selected.projectId ?? selected.projectSlug;
+  const selector = parsed.workspace ?? Deno.env.get("OPTD_WORKSPACE") ??
+    selected.workspaceId ?? selected.workspaceSlug;
   if (selector) {
-    const project = await resolveProject(parsed.server, selector);
-    params.set("project_id", String(project.id));
+    const workspace = await resolveWorkspace(parsed.server, selector);
+    params.set("workspace_id", String(workspace.id));
   }
   const query = params.toString();
   return query ? `?${query}` : "";
@@ -952,6 +993,7 @@ const CLI_GROUPS: ReadonlyArray<readonly [string, string, readonly string[]]> =
       "session-pid",
       "anchor",
       "roles",
+      "authority",
       "request",
       "approve",
       "deny",
@@ -967,15 +1009,15 @@ const CLI_GROUPS: ReadonlyArray<readonly [string, string, readonly string[]]> =
       "password-reset",
       "recover",
     ]],
-    ["context", "Manage local server and Project contexts.", [
+    ["context", "Manage local server and Workspace contexts.", [
       "list",
       "show",
       "add",
       "use",
-      "set-project",
+      "set-workspace",
       "remove",
     ]],
-    ["project", "Manage platform Projects.", [
+    ["workspace", "Manage platform Workspaces.", [
       "list",
       "create",
       "view",
@@ -1053,9 +1095,10 @@ function cliCommand() {
     .name("optctl")
     .description("Content-first Optd control client.")
     .option("--server <origin:string>", "Optd server origin.")
+    .option("--context <name:string>", "Named local context.")
     .option(
-      "--project <project:string>",
-      "Explicit Project UUID or local selector.",
+      "--workspace <workspace:string>",
+      "Explicit Workspace UUID or local selector.",
     )
     .option("--json", "Emit the canonical server JSON envelope.")
     .option("--verbose", "Include request context without credentials.");
@@ -1064,14 +1107,17 @@ function cliCommand() {
     for (const subcommand of subcommands) {
       group.command(
         subcommand,
-        new Command().description(`${subcommand} ${name} operation.`),
+        configureCommandHelp(
+          new Command().description(`${subcommand} ${name} operation.`),
+          `${name} ${subcommand}`,
+        ),
       );
     }
     root.command(name, group);
   }
   for (
     const [name, description] of [
-      ["home", "Show live active-pack and Project guidance."],
+      ["home", "Show live active-pack and Workspace guidance."],
       ["resources", "List active resources and their AXI purposes."],
       ["list", "List resource objects using metadata defaults."],
       ["search", "Search resource objects using metadata guidance."],
@@ -1082,23 +1128,38 @@ function cliCommand() {
       ["view", "Read one committed object or relationship."],
       ["history", "Read immutable object or relationship history."],
     ] as const
-  ) root.command(name, new Command().description(description));
+  ) {
+    root.command(
+      name,
+      configureCommandHelp(new Command().description(description), name),
+    );
+  }
   return root;
 }
 
 function helpText(args: string[]): string {
   const words = args.filter((arg) => arg !== "--help" && arg !== "-h");
   const group = CLI_GROUPS.find(([name]) => name === words[0]);
-  if (!group) return cliCommand().getHelp();
+  if (!group) {
+    const command = cliCommand().getCommand(words[0]);
+    return command
+      ? configureCommandHelp(
+        new Command().name(`optctl ${words[0]}`).description(
+          command.getDescription(),
+        ),
+        words[0],
+      ).getHelp()
+      : cliCommand().getHelp();
+  }
   const [name, description, subcommands] = group;
   if (words[1] && subcommands.includes(words[1])) {
     return [
-      `Usage: optctl ${name} ${words[1]} [options]`,
-      "",
-      `${words[1]} ${name} operation.`,
-      "",
-      "Options:",
-      "  -h, --help  Show this help.",
+      configureCommandHelp(
+        new Command().name(`optctl ${name} ${words[1]}`).description(
+          `${words[1]} ${name} operation.`,
+        ),
+        `${name} ${words[1]}`,
+      ).getHelp(),
       "",
       ...(name === "auth" &&
           ["request", "wait", "login", "session-pid", "anchor"].includes(
@@ -1505,13 +1566,13 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       }
     } else if (cmd === "auth" && sub === "roles") {
       const authArgs = parsed.positional.slice(2);
-      const projectId = option(authArgs, "--project");
-      const boundaryType = projectId
-        ? "project"
+      const workspaceId = option(authArgs, "--workspace");
+      const boundaryType = workspaceId
+        ? "workspace"
         : option(authArgs, "--boundary") ?? "system";
       const url = new URL(`${parsed.server}/api/v1/auth/roles`);
       url.searchParams.set("boundary_type", boundaryType);
-      if (projectId) url.searchParams.set("project_id", projectId);
+      if (workspaceId) url.searchParams.set("workspace_id", workspaceId);
       result = await decodeJsonResponse(
         await boundedFetch(url, {
           headers: await requestCredentialHeaders(parsed.server),
@@ -1521,9 +1582,9 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       const authArgs = parsed.positional.slice(2);
       const roles = options(authArgs, "--role");
       const reason = option(authArgs, "--reason") ?? "";
-      const projectId = option(authArgs, "--project");
-      const boundaryType = projectId
-        ? "project"
+      const workspaceId = option(authArgs, "--workspace");
+      const boundaryType = workspaceId
+        ? "workspace"
         : option(authArgs, "--boundary") ?? "system";
       if (!roles.length) {
         throw usageError("auth request requires at least one --role");
@@ -1540,8 +1601,8 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
           },
           body: JSON.stringify({
             roles,
-            boundary: projectId
-              ? { type: "project", project_id: projectId }
+            boundary: workspaceId
+              ? { type: "workspace", workspace_id: workspaceId }
               : { type: boundaryType },
             reason,
             redemption_nonce_hash: await tokenDigest(nonce),
@@ -1732,8 +1793,8 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       const boundary = assignmentBoundary(authArgs);
       const url = new URL(`${parsed.server}/api/v1/authorization/authority`);
       url.searchParams.set("boundary_type", String(boundary.type));
-      if (boundary.project_id) {
-        url.searchParams.set("project_id", String(boundary.project_id));
+      if (boundary.workspace_id) {
+        url.searchParams.set("workspace_id", String(boundary.workspace_id));
       }
       if (authArgs.includes("--include-security")) {
         url.searchParams.set("include_security", "true");
@@ -1749,17 +1810,20 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
         throw usageError("context show accepts at most one context name");
       }
       result = { ok: true, data: await showContext(value) };
-    } else if (cmd === "context" && sub === "add" && value) {
+    } else if (cmd === "context" && sub === "add") {
+      if (!value || value.startsWith("-")) {
+        throw usageError("context add requires a context name");
+      }
       const contextArgs = parsed.positional.slice(3);
       const origin = option(contextArgs, "--server");
-      const project = option(contextArgs, "--project");
+      const workspace = option(contextArgs, "--workspace");
       if (!origin) throw usageError("context add requires --server <origin>");
       const context = await addContext(value, origin);
-      if (project) {
-        const selected = await resolveProject(context.origin, project);
+      if (workspace) {
+        const selected = await resolveWorkspace(context.origin, workspace);
         await writeOrigin(context.origin, {
-          projectId: String(selected.id),
-          projectSlug: String(selected.slug),
+          workspaceId: String(selected.id),
+          workspaceSlug: String(selected.slug),
         });
       }
       result = { ok: true, data: await showContext(value) };
@@ -1847,7 +1911,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
         }/disable`,
         { expected_version: Number(expected) },
       );
-    } else if (cmd === "project" && sub === "list") {
+    } else if (cmd === "workspace" && sub === "list") {
       const listArgs = parsed.positional.slice(2);
       const parameters = new URLSearchParams();
       for (
@@ -1862,59 +1926,59 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
         if (value !== undefined) parameters.set(query, value);
       }
       const query = parameters.size ? `?${parameters}` : "";
-      result = await getJson(`${parsed.server}/api/v1/projects${query}`);
-    } else if (cmd === "project" && sub === "create" && value) {
+      result = await getJson(`${parsed.server}/api/v1/workspaces${query}`);
+    } else if (cmd === "workspace" && sub === "create" && value) {
       const displayName = option(parsed.positional.slice(3), "--display-name");
       if (!displayName) {
-        throw usageError("project create requires --display-name");
+        throw usageError("workspace create requires --display-name");
       }
       const description = option(parsed.positional.slice(3), "--description");
-      result = await postJson(`${parsed.server}/api/v1/projects`, {
+      result = await postJson(`${parsed.server}/api/v1/workspaces`, {
         slug: value,
         display_name: displayName,
         ...description === undefined ? {} : { description },
       });
-    } else if (cmd === "project" && sub === "view" && value) {
-      const project = await resolveProject(parsed.server, value);
-      result = { ok: true, data: project };
-    } else if (cmd === "project" && sub === "update" && value) {
-      const project = await resolveProject(parsed.server, value);
+    } else if (cmd === "workspace" && sub === "view" && value) {
+      const workspace = await resolveWorkspace(parsed.server, value);
+      result = { ok: true, data: workspace };
+    } else if (cmd === "workspace" && sub === "update" && value) {
+      const workspace = await resolveWorkspace(parsed.server, value);
       const expected = option(parsed.positional.slice(3), "--expected-version");
       if (!expected) {
-        throw usageError("project update requires --expected-version");
+        throw usageError("workspace update requires --expected-version");
       }
       const displayName = option(parsed.positional.slice(3), "--display-name");
       const description = option(parsed.positional.slice(3), "--description");
       result = await postJson(
-        `${parsed.server}/api/v1/projects/${project.id}/update`,
+        `${parsed.server}/api/v1/workspaces/${workspace.id}/update`,
         {
           expected_version: Number(expected),
           ...displayName === undefined ? {} : { display_name: displayName },
           ...description === undefined ? {} : { description },
         },
       );
-    } else if (cmd === "project" && sub === "archive" && value) {
-      const project = await resolveProject(parsed.server, value);
+    } else if (cmd === "workspace" && sub === "archive" && value) {
+      const workspace = await resolveWorkspace(parsed.server, value);
       const expected = option(parsed.positional.slice(3), "--expected-version");
       if (!expected) {
-        throw usageError("project archive requires --expected-version");
+        throw usageError("workspace archive requires --expected-version");
       }
       result = await postJson(
-        `${parsed.server}/api/v1/projects/${project.id}/archive`,
+        `${parsed.server}/api/v1/workspaces/${workspace.id}/archive`,
         { expected_version: Number(expected) },
       );
     } else if (
-      (cmd === "project" && sub === "select" && value) ||
-      (cmd === "context" && sub === "set-project" && value)
+      (cmd === "workspace" && sub === "select" && value) ||
+      (cmd === "context" && sub === "set-workspace" && value)
     ) {
-      const project = await resolveProject(parsed.server, value);
+      const workspace = await resolveWorkspace(parsed.server, value);
       await writeOrigin(parsed.server, {
-        projectId: String(project.id),
-        projectSlug: String(project.slug),
+        workspaceId: String(workspace.id),
+        workspaceSlug: String(workspace.slug),
       });
       result = {
         ok: true,
-        data: { project_id: project.id, slug: project.slug },
+        data: { workspace_id: workspace.id, slug: workspace.slug },
       };
     } else if (cmd === "home" || cmd === "resources") {
       result = await getJson(
@@ -1924,7 +1988,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
         )}`,
       );
     } else if ((cmd === "list" || cmd === "search") && sub) {
-      const projectId = await resolveReadProject(parsed);
+      const workspaceId = await resolveReadWorkspace(parsed);
       const args = parsed.positional.slice(2);
       const metadata = await resourceMetadata(parsed.server, sub);
       const axi = metadata.axi as Record<string, unknown> | undefined;
@@ -1960,7 +2024,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       }
       result = await postJson(
         `${parsed.server}/api/v1/queries`,
-        parseQueryPayload(projectId, "resource", sub, queryArgs),
+        parseQueryPayload(workspaceId, "resource", sub, queryArgs),
       );
     } else if (cmd === "create" || cmd === "update" || cmd === "transition") {
       result = await stageResourceCommand(parsed, cmd);
@@ -2030,14 +2094,14 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
     } else if (
       cmd === "action" && (sub === "stage" || sub === "commit") && value
     ) {
-      const project = { id: await resolveReadProject(parsed) };
+      const workspace = { id: await resolveReadWorkspace(parsed) };
       const [publisher, pack, name] = splitDefinitionIdentity(value);
       const actionArgs = parsed.positional.slice(3);
       const commit = sub === "commit" ? commitPayloadOptions(actionArgs) : null;
       const staged = await postJson(
         `${parsed.server}/api/v1/actions/${publisher}/${pack}/${name}/stage`,
         {
-          project_id: project.id,
+          workspace_id: workspace.id,
           input: await resolveActionInput(commit?.remaining ?? actionArgs),
         },
       );
@@ -2052,7 +2116,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
     } else if (
       cmd === "seed" && (sub === "stage" || sub === "commit") && value
     ) {
-      const project = { id: await resolveReadProject(parsed) };
+      const workspace = { id: await resolveReadWorkspace(parsed) };
       const [publisher, pack] = splitPackIdentity(value);
       const seedArgs = parsed.positional.slice(3);
       const commit = sub === "commit" ? commitPayloadOptions(seedArgs) : null;
@@ -2071,7 +2135,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       const staged = await postJson(
         `${parsed.server}/api/v1/packs/${publisher}/${pack}/seeds/stage`,
         {
-          project_id: project.id,
+          workspace_id: workspace.id,
           all,
           ...(names.length ? { seed_names: names } : {}),
         },
@@ -2294,14 +2358,14 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       const relationship = sub === "relationship";
       const identity = relationship ? parsed.positional[2] : sub;
       if (!identity) throw usageError("query requires publisher/pack:name");
-      if (!parsed.project) {
-        throw usageError("query requires --project <UUID-or-slug>");
+      if (!parsed.workspace) {
+        throw usageError("query requires --workspace <UUID-or-slug>");
       }
-      const project = await resolveProject(parsed.server, parsed.project);
+      const workspace = await resolveWorkspace(parsed.server, parsed.workspace);
       result = await postJson(
         `${parsed.server}/api/v1/queries`,
         parseQueryPayload(
-          String(project.id),
+          String(workspace.id),
           relationship ? "relationship" : "resource",
           identity,
           parsed.positional.slice(relationship ? 3 : 2),
@@ -2324,7 +2388,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       );
     } else if (cmd === "changeset" && (sub === "approve" || sub === "reject")) {
       const id = changesetId(value);
-      const requirementId = changesetId(parsed.positional[3]);
+      const requirementId = changesetId(parsed.positional[3], "requirement id");
       const decisionArgs = parsed.positional.slice(4);
       const reason = option(decisionArgs, "--reason");
       if (sub === "reject" && !reason?.trim()) {
@@ -2360,7 +2424,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
         throw usageError("object id must be a lowercase UUIDv7");
       }
       const [publisher, pack, name] = splitDefinitionIdentity(identity);
-      const projectId = await resolveReadProject(parsed);
+      const workspaceId = await resolveReadWorkspace(parsed);
       const options = cmd === "history"
         ? historyQuery(parsed.positional.slice(relationship ? 4 : 3))
         : (parsed.positional.length > (relationship ? 4 : 3)
@@ -2369,7 +2433,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
           })()
           : "");
       result = await getJson(
-        `${parsed.server}/api/v1/projects/${projectId}/${
+        `${parsed.server}/api/v1/workspaces/${workspaceId}/${
           relationship ? "relationships" : "objects"
         }/${publisher}/${pack}/${name}/${objectId}${
           cmd === "history" ? "/history" : ""
@@ -2449,8 +2513,12 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
     const unsupported = error instanceof Error &&
       error.message === "process_inspection_unsupported";
     const unavailable = error instanceof TypeError;
+    const inspectionUnavailable = error instanceof ProcessInspectionError &&
+      error.reason === "unavailable";
     const envelope = errorEnvelope({
-      code: unsupported
+      code: inspectionUnavailable
+        ? "process_inspection_unavailable"
+        : unsupported
         ? "process_inspection_unsupported"
         : unavailable
         ? "unavailable"

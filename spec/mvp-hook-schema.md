@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-mvp-hook-schema; contract: 1; input: sha256:c670f3b634a17538e3833325d8c3fd01d635b8f227574cfcaec9834bf4bab7f0 -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-mvp-hook-schema; contract: 1; input: sha256:fa2f6c9958d57ca13729c868ae5403716037547a20344ea6a67c11e802e37b68 -->
 
 # MVP Hook Schema v1
 
@@ -277,7 +277,7 @@ spec:
 
 Rules:
 
-- Secrets are global built-in system resources, not pack or project resources.
+- Secrets are global built-in system resources, not pack or workspace resources.
 - Every declared slot is required; optional secret slots are not supported.
 - A separate hook-secret grant maps one pinned hook revision slot to one
   concrete global secret.

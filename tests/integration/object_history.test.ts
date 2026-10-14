@@ -31,7 +31,7 @@ Deno.test("populated 1015 to 1016 upgrade preserves shared immutable evidence", 
     runtime = await startPostgresRuntime();
     sql = createPostgresClient(runtime.databaseUrl);
     const migrationIndex = platformMigrations.findIndex((item) =>
-      item.id === "1016_project_object_history"
+      item.id === "1016_workspace_object_history"
     );
     assertEquals(migrationIndex >= 0, true);
     const migration = platformMigrations[migrationIndex];
@@ -47,7 +47,7 @@ Deno.test("populated 1015 to 1016 upgrade preserves shared immutable evidence", 
       user,
       session,
       auth,
-      project,
+      workspace,
       candidate,
       plan,
       application,
@@ -77,8 +77,8 @@ Deno.test("populated 1015 to 1016 upgrade preserves shared immutable evidence", 
       );
       await query(
         tx,
-        "insert into projects(id,slug,display_name,created_by_auth_context_id,updated_by_auth_context_id) values($1,'upgrade-test','Upgrade Test',$2,$2)",
-        [project, auth],
+        "insert into workspaces(id,slug,display_name,created_by_auth_context_id,updated_by_auth_context_id) values($1,'upgrade-test','Upgrade Test',$2,$2)",
+        [workspace, auth],
       );
       await query(
         tx,
@@ -184,7 +184,7 @@ Deno.test("populated 1015 to 1016 upgrade preserves shared immutable evidence", 
   }
 });
 
-Deno.test("Project history is immutable, chained, unique, and comments do not bump versions", async () => {
+Deno.test("Workspace history is immutable, chained, unique, and comments do not bump versions", async () => {
   if (Deno.env.get("OPTD_DATABASE_URL") || !await findPostgresBins()) return;
   const root = await Deno.makeTempDir({ prefix: "optd-object-history-" });
   const previous = Deno.env.get("OPTD_DATA_DIR");
@@ -200,7 +200,7 @@ Deno.test("Project history is immutable, chained, unique, and comments do not bu
       user,
       session,
       auth,
-      project,
+      workspace,
       revision,
       commit,
       object,
@@ -231,8 +231,8 @@ Deno.test("Project history is immutable, chained, unique, and comments do not bu
       );
       await query(
         tx,
-        "insert into projects(id,slug,display_name,created_by_auth_context_id,updated_by_auth_context_id) values($1,'history-test','History Test',$2,$2)",
-        [project, auth],
+        "insert into workspaces(id,slug,display_name,created_by_auth_context_id,updated_by_auth_context_id) values($1,'history-test','History Test',$2,$2)",
+        [workspace, auth],
       );
       await query(
         tx,
@@ -246,26 +246,26 @@ Deno.test("Project history is immutable, chained, unique, and comments do not bu
       );
       await query(
         tx,
-        `insert into object_versions(id,project_id,definition_kind,resource_identity,object_id,version,changeset_commit_id,operation,resource_revision,snapshot_json,auth_context_id) values($1,$2,'resource','optd/test:thing',$3,1,$4,'create',$5,'{"data":{},"archived_at":null}',$6)`,
-        [v1, project, object, commit, revision, auth],
+        `insert into object_versions(id,workspace_id,definition_kind,resource_identity,object_id,version,changeset_commit_id,operation,resource_revision,snapshot_json,auth_context_id) values($1,$2,'resource','optd/test:thing',$3,1,$4,'create',$5,'{"data":{},"archived_at":null}',$6)`,
+        [v1, workspace, object, commit, revision, auth],
       );
       await query(
         tx,
-        `insert into object_versions(id,project_id,definition_kind,resource_identity,object_id,version,previous_version_id,changeset_commit_id,operation,resource_revision,snapshot_json,auth_context_id) values($1,$2,'resource','optd/test:thing',$3,2,$4,$5,'update',$6,'{"data":{},"archived_at":null}',$7)`,
-        [v2, project, object, v1, commit, revision, auth],
+        `insert into object_versions(id,workspace_id,definition_kind,resource_identity,object_id,version,previous_version_id,changeset_commit_id,operation,resource_revision,snapshot_json,auth_context_id) values($1,$2,'resource','optd/test:thing',$3,2,$4,$5,'update',$6,'{"data":{},"archived_at":null}',$7)`,
+        [v2, workspace, object, v1, commit, revision, auth],
       );
       await query(
         tx,
-        `insert into comments(id,project_id,definition_kind,resource_identity,object_id,target_object_version_id,changeset_commit_id,auth_context_id,body) values($1,$2,'resource','optd/test:thing',$3,$4,$5,$6,'observed')`,
-        [comment, project, object, v2, commit, auth],
+        `insert into comments(id,workspace_id,definition_kind,resource_identity,object_id,target_object_version_id,changeset_commit_id,auth_context_id,body) values($1,$2,'resource','optd/test:thing',$3,$4,$5,$6,'observed')`,
+        [comment, workspace, object, v2, commit, auth],
       );
     });
     assertEquals(
       Number(
         (await query<{ max: number }>(
           sql,
-          "select max(version) max from object_versions where project_id=$1 and object_id=$2",
-          [project, object],
+          "select max(version) max from object_versions where workspace_id=$1 and object_id=$2",
+          [workspace, object],
         )).rows[0].max,
       ),
       2,
@@ -283,8 +283,8 @@ Deno.test("Project history is immutable, chained, unique, and comments do not bu
     await assertRejects(() =>
       query(
         sql!,
-        `insert into object_versions(id,project_id,definition_kind,resource_identity,object_id,version,previous_version_id,changeset_commit_id,operation,resource_revision,snapshot_json,auth_context_id) values($1,$2,'resource','optd/test:thing',$3,3,$4,$5,'update',$6,'{}',$7)`,
-        [ids[13], project, object, v1, commit, revision, auth],
+        `insert into object_versions(id,workspace_id,definition_kind,resource_identity,object_id,version,previous_version_id,changeset_commit_id,operation,resource_revision,snapshot_json,auth_context_id) values($1,$2,'resource','optd/test:thing',$3,3,$4,$5,'update',$6,'{}',$7)`,
+        [ids[13], workspace, object, v1, commit, revision, auth],
       )
     );
   } finally {

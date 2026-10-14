@@ -6,12 +6,12 @@ import {
 } from "../../../src/domain/approvals/requirements.ts";
 import { stageDigest } from "../../../src/domain/changesets/stage.ts";
 
-const project = "019b7a2e-7c10-7000-8000-000000000001";
+const workspace = "019b7a2e-7c10-7000-8000-000000000001";
 const now = new Date("2026-01-01T00:00:00.000Z");
 const base = {
   key: "manager_discount",
   role: "optd/crm:sales_manager",
-  boundary: { type: "project", project_id: project },
+  boundary: { type: "workspace", workspace_id: workspace },
   reason: "reviewed customer impact",
 };
 
@@ -22,7 +22,7 @@ Deno.test("approval requirements default, canonicalize, coalesce, and sort", () 
       base,
       { ...base },
     ],
-    new Set([project]),
+    new Set([workspace]),
     now,
   );
   assertEquals(result.map((value) => value.key), [
@@ -45,8 +45,8 @@ Deno.test("approval requirements reject conflicting keys and invalid authority f
       [{
         ...base,
         boundary: {
-          type: "project",
-          project_id: "019b7a2e-7c10-7000-8000-000000000002",
+          type: "workspace",
+          workspace_id: "019b7a2e-7c10-7000-8000-000000000002",
         },
       }],
       [{ ...base, expires_at: "2025-12-31T00:00:00Z" }],
@@ -54,7 +54,7 @@ Deno.test("approval requirements reject conflicting keys and invalid authority f
     ]
   ) {
     assertThrows(
-      () => canonicalizeApprovalRequirements(value, new Set([project]), now),
+      () => canonicalizeApprovalRequirements(value, new Set([workspace]), now),
       ApprovalContractError,
     );
   }
@@ -63,7 +63,7 @@ Deno.test("approval requirements reject conflicting keys and invalid authority f
 Deno.test("approval decisions and lifecycle facts remain outside immutable digests", async () => {
   const evidence = {
     operation_graph_digest: `sha256:${"1".repeat(64)}`,
-    projects: [],
+    workspaces: [],
     pack_revisions: [],
     operations: [],
     dependencies: [],
@@ -71,7 +71,7 @@ Deno.test("approval decisions and lifecycle facts remain outside immutable diges
     policy_decisions: [],
     approval_requirements: canonicalizeApprovalRequirements(
       [base],
-      new Set([project]),
+      new Set([workspace]),
       now,
     ),
     required_capabilities: [],
@@ -95,7 +95,7 @@ Deno.test("approval expiration is normalized and bounded", () => {
       expires_at: "2026-01-02T00:00:00Z",
       principal_types: ["agent_user", "human_user", "agent_user"],
     }],
-    new Set([project]),
+    new Set([workspace]),
     now,
   );
   assertEquals(result[0].expires_at, "2026-01-02T00:00:00.000Z");

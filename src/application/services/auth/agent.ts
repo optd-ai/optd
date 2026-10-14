@@ -15,14 +15,14 @@ function boundary(value: unknown): AuthorizationBoundary | undefined {
   if (input.type === "system" && Object.keys(input).length === 1) {
     return { type: "system" };
   }
-  if (input.type === "all_projects" && Object.keys(input).length === 1) {
-    return { type: "all_projects" };
+  if (input.type === "all_workspaces" && Object.keys(input).length === 1) {
+    return { type: "all_workspaces" };
   }
   if (
-    input.type === "project" && Object.keys(input).length === 2 &&
-    typeof input.project_id === "string" && isUuidV7(input.project_id)
+    input.type === "workspace" && Object.keys(input).length === 2 &&
+    typeof input.workspace_id === "string" && isUuidV7(input.workspace_id)
   ) {
-    return { type: "project", projectId: input.project_id };
+    return { type: "workspace", workspaceId: input.workspace_id };
   }
 }
 

@@ -17,8 +17,8 @@ Deno.test("compiled optctl administers and redacts explicit policy assignments",
       })).code,
       0,
     );
-    const projectOne = await createProject(harness, "policy-one");
-    const projectTwo = await createProject(harness, "policy-two");
+    const workspaceOne = await createWorkspace(harness, "policy-one");
+    const workspaceTwo = await createWorkspace(harness, "policy-two");
 
     const createUser = await harness.runOptctl([
       "--json",
@@ -74,8 +74,8 @@ Deno.test("compiled optctl administers and redacts explicit policy assignments",
       user.id,
       "--role",
       "optd/test:reviewer",
-      "--project",
-      projectOne,
+      "--workspace",
+      workspaceOne,
     ]);
     const rootRoleAssignment = await harness.runOptctl([
       "--json",
@@ -85,8 +85,8 @@ Deno.test("compiled optctl administers and redacts explicit policy assignments",
       rootUser.id,
       "--role",
       "optd/test:reviewer",
-      "--project",
-      projectOne,
+      "--workspace",
+      workspaceOne,
     ]);
     const adminAssignment = await harness.runOptctl([
       "--json",
@@ -96,8 +96,8 @@ Deno.test("compiled optctl administers and redacts explicit policy assignments",
       user.id,
       "--role",
       "system:admin",
-      "--project",
-      projectOne,
+      "--workspace",
+      workspaceOne,
     ]);
     assertEquals(roleAssignment.code, 0, roleAssignment.stderr);
     assertEquals(rootRoleAssignment.code, 0, rootRoleAssignment.stderr);
@@ -110,14 +110,14 @@ Deno.test("compiled optctl administers and redacts explicit policy assignments",
       "create",
       "--policy-revision",
       policyVersionId,
-      "--project",
-      projectOne,
+      "--workspace",
+      workspaceOne,
     ]);
     assertEquals(created.code, 0, created.stderr);
     const createdAssignment = JSON.parse(created.stdout).data;
     assertEquals(createdAssignment.boundary, {
-      type: "project",
-      project_id: projectOne,
+      type: "workspace",
+      workspace_id: workspaceOne,
     });
 
     const systemCreated = await harness.runOptctl([
@@ -130,7 +130,7 @@ Deno.test("compiled optctl administers and redacts explicit policy assignments",
       "--boundary",
       "system",
     ]);
-    const allProjectsCreated = await harness.runOptctl([
+    const allWorkspacesCreated = await harness.runOptctl([
       "--json",
       "policy",
       "assignment",
@@ -138,10 +138,10 @@ Deno.test("compiled optctl administers and redacts explicit policy assignments",
       "--policy-revision",
       policyVersionId,
       "--boundary",
-      "all_projects",
+      "all_workspaces",
     ]);
     assertEquals(systemCreated.code, 0, systemCreated.stderr);
-    assertEquals(allProjectsCreated.code, 0, allProjectsCreated.stderr);
+    assertEquals(allWorkspacesCreated.code, 0, allWorkspacesCreated.stderr);
 
     const packDefaultId = uuidV7();
     const rootContext = (await query<{ id: string }>(
@@ -151,7 +151,7 @@ Deno.test("compiled optctl administers and redacts explicit policy assignments",
     await query(
       harness.server.sql,
       `insert into policy_assignments(id,policy_definition_version_id,boundary_type,active,source,created_by_auth_context_id)
-       values($1,$2,'all_projects',true,'pack_default',$3)`,
+       values($1,$2,'all_workspaces',true,'pack_default',$3)`,
       [packDefaultId, policyVersionId, rootContext],
     );
     const listed = await harness.runOptctl([
@@ -169,7 +169,7 @@ Deno.test("compiled optctl administers and redacts explicit policy assignments",
     const packDefault = items.find((item) => item.id === packDefaultId);
     assertExists(packDefault);
     assertEquals(packDefault.source, "pack_default");
-    assertEquals(packDefault.boundary, { type: "all_projects" });
+    assertEquals(packDefault.boundary, { type: "all_workspaces" });
 
     const login = await harness.login({
       username: "policy-admin",
@@ -181,8 +181,8 @@ Deno.test("compiled optctl administers and redacts explicit policy assignments",
       "--json",
       "auth",
       "authority",
-      "--project",
-      projectOne,
+      "--workspace",
+      workspaceOne,
     ]);
     assertEquals(normal.code, 0, normal.stderr);
     const normalBody = JSON.parse(normal.stdout).data;
@@ -196,8 +196,8 @@ Deno.test("compiled optctl administers and redacts explicit policy assignments",
       "--json",
       "auth",
       "authority",
-      "--project",
-      projectOne,
+      "--workspace",
+      workspaceOne,
       "--include-security",
     ]);
     assertEquals(privilegedDenied.code, 1);
@@ -215,8 +215,8 @@ Deno.test("compiled optctl administers and redacts explicit policy assignments",
       "create",
       "--policy-revision",
       policyVersionId,
-      "--project",
-      projectOne,
+      "--workspace",
+      workspaceOne,
     ]);
     assertEquals(exactAllowed.code, 0, exactAllowed.stderr);
     const wrongBoundary = await harness.runOptctl([
@@ -226,8 +226,8 @@ Deno.test("compiled optctl administers and redacts explicit policy assignments",
       "create",
       "--policy-revision",
       policyVersionId,
-      "--project",
-      projectTwo,
+      "--workspace",
+      workspaceTwo,
     ]);
     assertEquals(wrongBoundary.code, 1);
     assertEquals(JSON.parse(wrongBoundary.stderr).error.code, "policy_denied");
@@ -255,8 +255,8 @@ Deno.test("compiled optctl administers and redacts explicit policy assignments",
       "--json",
       "auth",
       "authority",
-      "--project",
-      projectOne,
+      "--workspace",
+      workspaceOne,
       "--include-security",
     ]);
     assertEquals(privileged.code, 0, privileged.stderr);
@@ -290,8 +290,8 @@ Deno.test("compiled optctl administers and redacts explicit policy assignments",
       "create",
       "--policy-revision",
       policyVersionId,
-      "--project",
-      projectOne,
+      "--workspace",
+      workspaceOne,
     ]);
     assertEquals(disabledDefinition.code, 1);
     assertEquals(JSON.parse(disabledDefinition.stderr).error.code, "not_found");
@@ -308,8 +308,8 @@ Deno.test("compiled optctl administers and redacts explicit policy assignments",
       rootUser.id,
       "--role",
       "optd/test:reviewer",
-      "--project",
-      projectTwo,
+      "--workspace",
+      workspaceTwo,
     ]);
     assertEquals(disabledRole.code, 1);
     assertEquals(JSON.parse(disabledRole.stderr).error.code, "not_found");
@@ -318,13 +318,13 @@ Deno.test("compiled optctl administers and redacts explicit policy assignments",
   }
 });
 
-async function createProject(
+async function createWorkspace(
   harness: LiveHarness,
   slug: string,
 ): Promise<string> {
   const result = await harness.runOptctl([
     "--json",
-    "project",
+    "workspace",
     "create",
     slug,
     "--display-name",

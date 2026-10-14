@@ -38,7 +38,7 @@ spec:
       empty:
         message: No sales team records found.
         help:
-          - optctl --project ${project} create optd/crm:sales_team --input object.json --stage
+          - optctl --workspace ${workspace} create optd/crm:sales_team --input object.json --stage
     detail:
       sections:
         - title: sales team
@@ -49,11 +49,11 @@ spec:
             - email_alias
             - monthly_target
       help:
-        - optctl --project ${project} query optd/crm:sales_team --where 'id == "${id}"'
+        - optctl --workspace ${workspace} query optd/crm:sales_team --where 'id == "${id}"'
     help:
       list:
-        - optctl --project ${project} query optd/crm:sales_team
+        - optctl --workspace ${workspace} query optd/crm:sales_team
       view:
-        - optctl --project ${project} view optd/crm:sales_team ${id}
+        - optctl --workspace ${workspace} view optd/crm:sales_team ${id}
       created:
-        - optctl --project ${project} view optd/crm:sales_team ${id}
+        - optctl --workspace ${workspace} view optd/crm:sales_team ${id}

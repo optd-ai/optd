@@ -1,4 +1,4 @@
-export const OPTD_VERSION = "0.1.0-dev";
+export { BUILD_VERSION as OPTD_VERSION } from "./build.ts";
 
 export type RuntimeConfig = {
   host: string;

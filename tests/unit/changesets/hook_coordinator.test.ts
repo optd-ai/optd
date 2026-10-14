@@ -59,11 +59,11 @@ Deno.test("trusted stage coordinator chains before-stage state in deterministic 
     operations: [{
       key: "item",
       op: "create",
-      project_id: "0198c4ba-42b8-7000-8000-000000000010",
+      workspace_id: "0198c4ba-42b8-7000-8000-000000000010",
       resource: "optd/test:item",
       fields: {},
     } as never],
-    projects: [],
+    workspaces: [],
     pack_revisions: [],
     hook_declarations: [first, second],
     authority_snapshot: {
@@ -117,7 +117,7 @@ Deno.test("trusted action-stage seam enforces declared operation effects", async
     hook_revision_id: "0198c4ba-42b8-7000-8000-000000000032",
     order: 2,
     script_content:
-      `const envelope=JSON.parse(await new Response(Deno.stdin.readable).text()); const input=envelope.input; if (input.request.name !== "generated" || input.request.actor.id !== "spoofed" || input.record.id !== "0198c4ba-42b8-7000-8000-000000000020" || JSON.stringify(input.actor) !== '{"id":"0198c4ba-42b8-7000-8000-000000000011","principal_type":"human_user"}' || Object.keys(input.actor).sort().join(",") !== "id,principal_type" || input.authority_snapshot !== undefined || envelope.authority_snapshot !== undefined || envelope.grant_snapshot !== undefined) throw new Error("uncurated input"); console.log(JSON.stringify({operations:[{op:"update",project_id:"0198c4ba-42b8-7000-8000-000000000010",resource:"optd/test:item",object_id:{$ref:"op_000001.object_id"},set:{status:"ready"}}]}));`,
+      `const envelope=JSON.parse(await new Response(Deno.stdin.readable).text()); const input=envelope.input; if (input.request.name !== "generated" || input.request.actor.id !== "spoofed" || input.record.id !== "0198c4ba-42b8-7000-8000-000000000020" || JSON.stringify(input.actor) !== '{"id":"0198c4ba-42b8-7000-8000-000000000011","principal_type":"human_user"}' || Object.keys(input.actor).sort().join(",") !== "id,principal_type" || input.authority_snapshot !== undefined || envelope.authority_snapshot !== undefined || envelope.grant_snapshot !== undefined) throw new Error("uncurated input"); console.log(JSON.stringify({operations:[{op:"update",workspace_id:"0198c4ba-42b8-7000-8000-000000000010",resource:"optd/test:item",object_id:{$ref:"op_000001.object_id"},set:{status:"ready"}}]}));`,
     effects: [{ resource: "optd/test:item", ops: ["update"] }],
   } as ActionStageHookDeclaration;
   const result = await coordinator.runActionStage({
@@ -126,12 +126,12 @@ Deno.test("trusted action-stage seam enforces declared operation effects", async
       id: "0198c4ba-42b8-7000-8000-000000000011",
       principal_type: "human_user",
     },
-    project_id: "0198c4ba-42b8-7000-8000-000000000010",
+    workspace_id: "0198c4ba-42b8-7000-8000-000000000010",
     input: { name: "generated", actor: { id: "spoofed", roles: ["admin"] } },
     reads: { item: { id: "0198c4ba-42b8-7000-8000-000000000020" } },
     read_dependencies: [{
       name: "item",
-      project_id: "0198c4ba-42b8-7000-8000-000000000010",
+      workspace_id: "0198c4ba-42b8-7000-8000-000000000010",
       resource_identity: "optd/test:item",
       object_id: "0198c4ba-42b8-7000-8000-000000000020",
       object_version_id: "0198c4ba-42b8-7000-8000-000000000021",
@@ -161,12 +161,12 @@ Deno.test("trusted action-stage seam enforces declared operation effects", async
         string,
         unknown
       >[])[0],
-      "project_id",
+      "workspace_id",
     ),
     false,
   );
   equals(
-    result.hook_executions[0].added_operations[0].project_id,
+    result.hook_executions[0].added_operations[0].workspace_id,
     "0198c4ba-42b8-7000-8000-000000000010",
   );
   equals(result.hook_executions[0].added_operations.length, 1);
@@ -187,13 +187,13 @@ Deno.test("trusted action-stage seam enforces declared operation effects", async
       reads: { item: {} },
       read_dependencies: [{
         name: "item",
-        project_id: "0198c4ba-42b8-7000-8000-000000000010",
+        workspace_id: "0198c4ba-42b8-7000-8000-000000000010",
         resource_identity: "optd/test:item",
         object_id: "0198c4ba-42b8-7000-8000-000000000020",
         object_version_id: "0198c4ba-42b8-7000-8000-000000000021",
       }],
       declarations: [{ ...action, effects: [] }],
-      project_id: "0198c4ba-42b8-7000-8000-000000000010",
+      workspace_id: "0198c4ba-42b8-7000-8000-000000000010",
       authority_snapshot: result.hook_executions[0].authority_snapshot,
     });
   } catch (error) {
@@ -214,13 +214,13 @@ Deno.test("trusted action-stage seam enforces declared operation effects", async
       reads: { item: {} },
       read_dependencies: [{
         name: "item",
-        project_id: "0198c4ba-42b8-7000-8000-000000000010",
+        workspace_id: "0198c4ba-42b8-7000-8000-000000000010",
         resource_identity: "optd/test:item",
         object_id: "0198c4ba-42b8-7000-8000-000000000020",
         object_version_id: "0198c4ba-42b8-7000-8000-000000000021",
       }],
       declarations: [action],
-      project_id: "0198c4ba-42b8-7000-8000-000000000010",
+      workspace_id: "0198c4ba-42b8-7000-8000-000000000010",
       authority_snapshot: result.hook_executions[0].authority_snapshot,
       limits: {
         maxOperations: 0,
@@ -249,7 +249,7 @@ Deno.test("trusted action-stage seam enforces declared operation effects", async
         ...action,
         input_mapping: { missing: "$reads.missing" },
       }],
-      project_id: "0198c4ba-42b8-7000-8000-000000000010",
+      workspace_id: "0198c4ba-42b8-7000-8000-000000000010",
       authority_snapshot: result.hook_executions[0].authority_snapshot,
     });
   } catch (error) {
@@ -258,7 +258,7 @@ Deno.test("trusted action-stage seam enforces declared operation effects", async
   }
   equals(undeclaredRead, true);
 
-  let crossProject = false;
+  let crossWorkspace = false;
   try {
     await coordinator.runActionStage({
       action: "optd/test:generate",
@@ -266,12 +266,12 @@ Deno.test("trusted action-stage seam enforces declared operation effects", async
         id: "0198c4ba-42b8-7000-8000-000000000011",
         principal_type: "human_user",
       },
-      project_id: "0198c4ba-42b8-7000-8000-000000000010",
+      workspace_id: "0198c4ba-42b8-7000-8000-000000000010",
       input: {},
       reads: { item: {} },
       read_dependencies: [{
         name: "item",
-        project_id: "0198c4ba-42b8-7000-8000-000000000010",
+        workspace_id: "0198c4ba-42b8-7000-8000-000000000010",
         resource_identity: "optd/test:item",
         object_id: "0198c4ba-42b8-7000-8000-000000000020",
         object_version_id: "0198c4ba-42b8-7000-8000-000000000021",
@@ -279,15 +279,15 @@ Deno.test("trusted action-stage seam enforces declared operation effects", async
       declarations: [{
         ...action,
         script_content:
-          `console.log(JSON.stringify({operations:[{op:"create",project_id:"0198c4ba-42b8-7000-8000-000000000099",resource:"optd/test:item",fields:{name:"wrong project"}}]}));`,
+          `console.log(JSON.stringify({operations:[{op:"create",workspace_id:"0198c4ba-42b8-7000-8000-000000000099",resource:"optd/test:item",fields:{name:"wrong workspace"}}]}));`,
       }],
       authority_snapshot: result.hook_executions[0].authority_snapshot,
     });
   } catch (error) {
-    crossProject = error instanceof Error && "code" in error &&
+    crossWorkspace = error instanceof Error && "code" in error &&
       error.code === "hook_invalid_output";
   }
-  equals(crossProject, true);
+  equals(crossWorkspace, true);
 });
 
 function equals(actual: unknown, expected: unknown): void {

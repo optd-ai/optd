@@ -24,7 +24,7 @@ Deno.test("after-commit conditions support false, strings, numbers and null", ()
     const expression of [
       "false || version == 1",
       'operation == "archive" || archived_at != null',
-      "project_id == null && object_version_id == null",
+      "workspace_id == null && object_version_id == null",
     ]
   ) lowerAfterCommitCondition(expression);
 });

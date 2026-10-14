@@ -65,20 +65,20 @@ Deno.test("immutable candidates are reused while every preview persists a distin
       "insert into auth_contexts(id,principal_id,human_user_id,session_id,credential_kind,roles,created_at) values ($1,$2,$3,$4,'human_full','{system:super_admin}',now())",
       [auth, principal, human, session],
     );
-    const projectId = uuidV7();
+    const workspaceId = uuidV7();
     await query(
       sql,
-      `insert into projects(
+      `insert into workspaces(
          id,slug,display_name,created_by_auth_context_id,updated_by_auth_context_id)
        values($1,'pack-plan-test','Pack Plan Test',$2,$2)`,
-      [projectId, auth],
+      [workspaceId, auth],
     );
     assertEquals(
       (await query<{ count: string }>(
         sql,
-        `select count(*)::text count from projects p
+        `select count(*)::text count from workspaces p
          join auth_contexts c on c.id=$2 where p.id=$1`,
-        [projectId, auth],
+        [workspaceId, auth],
       )).rows[0].count,
       "1",
     );
@@ -196,7 +196,7 @@ Deno.test("immutable candidates are reused while every preview persists a distin
                 indexname,
                 tablename,
                 indexdef:
-                  `CREATE UNIQUE INDEX ${indexname} ON public.${tablename} USING btree (project_id, ${field}) WHERE (archived_at IS NULL)`,
+                  `CREATE UNIQUE INDEX ${indexname} ON public.${tablename} USING btree (workspace_id, ${field}) WHERE (archived_at IS NULL)`,
               };
             }).sort((left, right) =>
               left.indexname.localeCompare(right.indexname)
@@ -215,7 +215,7 @@ Deno.test("immutable candidates are reused while every preview persists a distin
               ).map((constraint) => ({
                 definition_name: resource,
                 conname: String(constraint.name),
-                definition: `UNIQUE (project_id, ${
+                definition: `UNIQUE (workspace_id, ${
                   (constraint.fields as unknown[]).map(String).join(", ")
                 })`,
               }));
@@ -299,8 +299,8 @@ Deno.test("immutable candidates are reused while every preview persists a distin
     const rowId = uuidV7();
     await query(
       sql,
-      `insert into "${leadTable}"(id,project_id,created_by,updated_by,name,status,phone) values ($1,$2,$3,$3,'Lead','new','555')`,
-      [rowId, projectId, auth],
+      `insert into "${leadTable}"(id,workspace_id,created_by,updated_by,name,status,phone) values ($1,$2,$3,$3,'Lead','new','555')`,
+      [rowId, workspaceId, auth],
     );
     const blocked = await sql.begin((tx) =>
       validateMigrationPlan(tx, removal.plan.id, auth)
@@ -324,8 +324,8 @@ Deno.test("immutable candidates are reused while every preview persists a distin
       await query(tx, `lock table "${leadTable}" in share mode`);
       concurrentInsert = query(
         sql!,
-        `insert into "${leadTable}"(id,project_id,created_by,updated_by,name,status,phone) values ($1,$2,$3,$3,'Concurrent','new','777')`,
-        [uuidV7(), projectId, auth],
+        `insert into "${leadTable}"(id,workspace_id,created_by,updated_by,name,status,phone) values ($1,$2,$3,$3,'Concurrent','new','777')`,
+        [uuidV7(), workspaceId, auth],
       );
       const validation = await validateMigrationPlan(
         tx,

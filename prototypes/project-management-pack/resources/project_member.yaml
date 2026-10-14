@@ -4,7 +4,7 @@ metadata:
   name: project_member
 spec:
   fields:
-    work_project_id:
+    project_id:
       type: string
       required: true
       ref: optd/projects:project
@@ -16,53 +16,53 @@ spec:
     - name: project_principal_membership
       kind: unique
       fields:
-        - work_project_id
+        - project_id
         - principal_id
   indexes:
     - name: project_member_principal
       fields:
         - principal_id
-        - work_project_id
+        - project_id
   axi:
     purpose: Records a principal's direct membership in a work project.
     whenToUse:
       - Use project members to record direct principal membership; use role assignments for authority.
     identity:
       title: ${principal_id}
-      subtitle: ${work_project_id}
+      subtitle: ${project_id}
       labelFields:
         - principal_id
-        - work_project_id
+        - project_id
     list:
       defaultFields:
         - id
-        - work_project_id
+        - project_id
         - principal_id
       empty:
         message: No project members found.
         help:
-          - optctl --project ${project} create optd/projects:project_member --input object.json --stage
+          - optctl --workspace ${workspace} create optd/projects:project_member --input object.json --stage
     detail:
       sections:
         - title: Membership
           fields:
-            - work_project_id
+            - project_id
             - principal_id
       help:
-        - optctl --project ${project} view optd/projects:project_member ${id}
+        - optctl --workspace ${workspace} view optd/projects:project_member ${id}
     search:
       fields:
         - principal_id
       examples:
-        - optctl --project ${project} search optd/projects:project_member --text ${principal_id}
+        - optctl --workspace ${workspace} search optd/projects:project_member --text ${principal_id}
       resultFields:
         - id
-        - work_project_id
+        - project_id
         - principal_id
     help:
       list:
-        - optctl --project ${project} list optd/projects:project_member
+        - optctl --workspace ${workspace} list optd/projects:project_member
       view:
-        - optctl --project ${project} view optd/projects:project_member ${id}
+        - optctl --workspace ${workspace} view optd/projects:project_member ${id}
       created:
-        - optctl --project ${project} view optd/projects:project_member ${id}
+        - optctl --workspace ${workspace} view optd/projects:project_member ${id}

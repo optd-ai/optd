@@ -11,7 +11,7 @@ import type {
 
 export type SeedStageDto = {
   status: "staged" | "unchanged";
-  project_id: string;
+  workspace_id: string;
   revision_id: string;
   seed_names: string[];
   stage: StageDto | null;
@@ -22,7 +22,7 @@ export type SeedRowLookup = Readonly<{
   publisher: string;
   pack: string;
   resourceName: string;
-  projectId: string;
+  workspaceId: string;
   key: string;
   value: unknown;
 }>;
@@ -41,7 +41,7 @@ export interface SeedStagePort
   extends SeedCatalog<ActiveSeedRevision>, FrozenSeedReconciliation {
   authorize(
     auth: AuthContext,
-    projectId: string,
+    workspaceId: string,
     action: string,
   ): Promise<Result<void>>;
 }
@@ -58,9 +58,9 @@ export function makeStageSeedsService(port: SeedStagePort) {
       try {
         if (
           !isRecord(raw) || Object.keys(raw).some((key) =>
-            !["project_id", "all", "seed_names"].includes(key)
+            !["workspace_id", "all", "seed_names"].includes(key)
           ) ||
-          typeof raw.project_id !== "string" || !isUuidV7(raw.project_id) ||
+          typeof raw.workspace_id !== "string" || !isUuidV7(raw.workspace_id) ||
           typeof raw.all !== "boolean" ||
           (raw.seed_names !== undefined &&
             (!Array.isArray(raw.seed_names) ||
@@ -93,7 +93,11 @@ export function makeStageSeedsService(port: SeedStagePort) {
         }
         for (const name of selected) {
           const action = `seed:${publisher}/${pack}:${name}`;
-          const authorized = await port.authorize(auth, raw.project_id, action);
+          const authorized = await port.authorize(
+            auth,
+            raw.workspace_id,
+            action,
+          );
           if (!authorized.ok) return authorized;
         }
         const operations: Record<string, unknown>[] = [];
@@ -133,20 +137,20 @@ export function makeStageSeedsService(port: SeedStagePort) {
               publisher,
               pack,
               resourceName,
-              projectId: raw.project_id,
+              workspaceId: raw.workspace_id,
               key,
               value: row[key],
             });
             dependencies.push({
               kind: "uniqueness",
-              project_id: raw.project_id,
+              workspace_id: raw.workspace_id,
               definition: identity,
               key,
               value: row[key],
               constraint_name: activeUniqueness.name,
               constraint_fields: activeUniqueness.fields,
               constraint_predicate: activeUniqueness.predicate,
-              project_scoped: activeUniqueness.projectScoped,
+              workspace_scoped: activeUniqueness.workspaceScoped,
               present: Boolean(current),
               ...(current
                 ? {
@@ -157,7 +161,7 @@ export function makeStageSeedsService(port: SeedStagePort) {
             });
             const reconciled = reconcileSeedRow(row, current, {
               operationKey: `${name}_${operations.length}`,
-              projectId: raw.project_id,
+              workspaceId: raw.workspace_id,
               resource: identity,
             }, fieldDescriptors);
             if (reconciled) {
@@ -175,7 +179,7 @@ export function makeStageSeedsService(port: SeedStagePort) {
         if (!operations.length) {
           return ok({
             status: "unchanged",
-            project_id: raw.project_id,
+            workspace_id: raw.workspace_id,
             revision_id: revision.id,
             seed_names: selected,
             stage: null,
@@ -189,7 +193,7 @@ export function makeStageSeedsService(port: SeedStagePort) {
             revision_id: revision.id,
           },
           authority: {
-            project_id: raw.project_id,
+            workspace_id: raw.workspace_id,
             actions: selected.map((name) =>
               `seed:${publisher}/${pack}:${name}`
             ),
@@ -203,7 +207,7 @@ export function makeStageSeedsService(port: SeedStagePort) {
         if (!staged.ok) return staged;
         return ok({
           status: "staged",
-          project_id: raw.project_id,
+          workspace_id: raw.workspace_id,
           revision_id: revision.id,
           seed_names: selected,
           stage: staged.value,
@@ -236,7 +240,7 @@ export function reconcileSeedRow(
   current: Record<string, unknown> | undefined,
   context: {
     operationKey: string;
-    projectId: string;
+    workspaceId: string;
     resource: string;
   },
   fieldDescriptors: Record<string, unknown> = {},
@@ -245,7 +249,7 @@ export function reconcileSeedRow(
     return {
       op: "create",
       key: context.operationKey,
-      project_id: context.projectId,
+      workspace_id: context.workspaceId,
       resource: context.resource,
       fields: structuredClone(desired),
     };
@@ -263,7 +267,7 @@ export function reconcileSeedRow(
   return {
     op: "update",
     key: context.operationKey,
-    project_id: context.projectId,
+    workspace_id: context.workspaceId,
     resource: context.resource,
     object_id: current.id,
     expected_version: Number(current.version),
@@ -349,7 +353,7 @@ function activeSeedConstraint(
   if (matches.length !== 1) return null;
   return Object.freeze({
     name: String(matches[0].name),
-    projectScoped: true as const,
+    workspaceScoped: true as const,
     fields: Object.freeze([key]),
     predicate: "active()" as const,
   });

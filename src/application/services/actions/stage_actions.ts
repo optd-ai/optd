@@ -57,7 +57,7 @@ export type StageActionResult = StageDto | {
   stage: null;
 };
 export type ActionStageRequest = Readonly<{
-  project_id: string;
+  workspace_id: string;
   input: Record<string, unknown>;
 }>;
 export type ActionIdentity = Readonly<{
@@ -71,7 +71,7 @@ export type ActionDefinition = Readonly<{
   spec: Record<string, unknown>;
 }>;
 export type ActionReadRequest = Readonly<{
-  projectId: string;
+  workspaceId: string;
   target: NonNullable<ReturnType<typeof parseResourceIdentity>>;
   objectId: string;
   fields: readonly string[];
@@ -123,7 +123,7 @@ export type ActionHookExecution = Readonly<{
   grant_snapshot: HookGrantSnapshot;
   read_dependencies: readonly Readonly<{
     name: string;
-    project_id: string;
+    workspace_id: string;
     resource_identity: string;
     object_id: string;
     object_version_id: string;
@@ -136,13 +136,13 @@ export type ActionHookResult = Readonly<{
 
 type ActionHookRequest = Readonly<{
   action: string;
-  project_id: string;
+  workspace_id: string;
   actor: { id: string; principal_type: "human_user" | "agent_user" };
   input: Readonly<Record<string, unknown>>;
   reads: Readonly<Record<string, unknown>>;
   read_dependencies: readonly Readonly<{
     name: string;
-    project_id: string;
+    workspace_id: string;
     resource_identity: string;
     object_id: string;
     object_version_id: string;
@@ -164,7 +164,7 @@ export interface ActionStageCapabilities
     PinnedActionHookCatalog<ActionIdentity & { revisionId: string }>,
     ActionStageAuthorityPort<
       Readonly<{
-        projectId: string;
+        workspaceId: string;
         action: string;
         targets: readonly ReviewedTarget[];
         auth: AuthContext;
@@ -182,7 +182,7 @@ export interface ActionStageCapabilities
     > {
   availabilityState(
     request: Readonly<{
-      projectId: string;
+      workspaceId: string;
       target: NonNullable<ReturnType<typeof parseResourceIdentity>>;
       objectId: string;
       field: string;
@@ -190,7 +190,7 @@ export interface ActionStageCapabilities
   ): Promise<unknown | undefined>;
   availabilityCondition(
     request: Readonly<{
-      projectId: string;
+      workspaceId: string;
       target: NonNullable<ReturnType<typeof parseResourceIdentity>>;
       objectId: string;
       fields: Record<string, unknown>;
@@ -232,7 +232,7 @@ export function makeStageActionService(port: ActionStageCapabilities) {
         const reads: Record<string, unknown> = {};
         const readDependencies: Array<{
           name: string;
-          project_id: string;
+          workspace_id: string;
           resource_identity: string;
           object_id: string;
           object_version_id: string;
@@ -269,7 +269,7 @@ export function makeStageActionService(port: ActionStageCapabilities) {
             ? declaration.fields.map(String)
             : [];
           const result = await port.current({
-            projectId: raw.project_id,
+            workspaceId: raw.workspace_id,
             target,
             objectId,
             fields,
@@ -283,7 +283,7 @@ export function makeStageActionService(port: ActionStageCapabilities) {
           policyTargets.push({ definition: target, objectId });
           readDependencies.push({
             name: readName,
-            project_id: raw.project_id,
+            workspace_id: raw.workspace_id,
             resource_identity: qualified,
             object_id: objectId,
             object_version_id: result.objectVersionId,
@@ -293,7 +293,7 @@ export function makeStageActionService(port: ActionStageCapabilities) {
         if (!policyTargets.length) {
           for (const [field, value] of Object.entries(raw.input).sort()) {
             if (
-              field === "project_id" || !field.endsWith("_id") ||
+              field === "workspace_id" || !field.endsWith("_id") ||
               typeof value !== "string" || !isUuidV7(value)
             ) continue;
             const declared = field === "object_id" &&
@@ -308,7 +308,7 @@ export function makeStageActionService(port: ActionStageCapabilities) {
               return invalid("action input target resource is unavailable");
             }
             const result = await port.current({
-              projectId: raw.project_id,
+              workspaceId: raw.workspace_id,
               target,
               objectId: value,
               fields: [],
@@ -319,7 +319,7 @@ export function makeStageActionService(port: ActionStageCapabilities) {
             policyTargets.push({ definition: target, objectId: value });
             readDependencies.push({
               name: `$action.input.${field}`,
-              project_id: raw.project_id,
+              workspace_id: raw.workspace_id,
               resource_identity: qualified,
               object_id: value,
               object_version_id: result.objectVersionId,
@@ -330,7 +330,7 @@ export function makeStageActionService(port: ActionStageCapabilities) {
         const availabilityIssue = await checkAvailability(
           port,
           definition,
-          raw.project_id,
+          raw.workspace_id,
           auth,
           readObjectIds,
         );
@@ -379,7 +379,7 @@ export function makeStageActionService(port: ActionStageCapabilities) {
               );
             }
             return {
-              projectId: raw.project_id,
+              workspaceId: raw.workspace_id,
               resource,
               object: {
                 id: target.objectId,
@@ -389,16 +389,16 @@ export function makeStageActionService(port: ActionStageCapabilities) {
           },
         );
         const authority = await port.lockAndEvaluate({
-          projectId: raw.project_id,
+          workspaceId: raw.workspace_id,
           action: semantic,
           targets: reviewedTargets,
           auth,
         });
-        if (!authority) return policyDenied(semantic, raw.project_id, auth);
+        if (!authority) return policyDenied(semantic, raw.workspace_id, auth);
 
         const hookResult = await port.executeHooks({
           action: `${publisher}/${pack}:${name}`,
-          project_id: raw.project_id,
+          workspace_id: raw.workspace_id,
           actor: { id: actor.id, principal_type: actor.principal_type },
           input: raw.input,
           reads,
@@ -420,7 +420,7 @@ export function makeStageActionService(port: ActionStageCapabilities) {
         const targetedEvidence = {
           action: semantic,
           targets: authority.authorization.targets.map((evidence) => ({
-            project_id: evidence.target.projectId,
+            workspace_id: evidence.target.workspaceId,
             resource: evidence.target.resource,
             ...(evidence.target.object
               ? {
@@ -458,7 +458,7 @@ export function makeStageActionService(port: ActionStageCapabilities) {
             authority_evidence: targetedEvidence,
           },
           authority: {
-            project_id: raw.project_id,
+            workspace_id: raw.workspace_id,
             actions: [semantic],
             revision_id: definition.revisionId,
             effects: effects.map((effect) => ({
@@ -519,7 +519,7 @@ export function makeStageActionService(port: ActionStageCapabilities) {
         }
         if (isConcurrencyError(error)) {
           return err({
-            code: "project_conflict",
+            code: "workspace_conflict",
             message: "action authority changed while staging",
             severity: "conflict",
             details: {},
@@ -540,7 +540,7 @@ export function makeStageActionService(port: ActionStageCapabilities) {
 async function checkAvailability(
   port: ActionStageCapabilities,
   definition: ActionDefinition,
-  projectId: string,
+  workspaceId: string,
   auth: AuthContext,
   readObjectIds: ReadonlyMap<string, string>,
 ): Promise<string | null> {
@@ -560,7 +560,7 @@ async function checkAvailability(
   const target = parseResourceIdentity(resource);
   if (!target) return "availability resource is unavailable";
   const state = await port.availabilityState({
-    projectId,
+    workspaceId,
     target,
     objectId,
     field: String(lifecycle.field),
@@ -575,7 +575,7 @@ async function checkAvailability(
       record(record(definition.normalized).resources)[resourceName],
     );
     const allowed = await port.availabilityCondition({
-      projectId,
+      workspaceId,
       target,
       objectId,
       fields: record(record(definitionFields.spec).fields),
@@ -622,14 +622,14 @@ function actionDeclaration(
 function validRequest(value: unknown): value is ActionStageRequest {
   return isRecord(value) &&
     !Object.keys(value).some((key) =>
-      key !== "project_id" && key !== "input"
+      key !== "workspace_id" && key !== "input"
     ) &&
-    typeof value.project_id === "string" && isUuidV7(value.project_id) &&
+    typeof value.workspace_id === "string" && isUuidV7(value.workspace_id) &&
     isRecord(value.input);
 }
 function policyDenied(
   action: string,
-  projectId: string,
+  workspaceId: string,
   auth: AuthContext,
 ): Result<never> {
   const actor = policyActorFromAuthContext(auth);
@@ -642,7 +642,7 @@ function policyDenied(
       auth_context_id: auth.id,
       principal_id: actor.id,
       actor,
-      boundary: { type: "project", project_id: projectId },
+      boundary: { type: "workspace", workspace_id: workspaceId },
       action,
     },
   });

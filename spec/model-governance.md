@@ -1,6 +1,6 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-model-governance; contract: 1; input: sha256:76ce7eac17661a59327285b9d90e41ae1946e1cc42e34cc13af01da420c5f470 -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-model-governance; contract: 1; input: sha256:ba9323913f013d643b438228892548cb4e8f33bb862bdb686044771665e6bf13 -->
 
-# Project-model governance and cutover
+# Workspace-model governance and cutover
 
 Canonical project-model governance and cutover decisions and contracts projected from project-model/model.json.
 
@@ -26,6 +26,6 @@ After completeness review, delete every hand-authored spec file and replace the 
 
 <a id="obj-com-model-audit"></a>
 
-### Create and validate the repository project model
+### Create and validate the repository workspace model
 
 Read the complete current Pi session, every spec, implementation/test/release surfaces, construct a non-authoritative candidate model, test it against source, preserve contradictions as discoveries/questions, and present inconsistencies for human resolution before cutover.

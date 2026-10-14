@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-commit-revalidation; contract: 1; input: sha256:4204b1b51b491e6830b8c4b72cc821782231cca8655507a590d2643e46c1d8de -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-commit-revalidation; contract: 1; input: sha256:f5098ae7854bd6d05ba7e007321e594fc51d395ba65d42e769220a8c2ee6135f -->
 
 # Race-Free Commit Revalidation
 
@@ -16,7 +16,7 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 Staging runs hooks once and persists an immutable operation graph under
 [Immutable Staged Changeset Storage](staged-changeset-storage.md). Commit must
-still atomically revalidate current database, authorization, approval, project,
+still atomically revalidate current database, authorization, approval, workspace,
 and pack state with the writes. This contract prevents time-of-check/time-of-use
 races without synthetic global coordination rows or rerunning hooks.
 
@@ -109,7 +109,7 @@ Application write paths acquire locks in this order:
 
 1. staged-changeset lifecycle coordination row;
 2. pack-owned runtime tables;
-3. project rows;
+3. workspace rows;
 4. object and relationship dependency rows.
 
 Runtime tables are sorted by the stable tuple:
@@ -152,10 +152,10 @@ One commit attempt performs:
 7. Acquire early `ROW EXCLUSIVE` table locks in canonical order.
 8. Re-read active pack metadata after waiting and compare every referenced exact
    pack revision.
-9. Lock affected project rows `FOR SHARE` in UUID order and verify active state.
+9. Lock affected workspace rows `FOR SHARE` in UUID order and verify active state.
 10. Lock all staged object/relationship dependencies in canonical order: mutated
     rows `FOR UPDATE`, read-only rows `FOR SHARE`.
-11. Evaluate all operation/project authorization boundaries in one SQL statement
+11. Evaluate all operation/workspace authorization boundaries in one SQL statement
     snapshot using current auth/session/ancestor/role/policy state.
 12. Revalidate the frozen staged approval requirements, current requirement
     validity, authority, quorum, expiry, and decisions bound to the exact
@@ -226,7 +226,7 @@ revision. Pack activation and metadata/DDL updates occur in one transaction.
 ## Authorization and policy
 
 Authorization is recomputed at commit; staging decisions are evidence only. One
-SQL statement evaluates every operation/project boundary so `READ COMMITTED`
+SQL statement evaluates every operation/workspace boundary so `READ COMMITTED`
 does not mix policy snapshots across separate decisions.
 
 A current denial returns `authorization_changed` or the more specific

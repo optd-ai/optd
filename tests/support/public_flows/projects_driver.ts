@@ -30,7 +30,7 @@ export async function runCompleteProjectsPublicFlow(
     await harness.configureProvider([{
       kind: "retry_then_success",
       retryAfterSeconds: 1,
-      successHoldToken: "projects-retry-success",
+      successHoldToken: "workspaces-retry-success",
       body: { retry: true },
     }]);
     const PACK = await harness.assetPath("projects");
@@ -45,11 +45,11 @@ export async function runCompleteProjectsPublicFlow(
           "bootstrap",
           "init",
           "--username",
-          "projects-admin",
+          "workspaces-admin",
           "--display-name",
           "Projects Administrator",
           "--password-stdin",
-        ], { stdin: "projects acceptance password\n" }),
+        ], { stdin: "workspaces acceptance password\n" }),
         output,
       ),
     );
@@ -64,9 +64,9 @@ export async function runCompleteProjectsPublicFlow(
         "auth",
         "login",
         "--username",
-        "projects-admin",
+        "workspaces-admin",
         "--password-stdin",
-      ], { stdin: "projects acceptance password\n" }),
+      ], { stdin: "workspaces acceptance password\n" }),
       output,
     );
 
@@ -74,11 +74,11 @@ export async function runCompleteProjectsPublicFlow(
       toon(await ok(human.runCli([]), output)).data,
       json(await ok(human.runCli(["--json"]), output)).data,
     );
-    const hostProject = json(
+    const hostWorkspace = json(
       await ok(
         human.runCli([
           "--json",
-          "project",
+          "workspace",
           "create",
           "delivery",
           "--display-name",
@@ -87,9 +87,9 @@ export async function runCompleteProjectsPublicFlow(
         output,
       ),
     );
-    const projectId = String(hostProject.data.id);
-    assert(isUuidV7(projectId));
-    await ok(human.runCli(["project", "select", "delivery"]), output);
+    const workspaceId = String(hostWorkspace.data.id);
+    assert(isUuidV7(workspaceId));
+    await ok(human.runCli(["workspace", "select", "delivery"]), output);
 
     const preview = json(
       await ok(
@@ -126,13 +126,13 @@ export async function runCompleteProjectsPublicFlow(
     ) {
       const structured = json(
         await ok(
-          human.runCli(["--json", "--project", projectId, ...command]),
+          human.runCli(["--json", "--workspace", workspaceId, ...command]),
           output,
         ),
       );
       const plain = toon(
         await ok(
-          human.runCli(["--project", projectId, ...command]),
+          human.runCli(["--workspace", workspaceId, ...command]),
           output,
         ),
       );
@@ -140,10 +140,10 @@ export async function runCompleteProjectsPublicFlow(
       assertEquals(structured.data.axi_readiness?.ready ?? true, true);
     }
 
-    const secretV1 = `projects-secret-v1-${crypto.randomUUID()}`;
-    const secretV2 = `projects-secret-v2-${crypto.randomUUID()}`;
+    const secretV1 = `workspaces-secret-v1-${crypto.randomUUID()}`;
+    const secretV2 = `workspaces-secret-v2-${crypto.randomUUID()}`;
     const replacementSecret =
-      `projects-secret-replacement-${crypto.randomUUID()}`;
+      `workspaces-secret-replacement-${crypto.randomUUID()}`;
     const createdSecret = json(
       await ok(
         human.runCli([
@@ -227,8 +227,8 @@ export async function runCompleteProjectsPublicFlow(
       await ok(
         human.runCli([
           "--json",
-          "--project",
-          projectId,
+          "--workspace",
+          workspaceId,
           "seed",
           "commit",
           PROJECTS,
@@ -243,8 +243,8 @@ export async function runCompleteProjectsPublicFlow(
       await ok(
         human.runCli([
           "--json",
-          "--project",
-          projectId,
+          "--workspace",
+          workspaceId,
           "seed",
           "commit",
           PROJECTS,
@@ -256,7 +256,7 @@ export async function runCompleteProjectsPublicFlow(
     assertEquals(seed2.data.stage, null);
     assertEquals(await harness.observePersistenceCounts(), beforeRepeatedSeed);
 
-    await harness.waitForProviderBarrier("projects-retry-success");
+    await harness.waitForProviderBarrier("workspaces-retry-success");
     const attemptsAtRetrySuccess = await harness.providerAttempts();
     const attemptsByKey = Map.groupBy(
       attemptsAtRetrySuccess.filter((attempt) => attempt.idempotencyKey),
@@ -280,7 +280,7 @@ export async function runCompleteProjectsPublicFlow(
       ).length,
       1,
     );
-    await harness.releaseProviderBarrier("projects-retry-success");
+    await harness.releaseProviderBarrier("workspaces-retry-success");
     const scriptedDelivery = await waitOutboxDeliveryStatus(
       human,
       output,
@@ -306,7 +306,7 @@ export async function runCompleteProjectsPublicFlow(
     await assertHookQuiescence(
       harness,
       output,
-      "projects:post-delivery:scripted-retry",
+      "workspaces:post-delivery:scripted-retry",
     );
 
     await ok(
@@ -318,8 +318,8 @@ export async function runCompleteProjectsPublicFlow(
         humanId,
         "--role",
         `${PROJECTS}:project_manager`,
-        "--project",
-        projectId,
+        "--workspace",
+        workspaceId,
       ]),
       output,
     );
@@ -330,9 +330,9 @@ export async function runCompleteProjectsPublicFlow(
           "auth",
           "roles",
           "--boundary",
-          "project",
-          "--project",
-          projectId,
+          "workspace",
+          "--workspace",
+          workspaceId,
         ]),
         output,
       ),
@@ -350,9 +350,9 @@ export async function runCompleteProjectsPublicFlow(
           "--role",
           `${PROJECTS}:project_manager`,
           "--boundary",
-          "project",
-          "--project",
-          projectId,
+          "workspace",
+          "--workspace",
+          workspaceId,
           "--reason",
           "Run independent Projects acceptance",
         ]),
@@ -373,7 +373,7 @@ export async function runCompleteProjectsPublicFlow(
         String(request.data.id),
         "--yes",
         "--agent-name",
-        "projects-agent",
+        "workspaces-agent",
       ]),
       output,
     );
@@ -429,19 +429,19 @@ export async function runCompleteProjectsPublicFlow(
     assert(humanId !== nestedAgentId);
     assertEquals(whoami.data.role_assignments, [{
       role: `${PROJECTS}:project_manager`,
-      boundary: { type: "project", project_id: projectId },
+      boundary: { type: "workspace", workspace_id: workspaceId },
     }]);
 
-    const todoId = await harness.observeProjectsTodoStageId(projectId);
+    const todoId = await harness.observeProjectsTodoStageId(workspaceId);
     assert(isUuidV7(todoId));
-    const projectSetup = json(
+    const workspaceSetup = json(
       await ok(
         runJson(harness, ["--json", "changeset", "stage"], {
-          project_id: projectId,
+          workspace_id: workspaceId,
           operations: [{
             op: "create",
-            key: "project",
-            project_id: projectId,
+            key: "workspace",
+            workspace_id: workspaceId,
             resource: `${PROJECTS}:project`,
             fields: {
               name: "Independent Build",
@@ -455,31 +455,31 @@ export async function runCompleteProjectsPublicFlow(
         output,
       ),
     ).data;
-    assertEquals(projectSetup.operations.length, 1);
-    assertEquals(projectSetup.hook_executions, []);
+    assertEquals(workspaceSetup.operations.length, 1);
+    assertEquals(workspaceSetup.hook_executions, []);
     await ok(
-      agent.runCli(["--json", "changeset", "commit", projectSetup.id]),
+      agent.runCli(["--json", "changeset", "commit", workspaceSetup.id]),
       output,
     );
     await assertHookQuiescence(
       harness,
       output,
-      "projects:post-commit:project-setup",
+      "workspaces:post-commit:workspace-setup",
     );
-    const workProjectId = String(projectSetup.operations[0].object_id);
-    assert(isUuidV7(workProjectId));
+    const workWorkspaceId = String(workspaceSetup.operations[0].object_id);
+    assert(isUuidV7(workWorkspaceId));
 
     const memberSetup = json(
       await ok(
         runJson(harness, ["--json", "changeset", "stage"], {
-          project_id: projectId,
+          workspace_id: workspaceId,
           operations: [{
             op: "create",
             key: "member",
-            project_id: projectId,
+            workspace_id: workspaceId,
             resource: `${PROJECTS}:project_member`,
             fields: {
-              work_project_id: workProjectId,
+              project_id: workWorkspaceId,
               principal_id: principalId,
             },
           }],
@@ -496,26 +496,26 @@ export async function runCompleteProjectsPublicFlow(
     await assertHookQuiescence(
       harness,
       output,
-      "projects:post-commit:member-setup",
+      "workspaces:post-commit:member-setup",
     );
 
     await assertHookQuiescence(
       harness,
       output,
-      "projects:pre-hook-stage:task-setup",
+      "workspaces:pre-hook-stage:task-setup",
     );
     const setup = json(
       await ok(
         runJson(harness, ["--json", "changeset", "stage"], {
-          project_id: projectId,
+          workspace_id: workspaceId,
           operations: [{
             op: "create",
             key: "task",
-            project_id: projectId,
+            workspace_id: workspaceId,
             resource: `${PROJECTS}:task`,
             fields: {
               title: "Ship Projects",
-              work_project_id: workProjectId,
+              project_id: workWorkspaceId,
               stage_id: todoId,
               state: "todo",
               assignee_id: principalId,
@@ -539,14 +539,14 @@ export async function runCompleteProjectsPublicFlow(
     await assertHookQuiescence(
       harness,
       output,
-      "projects:post-commit:task-setup",
+      "workspaces:post-commit:task-setup",
     );
     const taskId = String(setup.operations[0].object_id);
     assert(isUuidV7(taskId));
     await assertHookQuiescence(
       harness,
       output,
-      "projects:pre-hook-stage:operation-setup",
+      "workspaces:pre-hook-stage:operation-setup",
     );
     const operationSetup = json(
       await ok(
@@ -554,15 +554,15 @@ export async function runCompleteProjectsPublicFlow(
           harness,
           ["--json", "changeset", "stage"],
           {
-            project_id: projectId,
+            workspace_id: workspaceId,
             operations: [{
               op: "create",
               key: "transition_task",
-              project_id: projectId,
+              workspace_id: workspaceId,
               resource: `${PROJECTS}:task`,
               fields: {
                 title: "Transition proof",
-                work_project_id: workProjectId,
+                project_id: workWorkspaceId,
                 stage_id: todoId,
                 state: "todo",
                 assignee_id: principalId,
@@ -570,11 +570,11 @@ export async function runCompleteProjectsPublicFlow(
             }, {
               op: "create",
               key: "archive_task",
-              project_id: projectId,
+              workspace_id: workspaceId,
               resource: `${PROJECTS}:task`,
               fields: {
                 title: "Archive proof",
-                work_project_id: workProjectId,
+                project_id: workWorkspaceId,
                 stage_id: todoId,
                 state: "todo",
                 assignee_id: principalId,
@@ -582,19 +582,19 @@ export async function runCompleteProjectsPublicFlow(
             }, {
               op: "create",
               key: "old_tag",
-              project_id: projectId,
+              workspace_id: workspaceId,
               resource: `${PROJECTS}:task_tag`,
               fields: { name: `old-${crypto.randomUUID()}`, color: "gray" },
             }, {
               op: "create",
               key: "new_tag",
-              project_id: projectId,
+              workspace_id: workspaceId,
               resource: `${PROJECTS}:task_tag`,
               fields: { name: `new-${crypto.randomUUID()}`, color: "green" },
             }, {
               op: "link",
               key: "old_link",
-              project_id: projectId,
+              workspace_id: workspaceId,
               relationship: `${PROJECTS}:task_tag_assignment`,
               from: taskId,
               to: { $ref: "old_tag.object_id" },
@@ -618,14 +618,14 @@ export async function runCompleteProjectsPublicFlow(
     await assertHookQuiescence(
       harness,
       output,
-      "projects:post-commit:operation-setup",
+      "workspaces:post-commit:operation-setup",
     );
     const operation = (key: string) =>
       operationSetup.operations.find((value: any) => value.key === key);
     await assertHookQuiescence(
       harness,
       output,
-      "projects:pre-hook-stage:all-seven",
+      "workspaces:pre-hook-stage:all-seven",
     );
     const allSeven = json(
       await ok(
@@ -633,54 +633,54 @@ export async function runCompleteProjectsPublicFlow(
           harness,
           ["--json", "changeset", "stage"],
           {
-            project_id: projectId,
+            workspace_id: workspaceId,
             operations: [{
               op: "create",
               key: "milestone",
-              project_id: projectId,
+              workspace_id: workspaceId,
               resource: `${PROJECTS}:project_milestone`,
               fields: {
                 name: "Complete public flow",
-                work_project_id: workProjectId,
+                project_id: workWorkspaceId,
                 status: "planned",
               },
             }, {
               op: "update",
-              project_id: projectId,
+              workspace_id: workspaceId,
               resource: `${PROJECTS}:task`,
               object_id: taskId,
               expected_version: 1,
               set: { description: "Updated through all seven operations" },
             }, {
               op: "transition",
-              project_id: projectId,
+              workspace_id: workspaceId,
               resource: `${PROJECTS}:task`,
               object_id: operation("transition_task").object_id,
               expected_version: 1,
               to: "in_progress",
             }, {
               op: "archive",
-              project_id: projectId,
+              workspace_id: workspaceId,
               resource: `${PROJECTS}:task`,
               object_id: operation("archive_task").object_id,
               expected_version: 1,
             }, {
               op: "link",
               key: "new_link",
-              project_id: projectId,
+              workspace_id: workspaceId,
               relationship: `${PROJECTS}:task_tag_assignment`,
               from: taskId,
               to: operation("new_tag").object_id,
               fields: { source: "matrix" },
             }, {
               op: "unlink",
-              project_id: projectId,
+              workspace_id: workspaceId,
               relationship: `${PROJECTS}:task_tag_assignment`,
               relationship_id: operation("old_link").relationship_id,
               expected_version: 1,
             }, {
               op: "comment",
-              project_id: projectId,
+              workspace_id: workspaceId,
               resource: `${PROJECTS}:task`,
               object_id: taskId,
               body: "Projects complete public-flow comment",
@@ -726,13 +726,13 @@ export async function runCompleteProjectsPublicFlow(
     await assertHookQuiescence(
       harness,
       output,
-      "projects:post-commit:all-seven",
+      "workspaces:post-commit:all-seven",
     );
 
     const readers: Array<
       { principalId: string; launcher: PublicFlowLauncher }
     > = [];
-    for (const username of ["projects-reader", "projects-unrelated"]) {
+    for (const username of ["workspaces-reader", "workspaces-unrelated"]) {
       const password = `${username}-${crypto.randomUUID()}`;
       const createdReader = data(
         await ok(
@@ -759,8 +759,8 @@ export async function runCompleteProjectsPublicFlow(
           String(createdReader.id),
           "--role",
           "optd/projects:linked_reader",
-          "--project",
-          projectId,
+          "--workspace",
+          workspaceId,
         ]),
         output,
       );
@@ -778,10 +778,10 @@ export async function runCompleteProjectsPublicFlow(
           harness,
           ["--json", "changeset", "stage"],
           {
-            project_id: projectId,
+            workspace_id: workspaceId,
             operations: [{
               op: "link",
-              project_id: projectId,
+              workspace_id: workspaceId,
               relationship: "optd/projects:task_viewer",
               from: taskId,
               to: readers[0].principalId,
@@ -804,21 +804,21 @@ export async function runCompleteProjectsPublicFlow(
     await assertHookQuiescence(
       harness,
       output,
-      "projects:post-commit:reader-link",
+      "workspaces:post-commit:reader-link",
     );
     assertEquals(
       (await harness.observeRelationshipTuple({
         pack: "projects_auxiliary",
         relationship: "task_viewer",
-        projectId,
+        workspaceId,
         fromObjectId: taskId,
       }))?.toObjectId,
       readers[0].principalId,
     );
     const intendedRead = await readers[0].launcher.runCli([
       "--json",
-      "--project",
-      projectId,
+      "--workspace",
+      workspaceId,
       "view",
       `${PROJECTS}:task`,
       taskId,
@@ -827,8 +827,8 @@ export async function runCompleteProjectsPublicFlow(
     assertEquals(intendedRead.code, 0, intendedRead.stderr);
     const unrelatedRead = await readers[1].launcher.runCli([
       "--json",
-      "--project",
-      projectId,
+      "--workspace",
+      workspaceId,
       "view",
       `${PROJECTS}:task`,
       taskId,
@@ -836,13 +836,16 @@ export async function runCompleteProjectsPublicFlow(
     output.push(unrelatedRead.stdout, unrelatedRead.stderr);
     assertEquals(unrelatedRead.code, 1);
 
-    assertEquals(await harness.observeProjectsTaskCount(projectId, "todo"), 1);
+    assertEquals(
+      await harness.observeProjectsTaskCount(workspaceId, "todo"),
+      1,
+    );
     const viewed = json(
       await ok(
         agent.runCli([
           "--json",
-          "--project",
-          projectId,
+          "--workspace",
+          workspaceId,
           "view",
           `${PROJECTS}:task`,
           taskId,
@@ -855,8 +858,8 @@ export async function runCompleteProjectsPublicFlow(
       await ok(
         agent.runCli([
           "--json",
-          "--project",
-          projectId,
+          "--workspace",
+          workspaceId,
           "history",
           `${PROJECTS}:task`,
           taskId,
@@ -869,14 +872,14 @@ export async function runCompleteProjectsPublicFlow(
     await assertHookQuiescence(
       harness,
       output,
-      "projects:pre-action:start-task",
+      "workspaces:pre-action:start-task",
     );
     const started = json(
       await ok(
         agent.runCli([
           "--json",
-          "--project",
-          projectId,
+          "--workspace",
+          workspaceId,
           "action",
           "stage",
           `${PROJECTS}:start_task`,
@@ -901,18 +904,18 @@ export async function runCompleteProjectsPublicFlow(
     await assertHookQuiescence(
       harness,
       output,
-      "projects:post-commit:start-task",
+      "workspaces:post-commit:start-task",
     );
 
     await assertHookQuiescence(
       harness,
       output,
-      "projects:pre-action:complete-task-invalid",
+      "workspaces:pre-action:complete-task-invalid",
     );
     const invalid = await agent.runCli([
       "--json",
-      "--project",
-      projectId,
+      "--workspace",
+      workspaceId,
       "action",
       "stage",
       `${PROJECTS}:complete_task`,
@@ -930,14 +933,14 @@ export async function runCompleteProjectsPublicFlow(
     await assertHookQuiescence(
       harness,
       output,
-      "projects:pre-action:complete-task-valid",
+      "workspaces:pre-action:complete-task-valid",
     );
     const completed = json(
       await ok(
         agent.runCli([
           "--json",
-          "--project",
-          projectId,
+          "--workspace",
+          workspaceId,
           "action",
           "stage",
           `${PROJECTS}:complete_task`,
@@ -952,7 +955,8 @@ export async function runCompleteProjectsPublicFlow(
         output,
       ),
     ).data;
-    assertEquals(completed.status, "awaiting_approval");
+    assertEquals(completed.status, "ready");
+    assertEquals(completed.approval_requirements, []);
     assertPersistedHookEvidence(completed, [{
       phase: "action.stage",
       stderr: "complete_task transitioning",
@@ -963,30 +967,6 @@ export async function runCompleteProjectsPublicFlow(
       phase: "changeset.validate",
       stderr: "validate_task errors=0 warnings=0",
     }]);
-    const requirement = completed.approval_requirements[0];
-    const selfApproval = await agent.runCli([
-      "--json",
-      "changeset",
-      "approve",
-      completed.id,
-      requirement.id,
-      "--reason",
-      "initiator approval must be denied",
-    ]);
-    output.push(selfApproval.stdout, selfApproval.stderr);
-    assertEquals(selfApproval.code, 1);
-    await ok(
-      human.runCli([
-        "--json",
-        "changeset",
-        "approve",
-        completed.id,
-        requirement.id,
-        "--reason",
-        "Independent manager approval",
-      ]),
-      output,
-    );
     await ok(
       agent.runCli(["--json", "changeset", "commit", completed.id]),
       output,
@@ -994,19 +974,19 @@ export async function runCompleteProjectsPublicFlow(
     await assertHookQuiescence(
       harness,
       output,
-      "projects:post-commit:complete-task",
+      "workspaces:post-commit:complete-task",
     );
     await assertHookQuiescence(
       harness,
       output,
-      "projects:pre-action:complete-task-rejected",
+      "workspaces:pre-action:complete-second-task",
     );
-    const rejectedCompletion = data(
+    const secondCompletion = data(
       await ok(
         agent.runCli([
           "--json",
-          "--project",
-          projectId,
+          "--workspace",
+          workspaceId,
           "action",
           "stage",
           `${PROJECTS}:complete_task`,
@@ -1021,8 +1001,9 @@ export async function runCompleteProjectsPublicFlow(
         output,
       ),
     );
-    assertEquals(rejectedCompletion.status, "awaiting_approval");
-    assertPersistedHookEvidence(rejectedCompletion, [{
+    assertEquals(secondCompletion.status, "ready");
+    assertEquals(secondCompletion.approval_requirements, []);
+    assertPersistedHookEvidence(secondCompletion, [{
       phase: "action.stage",
       stderr: "complete_task transitioning",
     }, {
@@ -1032,38 +1013,21 @@ export async function runCompleteProjectsPublicFlow(
       phase: "changeset.validate",
       stderr: "validate_task errors=0 warnings=0",
     }]);
-    const rejectionRequirement = rejectedCompletion.approval_requirements[0];
-    const rejected = data(
-      await ok(
-        human.runCli([
-          "--json",
-          "changeset",
-          "reject",
-          rejectedCompletion.id,
-          rejectionRequirement.id,
-          "--reason",
-          "independent rejection proof",
-        ]),
-        output,
-      ),
+    await ok(
+      agent.runCli(["--json", "changeset", "commit", secondCompletion.id]),
+      output,
     );
-    assertEquals(rejected.status, "rejected");
-    const rejectedCommit = await agent.runCli([
-      "--json",
-      "changeset",
-      "commit",
-      rejectedCompletion.id,
-    ]);
-    output.push(rejectedCommit.stdout, rejectedCommit.stderr);
-    assertEquals(rejectedCommit.code, 1);
 
     const timesheets = await harness.observeProjectsTimesheets(
-      projectId,
+      workspaceId,
       principalId,
     );
-    assertEquals(timesheets.length, 1);
-    assertEquals(timesheets[0].principalId, principalId);
-    assertEquals(timesheets[0].hours, "4.5");
+    assertEquals(timesheets.length, 2);
+    assertEquals(
+      timesheets.every((item) => item.principalId === principalId),
+      true,
+    );
+    assertEquals(timesheets.map((item) => item.hours).sort(), ["2", "4.5"]);
     assertEquals(
       timesheets.some((item) =>
         item.principalId === humanId || item.principalId === nestedAgentId
@@ -1071,19 +1035,19 @@ export async function runCompleteProjectsPublicFlow(
       false,
     );
 
-    const badProject = await agent.runCli([
+    const badWorkspace = await agent.runCli([
       "--json",
-      "--project",
+      "--workspace",
       crypto.randomUUID(),
       "query",
       `${PROJECTS}:task`,
     ]);
-    output.push(badProject.stdout, badProject.stderr);
-    assertEquals(badProject.code, 1);
+    output.push(badWorkspace.stdout, badWorkspace.stderr);
+    assertEquals(badWorkspace.code, 1);
     const injection = await agent.runCli([
       "--json",
-      "--project",
-      projectId,
+      "--workspace",
+      workspaceId,
       "query",
       `${PROJECTS}:task`,
       "--where",
@@ -1095,7 +1059,7 @@ export async function runCompleteProjectsPublicFlow(
     await assertHookQuiescence(
       harness,
       output,
-      "projects:pre-stage:retry-delivery",
+      "workspaces:pre-stage:retry-delivery",
     );
     await harness.enqueueProviderBehaviors([{
       kind: "retry",
@@ -1105,10 +1069,10 @@ export async function runCompleteProjectsPublicFlow(
     const retryStage = data(
       await ok(
         runJson(harness, ["--json", "changeset", "stage"], {
-          project_id: projectId,
+          workspace_id: workspaceId,
           operations: [{
             op: "create",
-            project_id: projectId,
+            workspace_id: workspaceId,
             resource: `${PROJECTS}:task_tag`,
             fields: {
               name: `quiescence-${crypto.randomUUID()}`,
@@ -1276,14 +1240,14 @@ export async function runCompleteProjectsPublicFlow(
     for (
       const args of [["--json", "auth", "whoami"], [
         "--json",
-        "--project",
-        projectId,
+        "--workspace",
+        workspaceId,
         "query",
         `${PROJECTS}:task`,
       ], [
         "--json",
-        "--project",
-        projectId,
+        "--workspace",
+        workspaceId,
         "action",
         "stage",
         `${PROJECTS}:block_task`,
@@ -1299,7 +1263,7 @@ export async function runCompleteProjectsPublicFlow(
         await assertHookQuiescence(
           harness,
           output,
-          "projects:pre-action:revoked-block-task",
+          "workspaces:pre-action:revoked-block-task",
         );
       }
       const revoked = await agent.runCli(args);
@@ -1447,7 +1411,7 @@ async function assertNoLeaks(
   const text = [...output, diagnostics.serverLogs].join("\n");
   for (
     const forbidden of [
-      "projects acceptance password",
+      "workspaces acceptance password",
       "authorization: Bearer",
       "postgres://",
       "OPTD_SECRET_MASTER_KEY",

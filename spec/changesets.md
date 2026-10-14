@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-changesets; contract: 1; input: sha256:a0e65eb503a3787b8edfe0979422223001a5f641cb029ac9d8b2ee30bd54de3e -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-changesets; contract: 1; input: sha256:6bfba7990f19053ab1d915e328c94293355c243fdfce890638b9a01f21ded96e -->
 
 # Changesets
 
@@ -58,7 +58,7 @@ are absent; recovery uses an explicitly valid compensating changeset.
 ## Staging
 
 Staging fully expands one atomic user intent, which may include operations in
-multiple projects under one Postgres transaction boundary. Stage hooks execute
+multiple workspaces under one Postgres transaction boundary. Stage hooks execute
 once. They may use dates, entropy, and declared network/secret access; their
 normalized output is persisted rather than reproduced at commit.
 
@@ -92,18 +92,18 @@ success.
 The creating principal may inspect/cancel its stage while authenticated and
 active. Another principal needs exact `changeset.inspect` or `changeset.cancel`
 system capability respectively and boundary visibility for every affected
-project. Safe `not_found` hides stages outside visibility. Approval reviewers
+workspace. Safe `not_found` hides stages outside visibility. Approval reviewers
 receive only the stage representation/redactions authorized by
 `changeset.approval.decide` and the exact requirement role.
 
 Authorization follows the frozen stage source. Direct graphs require every exact
-operation/resource/project permission. Semantic action stages require the exact
-`action:<publisher>/<pack>:<action>` permission in their one request project and
+operation/resource/workspace permission. Semantic action stages require the exact
+`action:<publisher>/<pack>:<action>` permission in their one request workspace and
 revalidated reviewed effect manifest, not separate caller permission for each
 internal emitted operation. Seed stages analogously require exact
 `seed:<publisher>/<pack>:<seed>` permission and reviewed seed effects. Action
-and seed staging cannot emit into another project; direct graphs may span
-projects. The creating principal needs no extra generic commit permission.
+and seed staging cannot emit into another workspace; direct graphs may span
+workspaces. The creating principal needs no extra generic commit permission.
 Another principal additionally needs exact `changeset.commit_others` system
 capability and stage visibility; `system:super_admin` remains the audited
 built-in bypass. Cancellation never undoes a commit and does not cancel claimed
@@ -261,3 +261,7 @@ The exact v1 operation shapes, UUIDv7 identity generation, structured
 references, compatible mutation merging, RFC 6902 normalization patches,
 operational limits, and RFC 8785/SHA-256 graph digest are normative in
 [Changeset Operation Schemas](changeset-operation-schema.md).
+
+## Created identities and approval parity
+
+Successful commits, including idempotent replay, return created: a map from operation keys (including generated ordinal keys) to generated object, relationship, or comment IDs. Approval readiness counts only currently active, boundary-compatible authority. At commit the documented system:super_admin approval bypass remains valid without requiring possession of the named requirement role; revoked/inactive or unrelated-boundary authorizations never count.

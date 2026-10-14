@@ -9,18 +9,18 @@ import {
 
 type Stored = { token: string; requestToken: string };
 
-Deno.test("compiled optctl grantability inherits all-project authority only into Projects", async () => {
+Deno.test("compiled optctl grantability inherits all-workspace authority only into Workspaces", async () => {
   const harness = await startLiveHarness();
   try {
     assertEquals(
       (await harness.bootstrap({
         username: "inherit-root",
-        password: "all projects inheritance root password",
+        password: "all workspaces inheritance root password",
       })).code,
       0,
     );
-    const first = await createProject(harness, "inherit-first");
-    const second = await createProject(harness, "inherit-second");
+    const first = await createWorkspace(harness, "inherit-first");
+    const second = await createWorkspace(harness, "inherit-second");
     assertEquals(
       (await harness.runOptctl([
         "--json",
@@ -28,14 +28,14 @@ Deno.test("compiled optctl grantability inherits all-project authority only into
         "user",
         "create",
         "--username",
-        "all-project-admin",
+        "all-workspace-admin",
         "--password-stdin",
-      ], "all projects admin password\n")).code,
+      ], "all workspaces admin password\n")).code,
       0,
     );
     const user = (await query<{ id: string }>(
       harness.server.sql,
-      "select id from human_users where username='all-project-admin'",
+      "select id from human_users where username='all-workspace-admin'",
     )).rows[0];
     const assignment = await harness.runOptctl([
       "--json",
@@ -46,14 +46,14 @@ Deno.test("compiled optctl grantability inherits all-project authority only into
       "--role",
       "system:admin",
       "--boundary",
-      "all_projects",
+      "all_workspaces",
     ]);
     assertEquals(assignment.code, 0, assignment.stderr);
     const assignmentBody = JSON.parse(assignment.stdout).data;
     assertEquals(
       (await harness.login({
-        username: "all-project-admin",
-        password: "all projects admin password",
+        username: "all-workspace-admin",
+        password: "all workspaces admin password",
       })).code,
       0,
     );
@@ -63,7 +63,7 @@ Deno.test("compiled optctl grantability inherits all-project authority only into
       "--json",
       "auth",
       "authority",
-      "--project",
+      "--workspace",
       first,
     ]);
     assertEquals(authority.code, 0, authority.stderr);
@@ -81,10 +81,10 @@ Deno.test("compiled optctl grantability inherits all-project authority only into
     const approved = await createRequest(harness, admin, [
       "--role",
       "system:admin",
-      "--project",
+      "--workspace",
       first,
       "--reason",
-      "approve inherited Project authority",
+      "approve inherited Workspace authority",
     ]);
     const approve = await harness.runOptctl([
       "--json",
@@ -97,10 +97,10 @@ Deno.test("compiled optctl grantability inherits all-project authority only into
     const denied = await createRequest(harness, admin, [
       "--role",
       "system:admin",
-      "--project",
+      "--workspace",
       second,
       "--reason",
-      "deny inherited Project authority",
+      "deny inherited Workspace authority",
     ]);
     const deny = await harness.runOptctl([
       "--json",
@@ -129,10 +129,10 @@ Deno.test("compiled optctl grantability inherits all-project authority only into
     ]);
     assertEquals(systemRequest.code, 1);
 
-    const exactRole = "optd/test:project_reviewer";
+    const exactRole = "optd/test:workspace_reviewer";
     await query(
       harness.server.sql,
-      "insert into system_roles(id,display_name,active) values($1,'Project Reviewer',true)",
+      "insert into system_roles(id,display_name,active) values($1,'Workspace Reviewer',true)",
       [exactRole],
     );
     await query(
@@ -143,7 +143,7 @@ Deno.test("compiled optctl grantability inherits all-project authority only into
     await login(
       harness,
       "inherit-root",
-      "all projects inheritance root password",
+      "all workspaces inheritance root password",
     );
     const exact = await harness.runOptctl([
       "--json",
@@ -153,7 +153,7 @@ Deno.test("compiled optctl grantability inherits all-project authority only into
       user.id,
       "--role",
       exactRole,
-      "--project",
+      "--workspace",
       first,
     ]);
     assertEquals(exact.code, 0, exact.stderr);
@@ -162,22 +162,22 @@ Deno.test("compiled optctl grantability inherits all-project authority only into
       token: admin.requestToken,
       requestToken: admin.requestToken,
     });
-    const wrongProject = await harness.runOptctl([
+    const wrongWorkspace = await harness.runOptctl([
       "--json",
       "auth",
       "request",
       "--role",
       exactRole,
-      "--project",
+      "--workspace",
       second,
       "--reason",
-      "must not cross Projects",
+      "must not cross Workspaces",
     ]);
-    assertEquals(wrongProject.code, 1);
+    assertEquals(wrongWorkspace.code, 1);
     const missingRole = await createRequest(harness, admin, [
       "--role",
       exactRole,
-      "--project",
+      "--workspace",
       first,
       "--reason",
       "missing role at decision time",
@@ -185,7 +185,7 @@ Deno.test("compiled optctl grantability inherits all-project authority only into
     await login(
       harness,
       "inherit-root",
-      "all projects inheritance root password",
+      "all workspaces inheritance root password",
     );
     const removeExactRole = await harness.runOptctl([
       "--json",
@@ -205,14 +205,14 @@ Deno.test("compiled optctl grantability inherits all-project authority only into
     const pendingPolicyDisable = await createRequest(harness, admin, [
       "--role",
       "system:admin",
-      "--project",
+      "--workspace",
       first,
       "--reason",
       "policy current-state cutoff",
     ]);
     const platformPolicy = (await query<{ id: string }>(
       harness.server.sql,
-      "select id from policy_assignments where source='platform' and boundary_type='all_projects' and active",
+      "select id from policy_assignments where source='platform' and boundary_type='all_workspaces' and active",
     )).rows[0];
     await query(
       harness.server.sql,
@@ -240,7 +240,7 @@ Deno.test("compiled optctl grantability inherits all-project authority only into
     const pendingRoleDisable = await createRequest(harness, admin, [
       "--role",
       "system:admin",
-      "--project",
+      "--workspace",
       first,
       "--reason",
       "role current-state cutoff",
@@ -248,7 +248,7 @@ Deno.test("compiled optctl grantability inherits all-project authority only into
     await login(
       harness,
       "inherit-root",
-      "all projects inheritance root password",
+      "all workspaces inheritance root password",
     );
     const disabledRole = await harness.runOptctl([
       "--json",
@@ -305,10 +305,10 @@ async function createRequest(
   await select(harness, admin);
   return JSON.parse(request.stdout).data.id as string;
 }
-async function createProject(harness: LiveHarness, slug: string) {
+async function createWorkspace(harness: LiveHarness, slug: string) {
   const result = await harness.runOptctl([
     "--json",
-    "project",
+    "workspace",
     "create",
     slug,
     "--display-name",
@@ -343,11 +343,11 @@ async function decide(harness: LiveHarness, token: string, id: string) {
 async function fetchAuthority(
   harness: LiveHarness,
   token: string,
-  project: string,
+  workspace: string,
 ) {
   const url = new URL(`${harness.baseUrl}/api/v1/authorization/authority`);
-  url.searchParams.set("boundary_type", "project");
-  url.searchParams.set("project_id", project);
+  url.searchParams.set("boundary_type", "workspace");
+  url.searchParams.set("workspace_id", workspace);
   const response = await fetch(url, {
     headers: { authorization: `Bearer ${token}` },
   });

@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-identity-auth; contract: 1; input: sha256:fea65839e05a1de23f1cf56df2e0c49f034ec83581299bec1d45ac5238ba3e39 -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-identity-auth; contract: 1; input: sha256:683c6443bffd78630cbdc6427e57b2dfcfc14067c03551582cdcb813b9a69826 -->
 
 # Identity, authentication, and authorization
 
@@ -36,7 +36,7 @@ A request/approval/redemption/delegation/replacement/revocation lineage anchored
 
 ### Role/policy assignment boundary
 
-Global role and policy definitions grant nothing by themselves. Assignments and authorizations carry exact Project, all_projects, or isolated system boundaries.
+Global role and policy definitions grant nothing by themselves. Assignments and authorizations carry exact Workspace, all_workspaces, or isolated system boundaries.
 
 ## Scenarios
 
@@ -44,7 +44,7 @@ Global role and policy definitions grant nothing by themselves. Assignments and 
 
 ### Bootstrap a fresh installation
 
-A new single-tenant server has no human users. The operator supplies the bootstrap secret, creates the first human, logs in from a separate process tree, and creates a Platform Project. Exactly one active super-admin remains, opaque sessions are stored server-side, local bindings are private, and caller actor headers have no authority.
+A new single-tenant server has no human users. The operator supplies the bootstrap secret, creates the first human, logs in from a separate process tree, and creates a Platform Workspace. Exactly one active super-admin remains, opaque sessions are stored server-side, local bindings are private, and caller actor headers have no authority.
 
 **Context.** A new single-tenant server has no human users.
 
@@ -100,13 +100,13 @@ For agent credentials actor.id is the agent principal and actor.human_user_id is
 
 ### Keep role/policy definitions global and authority boundary on assignments
 
-Roles and policies are global definitions. Role assignments, policy assignments, and agent authorizations carry exact Project, all_projects, or system boundaries; only validated system:super_admin bypass crosses boundaries.
+Roles and policies are global definitions. Role assignments, policy assignments, and agent authorizations carry exact Workspace, all_workspaces, or system boundaries; only validated system:super_admin bypass crosses boundaries.
 
 <a id="obj-dec-policy-model"></a>
 
 ### Use allow-only RBAC/ABAC and one-hop ReBAC
 
-Policy uses structured allow rules and the fixed CEL subset; direct one-hop same-Project relationships may target system:principal; deep traversal and actor arrays are unsupported.
+Policy uses structured allow rules and the fixed CEL subset; direct one-hop same-Workspace relationships may target system:principal; deep traversal and actor arrays are unsupported.
 
 <a id="obj-dec-auth-admin-routes"></a>
 
@@ -154,6 +154,6 @@ Human login requires password and binds a full opaque session locally; sessions 
 
 <a id="obj-com-project-boundary"></a>
 
-### Enforce Project lifecycle and authority
+### Enforce Workspace lifecycle and authority
 
-Project-scoped writes and actions require active exact Project authority; archived Projects reject new writes but retain authorized reads/history and already-enqueued delivery. all_projects inheritance is explicit; ordinary system authority is isolated.
+Workspace-scoped writes and actions require active exact Workspace authority; archived Workspaces reject new writes but retain authorized reads/history and already-enqueued delivery. all_workspaces inheritance is explicit; ordinary system authority is isolated.

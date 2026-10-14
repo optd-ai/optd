@@ -50,7 +50,7 @@ spec:
       empty:
         message: No project records found.
         help:
-          - optctl --project ${project} create optd/projects:project --input object.json --stage
+          - optctl --workspace ${workspace} create optd/projects:project --input object.json --stage
     detail:
       sections:
         - title: project
@@ -61,11 +61,11 @@ spec:
             - owner_id
             - visibility
       help:
-        - optctl --project ${project} query optd/projects:project --where 'id == "${id}"'
+        - optctl --workspace ${workspace} query optd/projects:project --where 'id == "${id}"'
     help:
       list:
-        - optctl --project ${project} query optd/projects:project
+        - optctl --workspace ${workspace} query optd/projects:project
       view:
-        - optctl --project ${project} view optd/projects:project ${id}
+        - optctl --workspace ${workspace} view optd/projects:project ${id}
       created:
-        - optctl --project ${project} view optd/projects:project ${id}
+        - optctl --workspace ${workspace} view optd/projects:project ${id}

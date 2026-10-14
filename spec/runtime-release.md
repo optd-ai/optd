@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-runtime-release; contract: 1; input: sha256:0cd32066e0b3b99cbb9cdc042b1e7f219eef28f3a378e9125d92ca28c40673c6 -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-runtime-release; contract: 1; input: sha256:2e274ed30f8d45e94f748e6d3dbaca9a04af9333b8413de8e88207184313a35d -->
 
 # Runtime, architecture, and release
 
@@ -106,7 +106,7 @@ Existing Operant development databases, local credentials and contexts, process 
 
 **Related cross-domain objects**
 
-- supports: [Do not build development-era compatibility](packs-projects.md#obj-int-no-compat)
+- supports: [Do not build development-era compatibility](packs-workspaces.md#obj-int-no-compat)
 
 ## Commitments
 

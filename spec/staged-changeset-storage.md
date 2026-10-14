@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-staged-changeset-storage; contract: 1; input: sha256:abffa3ed3c0497e53eab9bd103c660ae1a5f50775467ba22a6418e39a23c5e55 -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-staged-changeset-storage; contract: 1; input: sha256:4089ed97e0e993ea22e5d1d9bbdae78e974e854b869caacbbaa43a551eb638b0 -->
 
 # Immutable Staged Changeset Storage
 
@@ -41,7 +41,7 @@ staged_changeset_operations               # immutable
 - stage_id                    uuid not null
 - ordinal                     integer not null
 - operation_id                uuid not null
-- project_id                  uuid not null
+- workspace_id                  uuid not null
 - pack_revision_id            uuid not null
 - resource_revision_id        uuid not null
 - operation_kind              text not null
@@ -54,8 +54,8 @@ staged_changeset_dependencies             # immutable
 - stage_id                    uuid not null
 - ordinal                     integer not null
 - dependency_kind             text not null
-  # project | pack_revision | object_version | relationship | uniqueness | policy
-- project_id                  uuid null
+  # workspace | pack_revision | object_version | relationship | uniqueness | policy
+- workspace_id                  uuid null
 - pack_revision_id            uuid null
 - resource_revision_id        uuid null
 - object_id                   uuid null
@@ -83,7 +83,7 @@ staged_policy_decisions                   # immutable
 - id                          uuid primary key
 - stage_id                    uuid not null
 - ordinal                     integer not null
-- project_id                  uuid not null
+- workspace_id                  uuid not null
 - action                      text not null
 - resource_identity           text not null
 - decision_json               jsonb not null
@@ -158,7 +158,7 @@ Stage creation and inspection return the same `changeset.stage.v1` data object:
 id, schema_version, source, status, lifecycle_version,
 created_at, created_auth_context_id,
 operation_graph_digest, stage_digest,
-projects[], pack_revisions[], operations[], dependencies[],
+workspaces[], pack_revisions[], operations[], dependencies[],
 hook_executions[], policy_decisions[], warnings[],
 approval_requirements[], approval_decisions[], planned_events[],
 planned_deliveries[], commit|null, cancellation|null
@@ -167,7 +167,7 @@ planned_deliveries[], commit|null, cancellation|null
 Arrays use the canonical ordinals stored above. Later lifecycle/decision/commit
 facts are outside `stage_digest`. The stage digest is RFC 8785/SHA-256 over a
 versioned object containing operation graph digest, canonical dependencies,
-pinned project/pack/resource/hook/policy revisions and security digests, staged
+pinned workspace/pack/resource/hook/policy revisions and security digests, staged
 policy decisions, required capabilities/effects, approval requirements, and
 planned event/delivery identities. It excludes auth/request/timestamps,
 warnings, stderr/durations, and later lifecycle facts. `operation_graph_digest`

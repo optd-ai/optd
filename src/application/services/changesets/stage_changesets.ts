@@ -108,7 +108,7 @@ export function makeStageChangesetService(
               ok: true as const,
               value: {
                 operations: normalized.operations,
-                projects: [],
+                workspaces: [],
                 pack_revisions: [],
                 hook_declarations: [],
                 authority_snapshot: {
@@ -204,7 +204,7 @@ export function makeStageChangesetService(
             "object_id",
             "relationship_id",
             "comment_id",
-            "project_id",
+            "workspace_id",
             "version",
             "object_version_id",
             "created_at",
@@ -629,10 +629,10 @@ function validationResult(error: unknown): Result<never> {
     return err({
       code: error.code,
       message: error.message,
-      severity:
-        error.code === "operation_conflict" || error.code === "project_conflict"
-          ? "conflict"
-          : "validation",
+      severity: error.code === "operation_conflict" ||
+          error.code === "workspace_conflict"
+        ? "conflict"
+        : "validation",
       details: {
         issues: [{
           path: error.path,

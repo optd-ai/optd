@@ -4,7 +4,7 @@ import { startLiveHarness } from "../support/live_harness.ts";
 
 Deno.test({
   name:
-    "Project version conflicts serialize and roll back audit facts in real Postgres",
+    "Workspace version conflicts serialize and roll back audit facts in real Postgres",
   sanitizeOps: false,
   sanitizeResources: false,
   async fn() {
@@ -17,14 +17,14 @@ Deno.test({
       assertEquals(bootstrap.code, 0, bootstrap.stderr);
       const created = await harness.runOptctl([
         "--json",
-        "project",
+        "workspace",
         "create",
         "integration",
         "--display-name",
         "Integration",
       ]);
       assertEquals(created.code, 0, created.stderr);
-      const project = JSON.parse(created.stdout).data;
+      const workspace = JSON.parse(created.stdout).data;
       const store = JSON.parse(
         await Deno.readTextFile(
           `${harness.homeDir}/../xdg-config/optd/auth.json`,
@@ -53,7 +53,7 @@ Deno.test({
         "auth contexts are immutable",
       );
       const mutate = (name: string) =>
-        fetch(`${harness.baseUrl}/api/v1/projects/${project.id}/update`, {
+        fetch(`${harness.baseUrl}/api/v1/workspaces/${workspace.id}/update`, {
           method: "POST",
           headers: {
             "content-type": "application/json",
@@ -73,15 +73,15 @@ Deno.test({
       const failure = responses.find((response) => response.status === 409)!;
       assertEquals(
         (await failure.json()).error.code,
-        "project_version_conflict",
+        "workspace_version_conflict",
       );
 
       const facts = await query<{ version: string; updates: string }>(
         harness.server.sql,
         `select p.version::text,
-                (select count(*)::text from project_audit_events a where a.project_id=p.id and a.action='project.update') updates
-           from projects p where p.id=$1`,
-        [project.id],
+                (select count(*)::text from workspace_audit_events a where a.workspace_id=p.id and a.action='workspace.update') updates
+           from workspaces p where p.id=$1`,
+        [workspace.id],
       );
       assertEquals(facts.rows[0].version, "2");
       assertEquals(facts.rows[0].updates, "1");

@@ -34,9 +34,9 @@ import {
   registerAuthRoutes,
 } from "./auth_routes.ts";
 import {
-  type ProjectHttpService,
-  registerProjectRoutes,
-} from "./project_routes.ts";
+  registerWorkspaceRoutes,
+  type WorkspaceHttpService,
+} from "./workspace_routes.ts";
 import {
   type AuthorizationHttpService,
   registerAuthorizationRoutes,
@@ -48,7 +48,7 @@ export type HttpDependencies = {
   bootstrap: BootstrapHttpService;
   humanAuth: HumanAuthHttpService;
   agentAuth: AgentAuthHttpService;
-  projects: ProjectHttpService;
+  workspaces: WorkspaceHttpService;
   authorization: AuthorizationHttpService;
   metadata: {
     home(options: MetadataOptions): Promise<Result<HomeDto>>;
@@ -310,7 +310,7 @@ export function makeHttpApp(
   });
 
   registerAuthRoutes(app, deps.bootstrap, deps.humanAuth, deps.agentAuth);
-  registerProjectRoutes(app, deps.projects);
+  registerWorkspaceRoutes(app, deps.workspaces);
   registerAuthorizationRoutes(app, deps.authorization);
 
   app.get("/api/v1/metadata/home", async (c) => {
@@ -619,11 +619,11 @@ export function makeHttpApp(
     plural: "objects" | "relationships",
   ) => {
     const path =
-      `/api/v1/projects/:project_id/${plural}/:publisher/:pack/:name/:object_id`;
+      `/api/v1/workspaces/:workspace_id/${plural}/:publisher/:pack/:name/:object_id`;
     const address = (
       c: { req: { param(name: string): string } },
     ): ReadAddress => ({
-      projectId: c.req.param("project_id"),
+      workspaceId: c.req.param("workspace_id"),
       objectId: c.req.param("object_id"),
       definition: {
         kind,
@@ -975,7 +975,7 @@ function metadataOptions(c: {
   get(name: "auth"): AuthVariables["auth"];
 }): Result<MetadataOptions> {
   const unknown = Object.keys(c.req.queries()).filter((key) =>
-    key !== "project_id" && key !== "include_security"
+    key !== "workspace_id" && key !== "include_security"
   );
   if (unknown.length) {
     return err(
@@ -994,9 +994,9 @@ function metadataOptions(c: {
       ),
     );
   }
-  const projects = c.req.queries().project_id ?? [];
+  const workspaces = c.req.queries().workspace_id ?? [];
   const includes = c.req.queries().include_security ?? [];
-  if (projects.length > 1 || includes.length > 1) {
+  if (workspaces.length > 1 || includes.length > 1) {
     return err(
       validationError(
         "validation_failed",
@@ -1008,7 +1008,7 @@ function metadataOptions(c: {
     ok: true,
     value: {
       auth: c.get("auth"),
-      projectId: c.req.query("project_id"),
+      workspaceId: c.req.query("workspace_id"),
       includeSecurity: include === "true",
     },
   };

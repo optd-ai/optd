@@ -3,7 +3,7 @@ apiVersion: optd.dev/v1
 metadata:
   name: sales_access
 spec:
-  default_assignment: all_projects
+  default_assignment: all_workspaces
   rules:
     - name: direct_opportunity_viewer
       effect: allow

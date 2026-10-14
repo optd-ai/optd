@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-migration-classification; contract: 1; input: sha256:ec7ab03b36a247f482637cf36f749c86f9395c277f1b93b319d5a6db18aae6f5 -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-migration-classification; contract: 1; input: sha256:61c2a84f03e57a29679c8e07c02b69bc30400b50a42f717a0706730dbe325f9a -->
 
 # Migration Classification
 
@@ -46,7 +46,7 @@ Relevant existing concepts and tools:
 - **Liquibase preconditions:** migrations can declare checks evaluated before
   changes run. Useful for safety gates.
 - **API backward compatibility rules:** compatibility is about whether old
-  clients continue to work. For this project, that maps to whether existing
+  clients continue to work. For this workspace, that maps to whether existing
   data, existing hooks/actions, and existing API/CLI usage continue to work.
 
 ## Core Insight

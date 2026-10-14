@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-pack-structure; contract: 1; input: sha256:c6027a9d36ebda8ce6603be74e0935e9d47547b391b36f111aed3d59078f0ea4 -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-pack-structure; contract: 1; input: sha256:76968b0eb036409f47f5d1b61a34af59db4df96d83c4b921f335b6f66a805632 -->
 
 # Pack Structure
 
@@ -134,9 +134,9 @@ spec:
         - optd/crm:contact
         - optd/crm:company
       help:
-        - optctl --project ${project} list optd/crm:lead
-        - optctl --project ${project} list optd/crm:opportunity
-        - optctl --project ${project} search optd/crm:contact <email-or-name>
+        - optctl --workspace ${workspace} list optd/crm:lead
+        - optctl --workspace ${workspace} list optd/crm:opportunity
+        - optctl --workspace ${workspace} search optd/crm:contact <email-or-name>
 ```
 
 No `includes:` block. No file paths.
@@ -177,12 +177,12 @@ Rules:
   - `hooks/validate_lead.ts` -> hook name `validate_lead`
 - Relationship, lifecycle, role, policy, and seed files follow the same rule.
 
-Pack child definitions are global definition templates and omit runtime project
+Pack child definitions are global definition templates and omit runtime workspace
 identity. Applying a pack installs exactly one active server-wide revision; it
-does not materialize definitions or seed objects into a selected project.
-Runtime objects and explicit seed application carry project IDs separately. The
+does not materialize definitions or seed objects into a selected workspace.
+Runtime objects and explicit seed application carry workspace IDs separately. The
 pack `publisher` is global definition identity/provenance, not a runtime
-project. See [Pack Publishers and Projects](pack-publishers-and-projects.md).
+workspace. See [Pack Publishers and Workspaces](pack-publishers-and-workspaces.md).
 
 Every child YAML file must include `metadata.name`. The file basename must match
 `metadata.name`. The platform must not infer names from file paths because packs
@@ -264,18 +264,18 @@ deno test --allow-read --allow-write --allow-env --allow-net prototypes/pack-sql
 
 A seed definition has one pack-local resource, one required `key` field, mode
 `changeset`, and an ordered non-empty `rows` array. The key must be a required
-scalar field covered by a project-scoped unique constraint on that resource;
+scalar field covered by a workspace-scoped unique constraint on that resource;
 every row must contain a distinct key and pass the ordinary resource schema.
 References use normal structured/local pack references and must resolve during
 pack preview.
 
-Seed staging is an explicit per-project reconcile operation against the exact
+Seed staging is an explicit per-workspace reconcile operation against the exact
 active pack revision:
 
 1. Resolve selected seed names (or all pack seeds only when the request/CLI
    explicitly sets `all: true`) and sort them by name, then rows by canonical
    key. Empty/unknown/ambiguous selection is rejected.
-2. For each row, read the current object with the same project/resource/key.
+2. For each row, read the current object with the same workspace/resource/key.
 3. If absent, emit `create` with a server-issued UUIDv7.
 4. If present and declared seed fields differ, emit `update` against that
    existing object's UUID and expected version, setting exactly the declared
@@ -285,23 +285,23 @@ active pack revision:
 
 Seed authors never specify platform object IDs. The first creation generates the
 UUIDv7; every later reconcile locates and preserves that identity through the
-stable project-scoped business key. Concurrent missing-key creation is resolved
+stable workspace-scoped business key. Concurrent missing-key creation is resolved
 by the database unique constraint and normal commit conflict behavior.
 
 Reads and uniqueness facts become frozen stage dependencies. Preview records the
 seed effect manifest (`create|update` on its one resource). The invoking caller
 must have exact `seed:<publisher>/<pack>:<seed>` permission in the request
-project; the invocation-bound internal seed runner receives only that manifest.
+workspace; the invocation-bound internal seed runner receives only that manifest.
 Ordinary schema/hooks still apply, and seed definitions are not a privileged
 bypass. Concurrent creation/update is caught by normal commit revalidation and
 constraints.
 
-CLI `optctl --project <slug> seed stage <publisher>/<pack> --all` returns a
+CLI `optctl --workspace <slug> seed stage <publisher>/<pack> --all` returns a
 stage, while `seed commit` is the client-side stage-then-commit convenience;
 repeatable `--seed <name>` replaces `--all` for explicit subsets.
 
 If reconciliation emits no operations, the seed-stage route returns
-`status: unchanged`, selected project/revision/seed names, and `stage: null`
+`status: unchanged`, selected workspace/revision/seed names, and `stage: null`
 without persisting a stage. Otherwise it returns the complete ordinary immutable
 stage representation. Repeating a committed unchanged seed request therefore
 creates neither duplicate rows nor object versions. There is no seed-specific

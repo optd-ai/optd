@@ -9,20 +9,20 @@ export function parseAuthorizationBoundary(
   if (input.type === "system" && Object.keys(input).length === 1) {
     return { type: "system" };
   }
-  if (input.type === "all_projects" && Object.keys(input).length === 1) {
-    return { type: "all_projects" };
+  if (input.type === "all_workspaces" && Object.keys(input).length === 1) {
+    return { type: "all_workspaces" };
   }
   if (
-    input.type === "project" && Object.keys(input).length === 2 &&
-    typeof input.project_id === "string" && isUuidV7(input.project_id)
+    input.type === "workspace" && Object.keys(input).length === 2 &&
+    typeof input.workspace_id === "string" && isUuidV7(input.workspace_id)
   ) {
-    return { type: "project", projectId: input.project_id };
+    return { type: "workspace", workspaceId: input.workspace_id };
   }
 }
 
 export function boundaryDto(boundary: AuthorizationBoundary) {
-  return boundary.type === "project"
-    ? { type: "project" as const, project_id: boundary.projectId }
+  return boundary.type === "workspace"
+    ? { type: "workspace" as const, workspace_id: boundary.workspaceId }
     : { type: boundary.type };
 }
 
@@ -30,10 +30,10 @@ export function authorizationBoundaryMatches(
   target: AuthorizationBoundary,
   assignment: AuthorizationBoundary,
 ): boolean {
-  if (target.type === "project") {
-    return assignment.type === "all_projects" ||
-      (assignment.type === "project" &&
-        assignment.projectId === target.projectId);
+  if (target.type === "workspace") {
+    return assignment.type === "all_workspaces" ||
+      (assignment.type === "workspace" &&
+        assignment.workspaceId === target.workspaceId);
   }
   return assignment.type === target.type;
 }

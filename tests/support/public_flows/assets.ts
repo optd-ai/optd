@@ -34,8 +34,8 @@ export class PublicFlowAssets {
       await copyTree(await this.path("projects"), destination);
       await replace(
         join(destination, "pack.yaml"),
-        "version: 0.1.0",
         "version: 0.2.0",
+        "version: 0.2.1",
       );
       await writeProjectsAuxiliary(destination, this.#providerUrl);
       this.#generated.set(asset, destination);
@@ -50,7 +50,7 @@ export class PublicFlowAssets {
       : "2.0.0";
     await replace(
       join(destination, "pack.yaml"),
-      "version: 0.1.0",
+      "version: 0.2.0",
       `version: ${version}`,
     );
     if (asset !== "crm_migration_v1") {
@@ -95,7 +95,7 @@ async function writeProjectsAuxiliary(root: string, providerUrl: string) {
   );
   await Deno.writeTextFile(
     join(root, "policies", "access.yaml"),
-    `kind: Policy\napiVersion: optd.dev/v1\nmetadata: { name: access }\nspec:\n  default_assignment: all_projects\n  rules:\n    - name: manager_links\n      effect: allow\n      roles: [optd/projects:project_manager]\n      actions: [link, unlink]\n      resources: [optd/projects:task_viewer, optd/projects:task_tag_assignment]\n      axi: { summary: Managers may link task viewers. }\n    - name: direct_reader\n      effect: allow\n      roles: [optd/projects:linked_reader]\n      actions: [read]\n      resources: [optd/projects:task]\n      relation:\n        relationship: optd/projects:task_viewer\n        object_side: from\n        subject_side: to\n        subject: actor.id\n      axi: { summary: Linked readers may read one task. }\n  axi:\n    purpose: Auxiliary Projects access policy.\n    whenToUse: [Use for shared public-flow ReBAC.]\n    help: [optctl metadata policy optd/projects:access]\n`,
+    `kind: Policy\napiVersion: optd.dev/v1\nmetadata: { name: access }\nspec:\n  default_assignment: all_workspaces\n  rules:\n    - name: manager_links\n      effect: allow\n      roles: [optd/projects:project_manager]\n      actions: [link, unlink]\n      resources: [optd/projects:task_viewer, optd/projects:task_tag_assignment]\n      axi: { summary: Managers may link task viewers. }\n    - name: direct_reader\n      effect: allow\n      roles: [optd/projects:linked_reader]\n      actions: [read]\n      resources: [optd/projects:task]\n      relation:\n        relationship: optd/projects:task_viewer\n        object_side: from\n        subject_side: to\n        subject: actor.id\n      axi: { summary: Linked readers may read one task. }\n  axi:\n    purpose: Auxiliary Projects access policy.\n    whenToUse: [Use for shared public-flow ReBAC.]\n    help: [optctl metadata policy optd/projects:access]\n`,
   );
   const host = new URL(providerUrl).host;
   await Deno.writeTextFile(
@@ -105,8 +105,8 @@ async function writeProjectsAuxiliary(root: string, providerUrl: string) {
   await Deno.writeTextFile(
     join(root, "hooks", "deliver.ts"),
     `const envelope=JSON.parse(await new Response(Deno.stdin.readable).text());\nconst delivery=envelope.metadata.delivery;\nconst response=await fetch(${
-      JSON.stringify(`${providerUrl}/projects`)
-    },{method:"POST",headers:{"content-type":"application/json","idempotency-key":delivery.idempotency_key,"x-provider-token":Deno.env.get("PROJECTS_PROVIDER_TOKEN")??""},body:JSON.stringify({attempt_id:delivery.attempt_id})});\nif(response.status===503) console.log(JSON.stringify({outcome:"retry",code:"provider_unavailable",message:"retry",retry_after:(response.headers.get("retry-after")??"1")+"s"})); else console.log(JSON.stringify({outcome:"succeeded",external_id:"projects-provider"}));\n`,
+      JSON.stringify(`${providerUrl}/workspaces`)
+    },{method:"POST",headers:{"content-type":"application/json","idempotency-key":delivery.idempotency_key,"x-provider-token":Deno.env.get("PROJECTS_PROVIDER_TOKEN")??""},body:JSON.stringify({attempt_id:delivery.attempt_id})});\nif(response.status===503) console.log(JSON.stringify({outcome:"retry",code:"provider_unavailable",message:"retry",retry_after:(response.headers.get("retry-after")??"1")+"s"})); else console.log(JSON.stringify({outcome:"succeeded",external_id:"workspaces-provider"}));\n`,
   );
 }
 

@@ -35,10 +35,10 @@ export const CurrentAgentSchema = Type.Object({
 
 const AuthorizationBoundarySchema = Type.Union([
   Type.Object({
-    type: Type.Literal("project"),
-    project_id: NonEmptyString,
+    type: Type.Literal("workspace"),
+    workspace_id: NonEmptyString,
   }, { additionalProperties: false }),
-  Type.Object({ type: Type.Literal("all_projects") }, {
+  Type.Object({ type: Type.Literal("all_workspaces") }, {
     additionalProperties: false,
   }),
   Type.Object({ type: Type.Literal("system") }, {

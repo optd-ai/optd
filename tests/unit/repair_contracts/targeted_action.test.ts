@@ -23,7 +23,7 @@ Deno.test("target authority evidence canonicalizes exact reviewed targets", () =
     authorizationLineageIds: ["authorization-2", "authorization-1"],
     targets: [{
       target: {
-        projectId: "project-b",
+        workspaceId: "workspace-b",
         resource: "publisher/crm:lead",
         object: {
           id: "lead-2",
@@ -46,7 +46,7 @@ Deno.test("target authority evidence canonicalizes exact reviewed targets", () =
       relationshipIds: ["relationship-2", "relationship-1"],
     }, {
       target: {
-        projectId: "project-a",
+        workspaceId: "workspace-a",
         resource: "publisher/crm:lead",
         object: {
           id: "lead-1",
@@ -87,7 +87,7 @@ Deno.test("canonical target evidence preserves reviewed target and lineage order
   };
   const target = (id: string) => ({
     target: {
-      projectId: "project-1",
+      workspaceId: "workspace-1",
       resource: "publisher/crm:lead",
       object: { id, versionId: `version-${id}` },
     },
@@ -165,7 +165,7 @@ Deno.test("effect manifests cannot become authorization digest targets", () => {
     authorizationLineageIds: [],
     targets: [{
       target: {
-        projectId: "project-1",
+        workspaceId: "workspace-1",
         resource: "publisher/crm:lead",
         object: {
           id: "lead-1",
@@ -195,7 +195,7 @@ Deno.test("definition-level reviewed targets omit object evidence canonically", 
     authorizationLineageIds: [],
     targets: [{
       target: {
-        projectId: "project-1",
+        workspaceId: "workspace-1",
         resource: "publisher/crm:lead",
       },
       policyDigest: "policy-digest",
@@ -206,7 +206,7 @@ Deno.test("definition-level reviewed targets omit object evidence canonically", 
   });
 
   assertEquals(canonical.targets[0], {
-    project_id: "project-1",
+    workspace_id: "workspace-1",
     resource: "publisher/crm:lead",
     policy_digest: "policy-digest",
     matched_rules: [],

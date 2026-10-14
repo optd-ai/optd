@@ -32,7 +32,7 @@ Deno.test({
       const stage = await matrix.stage(
         ["gamma", "beta", "alpha"].map((name) => ({
           op: "create",
-          project_id: matrix.projectId,
+          workspace_id: matrix.workspaceId,
           resource: `test/commitmatrix:${name}`,
           fields: { key: `table-order-${name}`, status: "ready" },
         })),
@@ -111,7 +111,7 @@ Deno.test({
       const base = await matrix.stage(
         ["gamma", "beta", "alpha", "alpha"].map((name, index) => ({
           op: "create",
-          project_id: matrix.projectId,
+          workspace_id: matrix.workspaceId,
           resource: `test/commitmatrix:${name}`,
           fields: { key: `row-order-${name}-${index}`, status: "ready" },
         })),
@@ -131,31 +131,31 @@ Deno.test({
       const tables = await runtimeTableMap(matrix.harness.server.sql);
       const stage = await matrix.stage([{
         op: "update",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:gamma",
         object_id: gamma.id,
         set: { note: "reverse" },
       }, {
         op: "update",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:beta",
         object_id: beta.id,
         set: { note: "reverse" },
       }, {
         op: "update",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:alpha",
         object_id: alpha[1].id,
         set: { note: "second" },
       }, {
         op: "comment",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:alpha",
         object_id: alpha[0].id,
         body: "read plus mutation",
       }, {
         op: "update",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: "test/commitmatrix:alpha",
         object_id: alpha[0].id,
         set: { note: "promoted update" },

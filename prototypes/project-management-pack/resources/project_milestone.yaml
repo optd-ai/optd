@@ -7,7 +7,7 @@ spec:
     name:
       type: string
       required: true
-    work_project_id:
+    project_id:
       type: string
       required: true
       ref: optd/projects:project
@@ -32,29 +32,29 @@ spec:
       defaultFields:
         - id
         - name
-        - work_project_id
+        - project_id
         - deadline
         - status
       empty:
         message: No project milestone records found.
         help:
-          - optctl --project ${project} create optd/projects:project_milestone --input
+          - optctl --workspace ${workspace} create optd/projects:project_milestone --input
             object.json --stage
     detail:
       sections:
         - title: project milestone
           fields:
             - name
-            - work_project_id
+            - project_id
             - deadline
             - status
       help:
-        - optctl --project ${project} query optd/projects:project_milestone --where 'id ==
+        - optctl --workspace ${workspace} query optd/projects:project_milestone --where 'id ==
           "${id}"'
     help:
       list:
-        - optctl --project ${project} query optd/projects:project_milestone
+        - optctl --workspace ${workspace} query optd/projects:project_milestone
       view:
-        - optctl --project ${project} view optd/projects:project_milestone ${id}
+        - optctl --workspace ${workspace} view optd/projects:project_milestone ${id}
       created:
-        - optctl --project ${project} view optd/projects:project_milestone ${id}
+        - optctl --workspace ${workspace} view optd/projects:project_milestone ${id}

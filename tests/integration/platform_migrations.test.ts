@@ -42,6 +42,20 @@ Deno.test("fresh platform baseline is idempotent across real Postgres restart", 
   try {
     runtime = await startPostgresRuntime();
     sql = createPostgresClient(runtime.databaseUrl);
+    await query(sql, "create table projects(id uuid primary key)");
+    await assertRejects(
+      () => sql!.begin((tx) => applyPlatformMigrations(tx)),
+      Error,
+      "workspace_schema_requires_fresh_database",
+    );
+    assertEquals(
+      (await query<{ present: boolean }>(
+        sql,
+        "select to_regclass('public.platform_schema_migrations') is not null present",
+      )).rows[0].present,
+      false,
+    );
+    await query(sql, "drop table projects");
     const first = await sql.begin((tx) => applyPlatformMigrations(tx));
     assertEquals(first.applied.length, platformMigrations.length);
     const second = await sql.begin((tx) => applyPlatformMigrations(tx));

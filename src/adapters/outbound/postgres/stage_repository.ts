@@ -52,7 +52,7 @@ type Revision = {
   normalized: Record<string, unknown>;
 };
 type Prepared = {
-  projects: unknown[];
+  workspaces: unknown[];
   revisions: Revision[];
   dependencies: Record<string, unknown>[];
   decisions: Record<string, unknown>[];
@@ -108,29 +108,29 @@ export class PostgresStageRepository implements StageRepository {
   ): Promise<Result<StageHookInput>> {
     try {
       return await this.sql.begin(async (tx) => {
-        const projects: Record<string, unknown>[] = [];
-        const projectIds = [
-          ...new Set(operations.map((operation) => operation.project_id)),
+        const workspaces: Record<string, unknown>[] = [];
+        const workspaceIds = [
+          ...new Set(operations.map((operation) => operation.workspace_id)),
         ].sort();
-        for (const projectId of projectIds) {
-          await lockReadAuthority(tx, auth, projectId);
-          const project =
+        for (const workspaceId of workspaceIds) {
+          await lockReadAuthority(tx, auth, workspaceId);
+          const workspace =
             (await query<{ id: string; version: string; status: string }>(
               tx,
-              "select id,version,status from projects where id=$1 for share",
-              [projectId],
+              "select id,version,status from workspaces where id=$1 for share",
+              [workspaceId],
             )).rows[0];
-          if (!project || project.status !== "active") {
+          if (!workspace || workspace.status !== "active") {
             throw domain(
-              "project_inactive",
-              "Project is not active",
+              "workspace_inactive",
+              "Workspace is not active",
               "conflict",
             );
           }
-          projects.push({
-            project_id: project.id,
-            version: Number(project.version),
-            status: project.status,
+          workspaces.push({
+            workspace_id: workspace.id,
+            version: Number(workspace.version),
+            status: workspace.status,
           });
         }
         const revisions: Record<string, unknown>[] = [];
@@ -280,7 +280,7 @@ export class PostgresStageRepository implements StageRepository {
         const orderedHookDeclarations = hookDeclarations.sort(
           compareHookDeclarations,
         );
-        // Run the same complete current Project, operation, policy, lineage,
+        // Run the same complete current Workspace, operation, policy, lineage,
         // definition, and hook pin validation used by final persistence before
         // any secret resolution, provider request, or child spawn.
         await prepare(
@@ -293,13 +293,13 @@ export class PostgresStageRepository implements StageRepository {
         );
         return ok({
           operations,
-          projects,
+          workspaces,
           pack_revisions: revisions,
           hook_declarations: orderedHookDeclarations,
           authority_snapshot: await captureHookAuthoritySnapshot(
             tx,
             auth,
-            projectIds,
+            workspaceIds,
           ),
           proposed_states: proposedStates,
           base_states: baseStates,
@@ -354,7 +354,7 @@ export class PostgresStageRepository implements StageRepository {
             !currentRevisionIds.has(String(record(execution).pack_revision_id))
           ) {
             throw domain(
-              "project_conflict",
+              "workspace_conflict",
               "Active pack revision changed after hook coordination",
               "conflict",
             );
@@ -381,12 +381,12 @@ export class PostgresStageRepository implements StageRepository {
         ];
         const approvalRequirements = canonicalizeApprovalRequirements(
           hook?.approval_requirements ?? [],
-          new Set(input.operations.map((operation) => operation.project_id)),
+          new Set(input.operations.map((operation) => operation.workspace_id)),
           this.clock.now(),
         );
         const evidence = {
           operation_graph_digest: operationGraphDigest,
-          projects: prepared.projects,
+          workspaces: prepared.workspaces,
           pack_revisions: prepared.revisions.map(publicRevision),
           operations: input.operations,
           dependencies,
@@ -403,7 +403,7 @@ export class PostgresStageRepository implements StageRepository {
           approval_requirements: approvalRequirements,
           required_capabilities: [
             ...prepared.decisions.map((decision) =>
-              `${String(decision.project_id)}:${String(decision.action)}:${
+              `${String(decision.workspace_id)}:${String(decision.action)}:${
                 String(decision.resource_identity)
               }`
             ),
@@ -411,7 +411,7 @@ export class PostgresStageRepository implements StageRepository {
           ].sort(),
           effects: [
             ...input.operations.map((operation) =>
-              `${operation.project_id}:${operation.op}:${
+              `${operation.workspace_id}:${operation.op}:${
                 componentIdentity(operation)
               }`
             ),
@@ -439,7 +439,7 @@ export class PostgresStageRepository implements StageRepository {
           tx,
           `insert into staged_changesets(
           id,schema_version,source_kind,source_identity_json,created_auth_context_id,created_principal_id,creating_context_json,
-          operation_graph_digest,stage_digest,canonical_graph_json,projects_json,pack_revisions_json,warnings_json,
+          operation_graph_digest,stage_digest,canonical_graph_json,workspaces_json,pack_revisions_json,warnings_json,
           planned_events_json,planned_deliveries_json) values($1,1,$2,$3::jsonb,$4,$5,$6::jsonb,$7,$8,$9::jsonb,$10::jsonb,$11::jsonb,$12::jsonb,$13::jsonb,$14::jsonb) returning created_at`,
           [
             id,
@@ -461,7 +461,7 @@ export class PostgresStageRepository implements StageRepository {
               schema: "changeset.operations.v1",
               operations: input.operations,
             },
-            prepared.projects,
+            prepared.workspaces,
             prepared.revisions.map(publicRevision),
             hook?.warnings ?? [],
             hook?.planned_events ?? [],
@@ -476,13 +476,13 @@ export class PostgresStageRepository implements StageRepository {
           const row = prepared.operationRows[ordinal];
           await query(
             tx,
-            `insert into staged_changeset_operations(stage_id,ordinal,operation_id,project_id,pack_revision_id,resource_revision_id,component_revision_id,component_digest,operation_kind,object_id,canonical_operation_json)
+            `insert into staged_changeset_operations(stage_id,ordinal,operation_id,workspace_id,pack_revision_id,resource_revision_id,component_revision_id,component_digest,operation_kind,object_id,canonical_operation_json)
             values($1,$2,$3,$4,$5,null,$6,$7,$8,$9,$10::jsonb)`,
             [
               id,
               ordinal,
               row.operationId,
-              row.operation.project_id,
+              row.operation.workspace_id,
               row.revisionId,
               row.componentRevisionId,
               row.componentDigest,
@@ -500,13 +500,13 @@ export class PostgresStageRepository implements StageRepository {
           const dep = dependencies[ordinal];
           await query(
             tx,
-            `insert into staged_changeset_dependencies(stage_id,ordinal,dependency_kind,project_id,pack_revision_id,resource_revision_id,component_revision_id,component_digest,object_id,expected_version_id,dependency_json)
+            `insert into staged_changeset_dependencies(stage_id,ordinal,dependency_kind,workspace_id,pack_revision_id,resource_revision_id,component_revision_id,component_digest,object_id,expected_version_id,dependency_json)
             values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb)`,
             [
               id,
               ordinal,
               dep.kind,
-              dep.project_id ?? null,
+              dep.workspace_id ?? null,
               dep.pack_revision_id ?? null,
               dep.resource_revision_id ?? null,
               dep.component_revision_id ?? null,
@@ -521,12 +521,12 @@ export class PostgresStageRepository implements StageRepository {
           const decision = prepared.decisions[ordinal];
           await query(
             tx,
-            `insert into staged_policy_decisions(id,stage_id,ordinal,project_id,action,resource_identity,decision_json) values($1,$2,$3,$4,$5,$6,$7::jsonb)`,
+            `insert into staged_policy_decisions(id,stage_id,ordinal,workspace_id,action,resource_identity,decision_json) values($1,$2,$3,$4,$5,$6,$7::jsonb)`,
             [
               uuidV7(),
               id,
               ordinal,
-              decision.project_id,
+              decision.workspace_id,
               decision.action,
               decision.resource_identity,
               decision,
@@ -726,13 +726,13 @@ export class PostgresStageRepository implements StageRepository {
           );
         }
         const boundaryValue = record(requirement.boundary);
-        const boundary = boundaryValue.type === "project"
+        const boundary = boundaryValue.type === "workspace"
           ? {
-            type: "project" as const,
-            projectId: String(boundaryValue.project_id),
+            type: "workspace" as const,
+            workspaceId: String(boundaryValue.workspace_id),
           }
-          : boundaryValue.type === "all_projects"
-          ? { type: "all_projects" as const }
+          : boundaryValue.type === "all_workspaces"
+          ? { type: "all_workspaces" as const }
           : { type: "system" as const };
         const authority = await this.authorizationRepository(
           tx as unknown as Sql,
@@ -788,14 +788,14 @@ export class PostgresStageRepository implements StageRepository {
         let status = "awaiting_approval";
         if (rejected) status = "rejected";
         else {
-          const unsatisfied = (await query<{ present: boolean }>(
-            tx,
-            `select exists(select 1 from staged_approval_requirements r where r.stage_id=$1 and
-              (select count(distinct d.principal_id) from staged_approval_decisions d where d.requirement_id=r.id and d.decision='approve') <
-              (r.requirement_json->>'minimum')::int) present`,
-            [id],
-          )).rows[0]?.present;
-          if (!unsatisfied) status = "ready";
+          if (
+            await approvalsSatisfied(
+              tx,
+              id,
+              this.clock.now(),
+              this.authorizationRepository,
+            )
+          ) status = "ready";
         }
         if (status !== lifecycle.status) {
           await query(
@@ -884,7 +884,7 @@ export class PostgresStageRepository implements StageRepository {
 async function revalidateTargetedAuthority(
   sql: Queryable,
   auth: AuthContext,
-  projectId: string,
+  workspaceId: string,
   evidence: NonNullable<NonNullable<StageSource["authority"]>["targeted"]>,
   authorizationRootId: string | undefined,
   dependencies: Record<string, unknown>[],
@@ -900,7 +900,7 @@ async function revalidateTargetedAuthority(
     });
     if (!lineage.ok) {
       throw domain(
-        "project_conflict",
+        "workspace_conflict",
         "Targeted action authorization lineage changed before persistence",
         "conflict",
       );
@@ -917,13 +917,13 @@ async function revalidateTargetedAuthority(
   };
   if (canonicalJson(currentIdentity) !== canonicalJson(evidence.cutoff)) {
     throw domain(
-      "project_conflict",
+      "workspace_conflict",
       "Targeted action authority cutoff changed before persistence",
       "conflict",
     );
   }
   const reviewed = evidence.targets.map((target) => ({
-    projectId: target.project_id,
+    workspaceId: target.workspace_id,
     resource: target.resource,
     ...(target.object_id && target.object_version_id
       ? {
@@ -939,7 +939,7 @@ async function revalidateTargetedAuthority(
   );
   await lockTargetedActionAuthority(sql, physicalTargets);
   let current = await evaluateExactTargetedActionAuthority(sql, {
-    projectId,
+    workspaceId,
     action: evidence.action,
     targets: reviewed,
   }, auth);
@@ -952,7 +952,7 @@ async function revalidateTargetedAuthority(
   }
   await lockExactTargetAuthorityDependencies(sql, current.dependencies);
   current = await evaluateExactTargetedActionAuthority(sql, {
-    projectId,
+    workspaceId,
     action: evidence.action,
     targets: reviewed,
   }, auth);
@@ -978,7 +978,7 @@ async function revalidateTargetedAuthority(
   const expectedTargets: TargetAuthorityEvidence[] = evidence.targets.map(
     (target) => ({
       target: {
-        projectId: target.project_id,
+        workspaceId: target.workspace_id,
         resource: target.resource,
         ...(target.object_id && target.object_version_id
           ? {
@@ -1006,7 +1006,7 @@ async function revalidateTargetedAuthority(
     canonicalJson(current.targets) !== canonicalJson(expectedTargets)
   ) {
     throw domain(
-      "project_conflict",
+      "workspace_conflict",
       "Targeted action authority changed before persistence",
       "conflict",
     );
@@ -1023,7 +1023,7 @@ async function revalidateTargetedAuthority(
     {
       kind: "policy",
       target_dependency: "targeted_action_authority",
-      project_id: projectId,
+      workspace_id: workspaceId,
       action: evidence.action,
       targets: evidence.targets,
       canonical_target_digest: canonicalTargetDigest,
@@ -1034,7 +1034,7 @@ async function revalidateTargetedAuthority(
   for (let ordinal = 0; ordinal < evidence.targets.length; ordinal++) {
     const target = evidence.targets[ordinal];
     decisions.push({
-      project_id: target.project_id,
+      workspace_id: target.workspace_id,
       action: evidence.action,
       resource_identity: target.resource,
       object_id: target.object_id ?? null,
@@ -1058,35 +1058,35 @@ async function prepare(
   source: StageSource | undefined,
   authorizationRepository: StageAuthorizationRepositoryFactory,
 ): Promise<Prepared> {
-  const projectIds = [
-    ...new Set(operations.map((operation) => operation.project_id)),
+  const workspaceIds = [
+    ...new Set(operations.map((operation) => operation.workspace_id)),
   ].sort();
-  const projects: Record<string, unknown>[] = [];
+  const workspaces: Record<string, unknown>[] = [];
   const dependencies: Record<string, unknown>[] = [];
   const authorityRoots = new Map<string, string>();
-  for (const projectId of projectIds) {
-    const anchor = await lockReadAuthority(sql, auth, projectId);
-    authorityRoots.set(projectId, anchor.authorizationRootId);
-    const project =
+  for (const workspaceId of workspaceIds) {
+    const anchor = await lockReadAuthority(sql, auth, workspaceId);
+    authorityRoots.set(workspaceId, anchor.authorizationRootId);
+    const workspace =
       (await query<{ id: string; version: string; status: string }>(
         sql,
-        "select id,version,status from projects where id=$1 for share",
-        [projectId],
+        "select id,version,status from workspaces where id=$1 for share",
+        [workspaceId],
       )).rows[0];
-    if (!project) {
-      throw domain("not_found", "Project was not found", "not_found");
+    if (!workspace) {
+      throw domain("not_found", "Workspace was not found", "not_found");
     }
-    if (project.status !== "active") {
-      throw domain("project_inactive", "Project is inactive", "conflict");
+    if (workspace.status !== "active") {
+      throw domain("workspace_inactive", "Workspace is inactive", "conflict");
     }
     const fact = {
-      project_id: project.id,
-      version: Number(project.version),
-      status: project.status,
+      workspace_id: workspace.id,
+      version: Number(workspace.version),
+      status: workspace.status,
     };
-    projects.push(fact);
+    workspaces.push(fact);
     dependencies.push({
-      kind: "project",
+      kind: "workspace",
       ...fact,
       authorization_root_id: anchor.authorizationRootId,
     });
@@ -1118,7 +1118,7 @@ async function prepare(
     revisions.set(`${parsed.publisher}/${parsed.pack}`, revision);
     if (source?.authority && revision.id !== source.authority.revision_id) {
       throw domain(
-        "project_conflict",
+        "workspace_conflict",
         "Semantic source revision changed before persistence",
         "conflict",
       );
@@ -1148,8 +1148,8 @@ async function prepare(
           sql,
           `select current_object_version_id from ${
             quoteIdentifier(table)
-          } where project_id=$1 and id=$2 and archived_at is null for share`,
-          [dependency.project_id, dependency.object_id],
+          } where workspace_id=$1 and id=$2 and archived_at is null for share`,
+          [dependency.workspace_id, dependency.object_id],
         )).rows[0]
         : undefined;
       if (
@@ -1157,7 +1157,7 @@ async function prepare(
         current.current_object_version_id !== dependency.expected_version_id
       ) {
         throw domain(
-          "project_conflict",
+          "workspace_conflict",
           "Semantic source read changed before persistence",
           "conflict",
         );
@@ -1174,15 +1174,15 @@ async function prepare(
           sql,
           `select id,current_object_version_id from ${
             quoteIdentifier(table)
-          } where project_id=$1 and ${
+          } where workspace_id=$1 and ${
             quoteIdentifier(String(dependency.key))
           }=$2 and archived_at is null order by id for share`,
-          [dependency.project_id, dependency.value],
+          [dependency.workspace_id, dependency.value],
         )).rows
         : [];
       if (currentRows.length > 1) {
         throw domain(
-          "project_conflict",
+          "workspace_conflict",
           "Active seed uniqueness is violated",
           "conflict",
         );
@@ -1190,7 +1190,7 @@ async function prepare(
       const current = currentRows[0];
       if (
         dependency.constraint_predicate !== "active()" ||
-        dependency.project_scoped !== true ||
+        dependency.workspace_scoped !== true ||
         !Array.isArray(dependency.constraint_fields) ||
         canonicalJson(dependency.constraint_fields) !==
           canonicalJson([dependency.key]) ||
@@ -1202,7 +1202,7 @@ async function prepare(
               dependency.expected_version_id))
       ) {
         throw domain(
-          "project_conflict",
+          "workspace_conflict",
           "Seed reconciliation fact changed before persistence",
           "conflict",
         );
@@ -1325,9 +1325,9 @@ async function prepare(
     await revalidateTargetedAuthority(
       sql,
       auth,
-      source!.authority!.project_id,
+      source!.authority!.workspace_id,
       targetedAuthority,
-      authorityRoots.get(source!.authority!.project_id),
+      authorityRoots.get(source!.authority!.workspace_id),
       dependencies,
       decisions,
     );
@@ -1339,7 +1339,10 @@ async function prepare(
         sql as Sql,
       ).authorize({
         auth,
-        boundary: { type: "project", projectId: source.authority.project_id },
+        boundary: {
+          type: "workspace",
+          workspaceId: source.authority.workspace_id,
+        },
         action: semanticAction,
         resource: semanticAction,
       });
@@ -1390,7 +1393,33 @@ async function prepare(
       if (lifecycle) {
         const lifecycleSpec = record(lifecycle.spec);
         const field = String(lifecycleSpec.field);
-        const initial = String(lifecycleSpec.initial);
+        if (
+          operation.initial_state !== undefined && source &&
+          source.kind !== "direct"
+        ) {
+          throw domain(
+            "operation_conflict",
+            "initial-state imports require a direct audited changeset",
+            "conflict",
+          );
+        }
+        const initial = String(
+          operation.initial_state ?? lifecycleSpec.initial,
+        );
+        if (
+          operation.initial_state !== undefined &&
+          !array(lifecycleSpec.states).some((state) =>
+            typeof state === "string"
+              ? state === initial
+              : record(state).name === initial
+          )
+        ) {
+          throw domain(
+            "operation_conflict",
+            "import initial state is not declared by the lifecycle",
+            "conflict",
+          );
+        }
         const fields = record(operation.fields);
         if (Object.hasOwn(fields, field) && fields[field] !== initial) {
           throw domain(
@@ -1412,7 +1441,7 @@ async function prepare(
         );
         dependencies.push({
           kind: "lifecycle",
-          project_id: operation.project_id,
+          workspace_id: operation.workspace_id,
           pack_revision_id: revision.id,
           component_revision_id: lifecycleComponent.id,
           component_digest: lifecycleComponent.digest,
@@ -1429,7 +1458,7 @@ async function prepare(
       if (unique.length) {
         const values = record(operation.fields);
         const signature = canonicalJson([
-          operation.project_id,
+          operation.workspace_id,
           identity,
           ...unique.map((field) =>
             field === "from"
@@ -1450,14 +1479,28 @@ async function prepare(
       }
     }
     const action = operation.op;
+    if (
+      operation.initial_state !== undefined && operation.op === "create" &&
+      !Object.values(record(revision.normalized.lifecycles)).some((item) =>
+        record(record(item).spec).resource === identity
+      )
+    ) {
+      throw domain(
+        "operation_conflict",
+        "initial-state imports require a lifecycle",
+        "conflict",
+      );
+    }
     const authorizationAction = source?.authority
       ? source.authority.operation_authority[String(operation.key)]
+      : operation.initial_state !== undefined
+      ? "import"
       : action;
     if (source?.authority) {
-      if (operation.project_id !== source.authority.project_id) {
+      if (operation.workspace_id !== source.authority.workspace_id) {
         throw domain(
-          "project_conflict",
-          "Semantic source operations must remain in the request Project",
+          "workspace_conflict",
+          "Semantic source operations must remain in the request Workspace",
           "conflict",
         );
       }
@@ -1486,7 +1529,7 @@ async function prepare(
         sql as Sql,
       ).authorize({
         auth,
-        boundary: { type: "project", projectId: operation.project_id },
+        boundary: { type: "workspace", workspaceId: operation.workspace_id },
         action: effectiveAuthorizationAction,
         resource: authorizationResource,
       });
@@ -1533,7 +1576,7 @@ async function prepare(
         );
       }
       decisions.push({
-        project_id: operation.project_id,
+        workspace_id: operation.workspace_id,
         action: effectiveAuthorizationAction,
         resource_identity: authorizationResource,
         decision: "allow",
@@ -1545,7 +1588,7 @@ async function prepare(
       });
       dependencies.push({
         kind: "policy",
-        project_id: operation.project_id,
+        workspace_id: operation.workspace_id,
         authority_digest: authorization.value.digest,
         action: effectiveAuthorizationAction,
         resource_identity: authorizationResource,
@@ -1553,14 +1596,14 @@ async function prepare(
       });
       dependencies.push({
         kind: "assignment",
-        project_id: operation.project_id,
+        workspace_id: operation.workspace_id,
         effective_roles: [...authorization.value.effectiveRoles].sort(),
         superadmin: authorization.value.superAdmin,
       });
     }
     dependencies.push({
       kind: "resource",
-      project_id: operation.project_id,
+      workspace_id: operation.workspace_id,
       pack_revision_id: revision.id,
       resource_revision_id: null,
       component_revision_id: component.id,
@@ -1602,7 +1645,7 @@ async function prepare(
   }
   dependencies.sort((a, b) => canonicalJson(a).localeCompare(canonicalJson(b)));
   return {
-    projects,
+    workspaces,
     revisions: uniqueRevisions,
     dependencies,
     decisions,
@@ -1703,13 +1746,13 @@ async function validateCurrent(
             sql,
             `select id,current_object_version_id from ${
               quoteIdentifier(active.table_name)
-            } where project_id=$1 and id=$2 and archived_at is null for share`,
-            [operation.project_id, endpoint],
+            } where workspace_id=$1 and id=$2 and archived_at is null for share`,
+            [operation.workspace_id, endpoint],
           )).rows[0];
           if (!row?.current_object_version_id) {
             throw domain(
               "validation_failed",
-              "Relationship endpoint is absent, archived, in another Project, or has the wrong definition",
+              "Relationship endpoint is absent, archived, in another Workspace, or has the wrong definition",
               "validation",
             );
           }
@@ -1722,7 +1765,7 @@ async function validateCurrent(
           );
           dependencies.push({
             kind: "relationship",
-            project_id: operation.project_id,
+            workspace_id: operation.workspace_id,
             pack_revision_id: active.candidate_revision_id,
             component_revision_id: endpointComponent.id,
             component_digest: endpointComponent.digest,
@@ -1741,7 +1784,7 @@ async function validateCurrent(
           [parsed.publisher, parsed.pack, parsed.name],
         )).rows[0];
         const values = record(operation.fields);
-        const params: unknown[] = [operation.project_id];
+        const params: unknown[] = [operation.workspace_id];
         const predicates = unique.map((field) => {
           params.push(
             field === "from"
@@ -1763,14 +1806,14 @@ async function validateCurrent(
           sql,
           `select id from ${
             quoteIdentifier(runtime.table_name)
-          } where project_id=$1 and archived_at is null and ${
+          } where workspace_id=$1 and archived_at is null and ${
             predicates.join(" and ")
           } limit 1 for share`,
           params,
         )).rows[0];
         dependencies.push({
           kind: "uniqueness",
-          project_id: operation.project_id,
+          workspace_id: operation.workspace_id,
           pack_revision_id: revision.id,
           component_revision_id: componentRevisionId,
           component_digest: componentDigest,
@@ -1809,7 +1852,7 @@ async function validateCurrent(
   if (creates.has(objectId)) {
     dependencies.push({
       kind: "object_version",
-      project_id: operation.project_id,
+      workspace_id: operation.workspace_id,
       pack_revision_id: revision.id,
       resource_revision_id: null,
       component_revision_id: componentRevisionId,
@@ -1845,8 +1888,8 @@ async function validateCurrent(
         : ",null lifecycle_value"
     } from ${
       quoteIdentifier(runtime.table_name)
-    } current_row where project_id=$1 and id=$2 for share`,
-    [operation.project_id, objectId],
+    } current_row where workspace_id=$1 and id=$2 for share`,
+    [operation.workspace_id, objectId],
   )).rows[0];
   if (!row) {
     throw domain("not_found", "Current object was not found", "not_found");
@@ -1859,7 +1902,7 @@ async function validateCurrent(
       sql as Sql,
     ).authorize({
       auth,
-      boundary: { type: "project", projectId: operation.project_id },
+      boundary: { type: "workspace", workspaceId: operation.workspace_id },
       action: "read_archived",
       resource: componentIdentity(operation),
     });
@@ -1900,7 +1943,7 @@ async function validateCurrent(
     }
     dependencies.push({
       kind: "policy",
-      project_id: operation.project_id,
+      workspace_id: operation.workspace_id,
       action: "read_archived",
       resource_identity: componentIdentity(operation),
       authority_digest: archivedAuthority.value.digest,
@@ -2052,7 +2095,7 @@ async function validateCurrent(
     );
     dependencies.push({
       kind: "lifecycle",
-      project_id: operation.project_id,
+      workspace_id: operation.workspace_id,
       pack_revision_id: revision.id,
       resource_revision_id: null,
       component_revision_id: lifecycleComponent.id,
@@ -2093,7 +2136,7 @@ async function validateCurrent(
   }
   dependencies.push({
     kind: operation.op === "unlink" ? "relationship" : "object_version",
-    project_id: operation.project_id,
+    workspace_id: operation.workspace_id,
     pack_revision_id: revision.id,
     resource_revision_id: null,
     component_revision_id: componentRevisionId,
@@ -2142,16 +2185,16 @@ async function evaluateStagePolicy(
      from policy_rules pr join policy_definition_versions pd on pd.id=pr.policy_definition_version_id
      where pr.id=any($1::uuid[]) and pd.active and pd.candidate_revision_id=$2
        and exists(select 1 from policy_assignments pa where pa.policy_definition_version_id=pd.id and pa.active
-         and (pa.boundary_type='all_projects' or (pa.boundary_type='project' and pa.project_id=$3)))
+         and (pa.boundary_type='all_workspaces' or (pa.boundary_type='workspace' and pa.workspace_id=$3)))
        and (exists(select 1 from role_assignments ra where ra.principal_id=$4 and ra.role_id=pr.role_id and ra.active
-         and (ra.boundary_type='all_projects' or (ra.boundary_type='project' and ra.project_id=$3)))
+         and (ra.boundary_type='all_workspaces' or (ra.boundary_type='workspace' and ra.workspace_id=$3)))
          or exists(select 1 from agent_authorization_roles ar where ar.authorization_id=$5 and ar.role_id=pr.role_id
-         and (ar.boundary_type='all_projects' or (ar.boundary_type='project' and ar.project_id=$3))))
+         and (ar.boundary_type='all_workspaces' or (ar.boundary_type='workspace' and ar.workspace_id=$3))))
      order by pr.id for share of pr,pd`,
     [
       ruleIds,
       revision.id,
-      operation.project_id,
+      operation.workspace_id,
       auth.principalId,
       auth.authorizationId ?? null,
     ],
@@ -2250,8 +2293,8 @@ async function currentResourceState(
     sql,
     `select to_jsonb(current_row) snapshot from ${
       quoteIdentifier(runtime.table_name)
-    } current_row where project_id=$1 and id=$2`,
-    [operation.project_id, operation.object_id],
+    } current_row where workspace_id=$1 and id=$2`,
+    [operation.workspace_id, operation.object_id],
   )).rows[0];
   return record(current?.snapshot);
 }
@@ -2265,14 +2308,14 @@ async function proposedState(
     return {
       ...record(operation.fields),
       id: operation.object_id,
-      project_id: operation.project_id,
+      workspace_id: operation.workspace_id,
     };
   }
   if (operation.op === "link") {
     return {
       ...record(operation.fields),
       id: operation.relationship_id,
-      project_id: operation.project_id,
+      workspace_id: operation.workspace_id,
       from: operation.from,
       to: operation.to,
     };
@@ -2291,8 +2334,8 @@ async function proposedState(
     sql,
     `select to_jsonb(current_row) snapshot from ${
       quoteIdentifier(runtime.table_name)
-    } current_row where project_id=$1 and id=$2`,
-    [operation.project_id, id],
+    } current_row where workspace_id=$1 and id=$2`,
+    [operation.workspace_id, id],
   )).rows[0];
   const proposed = { ...record(current?.snapshot), ...record(operation.set) };
   for (const field of (operation.unset as string[] | undefined) ?? []) {
@@ -2372,10 +2415,10 @@ async function evaluateDirectRelation(
       sql,
       `select exists(select 1 from ${
         quoteIdentifier(runtime.table_name)
-      } where project_id=$1 and archived_at is null and ${
+      } where workspace_id=$1 and archived_at is null and ${
         quoteIdentifier(objectColumn)
       }=$2 and ${quoteIdentifier(subjectColumn)}=$3) allowed`,
-      [operation.project_id, objectId, subjectId],
+      [operation.workspace_id, objectId, subjectId],
     )).rows[0]?.allowed,
   );
 }
@@ -2440,8 +2483,8 @@ async function validateUniqueness(
       sql,
       `select to_jsonb(current_row) snapshot from ${
         quoteIdentifier(runtime.table_name)
-      } current_row where project_id=$1 and id=$2`,
-      [operation.project_id, objectId],
+      } current_row where workspace_id=$1 and id=$2`,
+      [operation.workspace_id, objectId],
     )).rows[0];
     proposed = { ...record(current?.snapshot), ...record(operation.set) };
     for (const field of (operation.unset as string[] | undefined) ?? []) {
@@ -2519,7 +2562,7 @@ async function validateUniqueness(
         "validation",
       );
     }
-    const params: unknown[] = [operation.project_id];
+    const params: unknown[] = [operation.workspace_id];
     const predicates = targetFields.map((field, index) => {
       params.push(proposed[sourceFields[index]]);
       return `${quoteIdentifier(field)} is not distinct from $${params.length}`;
@@ -2529,7 +2572,7 @@ async function validateUniqueness(
         sql,
         `select id,current_object_version_id from ${
           quoteIdentifier(targetRuntime.table_name)
-        } where project_id=$1 and archived_at is null and ${
+        } where workspace_id=$1 and archived_at is null and ${
           predicates.join(" and ")
         } limit 1 for share`,
         params,
@@ -2543,7 +2586,7 @@ async function validateUniqueness(
     }
     dependencies.push({
       kind: "object_version",
-      project_id: operation.project_id,
+      workspace_id: operation.workspace_id,
       object_id: targetRow.id,
       expected_version_id: targetRow.current_object_version_id,
       foreign_key_constraint: constraint.name,
@@ -2556,13 +2599,13 @@ async function validateUniqueness(
         proposed[field] === undefined || proposed[field] === null
       )
     ) continue;
-    const params: unknown[] = [operation.project_id, objectId];
+    const params: unknown[] = [operation.workspace_id, objectId];
     const predicates = fields.map((field) => {
       params.push(proposed[field]);
       return `${quoteIdentifier(field)} is not distinct from $${params.length}`;
     });
     const signature = canonicalJson([
-      operation.project_id,
+      operation.workspace_id,
       `${parsed.publisher}/${parsed.pack}:${parsed.name}`,
       fields,
       fields.map((field) => proposed[field]),
@@ -2579,14 +2622,14 @@ async function validateUniqueness(
       sql,
       `select id from ${
         quoteIdentifier(runtime.table_name)
-      } where project_id=$1 and id<>$2${
+      } where workspace_id=$1 and id<>$2${
         uniqueSet.predicate === "active()" ? " and archived_at is null" : ""
       } and ${predicates.join(" and ")} order by id limit 2 for share`,
       params,
     )).rows[0];
     dependencies.push({
       kind: "uniqueness",
-      project_id: operation.project_id,
+      workspace_id: operation.workspace_id,
       pack_revision_id: revision.id,
       component_revision_id: componentRevisionId,
       component_digest: componentDigest,
@@ -2594,7 +2637,7 @@ async function validateUniqueness(
       values: fields.map((field) => proposed[field]),
       constraint_name: uniqueSet.name,
       constraint_predicate: uniqueSet.predicate,
-      project_scoped: true,
+      workspace_scoped: true,
       existing_id: duplicate?.id ?? null,
     });
     if (duplicate) {
@@ -2605,6 +2648,86 @@ async function validateUniqueness(
       );
     }
   }
+}
+
+async function approvalsSatisfied(
+  sql: Queryable,
+  stageId: string,
+  now: Date,
+  authorizationRepository: StageAuthorizationRepositoryFactory,
+): Promise<boolean> {
+  const requirements = (await query<
+    { id: string; requirement_json: unknown; created_principal_id: string }
+  >(
+    sql,
+    `select r.id,r.requirement_json,s.created_principal_id from staged_approval_requirements r
+     join staged_changesets s on s.id=r.stage_id where r.stage_id=$1`,
+    [stageId],
+  )).rows;
+  for (const row of requirements) {
+    const requirement = record(row.requirement_json);
+    if (
+      requirement.expires_at && new Date(String(requirement.expires_at)) <= now
+    ) return false;
+    const decisions = (await query<{
+      id: string;
+      principal_id: string;
+      human_user_id: string;
+      session_id: string;
+      authorization_id: string | null;
+      credential_kind: AuthContext["credentialKind"];
+      created_at: string;
+      type: AuthContext["principalType"];
+    }>(
+      sql,
+      `select c.*,p.type from staged_approval_decisions d
+      join auth_contexts c on c.id=d.decided_auth_context_id and c.principal_id=d.principal_id
+      join principals p on p.id=c.principal_id and p.active
+      where d.stage_id=$1 and d.requirement_id=$2 and d.decision='approve'`,
+      [stageId, row.id],
+    )).rows;
+    const valid = new Set<string>();
+    const boundary = record(requirement.boundary);
+    for (const decision of decisions) {
+      if (
+        !array(requirement.principal_types).includes(decision.type) ||
+        (!requirement.allow_initiator &&
+          decision.principal_id === row.created_principal_id)
+      ) continue;
+      const auth: AuthContext = {
+        id: decision.id,
+        principalId: decision.principal_id,
+        humanUserId: decision.human_user_id,
+        sessionId: decision.session_id,
+        principalType: decision.type,
+        ...(decision.authorization_id
+          ? { authorizationId: decision.authorization_id }
+          : {}),
+        credentialKind: decision.credential_kind,
+        roles: [],
+        createdAt: String(decision.created_at),
+      };
+      const authority = await authorizationRepository(sql as Sql).authorize({
+        auth,
+        boundary: boundary.type === "workspace"
+          ? { type: "workspace", workspaceId: String(boundary.workspace_id) }
+          : boundary.type === "all_workspaces"
+          ? { type: "all_workspaces" }
+          : { type: "system" },
+        action: "changeset.approval.decide",
+        resource: "system:changeset-approval",
+      });
+      if (
+        authority.ok &&
+        (authority.value.superAdmin ||
+          authority.value.effectiveRoles.includes(String(requirement.role)))
+      ) {
+        valid.add(decision.principal_id);
+      }
+    }
+    if (valid.size < Number(requirement.minimum)) return false;
+  }
+  return true;
 }
 
 async function canReviewAny(
@@ -2638,10 +2761,10 @@ async function canReviewAny(
       new Date(String(requirement.expires_at)) <= now
     ) continue;
     const value = record(requirement.boundary);
-    const boundary = value.type === "project"
-      ? { type: "project" as const, projectId: String(value.project_id) }
-      : value.type === "all_projects"
-      ? { type: "all_projects" as const }
+    const boundary = value.type === "workspace"
+      ? { type: "workspace" as const, workspaceId: String(value.workspace_id) }
+      : value.type === "all_workspaces"
+      ? { type: "all_workspaces" as const }
       : { type: "system" as const };
     const authority = await authorizationRepository(sql as Sql)
       .authorize({
@@ -2678,26 +2801,26 @@ async function canAccess(
     [stageId],
   )).rows[0];
   if (!root) return false;
-  const projects = (await query<{ project_id: string }>(
+  const workspaces = (await query<{ workspace_id: string }>(
     sql,
-    "select distinct project_id from staged_changeset_operations where stage_id=$1 order by project_id",
+    "select distinct workspace_id from staged_changeset_operations where stage_id=$1 order by workspace_id",
     [stageId],
-  )).rows.map((row) => row.project_id);
-  for (const projectId of projects) {
-    await lockReadAuthority(sql, auth, projectId);
-    const project = (await query<{ status: string }>(
+  )).rows.map((row) => row.workspace_id);
+  for (const workspaceId of workspaces) {
+    await lockReadAuthority(sql, auth, workspaceId);
+    const workspace = (await query<{ status: string }>(
       sql,
-      "select status from projects where id=$1 for share",
-      [projectId],
+      "select status from workspaces where id=$1 for share",
+      [workspaceId],
     )).rows[0];
-    if (!project || project.status !== "active") return false;
+    if (!workspace || workspace.status !== "active") return false;
   }
   if (root.created_principal_id === auth.principalId) return true;
-  for (const projectId of projects) {
+  for (const workspaceId of workspaces) {
     const allowed = await authorizationRepository(sql as Sql)
       .authorize({
         auth,
-        boundary: { type: "project", projectId },
+        boundary: { type: "workspace", workspaceId },
         action,
         resource: "changeset",
       });
@@ -2780,7 +2903,7 @@ async function load(sql: Queryable, id: string): Promise<StageDto | null> {
     created_auth_context_id: String(row.created_auth_context_id),
     operation_graph_digest: String(row.operation_graph_digest),
     stage_digest: String(row.stage_digest),
-    projects: array(row.projects_json),
+    workspaces: array(row.workspaces_json),
     pack_revisions: array(row.pack_revisions_json),
     operations,
     dependencies,
@@ -2969,7 +3092,7 @@ function timestamp(value: unknown): string | null {
 async function captureHookAuthoritySnapshot(
   sql: Queryable,
   auth: AuthContext,
-  projectIds: string[],
+  workspaceIds: string[],
 ): Promise<StageHookInput["authority_snapshot"]> {
   const actor = policyActorFromAuthContext(auth);
   const assignments = (await query<{ kind: string; id: string }>(
@@ -2989,10 +3112,10 @@ async function captureHookAuthoritySnapshot(
        union all select 'agent_authorization',id from lineage
        union all select 'role_assignment',id from role_assignments
         where principal_id=$3 and
-          (boundary_type in ('system','all_projects') or project_id=any($5::uuid[]))
+          (boundary_type in ('system','all_workspaces') or workspace_id=any($5::uuid[]))
        union all select 'agent_authorization_role',id from agent_authorization_roles
         where authorization_id=$1 and
-          (boundary_type in ('system','all_projects') or project_id=any($5::uuid[]))
+          (boundary_type in ('system','all_workspaces') or workspace_id=any($5::uuid[]))
        union all select 'role_definition_version',role_version.id
          from role_definition_versions role_version where role_version.role_id in (
            select role_id from role_assignments where principal_id=$3
@@ -3004,26 +3127,26 @@ async function captureHookAuthoritySnapshot(
       auth.sessionId,
       auth.principalId,
       auth.humanUserId,
-      projectIds,
+      workspaceIds,
     ],
   )).rows;
   const policies = (await query<{ kind: string; id: string }>(
     sql,
     `select kind,id::text from (
        select 'policy_assignment' kind,id from policy_assignments
-        where boundary_type in ('system','all_projects') or project_id=any($1::uuid[])
+        where boundary_type in ('system','all_workspaces') or workspace_id=any($1::uuid[])
        union all select 'policy_definition_version',definition.id
          from policy_definition_versions definition join policy_assignments assignment
            on assignment.policy_definition_version_id=definition.id
-        where assignment.boundary_type in ('system','all_projects') or
-              assignment.project_id=any($1::uuid[])
+        where assignment.boundary_type in ('system','all_workspaces') or
+              assignment.workspace_id=any($1::uuid[])
        union all select 'policy_rule',rule.id from policy_rules rule
          join policy_assignments assignment
            on assignment.policy_definition_version_id=rule.policy_definition_version_id
-        where assignment.boundary_type in ('system','all_projects') or
-              assignment.project_id=any($1::uuid[])
+        where assignment.boundary_type in ('system','all_workspaces') or
+              assignment.workspace_id=any($1::uuid[])
      ) evidence order by kind,id`,
-    [projectIds],
+    [workspaceIds],
   )).rows;
   return {
     principal_id: actor.id,

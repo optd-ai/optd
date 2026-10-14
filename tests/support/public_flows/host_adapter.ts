@@ -256,7 +256,7 @@ export function createHostPublicFlowBackend(
         [id],
       )).rows[0].principal_id;
     },
-    async observeCrmLostReasonId(projectId) {
+    async observeCrmLostReasonId(workspaceId) {
       const table = (await query<{ table_name: string }>(
         harness.server.sql,
         "select table_name from pack_runtime_tables where publisher='optd' and pack_name='crm' and definition_kind='resource' and definition_name='lost_reason'",
@@ -266,11 +266,11 @@ export function createHostPublicFlowBackend(
       }
       return (await query<{ id: string }>(
         harness.server.sql,
-        `select id from ${table} where project_id=$1 and archived_at is null order by id limit 1`,
-        [projectId],
+        `select id from ${table} where workspace_id=$1 and archived_at is null order by id limit 1`,
+        [workspaceId],
       )).rows[0].id;
     },
-    async observeProjectsTodoStageId(projectId) {
+    async observeProjectsTodoStageId(workspaceId) {
       const table = (await query<{ table_name: string }>(
         harness.server.sql,
         "select table_name from pack_runtime_tables where publisher='optd' and pack_name='projects' and definition_kind='resource' and definition_name='task_stage'",
@@ -280,11 +280,11 @@ export function createHostPublicFlowBackend(
       }
       return (await query<{ id: string }>(
         harness.server.sql,
-        `select id from ${table} where project_id=$1 and name='todo' and archived_at is null limit 1`,
-        [projectId],
+        `select id from ${table} where workspace_id=$1 and name='todo' and archived_at is null limit 1`,
+        [workspaceId],
       )).rows[0].id;
     },
-    async observeProjectsTaskCount(projectId, state) {
+    async observeProjectsTaskCount(workspaceId, state) {
       const table = (await query<{ table_name: string }>(
         harness.server.sql,
         "select table_name from pack_runtime_tables where publisher='optd' and pack_name='projects' and definition_kind='resource' and definition_name='task'",
@@ -292,11 +292,11 @@ export function createHostPublicFlowBackend(
       if (!/^[a-z0-9_]+$/.test(table)) throw new Error("invalid task table");
       return (await query<{ count: number }>(
         harness.server.sql,
-        `select count(*)::int count from ${table} where project_id=$1 and state=$2 and archived_at is null`,
-        [projectId, state],
+        `select count(*)::int count from ${table} where workspace_id=$1 and state=$2 and archived_at is null`,
+        [workspaceId, state],
       )).rows[0].count;
     },
-    async observeProjectsTimesheets(projectId, principalId) {
+    async observeProjectsTimesheets(workspaceId, principalId) {
       const table = (await query<{ table_name: string }>(
         harness.server.sql,
         "select table_name from pack_runtime_tables where publisher='optd' and pack_name='projects' and definition_kind='resource' and definition_name='timesheet'",
@@ -306,8 +306,8 @@ export function createHostPublicFlowBackend(
       }
       return (await query<{ principal_id: string; hours: string }>(
         harness.server.sql,
-        `select principal_id,hours::text hours from ${table} where project_id=$1 and principal_id=$2 and archived_at is null`,
-        [projectId, principalId],
+        `select principal_id,hours::text hours from ${table} where workspace_id=$1 and principal_id=$2 and archived_at is null`,
+        [workspaceId, principalId],
       )).rows.map((row) => ({
         principalId: row.principal_id,
         hours: Number(row.hours).toString(),
@@ -316,8 +316,8 @@ export function createHostPublicFlowBackend(
     async observeCrmRelationshipAuthority(input) {
       return (await query<{ count: number }>(
         harness.server.sql,
-        `select count(*)::int count from role_assignments ra join policy_rules pr on pr.role_id=ra.role_id join policy_definition_versions pdv on pdv.id=pr.policy_definition_version_id and pdv.active join policy_assignments pa on pa.policy_definition_version_id=pdv.id and pa.active where ra.principal_id=$1 and ra.active and ra.role_id='optd/crm:crm_admin' and ra.project_id=$2 and pr.capability='link' and pr.resource='optd/crm:opportunity_viewer' and pa.boundary_type='all_projects'`,
-        [input.principalId, input.projectId],
+        `select count(*)::int count from role_assignments ra join policy_rules pr on pr.role_id=ra.role_id join policy_definition_versions pdv on pdv.id=pr.policy_definition_version_id and pdv.active join policy_assignments pa on pa.policy_definition_version_id=pdv.id and pa.active where ra.principal_id=$1 and ra.active and ra.role_id='optd/crm:crm_admin' and ra.workspace_id=$2 and pr.capability='link' and pr.resource='optd/crm:opportunity_viewer' and pa.boundary_type='all_workspaces'`,
+        [input.principalId, input.workspaceId],
       )).rows[0].count;
     },
     async observeRelationshipTuple(input) {
@@ -333,8 +333,8 @@ export function createHostPublicFlowBackend(
       const row =
         (await query<{ from_object_id: string; to_object_id: string }>(
           harness.server.sql,
-          `select from_object_id,to_object_id from ${table} where project_id=$1 and from_object_id=$2 and archived_at is null`,
-          [input.projectId, input.fromObjectId],
+          `select from_object_id,to_object_id from ${table} where workspace_id=$1 and from_object_id=$2 and archived_at is null`,
+          [input.workspaceId, input.fromObjectId],
         )).rows[0];
       return row
         ? { fromObjectId: row.from_object_id, toObjectId: row.to_object_id }
@@ -415,7 +415,7 @@ export function createHostPublicFlowBackend(
       lockRelease = undefined;
       lockTask = undefined;
     },
-    async observeMigration(projectId, leadId) {
+    async observeMigration(workspaceId, leadId) {
       const activeRevisionId = (await query<{ id: string }>(
         harness.server.sql,
         "select candidate_revision_id::text id from pack_active_revisions where publisher='optd' and pack_name='crm'",
@@ -440,8 +440,8 @@ export function createHostPublicFlowBackend(
           (select coalesce(jsonb_agg(to_jsonb(t) order by t.definition_kind,t.definition_name),'[]'::jsonb)::text from pack_runtime_tables t where publisher='optd' and pack_name='crm') catalog,
           (select coalesce(jsonb_agg(field_name order by field_name),'[]'::jsonb)::text from pack_source_files, lateral jsonb_object_keys(content::jsonb->'spec'->'fields') field_name where revision=$1 and path='resources/lead.yaml') source_fields,
           (select coalesce(jsonb_agg(to_jsonb(c) order by c.ordinal_position),'[]'::jsonb)::text from (select ordinal_position,column_name,data_type,udt_name,is_nullable,column_default from information_schema.columns where table_schema='public' and table_name=$2) c) physical_columns,
-          (select coalesce(jsonb_agg(to_jsonb(r) order by r.id),'[]'::jsonb)::text from ${table} r where r.project_id=$3 and r.id=$4) physical_rows`,
-        [activeRevisionId, table, projectId, leadId],
+          (select coalesce(jsonb_agg(to_jsonb(r) order by r.id),'[]'::jsonb)::text from ${table} r where r.workspace_id=$3 and r.id=$4) physical_rows`,
+        [activeRevisionId, table, workspaceId, leadId],
       )).rows[0];
       return {
         activeRevisionId,

@@ -6,9 +6,9 @@ import {
 
 const base: StageEvidence = {
   operation_graph_digest: `sha256:${"0".repeat(64)}`,
-  projects: [{ project_id: "project-a", version: 1, status: "active" }],
+  workspaces: [{ workspace_id: "workspace-a", version: 1, status: "active" }],
   pack_revisions: [{ id: "pack-a", digest: `sha256:${"1".repeat(64)}` }],
-  operations: [{ op: "create", project_id: "project-a" }] as never,
+  operations: [{ op: "create", workspace_id: "workspace-a" }] as never,
   dependencies: [{
     kind: "resource",
     component_revision_id: "component-a",
@@ -31,9 +31,9 @@ Deno.test("stage digest includes every frozen evidence category", async () => {
   const original = await stageDigest(base);
   const changes: Array<[string, StageEvidence]> = [
     ["graph", { ...base, operation_graph_digest: `sha256:${"f".repeat(64)}` }],
-    ["project", {
+    ["workspace", {
       ...base,
-      projects: [{ project_id: "project-a", version: 2 }],
+      workspaces: [{ workspace_id: "workspace-a", version: 2 }],
     }],
     ["pack", { ...base, pack_revisions: [{ id: "pack-b" }] }],
     ["component revision", {
@@ -74,7 +74,7 @@ Deno.test("stage digest includes every frozen evidence category", async () => {
     ["delivery", { ...base, planned_deliveries: [{ id: "delivery-b" }] }],
     ["operation", {
       ...base,
-      operations: [{ op: "archive", project_id: "project-a" }] as never,
+      operations: [{ op: "archive", workspace_id: "workspace-a" }] as never,
     }],
   ];
   for (const [category, changed] of changes) {

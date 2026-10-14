@@ -60,7 +60,7 @@ export async function storeOrReuseCandidate(
     [pack.publisher, pack.name, pack.sourceDigest],
   );
   if (existing.rows[0]) {
-    await projectComponentRevisions(sql, pack, existing.rows[0].id);
+    await workspaceComponentRevisions(sql, pack, existing.rows[0].id);
     return { id: existing.rows[0].id, reused: true };
   }
   const id = uuidV7();
@@ -80,7 +80,7 @@ export async function storeOrReuseCandidate(
     ],
   );
   if (inserted.rows[0]) {
-    await projectComponentRevisions(sql, pack, inserted.rows[0].id);
+    await workspaceComponentRevisions(sql, pack, inserted.rows[0].id);
     return { id: inserted.rows[0].id, reused: false };
   }
   const raced = await query<{ id: string }>(
@@ -91,11 +91,11 @@ export async function storeOrReuseCandidate(
   if (!raced.rows[0]) {
     throw new Error("candidate revision conflict could not be resolved");
   }
-  await projectComponentRevisions(sql, pack, raced.rows[0].id);
+  await workspaceComponentRevisions(sql, pack, raced.rows[0].id);
   return { id: raced.rows[0].id, reused: true };
 }
 
-async function projectComponentRevisions(
+async function workspaceComponentRevisions(
   sql: Queryable,
   pack: LoadedPack,
   candidateRevisionId: string,
@@ -173,10 +173,10 @@ async function projectComponentRevisions(
       }
     }
   }
-  await projectHookAttachmentRevisions(sql, pack, candidateRevisionId);
+  await workspaceHookAttachmentRevisions(sql, pack, candidateRevisionId);
 }
 
-async function projectHookAttachmentRevisions(
+async function workspaceHookAttachmentRevisions(
   sql: Queryable,
   pack: LoadedPack,
   candidateRevisionId: string,

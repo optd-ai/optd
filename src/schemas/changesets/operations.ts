@@ -20,7 +20,7 @@ const Ref = strictObject({
 const IdOrRef = Type.Union([UuidV7Schema, Ref]);
 const common = {
   key: Type.Optional(LocalKey),
-  project_id: Type.Optional(UuidV7Schema),
+  workspace_id: Type.Optional(UuidV7Schema),
 };
 const mutation = {
   expected_version: Type.Optional(Type.Integer({ minimum: 1 })),
@@ -33,6 +33,8 @@ export const AuthoredCreateSchema = strictObject({
   ...common,
   resource: QualifiedIdentitySchema,
   fields: Fields,
+  initial_state: Type.Optional(FieldName),
+  import_reason: Type.Optional(Type.String({ minLength: 1, maxLength: 4096 })),
 });
 export const AuthoredUpdateSchema = strictObject({
   op: Type.Literal("update"),
@@ -87,7 +89,7 @@ export const AuthoredOperationSchema = Type.Union([
   AuthoredUnlinkSchema,
   AuthoredCommentSchema,
 ]);
-const resolvedCommon = { key: LocalKey, project_id: UuidV7Schema };
+const resolvedCommon = { key: LocalKey, workspace_id: UuidV7Schema };
 const resolvedMutation = {
   expected_version: Type.Optional(Type.Integer({ minimum: 1 })),
   set: Type.Optional(Fields),
@@ -100,6 +102,10 @@ export const ResolvedOperationSchema = Type.Union([
     resource: QualifiedIdentitySchema,
     object_id: UuidV7Schema,
     fields: Fields,
+    initial_state: Type.Optional(FieldName),
+    import_reason: Type.Optional(
+      Type.String({ minLength: 1, maxLength: 4096 }),
+    ),
   }),
   strictObject({
     op: Type.Literal("update"),
@@ -149,7 +155,7 @@ export const ResolvedOperationSchema = Type.Union([
   }),
 ]);
 export const StageRequestSchema = strictObject({
-  project_id: Type.Optional(UuidV7Schema),
+  workspace_id: Type.Optional(UuidV7Schema),
   operations: Type.Array(AuthoredOperationSchema, {
     minItems: 1,
     maxItems: 10000,

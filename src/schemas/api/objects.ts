@@ -25,7 +25,7 @@ const Fields = Type.Record(
 export const ObjectDtoSchema = strictObject({
   kind: Type.Literal("object"),
   id: UuidV7,
-  project_id: UuidV7,
+  workspace_id: UuidV7,
   resource: Identity,
   version: Type.Integer({ minimum: 1 }),
   object_version_id: UuidV7,
@@ -37,7 +37,7 @@ export const ObjectDtoSchema = strictObject({
 export const RelationshipDtoSchema = strictObject({
   kind: Type.Literal("relationship"),
   id: UuidV7,
-  project_id: UuidV7,
+  workspace_id: UuidV7,
   relationship: Identity,
   version: Type.Integer({ minimum: 1 }),
   object_version_id: UuidV7,

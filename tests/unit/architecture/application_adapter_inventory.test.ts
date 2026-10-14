@@ -71,8 +71,8 @@ export const EXPECTED_APPLICATION_ADAPTER_EDGES:
     ),
     edge(
       "src/application/app.ts",
-      "src/adapters/outbound/postgres/project_repository.ts",
-      "src/application/ports/project_repository.ts#ProjectRepository",
+      "src/adapters/outbound/postgres/workspace_repository.ts",
+      "src/application/ports/workspace_repository.ts#WorkspaceRepository",
     ),
     edge(
       "src/application/app.ts",

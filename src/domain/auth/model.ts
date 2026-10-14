@@ -4,8 +4,8 @@ export type CredentialKind =
   | "agent_authorization";
 
 export type AuthorizationBoundary =
-  | { type: "project"; projectId: string }
-  | { type: "all_projects" }
+  | { type: "workspace"; workspaceId: string }
+  | { type: "all_workspaces" }
   | { type: "system" };
 
 export type RoleAssignment = {

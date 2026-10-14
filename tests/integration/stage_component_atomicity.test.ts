@@ -25,7 +25,7 @@ import { isUuidV7, uuidV7 } from "../../src/domain/ids/uuid_v7.ts";
 
 Deno.test({
   name:
-    "candidate components and hook attachments project atomically across reuse races and apply failure",
+    "candidate components and hook attachments workspace atomically across reuse races and apply failure",
   sanitizeOps: false,
   sanitizeResources: false,
   async fn() {

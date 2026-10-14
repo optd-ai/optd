@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-pack-definition-schemas; contract: 1; input: sha256:ba24690264dafae8ef9d6ffd77685009eee05b411c490818825a1e76b89bb6eb -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-pack-definition-schemas; contract: 1; input: sha256:d05d33eaa14d8f9bc22df19bd08ae401c952bc8f2eec813e0037170391aecbb3 -->
 
 # Pack Definition Schemas v1
 
@@ -74,9 +74,9 @@ strict descriptor with required `type`:
   `string`.
 - `format` is one of `email|uri|uuid` and only valid for `string`.
 - `ref` is a pack-local or publisher-qualified resource identity. A reference is
-  stored as UUID, must target an object in the same project, and cannot also
+  stored as UUID, must target an object in the same workspace, and cannot also
   have `enum`/`format`.
-- `unique: true` creates a project-scoped unique constraint including archived
+- `unique: true` creates a workspace-scoped unique constraint including archived
   rows. Active-only or multi-field uniqueness uses a named `unique` constraint
   with `where: active()` below.
 - `default` is intentionally absent: omitted write values are not silently
@@ -88,7 +88,7 @@ strict descriptor with required `type`:
   precision/scale. Date is `YYYY-MM-DD`; timestamp is RFC 3339 normalized to
   UTC.
 
-Platform fields (`id`, `project_id`, version/current-version, created/updated/
+Platform fields (`id`, `workspace_id`, version/current-version, created/updated/
 archive/auth metadata) are reserved and cannot be pack fields.
 
 ## `Resource`
@@ -138,14 +138,14 @@ spec:
 resource or read-only built-in `system:principal`; the latter validates an
 active principal UUID and enables direct one-hop ReBAC but is never
 created/updated by pack operations. Pack-resource endpoints and the relationship
-row belong to one project; cross-project links/references are forbidden even
-inside a multi-project changeset. Cardinality is expressed by `unique`:
+row belong to one workspace; cross-workspace links/references are forbidden even
+inside a multi-workspace changeset. Cardinality is expressed by `unique`:
 `[from]`, `[to]`, or `[from, to]`, avoiding ambiguous endpoint labels.
-Relationship uniqueness is project-scoped and active-row-only
+Relationship uniqueness is workspace-scoped and active-row-only
 (`archived_at IS NULL`) so an explicitly unlinked row may later be relinked with
 a new UUID/history. `fields` defaults empty and cannot use names
 `from|to|from_id|to_id`. `unique` is optional and may contain `from`, `to`, and
-relationship payload fields. Relationships are first-class project rows with
+relationship payload fields. Relationships are first-class workspace rows with
 generated UUIDv7/history/policy; they do not point at arbitrary resource field
 names.
 
@@ -230,7 +230,7 @@ spec:
 
 Only these fields are allowed. Resource/key/row/reconcile behavior is frozen in
 `pack-structure.md`. Rows contain only declared pack fields and never platform
-IDs/project/version metadata.
+IDs/workspace/version metadata.
 
 ## Canonicalization and references
 

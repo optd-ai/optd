@@ -35,7 +35,7 @@ const agent = {
   },
   role_assignments: [{
     role: "crm:sales_rep",
-    boundary: { type: "project", project_id: "project-1" },
+    boundary: { type: "workspace", workspace_id: "workspace-1" },
   }],
   session_id: "session-agent",
   auth_context_id: "context-agent",

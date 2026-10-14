@@ -12,7 +12,7 @@ Deno.test("object and relationship read DTOs are strict and UUIDv7 typed", () =>
   assert(objectDtoContract.check({
     kind: "object",
     id,
-    project_id: id,
+    workspace_id: id,
     resource: {
       publisher: "optd",
       pack: "crm",
@@ -29,7 +29,7 @@ Deno.test("object and relationship read DTOs are strict and UUIDv7 typed", () =>
   assert(relationshipDtoContract.check({
     kind: "relationship",
     id,
-    project_id: id,
+    workspace_id: id,
     relationship: {
       publisher: "optd",
       pack: "crm",
@@ -49,7 +49,7 @@ Deno.test("object and relationship read DTOs are strict and UUIDv7 typed", () =>
     objectDtoContract.check({
       kind: "object",
       id: id.toUpperCase(),
-      project_id: id,
+      workspace_id: id,
       resource: {
         publisher: "optd",
         pack: "crm",
@@ -69,7 +69,7 @@ Deno.test("object and relationship read DTOs are strict and UUIDv7 typed", () =>
     objectDtoContract.check({
       kind: "object",
       id,
-      project_id: id,
+      workspace_id: id,
       resource: {
         publisher: "optd",
         pack: "crm",

@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-queries-policy-history; contract: 1; input: sha256:75e357486d75d44480e0ac0f7370d83a12bba3a66d0a65ce99b3750d74cf1544 -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-queries-policy-history; contract: 1; input: sha256:59f1ccd10a2c31d036e69e2f6b5639c673b0cd2628a82793a578c6a11737b864 -->
 
 # Queries, policy, and history
 
@@ -28,7 +28,7 @@ Semantic/vector search, generated summaries, and MCP tools are outside current s
 
 ### Bind keyset cursors to canonical query and policy context
 
-Query/history/outbox pagination uses signed canonical cursors bound to filters, ordering, Project, actor policy/root, and generation where relevant; mismatch fails rather than silently restarting.
+Query/history/outbox pagination uses signed canonical cursors bound to filters, ordering, Workspace, actor policy/root, and generation where relevant; mismatch fails rather than silently restarting.
 
 <a id="obj-com-history"></a>
 

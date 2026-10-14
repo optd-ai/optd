@@ -104,11 +104,11 @@ export interface CompletePublicFlowEvidence {
   observeCrmRelationshipPolicy(): Promise<readonly Record<string, string>[]>;
   observePersistenceCounts(): Promise<PersistenceCounts>;
   observeAuthContextPrincipal(authContextId: string): Promise<string>;
-  observeCrmLostReasonId(projectId: string): Promise<string>;
-  observeProjectsTodoStageId(projectId: string): Promise<string>;
-  observeProjectsTaskCount(projectId: string, state: string): Promise<number>;
+  observeCrmLostReasonId(workspaceId: string): Promise<string>;
+  observeProjectsTodoStageId(workspaceId: string): Promise<string>;
+  observeProjectsTaskCount(workspaceId: string, state: string): Promise<number>;
   observeProjectsTimesheets(
-    projectId: string,
+    workspaceId: string,
     principalId: string,
   ): Promise<
     readonly Readonly<{
@@ -119,14 +119,14 @@ export interface CompletePublicFlowEvidence {
   observeCrmRelationshipAuthority(
     input: Readonly<{
       principalId: string;
-      projectId: string;
+      workspaceId: string;
     }>,
   ): Promise<number>;
   observeRelationshipTuple(
     input: Readonly<{
       pack: "crm" | "projects_auxiliary";
       relationship: string;
-      projectId: string;
+      workspaceId: string;
       fromObjectId: string;
     }>,
   ): Promise<RelationshipTupleEvidence | null>;
@@ -144,7 +144,7 @@ export interface CompletePublicFlowEvidence {
   holdMigrationTableLock(): Promise<void>;
   releaseMigrationTableLock(): Promise<void>;
   observeMigration(
-    projectId: string,
+    workspaceId: string,
     leadId: string,
   ): Promise<MigrationEvidence>;
   observeMigrationSideEffects(planId: string): Promise<MigrationSideEffects>;

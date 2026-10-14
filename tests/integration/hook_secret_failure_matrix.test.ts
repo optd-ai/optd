@@ -32,24 +32,24 @@ Deno.test({
         "--safe",
       ]);
       assertEquals(applied.code, 0, applied.stderr);
-      const project = await harness.runOptctl([
+      const workspace = await harness.runOptctl([
         "--json",
-        "project",
+        "workspace",
         "create",
         "hook-failure-matrix",
         "--display-name",
         "Hook Failure Matrix",
       ]);
-      assertEquals(project.code, 0, project.stderr);
-      const projectId = JSON.parse(project.stdout).data.id;
+      assertEquals(workspace.code, 0, workspace.stderr);
+      const workspaceId = JSON.parse(workspace.stdout).data.id;
       for (const item of CASES) {
         const before = await stageCount(harness);
-        const result = await stage(harness, projectId, item.name);
+        const result = await stage(harness, workspaceId, item.name);
         assertEquals(result.code, 1, result.stderr);
         assertEquals(JSON.parse(result.stderr).error.code, item.code);
         assertEquals(await stageCount(harness), before);
       }
-      const retained = await stage(harness, projectId, "stderr");
+      const retained = await stage(harness, workspaceId, "stderr");
       assertEquals(retained.code, 0, retained.stderr);
       const execution = JSON.parse(retained.stdout).data.hook_executions[0];
       assertEquals(execution.logs_truncated, true);
@@ -67,11 +67,11 @@ Deno.test({
 
 function stage(
   harness: Awaited<ReturnType<typeof startAuthenticatedHarness>>,
-  projectId: string,
+  workspaceId: string,
   name: string,
 ) {
   return harness.runJson(["--json", "changeset", "stage"], {
-    project_id: projectId,
+    workspace_id: workspaceId,
     operations: [{
       op: "create",
       resource: `test/failures:${name}`,

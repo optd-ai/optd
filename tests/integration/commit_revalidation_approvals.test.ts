@@ -82,7 +82,7 @@ Deno.test({
               );
             } else {await query(
                 matrix.harness.server.sql,
-                "update role_assignments set boundary_type='all_projects' where id=$1",
+                "update role_assignments set boundary_type='all_workspaces' where id=$1",
                 [approver.reviewerAssignment],
               );}
           },
@@ -337,7 +337,7 @@ async function stageApproval(
     {
       operations: [{
         op: "create",
-        project_id: matrix.projectId,
+        workspace_id: matrix.workspaceId,
         resource: `test/commitmatrix:${resource}`,
         fields: { key: `approval-cutoff-${suffix}` },
       }],
@@ -458,15 +458,30 @@ async function createApprover(
   await query(
     matrix.harness.server.sql,
     `insert into auth_contexts(id,principal_id,human_user_id,session_id,credential_kind,roles,created_at)
-     values($1,$2,$3,$4,'human_full','{system:super_admin,test/commitmatrix:reviewer}',now())`,
+     values($1,$2,$3,$4,'human_full','{test/commitmatrix:reviewer}',now())`,
     [context, principal, human, session],
   );
   await query(
     matrix.harness.server.sql,
     `insert into role_assignments(id,principal_id,role_id,boundary_type,active) values
-      ($1,$2,'test/commitmatrix:reviewer','system',true),
-      ($3,$2,'system:super_admin','system',true)`,
-    [reviewerAssignment, principal, uuidV7()],
+      ($1,$2,'test/commitmatrix:reviewer','system',true)`,
+    [reviewerAssignment, principal],
+  );
+  const policy = uuidV7();
+  await query(
+    matrix.harness.server.sql,
+    "insert into policy_definition_versions(id,policy_id,version,active) values($1,$2,1,true)",
+    [policy, `test/commitmatrix:approval_${principal.replaceAll("-", "")}`],
+  );
+  await query(
+    matrix.harness.server.sql,
+    "insert into policy_rules(id,policy_definition_version_id,role_id,capability,resource,condition_kind) values($1,$2,'test/commitmatrix:reviewer','changeset.approval.decide','system:changeset-approval','unconditional')",
+    [uuidV7(), policy],
+  );
+  await query(
+    matrix.harness.server.sql,
+    "insert into policy_assignments(id,policy_definition_version_id,boundary_type,active) values($1,$2,'system',true)",
+    [uuidV7(), policy],
   );
   return {
     reviewerAssignment,
@@ -477,7 +492,7 @@ async function createApprover(
       humanUserId: human,
       sessionId: session,
       credentialKind: "human_full",
-      roles: ["system:super_admin", "test/commitmatrix:reviewer"],
+      roles: ["test/commitmatrix:reviewer"],
       createdAt: new Date().toISOString(),
     },
   };

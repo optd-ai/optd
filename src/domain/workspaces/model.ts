@@ -1,12 +1,12 @@
 import { err, ok, type Result, validationError } from "../errors/result.ts";
 
-export type ProjectStatus = "active" | "archived";
-export type Project = {
+export type WorkspaceStatus = "active" | "archived";
+export type Workspace = {
   id: string;
   slug: string;
   displayName: string;
   description: string | null;
-  status: ProjectStatus;
+  status: WorkspaceStatus;
   version: number;
   createdAt: string;
   updatedAt: string;
@@ -15,7 +15,7 @@ export type Project = {
 
 const SLUG = /^[a-z][a-z0-9-]*$/;
 
-export function validateProjectSlug(value: unknown): Result<string> {
+export function validateWorkspaceSlug(value: unknown): Result<string> {
   if (
     typeof value !== "string" || unicodeLength(value) < 1 ||
     unicodeLength(value) > 63 || !SLUG.test(value)
@@ -31,7 +31,7 @@ export function validateProjectSlug(value: unknown): Result<string> {
   return ok(value);
 }
 
-export function validateProjectName(value: unknown): Result<string> {
+export function validateWorkspaceName(value: unknown): Result<string> {
   if (typeof value !== "string") {
     return err(
       validationError("validation_failed", "display_name is required", {

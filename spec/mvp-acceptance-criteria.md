@@ -1,4 +1,4 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-mvp-acceptance-criteria; contract: 1; input: sha256:fc7ef7ba2db39f8175de0e8cc215fac57a353968cf75745cf5b350ec755af361 -->
+<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-mvp-acceptance-criteria; contract: 1; input: sha256:a621ff8fb87098dd472af44ef09d10763a12781c441185196ddd5260fd8f740d -->
 
 # MVP Acceptance Criteria
 
@@ -17,7 +17,7 @@ Generated exact-contract projection imported into project-model/model.json from 
 The MVP is the smallest platform-engine implementation that can run real packs
 safely through API and `optctl`. It is not a CRM-only product.
 
-CRM is the default bundled proof fixture. A second bundled project-management
+CRM is the default bundled proof fixture. A second bundled workspace-management
 pack proves that the platform is generic and not accidentally hard-coded around
 CRM semantics.
 
@@ -34,7 +34,7 @@ setup:
 4. `optctl bootstrap init --username <name>` creates/logs in the first human
    `system:super_admin` through the public auth interface.
 5. Authenticated `optctl home` returns agent-friendly TOON output.
-6. `optctl project create sales --display-name "Sales"` creates the explicit
+6. `optctl workspace create sales --display-name "Sales"` creates the explicit
    UUIDv7 runtime/auth boundary and selects it in local context.
 7. `optctl pack preview prototypes/crm-default-pack` validates the CRM pack
    against `pack-definition-schemas.md` (including publisher-qualified identity,
@@ -43,7 +43,7 @@ setup:
    rejected.
 8. `optctl pack apply prototypes/crm-default-pack` applies the CRM pack as
    authored in the repository.
-9. `optctl --project sales seed commit optd/crm --all` uses the exact
+9. `optctl --workspace sales seed commit optd/crm --all` uses the exact
    client-side stage/changeset-commit reconcile path; a repeated run returns
    unchanged without creating object versions.
 10. `optctl metadata resource optd/crm:lead` and
@@ -52,9 +52,9 @@ setup:
 11. `optctl changeset stage/inspect/commit` can create, update, archive, link,
     unlink, transition, and comment on objects; stage output already contains
     the complete inspect representation.
-12. `optctl --project sales query optd/crm:lead ...` filters through
+12. `optctl --workspace sales query optd/crm:lead ...` filters through
     SQL-lowered expressions, policy pushdown, projection, and cursor pagination.
-13. `optctl --project sales action stage/commit optd/crm:convert_lead ...`
+13. `optctl --workspace sales action stage/commit optd/crm:convert_lead ...`
     runs the configured action/hook path; direct commit is a client-side stage
     followed by commit.
 14. Object and first-class relationship read/query/history show immutable
@@ -87,7 +87,7 @@ setup:
   waits indefinitely over a reconnectable WebSocket, then redeems and installs
   it, including interrupted-delivery retry.
 - The nearest process binding always supplies one current authorization token;
-  `optctl` never credential-shops by role/project or falls back after denial.
+  `optctl` never credential-shops by role/workspace or falls back after denial.
 - On Linux, PID/start-time/user/boot-marker ancestry selects the nearest
   binding, rejects PID reuse/stale/mismatched identity, and survives compiled
   CLI tests. Unimplemented OS adapters fail `process_inspection_unsupported`,
@@ -102,7 +102,7 @@ setup:
 
 ## Changeset and hook authorization acceptance
 
-- A changeset may atomically touch multiple projects; one token is evaluated per
+- A changeset may atomically touch multiple workspaces; one token is evaluated per
   operation boundary and the client creates no causation links.
 - Staging executes synchronous action/hook effects once and validates declared
   effects, runtime capabilities, hook secret grants, code/config identities,
@@ -163,7 +163,7 @@ setup:
 
 ## Second pack acceptance
 
-The MVP plan must include a second bundled pack modeled after Odoo-style project
+The MVP plan must include a second bundled pack modeled after Odoo-style workspace
 management. It does not need every Odoo feature, but it must prove genericity by
 using different domain objects and workflows from CRM.
 
@@ -179,7 +179,7 @@ Minimum resources:
 
 Minimum behaviors:
 
-- Project/task ownership and assignment.
+- Workspace/task ownership and assignment.
 - Task stage lifecycle: `todo -> in_progress -> blocked -> done` with explicit
   allowed transitions.
 - Milestone linkage.
@@ -188,7 +188,7 @@ Minimum behaviors:
 - At least one action, e.g. `optd/projects:start_task`,
   `optd/projects:block_task`, or `optd/projects:complete_task`.
 - At least one validation hook and one after-commit hook.
-- Policy rules for project members, assignees, managers, and admins.
+- Policy rules for workspace members, assignees, managers, and admins.
 - AXI guidance sufficient for `optctl home` and metadata commands.
 
 ## Runtime acceptance
@@ -223,7 +223,7 @@ Minimum behaviors:
 - Hooks receive curated stdin JSON and only explicitly declared env
   vars/secrets.
 - Policy is enforced for queries/object/relationship reads, changesets/actions/
-  seeds, sensitive metadata, migrations, projects, assignments, secrets, and
+  seeds, sensitive metadata, migrations, workspaces, assignments, secrets, and
   outbox administration. Hooks have no self-API capability.
 - One-hop ReBAC is proven by CRM `opportunity_viewer` relationships directly to
   `system:principal`; no actor-supplied arrays or deep traversal are accepted.
@@ -239,5 +239,5 @@ Minimum behaviors:
 - CLI structured input is JSON only.
 - Server routes follow the frozen resource-oriented inventory in
   `spec/mvp-api-routes.md`.
-- CLI sends publisher-qualified definition identity and explicit project
+- CLI sends publisher-qualified definition identity and explicit workspace
   separately; no dotted namespace compatibility alias is required.

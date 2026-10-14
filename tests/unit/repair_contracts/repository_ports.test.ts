@@ -24,7 +24,7 @@ const actor = {
 } as const;
 const reviewedTargets: readonly TargetAuthorityEvidence[] = [{
   target: {
-    projectId: "019b1234-5678-7abc-8def-012345678900",
+    workspaceId: "019b1234-5678-7abc-8def-012345678900",
     resource: "publisher/crm:lead",
     object: {
       id: "019b1234-5678-7abc-8def-012345678901",
@@ -101,7 +101,7 @@ const changesets: ChangesetFactRepository<
 const readSession: ReadSessionPort<
   {
     auth: { authContextId: string };
-    address: { projectId: string; objectId: string };
+    address: { workspaceId: string; objectId: string };
   },
   {
     object: string;
@@ -110,7 +110,10 @@ const readSession: ReadSessionPort<
 > = {
   async execute(request, work) {
     assertEquals(request.auth.authContextId, "auth-context");
-    assertEquals(request.address, { projectId: "project", objectId: "object" });
+    assertEquals(request.address, {
+      workspaceId: "workspace",
+      objectId: "object",
+    });
     return await work({
       object: "object",
       authorizationRootId: "authorization-root",
@@ -127,7 +130,7 @@ const exactStageCutoff = await createActionStageAuthorityCutoff(
 );
 
 const actionStageAuthority: ActionStageAuthorityPort<
-  { projectId: string },
+  { workspaceId: string },
   ActionStageAuthorityCutoff
 > = {
   lockAndEvaluate: () => Promise.resolve(exactStageCutoff),
@@ -169,7 +172,7 @@ Deno.test("read session preserves immutable request and root anchor", async () =
   const result = await readSession.execute(
     {
       auth: { authContextId: "auth-context" },
-      address: { projectId: "project", objectId: "object" },
+      address: { workspaceId: "workspace", objectId: "object" },
     },
     (session) => Promise.resolve(session),
   );
@@ -181,7 +184,7 @@ Deno.test("read session preserves immutable request and root anchor", async () =
 
 Deno.test("action stage authority freezes cutoff before post-hook persistence", async () => {
   const cutoff = await actionStageAuthority.lockAndEvaluate({
-    projectId: "project",
+    workspaceId: "workspace",
   });
   assertEquals(cutoff.authorization.actor, actor);
   assertEquals(
