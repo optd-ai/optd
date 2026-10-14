@@ -167,30 +167,16 @@ Deno.test("freshness rejects stale, future, nonfinite and replayed observations"
   ) assert.throws(() => assertFresh(times[0], times[1], times[2]));
 });
 
-Deno.test("challenge is read from unambiguous current model, never historical receipt", () => {
-  const records = ["DEC-optd-api-namespace", "EV-optd-domain-control-txt"].map((
-    id,
-  ) => ({ id, body: challenge }));
-  assert.equal(expectedChallenge({ records }), challenge);
+Deno.test("challenge is read from the current spec, never a model or historical receipt", () => {
+  assert.equal(expectedChallenge("# Namespace\n" + challenge), challenge);
   for (
-    const model of [
-      {},
-      { records: records.slice(1) },
-      { records: [...records, records[0]] },
-      {
-        records: [records[0], {
-          ...records[1],
-          body: "pi-dag-workflow=00000000000000000000000000000000",
-        }],
-      },
-      {
-        records: [records[0], {
-          ...records[1],
-          body: challenge + " " + challenge,
-        }],
-      },
+    const specification of [
+      "",
+      "# Namespace\nNo challenge.",
+      challenge + "\n" + challenge,
+      challenge + "\npi-dag-workflow=00000000000000000000000000000000",
     ]
-  ) assert.throws(() => expectedChallenge(model));
+  ) assert.throws(() => expectedChallenge(specification));
 });
 
 Deno.test("command boundary denies mutation, credentials, arbitrary services and argument injection", () => {

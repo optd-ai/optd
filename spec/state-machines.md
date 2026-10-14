@@ -1,8 +1,6 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-state-machines; contract: 1; input: sha256:f14f7d265848dba8469bad6d2cfdc5314e7f435848a5d7d37f4ea6d56322d639 -->
-
 # State Machines
 
-Generated exact-contract projection imported into project-model/model.json from the reviewed state-machines.md source.
+Authoritative contract; edit this specification directly.
 
 ## Exact migrated contract
 
@@ -10,7 +8,11 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — State Machines
 
-**Migration provenance.** Exact normative contract imported from `spec/state-machines.md` at `sha256:746fe79ad8db6c42a7420ed6e9b345dfd6abb6f59cc9e4c29eea2dd280ca83c9`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
+**Migration provenance.** Exact normative contract imported from
+`spec/state-machines.md` at
+`sha256:746fe79ad8db6c42a7420ed6e9b345dfd6abb6f59cc9e4c29eea2dd280ca83c9`. Text
+explicitly labeled historical, research, prototype evidence, or deferred remains
+non-normative; all other versioned requirements below are preserved literally.
 
 ## Decision
 

@@ -1,8 +1,6 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-mvp-stack; contract: 1; input: sha256:32d75d06ebaa786999db8ef77e5e397bb3f672dd5391c94cd7ae0996907ba9f7 -->
-
 # MVP Stack Decisions
 
-Generated exact-contract projection imported into project-model/model.json from the reviewed mvp-stack.md source.
+Authoritative contract; edit this specification directly.
 
 ## Exact migrated contract
 
@@ -10,7 +8,11 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — MVP Stack Decisions
 
-**Migration provenance.** Exact normative contract imported from `spec/mvp-stack.md` at `sha256:f6ab86b71ab4d5b95612ba408f014ae2b61513a74387eae71d836dacefcb4fdd`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
+**Migration provenance.** Exact normative contract imported from
+`spec/mvp-stack.md` at
+`sha256:f6ab86b71ab4d5b95612ba408f014ae2b61513a74387eae71d836dacefcb4fdd`. Text
+explicitly labeled historical, research, prototype evidence, or deferred remains
+non-normative; all other versioned requirements below are preserved literally.
 
 ## Decisions
 
@@ -26,10 +28,10 @@ Rationale:
 - Keeps server iteration fast while core semantics stabilize.
 - Does not prevent a later Rust server if performance requirements demand it.
 
-Avoid NestJS for the MVP unless the workspace later needs its module/decorator/DI
-model. The platform's hard problems are storage correctness, policy/query
-lowering, changesets, hooks, migrations, and outbox behavior; a heavy HTTP
-framework does not solve those.
+Avoid NestJS for the MVP unless the workspace later needs its
+module/decorator/DI model. The platform's hard problems are storage correctness,
+policy/query lowering, changesets, hooks, migrations, and outbox behavior; a
+heavy HTTP framework does not solve those.
 
 ### CLI
 

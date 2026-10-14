@@ -1,8 +1,6 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-secret-encryption; contract: 1; input: sha256:f2eafc3ae4b7a9bfa6c3ec8b80d1ecc845e80c67835c1d9c71d0e8cf5c003a96 -->
-
 # Secret Encryption Model
 
-Generated exact-contract projection imported into project-model/model.json from the reviewed secret-encryption.md source.
+Authoritative contract; edit this specification directly.
 
 ## Exact migrated contract
 
@@ -10,7 +8,12 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — Secret Encryption Model
 
-**Migration provenance.** Exact normative contract imported from `spec/secret-encryption.md` at `sha256:245fc34ad2f90fef04c5a023d2dc626a70315d38c44ddd31a49860e81b7d15f7`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
+**Migration provenance.** Exact normative contract imported from
+`spec/secret-encryption.md` at
+`sha256:245fc34ad2f90fef04c5a023d2dc626a70315d38c44ddd31a49860e81b7d15f7`. Text
+explicitly labeled historical, research, prototype evidence, or deferred remains
+non-normative; all other versioned requirements below preserve the imported
+contract semantics as maintained directly in these specifications.
 
 Secrets are encrypted at the application layer before they are written to
 Postgres. Do not rely only on Postgres/database-level encryption at rest.
@@ -69,9 +72,9 @@ create table platform_secrets(
 
 ## MVP key behavior
 
-- `OPTD_SECRET_MASTER_KEY` is base64 for exactly 32 random bytes. Encryption
-  is AES-256-GCM with a fresh 96-bit cryptographic nonce per value; `key_id` is
-  a non-secret SHA-256 fingerprint of the key and algorithm/version.
+- `OPTD_SECRET_MASTER_KEY` is base64 for exactly 32 random bytes. Encryption is
+  AES-256-GCM with a fresh 96-bit cryptographic nonce per value; `key_id` is a
+  non-secret SHA-256 fingerprint of the key and algorithm/version.
 - The key is required before secret create/rotate/decrypt. If no secret rows
   exist, the server may start without it and secret mutation/resolution returns
   `secret_key_unavailable` (503).

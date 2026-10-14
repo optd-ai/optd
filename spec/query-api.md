@@ -1,8 +1,6 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-query-api; contract: 1; input: sha256:cc39ff68baa4235720f834ee200f4bc1ededb58f737f96ea021eeb390c7d2018 -->
-
 # Query and Object Read API v1
 
-Generated exact-contract projection imported into project-model/model.json from the reviewed query-api.md source.
+Authoritative contract; edit this specification directly.
 
 ## Exact migrated contract
 
@@ -10,7 +8,12 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — Query and Object Read API v1
 
-**Migration provenance.** Exact normative contract imported from `spec/query-api.md` at `sha256:551ee5b8c344c7624e274adc5034e804cd8676349e562a16e12217a660e439d9`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
+**Migration provenance.** Exact normative contract imported from
+`spec/query-api.md` at
+`sha256:551ee5b8c344c7624e274adc5034e804cd8676349e562a16e12217a660e439d9`. Text
+explicitly labeled historical, research, prototype evidence, or deferred remains
+non-normative; all other versioned requirements below preserve the imported
+contract semantics as maintained directly in these specifications.
 
 ## Read DTOs
 
@@ -167,8 +170,8 @@ inserts/updates may appear according to ordinary keyset semantics.
 
 Object and relationship GET routes resolve explicit workspace/definition/row ID
 and apply `read` (and `read_archived` when needed) before returning the matching
-DTO. Definition or workspace mismatch returns safe `not_found`/`workspace_conflict`
-without existence leak.
+DTO. Definition or workspace mismatch returns safe
+`not_found`/`workspace_conflict` without existence leak.
 
 History GET returns one cursor-paginated timeline newest first by
 `created_at,id`. Entries have discriminator `object_version|comment`.
@@ -181,4 +184,7 @@ access uses `read` plus `history.read`; archived history also requires
 
 ## Projection and pagination guidance
 
-The platform id field is valid in explicit and default projections. Omitted fields use axi.list.defaultFields when present, otherwise resource fields. CLI text output displays a next-cursor notice whenever meta.has_more is true; JSON preserves the envelope and cursor without presentation text.
+The platform id field is valid in explicit and default projections. Omitted
+fields use axi.list.defaultFields when present, otherwise resource fields. CLI
+text output displays a next-cursor notice whenever meta.has_more is true; JSON
+preserves the envelope and cursor without presentation text.

@@ -898,8 +898,8 @@ printf '\n== typecheck and format ==\n'
 printf 'COMMAND: deno task check\n'
 run_owned typecheck deno task check
 verify_source
-printf 'COMMAND: deno fmt --check src tests docs project-model deno.json\n'
-run_owned format deno fmt --check src tests docs project-model deno.json
+printf 'COMMAND: deno fmt --check src tests docs spec deno.json\n'
+run_owned format deno fmt --check src tests docs spec deno.json
 verify_source
 
 printf '\n== exact one-time release image build ==\n'

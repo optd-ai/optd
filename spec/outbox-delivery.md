@@ -1,8 +1,6 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-outbox-delivery; contract: 1; input: sha256:296ce13e23e695f8af6198de2afb0947dd582a115c4f7a0d17b68b7dbeaba515 -->
-
 # Durable Outbox Delivery
 
-Generated exact-contract projection imported into project-model/model.json from the reviewed outbox-delivery.md source.
+Authoritative contract; edit this specification directly.
 
 ## Exact migrated contract
 
@@ -10,14 +8,19 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — Durable Outbox Delivery
 
-**Migration provenance.** Exact normative contract imported from `spec/outbox-delivery.md` at `sha256:37566cb3182a77dd82ec69c54d040b96568e5754693af48a79504cc76db16124`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
+**Migration provenance.** Exact normative contract imported from
+`spec/outbox-delivery.md` at
+`sha256:37566cb3182a77dd82ec69c54d040b96568e5754693af48a79504cc76db16124`. Text
+explicitly labeled historical, research, prototype evidence, or deferred remains
+non-normative; all other versioned requirements below preserve the imported
+contract semantics as maintained directly in these specifications.
 
 ## Purpose and guarantee
 
 Intentional external effects run only after the domain transaction commits. That
 transaction atomically inserts immutable events and durable outbox delivery
-rows. The main optd server then runs one asynchronous polling loop in the
-same process/container to claim and execute after-commit hooks.
+rows. The main optd server then runs one asynchronous polling loop in the same
+process/container to claim and execute after-commit hooks.
 
 The MVP guarantee is **durable at-least-once delivery attempts**, not
 exactly-once external effects. A hook may complete an external request and the
@@ -188,8 +191,8 @@ authorized manual retry may reopen `dead_letter` as a new generation.
 ## No delivery ordering guarantee
 
 MVP provides no ordering guarantee between deliveries, even when they reference
-the same object, workspace, event type, or hook. Independent rows may execute and
-complete in any order.
+the same object, workspace, event type, or hook. Independent rows may execute
+and complete in any order.
 
 This avoids head-of-line blocking and hidden coordination before real pack usage
 demonstrates a concrete need. Events and envelopes include immutable object

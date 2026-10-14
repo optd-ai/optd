@@ -1,8 +1,6 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-object-model; contract: 1; input: sha256:84e277d1c433a407f3f32a533fbd4fd21546a04e4b90e5b47289e3f6492a337b -->
-
 # Object Model
 
-Generated exact-contract projection imported into project-model/model.json from the reviewed object-model.md source.
+Authoritative contract; edit this specification directly.
 
 ## Exact migrated contract
 
@@ -10,7 +8,11 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — Object Model
 
-**Migration provenance.** Exact normative contract imported from `spec/object-model.md` at `sha256:68b5ab4f4405cd14db257a7ad8946a4d78b195786c973609fe03fd11a649737c`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
+**Migration provenance.** Exact normative contract imported from
+`spec/object-model.md` at
+`sha256:68b5ab4f4405cd14db257a7ad8946a4d78b195786c973609fe03fd11a649737c`. Text
+explicitly labeled historical, research, prototype evidence, or deferred remains
+non-normative; all other versioned requirements below are preserved literally.
 
 ## Summary
 
@@ -104,11 +106,11 @@ and scripts layered on the same resource APIs as user-defined resources.
   relationship definitions come from globally installed packs. Operators create
   custom domain types by authoring/applying packs, not by bypassing pack
   validation with an unversioned loose-type API.
-- Every runtime object has UUIDv7 identity, explicit workspace, qualified resource
-  definition, mutable current projection, immutable version history, audit
-  provenance, archive fields, policy evaluation, and changeset-only mutation.
-  Lifecycle, search, comments, relationships, actions, and hooks are optional
-  definition capabilities unless their specific schemas require them.
+- Every runtime object has UUIDv7 identity, explicit workspace, qualified
+  resource definition, mutable current projection, immutable version history,
+  audit provenance, archive fields, policy evaluation, and changeset-only
+  mutation. Lifecycle, search, comments, relationships, actions, and hooks are
+  optional definition capabilities unless their specific schemas require them.
 - Resource/relationship schema is strict before staging: unknown fields and
   incompatible values fail; commit revalidates the pinned canonical graph
   against the current exact referenced pack revision.

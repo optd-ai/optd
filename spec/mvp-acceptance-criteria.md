@@ -1,8 +1,6 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-mvp-acceptance-criteria; contract: 1; input: sha256:a621ff8fb87098dd472af44ef09d10763a12781c441185196ddd5260fd8f740d -->
-
 # MVP Acceptance Criteria
 
-Generated exact-contract projection imported into project-model/model.json from the reviewed mvp-acceptance-criteria.md source.
+Authoritative contract; edit this specification directly.
 
 ## Exact migrated contract
 
@@ -10,7 +8,12 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — MVP Acceptance Criteria
 
-**Migration provenance.** Exact normative contract imported from `spec/mvp-acceptance-criteria.md` at `sha256:840d58390cc1a42d98a05c02c4d3cf73eeacc2dd7f391e90352ea70fa4f30c7b`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
+**Migration provenance.** Exact normative contract imported from
+`spec/mvp-acceptance-criteria.md` at
+`sha256:840d58390cc1a42d98a05c02c4d3cf73eeacc2dd7f391e90352ea70fa4f30c7b`. Text
+explicitly labeled historical, research, prototype evidence, or deferred remains
+non-normative; all other versioned requirements below preserve the imported
+contract semantics as maintained directly in these specifications.
 
 ## MVP definition
 
@@ -102,8 +105,8 @@ setup:
 
 ## Changeset and hook authorization acceptance
 
-- A changeset may atomically touch multiple workspaces; one token is evaluated per
-  operation boundary and the client creates no causation links.
+- A changeset may atomically touch multiple workspaces; one token is evaluated
+  per operation boundary and the client creates no causation links.
 - Staging executes synchronous action/hook effects once and validates declared
   effects, runtime capabilities, hook secret grants, code/config identities,
   policies, and object versions.
@@ -163,9 +166,9 @@ setup:
 
 ## Second pack acceptance
 
-The MVP plan must include a second bundled pack modeled after Odoo-style workspace
-management. It does not need every Odoo feature, but it must prove genericity by
-using different domain objects and workflows from CRM.
+The MVP plan must include a second bundled pack modeled after Odoo-style
+workspace management. It does not need every Odoo feature, but it must prove
+genericity by using different domain objects and workflows from CRM.
 
 Minimum resources:
 
@@ -197,8 +200,8 @@ Minimum behaviors:
 - The production image/container environment provides Postgres binaries.
 - If `OPTD_DATABASE_URL` is set, the server uses external Postgres and never
   manages that process.
-- If `OPTD_DATABASE_URL` is absent, the server starts app-managed Postgres
-  under `OPTD_DATA_DIR`.
+- If `OPTD_DATABASE_URL` is absent, the server starts app-managed Postgres under
+  `OPTD_DATA_DIR`.
 - Integration tests use the same app-managed Postgres lifecycle when Postgres
   binaries are available.
 - PGlite is permitted only for focused prototypes/unit spikes, not as the MVP
@@ -207,9 +210,9 @@ Minimum behaviors:
 ## Security and policy acceptance
 
 - Secret values are encrypted before storage in Postgres.
-- `OPTD_SECRET_MASTER_KEY` is base64 for 32 bytes; AES-256-GCM uses fresh
-  nonces and row/version AAD. Existing encrypted rows plus missing/mismatched
-  key fail startup.
+- `OPTD_SECRET_MASTER_KEY` is base64 for 32 bytes; AES-256-GCM uses fresh nonces
+  and row/version AAD. Existing encrypted rows plus missing/mismatched key fail
+  startup.
 - Secret APIs and hook injection are policy controlled through global,
   revision-and-slot-specific hook-secret grants. Every declared slot is
   required; grant mutation requires both `secret.grant` and

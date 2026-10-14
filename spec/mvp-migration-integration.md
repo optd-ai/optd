@@ -1,8 +1,6 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-mvp-migration-integration; contract: 1; input: sha256:d8b6cc4791f1de7e89c1902773c7346616c1608dcf729d84aba8f7f89253f60a -->
-
 # MVP Pack-Migration Integration
 
-Generated exact-contract projection imported into project-model/model.json from the reviewed mvp-migration-integration.md source.
+Authoritative contract; edit this specification directly.
 
 ## Exact migrated contract
 
@@ -10,7 +8,11 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — MVP Pack-Migration Integration
 
-**Migration provenance.** Exact normative contract imported from `spec/mvp-migration-integration.md` at `sha256:515d481385fc87bb369053ab259fb8df0e254b3aa43cca112c83068977576a7a`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
+**Migration provenance.** Exact normative contract imported from
+`spec/mvp-migration-integration.md` at
+`sha256:515d481385fc87bb369053ab259fb8df0e254b3aa43cca112c83068977576a7a`. Text
+explicitly labeled historical, research, prototype evidence, or deferred remains
+non-normative; all other versioned requirements below are preserved literally.
 
 ## Decision
 

@@ -110,8 +110,9 @@ and write capabilities remain explicit `UNVERIFIED` postcreation obligations,
 not prerequisites for a nonexistent destination. Local release/integration
 scripts and canonical OCI identity are inspected and hashed; workflow
 presence/absence is inventoried without claiming execution. TXT control is
-checked against the exact frozen-model challenge at both authoritative servers
-and both required public resolvers, within the bounded observation window.
+checked against the exact challenge in `spec/packs-workspaces.md` at both
+authoritative servers and both required public resolvers, within the bounded
+observation window.
 
 API contracts:
 [organization metadata](https://docs.github.com/en/rest/orgs/orgs),

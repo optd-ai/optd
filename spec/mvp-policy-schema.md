@@ -1,8 +1,6 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-mvp-policy-schema; contract: 1; input: sha256:b55aff5f70d3d73d721e3fe15dba0958918d88161a8c79898f252f93f082647f -->
-
 # MVP Policy Schema v1
 
-Generated exact-contract projection imported into project-model/model.json from the reviewed mvp-policy-schema.md source.
+Authoritative contract; edit this specification directly.
 
 ## Exact migrated contract
 
@@ -10,7 +8,12 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — MVP Policy Schema v1
 
-**Migration provenance.** Exact normative contract imported from `spec/mvp-policy-schema.md` at `sha256:f5d3922c71d77bf62224e1b45836b3c3d6793b9b68fa65df05892252fb61e51b`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
+**Migration provenance.** Exact normative contract imported from
+`spec/mvp-policy-schema.md` at
+`sha256:f5d3922c71d77bf62224e1b45836b3c3d6793b9b68fa65df05892252fb61e51b`. Text
+explicitly labeled historical, research, prototype evidence, or deferred remains
+non-normative; all other versioned requirements below preserve the imported
+contract semantics as maintained directly in these specifications.
 
 Policy uses structured YAML plus the frozen SQL-lowerable CEL subset. Rego/OPA,
 arbitrary SQL, caller-supplied roles, and pack-defined permission vocabularies
@@ -58,10 +61,10 @@ Pack-local role/resource/action/relationship references may be abbreviated in
 source and are canonicalized against the owning pack during preview. Persisted
 policy definitions contain only publisher-qualified identities.
 
-`spec.default_assignment` is required and is `none|all_workspaces`. Pack policies
-cannot default-activate at `system` or one workspace. `all_workspaces` activation is
-security-relevant, shown in preview, and atomically tied to the exact active
-pack revision. It grants no role by itself.
+`spec.default_assignment` is required and is `none|all_workspaces`. Pack
+policies cannot default-activate at `system` or one workspace. `all_workspaces`
+activation is security-relevant, shown in preview, and atomically tied to the
+exact active pack revision. It grants no role by itself.
 
 ## Rule fields
 

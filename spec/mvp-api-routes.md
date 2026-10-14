@@ -1,8 +1,6 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-mvp-api-routes; contract: 1; input: sha256:fe0d2b881188292714ff6899891e21161d3a7070896539277399ba1f91d3b27e -->
-
 # MVP API Routes
 
-Generated exact-contract projection imported into project-model/model.json from the reviewed mvp-api-routes.md source.
+Authoritative contract; edit this specification directly.
 
 ## Exact migrated contract
 
@@ -10,7 +8,12 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — MVP API Routes
 
-**Migration provenance.** Exact normative contract imported from `spec/mvp-api-routes.md` at `sha256:b6b7896c05a6ad08e8d376ba91956fa19a2c598d31017cff005bda479f0e17d6`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
+**Migration provenance.** Exact normative contract imported from
+`spec/mvp-api-routes.md` at
+`sha256:b6b7896c05a6ad08e8d376ba91956fa19a2c598d31017cff005bda479f0e17d6`. Text
+explicitly labeled historical, research, prototype evidence, or deferred remains
+non-normative; all other versioned requirements below preserve the imported
+contract semantics as maintained directly in these specifications.
 
 ## Decision
 
@@ -117,17 +120,17 @@ POST /policy-assignments/{assignment_id}/disable
 - `{publisher}`, `{pack}`, and child-name segments are lowercase canonical
   names; the server resolves the one active revision and returns its immutable
   revision ID/digest in metadata.
-- `{workspace_id}`, `{object_id}`, `{stage_id}`, migration/grant/delivery IDs, and
-  generated operation/entity IDs are UUIDv7 values. CLI may resolve a workspace
-  slug/name before invoking workspace-ID routes.
+- `{workspace_id}`, `{object_id}`, `{stage_id}`, migration/grant/delivery IDs,
+  and generated operation/entity IDs are UUIDv7 values. CLI may resolve a
+  workspace slug/name before invoking workspace-ID routes.
 - `POST /queries` carries one explicit `workspace_id` and one structured
   definition identity `{kind: resource|relationship, publisher, pack, name}`.
   Cross-workspace list/query is not an MVP query mode.
-- A multi-workspace stage carries `workspace_id` on each operation. Stage inspection
-  exposes the canonical set of affected workspaces.
-- Object reads include workspace in the path even though object UUIDv7 values are
-  globally unique; a mismatch returns safe `not_found`/`workspace_conflict` per
-  the authorization/error contracts.
+- A multi-workspace stage carries `workspace_id` on each operation. Stage
+  inspection exposes the canonical set of affected workspaces.
+- Object reads include workspace in the path even though object UUIDv7 values
+  are globally unique; a mismatch returns safe `not_found`/`workspace_conflict`
+  per the authorization/error contracts.
 
 ## Write sequencing
 

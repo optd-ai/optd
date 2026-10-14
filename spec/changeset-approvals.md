@@ -1,8 +1,6 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-changeset-approvals; contract: 1; input: sha256:67346a909eab9ce55bcd35321a3ff2f69fc448aee6c8418ac8016b9be322c082 -->
-
 # Changeset Approval Contract
 
-Generated exact-contract projection imported into project-model/model.json from the reviewed changeset-approvals.md source.
+Authoritative contract; edit this specification directly.
 
 ## Exact migrated contract
 
@@ -10,7 +8,12 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — Changeset Approval Contract
 
-**Migration provenance.** Exact normative contract imported from `spec/changeset-approvals.md` at `sha256:d8a9b5c262e9a96e972c58e3a06a342ba528e331e09d148093435f298b9bb14c`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
+**Migration provenance.** Exact normative contract imported from
+`spec/changeset-approvals.md` at
+`sha256:d8a9b5c262e9a96e972c58e3a06a342ba528e331e09d148093435f298b9bb14c`. Text
+explicitly labeled historical, research, prototype evidence, or deferred remains
+non-normative; all other versioned requirements below preserve the imported
+contract semantics as maintained directly in these specifications.
 
 ## Decision
 
@@ -43,9 +46,9 @@ A trusted stage hook may emit `required_approvals[]`:
   stage.
 - `role`: one exact global role identity. Wildcards and permission expressions
   are forbidden.
-- `boundary`: exactly one workspace/all-workspace/system boundary using the normal
-  assignment schema. A workspace boundary must be one of the stage's affected
-  workspaces.
+- `boundary`: exactly one workspace/all-workspace/system boundary using the
+  normal assignment schema. A workspace boundary must be one of the stage's
+  affected workspaces.
 - `minimum`: integer 1–10; default 1.
 - `principal_types`: non-empty subset of `human_user|agent_user`; default is
   `[human_user]` so human review is explicit unless the pack says otherwise.

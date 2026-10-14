@@ -1,8 +1,6 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-disposition-crm-prototype-flow; contract: 1; input: sha256:28a92ef895c912ab347492e270e43208a1017807510a5eeadf96aa4dc491fea8 -->
-
 # Historical CRM Prototype Flow
 
-Generated non-normative disposition view preserving the complete reviewed legacy source for auditability.
+Non-normative historical material; see [spec governance](model-governance.md).
 
 ## Migration disposition
 
@@ -10,7 +8,12 @@ Generated non-normative disposition view preserving the complete reviewed legacy
 
 ### Disposition — Historical CRM Prototype Flow
 
-**Migration disposition.** This source is preserved literally below for auditability at `sha256:0f4533085e2fb1c1e4f26b0f1b0f08068ea97abb3b7f75c3e43f2e0d866f54ff`, but remains non-normative historical, supporting research, prototype evidence, roadmap, or superseded planning material. Only separately accepted current project-model objects carry product authority.
+**Migration disposition.** This source is preserved literally below for
+auditability at
+`sha256:0f4533085e2fb1c1e4f26b0f1b0f08068ea97abb3b7f75c3e43f2e0d866f54ff`, but
+remains non-normative historical, supporting research, prototype evidence,
+roadmap, or superseded planning material. Current normative specifications, not
+this historical material, carry product authority.
 
 > **Status:** prototype walkthrough retained as evidence. Its preview commands,
 > hook packaging questions, and identity examples are not normative.

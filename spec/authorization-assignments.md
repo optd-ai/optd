@@ -1,8 +1,6 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-authorization-assignments; contract: 1; input: sha256:631ad21e8debe2c8ed9ec86c24b23d14907611c1dd00c8f1d7441462c8cabf83 -->
-
 # Authorization Definitions and Assignments
 
-Generated exact-contract projection imported into project-model/model.json from the reviewed authorization-assignments.md source.
+Authoritative contract; edit this specification directly.
 
 ## Exact migrated contract
 
@@ -10,12 +8,17 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — Authorization Definitions and Assignments
 
-**Migration provenance.** Exact normative contract imported from `spec/authorization-assignments.md` at `sha256:1808e5907a6c5526e46999d2f512cb52231a5986a1e418ae7274142cddcb48a5`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
+**Migration provenance.** Exact normative contract imported from
+`spec/authorization-assignments.md` at
+`sha256:1808e5907a6c5526e46999d2f512cb52231a5986a1e418ae7274142cddcb48a5`. Text
+explicitly labeled historical, research, prototype evidence, or deferred remains
+non-normative; all other versioned requirements below preserve the imported
+contract semantics as maintained directly in these specifications.
 
 ## Decision
 
-optd separates reusable authorization definitions from the boundaries where
-they apply:
+optd separates reusable authorization definitions from the boundaries where they
+apply:
 
 1. Role definitions are globally registered.
 2. Policy definitions are globally registered.
@@ -54,9 +57,9 @@ The variants have distinct meanings:
 - `system` applies to operations without a workspace target, such as managing
   workspaces, users, policy assignments, or bootstrap recovery.
 
-System authority does not imply all-workspace authority, and all-workspace authority
-does not imply system authority. Creating `system` or `all_workspaces` assignments
-requires explicit elevated authorization.
+System authority does not imply all-workspace authority, and all-workspace
+authority does not imply system authority. Creating `system` or `all_workspaces`
+assignments requires explicit elevated authorization.
 
 ## Role definitions
 
@@ -94,8 +97,8 @@ installed globally rather than per workspace.
 ## Policy definitions
 
 A policy definition is globally registered authorization logic. It references
-canonical role and pack-definition identities rather than one particular workspace
-installation.
+canonical role and pack-definition identities rather than one particular
+workspace installation.
 
 ```yaml
 kind: Policy
@@ -151,7 +154,8 @@ boundary:
 
 Other exact boundary variants are `{ "type": "all_workspaces" }` and
 `{ "type": "system" }`. A workspace assignment grants no authority in another
-workspace; all-workspace authority does not imply system authority and vice versa.
+workspace; all-workspace authority does not imply system authority and vice
+versa.
 
 The server creates a UUIDv7 assignment with immutable principal/role/boundary/
 creator content and separate active/disabled lifecycle. Deactivation retains
@@ -223,8 +227,8 @@ containing the prior still-valid assignments plus the new assignments. The new
 token supersedes the prior local process binding; one process anchor has one
 current authorization token.
 
-`optctl` never chooses among authorizations based on roles or target workspace. It
-walks ancestry, selects the nearest binding, and sends that one token. The
+`optctl` never chooses among authorizations based on roles or target workspace.
+It walks ancestry, selects the nearest binding, and sends that one token. The
 server computes effective roles from the authorization's assignments for each
 request or changeset operation boundary. Insufficient authority fails normally;
 the CLI never searches other bindings, combines tokens, or falls back to broader
@@ -274,8 +278,8 @@ one boundary.
 
 ### Pack default all-workspace policy assignment
 
-A pack Policy with `spec.default_assignment: all_workspaces` creates/activates one
-server-generated assignment bound to that exact policy/pack revision during
+A pack Policy with `spec.default_assignment: all_workspaces` creates/activates
+one server-generated assignment bound to that exact policy/pack revision during
 transactional pack activation. `none` creates no default assignment. Pack source
 cannot default-activate system or one-workspace authority. Preview surfaces this
 security-relevant change.
@@ -284,8 +288,8 @@ The generated assignment uses a UUIDv7, canonical `{type: all_workspaces}`
 boundary, source pack/policy revision UUIDs, activation auth context, and active
 timestamps. This does not grant any principal a role. Workspace-specific role
 assignments still determine who has CRM authority in each workspace. Explicit
-workspace policy assignments may configure exceptions/additional policy but never
-install another pack copy or version.
+workspace policy assignments may configure exceptions/additional policy but
+never install another pack copy or version.
 
 ### System policy assignment
 
@@ -334,8 +338,8 @@ cannot silently imply all-workspace access.
 
 ## Pack installation and upgrades
 
-Previewing local source for `optd/crm@0.1.0` creates the exact durable
-migration plan/candidate revision; applying that plan transactionally activates
+Previewing local source for `optd/crm@0.1.0` creates the exact durable migration
+plan/candidate revision; applying that plan transactionally activates
 server-wide resource/action/hook/lifecycle, role, policy, seed, and default
 policy-assignment definitions. It must not automatically assign domain roles to
 principals.
@@ -398,11 +402,11 @@ identifiers.
 
 ## Vocabulary
 
-| Term                  | Meaning                                                                 |
-| --------------------- | ----------------------------------------------------------------------- |
-| Role definition       | Globally registered responsibility identity                             |
-| Policy definition     | Globally registered authorization logic                                 |
-| Role assignment       | Principal holds a role in a workspace, all workspaces, or system boundary   |
-| Policy assignment     | Policy is active in a workspace, all workspaces, or system boundary         |
-| Agent authorization   | One server-issued token containing the agent's bounded role assignments |
-| Local process binding | `optctl` process tree allowed to use the authorization token            |
+| Term                  | Meaning                                                                   |
+| --------------------- | ------------------------------------------------------------------------- |
+| Role definition       | Globally registered responsibility identity                               |
+| Policy definition     | Globally registered authorization logic                                   |
+| Role assignment       | Principal holds a role in a workspace, all workspaces, or system boundary |
+| Policy assignment     | Policy is active in a workspace, all workspaces, or system boundary       |
+| Agent authorization   | One server-issued token containing the agent's bounded role assignments   |
+| Local process binding | `optctl` process tree allowed to use the authorization token              |

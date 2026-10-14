@@ -1,8 +1,6 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-deployment; contract: 1; input: sha256:a13318a3ad70bc1fe2c79958ab2e20ef515eb9bddeab71a0de346016aca0130a -->
-
 # Deployment
 
-Generated exact-contract projection imported into project-model/model.json from the reviewed deployment.md source.
+Authoritative contract; edit this specification directly.
 
 ## Exact migrated contract
 
@@ -10,7 +8,12 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — Deployment
 
-**Migration provenance.** Exact normative contract imported from `spec/deployment.md` at `sha256:d90ebb1594b51611916f48f816badf8aeaa81cd1142c357ba0b45c58786baa25`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
+**Migration provenance.** Exact normative contract imported from
+`spec/deployment.md` at
+`sha256:d90ebb1594b51611916f48f816badf8aeaa81cd1142c357ba0b45c58786baa25`. Text
+explicitly labeled historical, research, prototype evidence, or deferred remains
+non-normative; all other versioned requirements below preserve the imported
+contract semantics as maintained directly in these specifications.
 
 ## Direction
 
@@ -40,19 +43,19 @@ must not be treated as production-equivalent.
 
 ### External Postgres Mode
 
-When `OPTD_DATABASE_URL` is present, optd uses that exact PostgreSQL
-database for all persistence and coordination. App nodes are stateless aside
-from disposable caches; each main server runs one in-process outbox polling loop
-that coordinates through PostgreSQL locks. Startup never falls back to a local
+When `OPTD_DATABASE_URL` is present, optd uses that exact PostgreSQL database
+for all persistence and coordination. App nodes are stateless aside from
+disposable caches; each main server runs one in-process outbox polling loop that
+coordinates through PostgreSQL locks. Startup never falls back to a local
 database after selecting this mode.
 
 ### App-Managed Postgres Mode
 
 When `OPTD_DATABASE_URL` is absent, optd initializes and owns an official
-PostgreSQL process under `OPTD_DATA_DIR`. The server connects over loopback
-TCP using `OPTD_PG_PORT` (`0` selects a free port). The optd server arms
-signal handling before readiness, supervises the exact managed child, and uses
-bounded PostgreSQL-native smart/fast/immediate shutdown escalation.
+PostgreSQL process under `OPTD_DATA_DIR`. The server connects over loopback TCP
+using `OPTD_PG_PORT` (`0` selects a free port). The optd server arms signal
+handling before readiness, supervises the exact managed child, and uses bounded
+PostgreSQL-native smart/fast/immediate shutdown escalation.
 
 The default image runs the optd server under `tini`; there is no separate
 worker, database sidecar, or generic process supervisor. One mounted data volume
@@ -89,9 +92,9 @@ Bootstrap/recovery tokens and the secret master key are injected as secret
 environment/mounted values per their specs and never printed. There is no auth
 mode/bypass configuration variable.
 
-When `OPTD_DATABASE_URL` is absent, app-managed Postgres is the default. It
-lets the app initialize/start a managed Postgres process under
-`OPTD_DATA_DIR` while preserving real Postgres behavior.
+When `OPTD_DATABASE_URL` is absent, app-managed Postgres is the default. It lets
+the app initialize/start a managed Postgres process under `OPTD_DATA_DIR` while
+preserving real Postgres behavior.
 
 ## MVP runtime artifacts
 
@@ -100,11 +103,10 @@ The repository includes production-style examples:
 - `Dockerfile` builds a Deno server image, compiled `optctl` binary, and
   container-provided Postgres binaries.
 - `docker-compose.yml` runs the default one-container app-managed Postgres mode.
-- `compose.external-postgres.yml` runs optd against an external Compose
-  Postgres service via `OPTD_DATABASE_URL`.
+- `compose.external-postgres.yml` runs optd against an external Compose Postgres
+  service via `OPTD_DATABASE_URL`.
 - `k8s/optd-app-managed.example.yaml` and
-  `k8s/optd-external-postgres.example.yaml` show Kubernetes deployment
-  shapes.
+  `k8s/optd-external-postgres.example.yaml` show Kubernetes deployment shapes.
 - `docs/runtime.md` documents runtime env, data directory behavior,
   health/readiness, backup/restore guidance, and no-PGlite guardrails.
 

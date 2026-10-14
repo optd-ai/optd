@@ -1,8 +1,6 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-changesets; contract: 1; input: sha256:6bfba7990f19053ab1d915e328c94293355c243fdfce890638b9a01f21ded96e -->
-
 # Changesets
 
-Generated exact-contract projection imported into project-model/model.json from the reviewed changesets.md source.
+Authoritative contract; edit this specification directly.
 
 ## Exact migrated contract
 
@@ -10,7 +8,12 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — Changesets
 
-**Migration provenance.** Exact normative contract imported from `spec/changesets.md` at `sha256:0ac9a09a27188a26cf9f243fc61911109a5c5a884c8dd7482c93e33df27f162d`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
+**Migration provenance.** Exact normative contract imported from
+`spec/changesets.md` at
+`sha256:0ac9a09a27188a26cf9f243fc61911109a5c5a884c8dd7482c93e33df27f162d`. Text
+explicitly labeled historical, research, prototype evidence, or deferred remains
+non-normative; all other versioned requirements below preserve the imported
+contract semantics as maintained directly in these specifications.
 
 ## Summary
 
@@ -97,15 +100,15 @@ receive only the stage representation/redactions authorized by
 `changeset.approval.decide` and the exact requirement role.
 
 Authorization follows the frozen stage source. Direct graphs require every exact
-operation/resource/workspace permission. Semantic action stages require the exact
-`action:<publisher>/<pack>:<action>` permission in their one request workspace and
-revalidated reviewed effect manifest, not separate caller permission for each
-internal emitted operation. Seed stages analogously require exact
-`seed:<publisher>/<pack>:<seed>` permission and reviewed seed effects. Action
-and seed staging cannot emit into another workspace; direct graphs may span
-workspaces. The creating principal needs no extra generic commit permission.
-Another principal additionally needs exact `changeset.commit_others` system
-capability and stage visibility; `system:super_admin` remains the audited
+operation/resource/workspace permission. Semantic action stages require the
+exact `action:<publisher>/<pack>:<action>` permission in their one request
+workspace and revalidated reviewed effect manifest, not separate caller
+permission for each internal emitted operation. Seed stages analogously require
+exact `seed:<publisher>/<pack>:<seed>` permission and reviewed seed effects.
+Action and seed staging cannot emit into another workspace; direct graphs may
+span workspaces. The creating principal needs no extra generic commit
+permission. Another principal additionally needs exact `changeset.commit_others`
+system capability and stage visibility; `system:super_admin` remains the audited
 built-in bypass. Cancellation never undoes a commit and does not cancel claimed
 outbox work.
 
@@ -264,4 +267,10 @@ operational limits, and RFC 8785/SHA-256 graph digest are normative in
 
 ## Created identities and approval parity
 
-Successful commits, including idempotent replay, return created: a map from operation keys (including generated ordinal keys) to generated object, relationship, or comment IDs. Approval readiness counts only currently active, boundary-compatible authority. At commit the documented system:super_admin approval bypass remains valid without requiring possession of the named requirement role; revoked/inactive or unrelated-boundary authorizations never count.
+Successful commits, including idempotent replay, return created: a map from
+operation keys (including generated ordinal keys) to generated object,
+relationship, or comment IDs. Approval readiness counts only currently active,
+boundary-compatible authority. At commit the documented system:super_admin
+approval bypass remains valid without requiring possession of the named
+requirement role; revoked/inactive or unrelated-boundary authorizations never
+count.

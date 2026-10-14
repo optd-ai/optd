@@ -1,8 +1,6 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-storage-postgres; contract: 1; input: sha256:6d7ddbb5ffe04f5aaeb24688c88fb9f209ce572738b32f35a37f879d0b3b87ec -->
-
 # Postgres Storage
 
-Generated exact-contract projection imported into project-model/model.json from the reviewed storage-postgres.md source.
+Authoritative contract; edit this specification directly.
 
 ## Exact migrated contract
 
@@ -10,12 +8,17 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — Postgres Storage
 
-**Migration provenance.** Exact normative contract imported from `spec/storage-postgres.md` at `sha256:a2f52223ed5d041effc941d16d361f1a0b3bac4283d5fb1c0348f33699d6cffb`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
+**Migration provenance.** Exact normative contract imported from
+`spec/storage-postgres.md` at
+`sha256:a2f52223ed5d041effc941d16d361f1a0b3bac4283d5fb1c0348f33699d6cffb`. Text
+explicitly labeled historical, research, prototype evidence, or deferred remains
+non-normative; all other versioned requirements below preserve the imported
+contract semantics as maintained directly in these specifications.
 
 ## Direction
 
-The workspace is open-source and single-tenant by default. MVP storage is Postgres
-only, either:
+The workspace is open-source and single-tenant by default. MVP storage is
+Postgres only, either:
 
 1. external Postgres via `OPTD_DATABASE_URL`, or
 2. app-managed local Postgres when `OPTD_DATABASE_URL` is absent.

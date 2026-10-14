@@ -1,8 +1,6 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-pack-publishers-and-projects; contract: 1; input: sha256:5c8926881921dec86e655ec9cf31416641c9e48bb772e61154f54d9336d11170 -->
-
 # Pack Publishers and Workspaces
 
-Generated exact-contract projection imported into project-model/model.json from the reviewed pack-publishers-and-workspaces.md source.
+Authoritative contract; edit this specification directly.
 
 ## Exact migrated contract
 
@@ -10,7 +8,12 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — Pack Publishers and Workspaces
 
-**Migration provenance.** Exact normative contract imported from `spec/pack-publishers-and-projects.md` at `sha256:b959a489f0bc16f34c39c859442006ba9827b778937d478a5a32eb72e139987d`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
+**Migration provenance.** Exact normative contract imported from
+`spec/pack-publishers-and-projects.md` at
+`sha256:b959a489f0bc16f34c39c859442006ba9827b778937d478a5a32eb72e139987d`. Text
+explicitly labeled historical, research, prototype evidence, or deferred remains
+non-normative; all other versioned requirements below preserve the imported
+contract semantics as maintained directly in these specifications.
 
 ## Decision
 
@@ -23,8 +26,8 @@ boundaries:
   policy evaluation, and CLI context, analogous to a Kubernetes namespace.
 - **namespace** is not a user-facing synonym for either concept.
 
-Packs are installed globally on one optd server. They are not installed once
-per workspace. A workspace scopes use of globally installed definitions.
+Packs are installed globally on one optd server. They are not installed once per
+workspace. A workspace scopes use of globally installed definitions.
 
 ## Pack identity and source
 
@@ -72,9 +75,10 @@ migration lifecycle. Different workspaces cannot select different pack versions.
 ## Workspace identity
 
 Workspaces are built-in UUIDv7 system records with immutable slug and explicit
-lifecycle as frozen in [Platform Workspaces](workspaces.md). They are not pack YAML
-or pack installation targets. Workspaces do not imply separate tenants; optd
-remains single-tenant and workspaces scope data/authority within the installation.
+lifecycle as frozen in [Platform Workspaces](workspaces.md). They are not pack
+YAML or pack installation targets. Workspaces do not imply separate tenants;
+optd remains single-tenant and workspaces scope data/authority within the
+installation.
 
 A global resource definition may have object instances in many workspaces:
 
@@ -108,8 +112,8 @@ Pack-provided default policy assignments are installed globally, normally with
 `all_workspaces` boundary, so the same policy logic applies to each workspace's
 data. Workspace-specific/system policy assignments may further configure server
 policy, but they do not install another pack copy. Role assignments and agent
-authorizations carry workspace/all-workspace/system boundaries and determine where a
-principal holds a role.
+authorizations carry workspace/all-workspace/system boundaries and determine
+where a principal holds a role.
 
 See [Authorization Definitions and Assignments](authorization-assignments.md).
 
@@ -136,5 +140,5 @@ optctl pack inspect optd/crm
 The existing pre-auth MVP overloaded `namespace` in identifiers such as
 `default.crm` and `default.lead`. There are no deployed users/databases
 requiring compatibility. The next schema may invalidate old databases and move
-directly to publisher-qualified global definitions plus explicit workspace ids; no
-alias or backfill layer is required.
+directly to publisher-qualified global definitions plus explicit workspace ids;
+no alias or backfill layer is required.

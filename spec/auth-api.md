@@ -1,8 +1,6 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-auth-api; contract: 1; input: sha256:5c1d74c06c903fbb74964f615e272d1747e240da9d26339d72e41c7bd71be074 -->
-
 # Authentication API and CLI Contract
 
-Generated exact-contract projection imported into project-model/model.json from the reviewed auth-api.md source.
+Authoritative contract; edit this specification directly.
 
 ## Exact migrated contract
 
@@ -10,7 +8,12 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — Authentication API and CLI Contract
 
-**Migration provenance.** Exact normative contract imported from `spec/auth-api.md` at `sha256:a9b136238ba6711eb61dd2d432cac032e55e7fb6af42f5e3519192a2c002dabc`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
+**Migration provenance.** Exact normative contract imported from
+`spec/auth-api.md` at
+`sha256:a9b136238ba6711eb61dd2d432cac032e55e7fb6af42f5e3519192a2c002dabc`. Text
+explicitly labeled historical, research, prototype evidence, or deferred remains
+non-normative; all other versioned requirements below preserve the imported
+contract semantics as maintained directly in these specifications.
 
 ## Conventions
 

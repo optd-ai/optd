@@ -1,8 +1,6 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-expression-language; contract: 1; input: sha256:6d956ab318da44290053eb3ec18bdd4272f2d528707df14487a73b3e96dfb8e7 -->
-
 # Expression Language
 
-Generated exact-contract projection imported into project-model/model.json from the reviewed expression-language.md source.
+Authoritative contract; edit this specification directly.
 
 ## Exact migrated contract
 
@@ -10,7 +8,12 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — Expression Language
 
-**Migration provenance.** Exact normative contract imported from `spec/expression-language.md` at `sha256:4f7ffb261098a1ab28b4d6157bdbb7e6eb8b0d08b288a453a0a222086e0841f2`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
+**Migration provenance.** Exact normative contract imported from
+`spec/expression-language.md` at
+`sha256:4f7ffb261098a1ab28b4d6157bdbb7e6eb8b0d08b288a453a0a222086e0841f2`. Text
+explicitly labeled historical, research, prototype evidence, or deferred remains
+non-normative; all other versioned requirements below preserve the imported
+contract semantics as maintained directly in these specifications.
 
 ## Decision
 
@@ -369,8 +372,8 @@ Run `optctl expression validate optd/crm:lead --context partial-index '<expr>'`
 ## Frozen implementation decisions
 
 - The server parses CEL with `@bufbuild/cel` and lowers the hardcoded supported
-  AST subset through optd's auditable typed SQL lowerer. Unsupported AST
-  forms fail closed; no general third-party CEL-to-SQL compiler is used.
+  AST subset through optd's auditable typed SQL lowerer. Unsupported AST forms
+  fail closed; no general third-party CEL-to-SQL compiler is used.
 - `optctl` does not maintain a competing CEL evaluator/parser. It sends source
   to server validation and exposes server-authored subset help/examples.
 - Bare fields are canonical and `self.<field>` is an accepted alias. Actor

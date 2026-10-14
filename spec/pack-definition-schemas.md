@@ -1,8 +1,6 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-pack-definition-schemas; contract: 1; input: sha256:d05d33eaa14d8f9bc22df19bd08ae401c952bc8f2eec813e0037170391aecbb3 -->
-
 # Pack Definition Schemas v1
 
-Generated exact-contract projection imported into project-model/model.json from the reviewed pack-definition-schemas.md source.
+Authoritative contract; edit this specification directly.
 
 ## Exact migrated contract
 
@@ -10,7 +8,12 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — Pack Definition Schemas v1
 
-**Migration provenance.** Exact normative contract imported from `spec/pack-definition-schemas.md` at `sha256:5d461390125e4a9b76a4ecf1038a2cdbdeec465f096febf7d736f18d876cd751`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
+**Migration provenance.** Exact normative contract imported from
+`spec/pack-definition-schemas.md` at
+`sha256:5d461390125e4a9b76a4ecf1038a2cdbdeec465f096febf7d736f18d876cd751`. Text
+explicitly labeled historical, research, prototype evidence, or deferred remains
+non-normative; all other versioned requirements below preserve the imported
+contract semantics as maintained directly in these specifications.
 
 ## Decision
 

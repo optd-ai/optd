@@ -1,8 +1,6 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-api-errors; contract: 1; input: sha256:7c2df2d5867763e0af7987bb338cad1bea24fb024c18fa1e0919e33a2807366f -->
-
 # API Response and Error Contract
 
-Generated exact-contract projection imported into project-model/model.json from the reviewed api-errors.md source.
+Authoritative contract; edit this specification directly.
 
 ## Exact migrated contract
 
@@ -10,7 +8,11 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — API Response and Error Contract
 
-**Migration provenance.** Exact normative contract imported from `spec/api-errors.md` at `sha256:bd20733688be80787078a03a14648af699713c688331bc4d51465fcb1c65587f`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
+**Migration provenance.** Exact normative contract imported from
+`spec/api-errors.md` at
+`sha256:bd20733688be80787078a03a14648af699713c688331bc4d51465fcb1c65587f`. Text
+explicitly labeled historical, research, prototype evidence, or deferred remains
+non-normative; all other versioned requirements below are preserved literally.
 
 ## Decision
 

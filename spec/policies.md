@@ -1,8 +1,6 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-policies; contract: 1; input: sha256:4e54760d13a4eabe89adecd2e99334f0456733a76651db94ef061ec578aa7fa5 -->
-
 # Policies and Authorization
 
-Generated exact-contract projection imported into project-model/model.json from the reviewed policies.md source.
+Authoritative contract; edit this specification directly.
 
 ## Exact migrated contract
 
@@ -10,14 +8,19 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — Policies and Authorization
 
-**Migration provenance.** Exact normative contract imported from `spec/policies.md` at `sha256:2dd369390e59a5c850d73bc49fd9ecbbcbbcf17823aaba91ba08d67cc320f520`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
+**Migration provenance.** Exact normative contract imported from
+`spec/policies.md` at
+`sha256:2dd369390e59a5c850d73bc49fd9ecbbcbbcf17823aaba91ba08d67cc320f520`. Text
+explicitly labeled historical, research, prototype evidence, or deferred remains
+non-normative; all other versioned requirements below preserve the imported
+contract semantics as maintained directly in these specifications.
 
 ## Definition and assignment model
 
 Role and policy definitions are globally registered, while explicit assignments
 control where they apply. Role assignments, policy assignments, and agent
-authorizations must select exactly one `workspace`, `all_workspaces`, or `system`
-boundary. Missing boundary never implies global authority. See
+authorizations must select exactly one `workspace`, `all_workspaces`, or
+`system` boundary. Missing boundary never implies global authority. See
 [Authorization Definitions and Assignments](authorization-assignments.md) for
 the normative model.
 
@@ -178,8 +181,8 @@ separate contract; policy controls who may decide.
 ## Enforcement points
 
 - Protected system API admission uses exact dotted system capabilities.
-- Direct stage evaluates each operation/workspace; action/seed stage evaluates its
-  exact semantic permission and reviewed effect manifest.
+- Direct stage evaluates each operation/workspace; action/seed stage evaluates
+  its exact semantic permission and reviewed effect manifest.
 - Commit rechecks current authorization in one SQL-statement snapshot under the
   canonical locks.
 - Query/search/history lower policy predicates into SQL before keyset sorting,

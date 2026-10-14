@@ -1,8 +1,6 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-disposition-mvp-roadmap; contract: 1; input: sha256:7dea315c25b5348fc6bd0f529cbcf42844c46c4faa29dd47b8bf5227e9f21e90 -->
-
 # Historical MVP Roadmap
 
-Generated non-normative disposition view preserving the complete reviewed legacy source for auditability.
+Non-normative historical material; see [spec governance](model-governance.md).
 
 ## Migration disposition
 
@@ -10,7 +8,12 @@ Generated non-normative disposition view preserving the complete reviewed legacy
 
 ### Disposition — Historical MVP Roadmap
 
-**Migration disposition.** This source is preserved literally below for auditability at `sha256:6288554dafb7da5e95dfea5ed1cab5c7e022755fbc001810e38d5f868735d45b`, but remains non-normative historical, supporting research, prototype evidence, roadmap, or superseded planning material. Only separately accepted current project-model objects carry product authority.
+**Migration disposition.** This source is preserved literally below for
+auditability at
+`sha256:6288554dafb7da5e95dfea5ed1cab5c7e022755fbc001810e38d5f868735d45b`, but
+remains non-normative historical, supporting research, prototype evidence,
+roadmap, or superseded planning material. Current normative specifications, not
+this historical material, carry product authority.
 
 > **Status:** implementation history for the completed pre-auth MVP. It contains
 > old preview/action/namespace terminology and must not drive the next plan. and

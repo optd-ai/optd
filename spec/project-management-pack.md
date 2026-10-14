@@ -1,8 +1,6 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-project-management-pack; contract: 1; input: sha256:b7520dfe90af472fe4cf901d1c368cfb4d87fbafc86246c3c41d8373c1fe6bbd -->
-
 # Project Management Proof-Pack Requirements
 
-Generated exact-contract projection imported into project-model/model.json from the reviewed project-management-pack.md source.
+Authoritative contract; edit this specification directly.
 
 ## Exact migrated contract
 
@@ -10,7 +8,12 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — Project Management Proof-Pack Requirements
 
-**Migration provenance.** Exact normative contract imported from `spec/project-management-pack.md` at `sha256:899349a5c143cd03d41de97f390ed218a90aabd0197c6d22905566367dc140d3`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
+**Migration provenance.** Exact normative contract imported from
+`spec/project-management-pack.md` at
+`sha256:899349a5c143cd03d41de97f390ed218a90aabd0197c6d22905566367dc140d3`. Text
+explicitly labeled historical, research, prototype evidence, or deferred remains
+non-normative; all other versioned requirements below preserve the imported
+contract semantics as maintained directly in these specifications.
 
 > **Status:** normative proof-pack domain requirements. Runtime platform
 > workspaces remain separate from the pack resource `optd/projects:project`;
@@ -21,9 +24,9 @@ Generated exact-contract projection imported into project-model/model.json from 
 The MVP should include a second bundled pack inspired by Odoo's Workspace app to
 prove that the platform is generic and not CRM-specific.
 
-This pack should model workspaces, tasks, stages, milestones, tags, and timesheet
-entries. It should be authored as normal pack files and must not require engine
-special cases.
+This pack should model workspaces, tasks, stages, milestones, tags, and
+timesheet entries. It should be authored as normal pack files and must not
+require engine special cases.
 
 ## Pack identity
 
@@ -145,8 +148,8 @@ Minimum relationships:
 
 Workspace-to-task uses the required direct `task.project_id`; it is not also
 duplicated as a relationship row. Membership is the explicit
-`optd/projects:project_member` resource because membership carries domain
-role, uniqueness, object history, and policy-visible lifecycle. The generic
+`optd/projects:project_member` resource because membership carries domain role,
+uniqueness, object history, and policy-visible lifecycle. The generic
 relationship schema can target read-only `system:principal`; that capability is
 not used as a substitute for this richer membership resource.
 
@@ -175,8 +178,8 @@ Minimum one action is required; preferred set:
 - `optd/projects:start_task`: moves a task from Todo/Blocked to In Progress.
 - `optd/projects:block_task`: moves a task to Blocked and requires
   `blocked_reason`.
-- `optd/projects:complete_task`: moves a task to Done and can optionally
-  write spent-hours summary.
+- `optd/projects:complete_task`: moves a task to Done and can optionally write
+  spent-hours summary.
 
 Actions use `action.stage`, are policy-checked/hook-validated, and commit only
 through the returned immutable stage.
@@ -223,11 +226,18 @@ The workspace-management pack is accepted when:
 1. It applies on a fresh MVP server without special-case code.
 2. `optctl metadata resource optd/projects:task` exposes fields, lifecycle,
    policy hints, and AXI guidance.
-3. A test creates a workspace, creates a task, starts it, blocks it, unblocks it,
-   completes it, logs a timesheet entry, and reads history.
+3. A test creates a workspace, creates a task, starts it, blocks it, unblocks
+   it, completes it, logs a timesheet entry, and reads history.
 4. Policy prevents a non-member/non-assignee from updating the task.
 5. The after-commit hook writes an outbox/hook execution record.
 
 ## Onboarding and completion
 
-Each Workspace explicitly initializes its reference data using seed commit optd/projects --all. Projects administrators can initialize these seeds, import historical objects with an audit reason, manage relationships and decide approvals; seed execution does not require platform super-admin. An authorized human or agent may complete its own task without a separate approval. Completion hours and work_date are jointly optional; omitting both emits no timesheet, while supplying one without the other is invalid. Required-field and action-read metadata must be discoverable.
+Each Workspace explicitly initializes its reference data using seed commit
+optd/projects --all. Projects administrators can initialize these seeds, import
+historical objects with an audit reason, manage relationships and decide
+approvals; seed execution does not require platform super-admin. An authorized
+human or agent may complete its own task without a separate approval. Completion
+hours and work_date are jointly optional; omitting both emits no timesheet,
+while supplying one without the other is invalid. Required-field and action-read
+metadata must be discoverable.

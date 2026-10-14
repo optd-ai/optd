@@ -1,8 +1,6 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-hook-secret-grants; contract: 1; input: sha256:7cb1c4a28cc6023ee4c4b2859891a1eafc36b9744ac9c7828601522826acf4f3 -->
-
 # Hook-Secret Grants
 
-Generated exact-contract projection imported into project-model/model.json from the reviewed hook-secret-grants.md source.
+Authoritative contract; edit this specification directly.
 
 ## Exact migrated contract
 
@@ -10,7 +8,12 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — Hook-Secret Grants
 
-**Migration provenance.** Exact normative contract imported from `spec/hook-secret-grants.md` at `sha256:01bf907b075a9d39da058f808bee555c449e498ae92add60b4898fdeff0bd666`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
+**Migration provenance.** Exact normative contract imported from
+`spec/hook-secret-grants.md` at
+`sha256:01bf907b075a9d39da058f808bee555c449e498ae92add60b4898fdeff0bd666`. Text
+explicitly labeled historical, research, prototype evidence, or deferred remains
+non-normative; all other versioned requirements below preserve the imported
+contract semantics as maintained directly in these specifications.
 
 ## Purpose
 
@@ -84,8 +87,8 @@ are deferred.
 
 Plaintext is accepted only through authenticated create/rotate operations,
 encrypted with AES-256-GCM before persistence, and never returned by read/list
-APIs. `OPTD_SECRET_MASTER_KEY` supplies the application master key as defined
-in [Secret Encryption](secret-encryption.md).
+APIs. `OPTD_SECRET_MASTER_KEY` supplies the application master key as defined in
+[Secret Encryption](secret-encryption.md).
 
 ## Grant model
 

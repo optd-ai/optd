@@ -156,7 +156,7 @@ revoked, inactive, or unrelated to the effective agent authorization.
 **Acceptance:** system admin follows its active policy; a project-scoped agent
 resolves its own slug but cannot enumerate or mutate other projects;
 revocation/archival and pagination remain correct. This changes existing access
-semantics and needs a reviewed model direction.
+semantics and needs a reviewed specification change.
 
 ### 4. Default list projection rejects platform IDs — A5
 
@@ -213,10 +213,10 @@ for pack-role acceptance tests.
 
 ### Phase 0 — Freeze intended contracts and add reproductions
 
-- Record accepted policy decisions in the authoritative
-  `project-model/model.json` through reviewed directions; regenerate `spec/`
-  projections. **Do not hand-edit generated spec files**
-  (`project-model/README.md:38–40`).
+- Record accepted policy decisions directly in authoritative `spec/` Markdown
+  alongside implementation and tests. The former DAG-model workflow is retired;
+  see `spec/model-governance.md`. Historical model revision references in this
+  completed plan describe the earlier implementation, not current authority.
 - Add failing regressions for A1/A2, super-admin decision-to-commit parity,
   A3/A7 visibility, bundled list defaults, and actual relationship-role grants.
 - Keep behavior changes to approval policy, import authority, and naming visibly
@@ -302,7 +302,7 @@ project.
 1. Inventory domain/repository names, API routes/DTOs, CLI/context/env fields,
    boundary variants, DB columns/FKs/indexes, generated runtime
    resource/relationship tables, hooks, policies, seeds, queries/cursors,
-   authorization payloads, outbox/audit/history, model projections, deployment
+   authorization payloads, outbox/audit/history, specifications, deployment
    scripts and fixtures.
 2. Decide a clean breaking release versus a bounded compatibility window. Do not
    add aliases or dual schemas without an explicit support requirement.
@@ -361,6 +361,6 @@ findings; that is not an end-to-end reproduction of each report.
 Not run: full test suite, release/container gate, historical images, full
 Projects onboarding with non-super-admin actors, populated rename upgrades, or
 pristine NixOS without the workaround symlink. Before release, run
-formatting/type checks, model projection checks, all affected integration/E2E
+formatting/type checks, specification checks, all affected integration/E2E
 suites, and the full release gate. The passing baseline suites do not prove the
 newly identified defects absent.

@@ -1,31 +1,50 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-model-governance; contract: 1; input: sha256:ba9323913f013d643b438228892548cb4e8f33bb862bdb686044771665e6bf13 -->
+# Specification governance
 
-# Workspace-model governance and cutover
+## Source of truth
 
-Canonical project-model governance and cutover decisions and contracts projected from project-model/model.json.
+`spec/` is the authoritative product and technical contract. Edit its Markdown
+directly; no DAG workflow, JSON model, projection generator, or generation
+receipt is required. This supersedes the former generated-only specification
+policy.
 
-## Decisions
+The existing 62 documents were checked against model revision 27 with zero drift
+before cutover. Their contract bodies and stable object anchors were retained;
+source-of-truth and formatting policies were updated. The original model and
+migration receipts are preserved under [history](history/README.md), including
+records not previously rendered into normative specs. They are non-normative
+history, not a second authority. Historical acceptance or publication permission
+does not authorize a new external operation.
+
+## Editing workflow
+
+1. Read the relevant contract and accepted decisions before implementation.
+2. Edit affected specifications and examples directly in the same reviewed
+   change as implementation and tests. Update overlapping summaries and detailed
+   contracts together; explicitly resolve conflicts rather than creating
+   parallel truths.
+3. Keep requirements distinct from proposals, deferred work and historical
+   evidence. Never promote these merely by moving files.
+4. Keep stable anchors used by links. Add new documents to the index in
+   `README.md`; distinguish normative and historical material there.
+5. Run `deno task spec:check`, formatting and relevant regression tests. The
+   checker validates indexed files, headings, unique explicit anchors and
+   absence of generated-model headers, and rejects symlinks. It does not freeze
+   prose, interpret requirements, or establish behavioral conformance.
+6. Release changes still require real host coverage, the complete exact-source
+   image gate, artifact identity verification and ownership-scoped cleanup.
+
+## Historical decision anchors
 
 <a id="obj-dec-readiness-status"></a>
 
-### Treat the old planning-readiness result as historical
-
-The 2026-07-14 readiness result justified the completed implementation plan. Current authority cutover depends instead on the reviewed project-model conflict record, exact projection/omission coverage, replacement documentation, and user-approved spec cleanup.
-
-**Rationale.** A historical planning conclusion must not claim current project-model cutover readiness.
+Historical planning-readiness results are evidence only, never current
+acceptance.
 
 <a id="obj-dec-generated-spec-layout"></a>
 
-### Keep spec only as generated project-model projections
-
-After completeness review, delete every hand-authored spec file and replace the directory with deterministic project-model-generated Markdown projections. project-model/model.json is the structured semantic source of truth; generated spec views are the compatible human-readable projection required by pi-dag-workflow. No hand-authored contract remains in spec. Retained model-contract and external-readiness outputs from a cancelled historical DAG are evidence rather than authority: independently inspect their exact local Git lineage and rerun current authoritative-model, deterministic-projection, source, and release checks before selectively adopting them into successor work.
-
-**Rationale.** This eliminates dual authority while preserving authoritative workflow validation and generated-spec placement invariants.
-
-## Commitments
+The generated-only policy is superseded by the source-of-truth rule above.
 
 <a id="obj-com-model-audit"></a>
 
-### Create and validate the repository workspace model
-
-Read the complete current Pi session, every spec, implementation/test/release surfaces, construct a non-authoritative candidate model, test it against source, preserve contradictions as discoveries/questions, and present inconsistencies for human resolution before cutover.
+The completed DAG-model audit is archived; future reviews operate directly on
+specifications and executable behavior.

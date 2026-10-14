@@ -31,17 +31,12 @@ Deno.test("composed verifier propagates real prefix failures and unconditionally
     new TextDecoder().decode(result.stderr);
   try {
     for (
-      const path of ["src", "tests/unit", "docs", "scripts", "project-model"]
+      const path of ["src", "tests/unit", "docs", "scripts", "spec"]
     ) await Deno.mkdir(join(fixture, path), { recursive: true });
-    await copyTree(
-      join(root, "project-model/runtime"),
-      join(fixture, "project-model/runtime"),
-    );
     await copyTree(join(root, "spec"), join(fixture, "spec"));
     for (
       const path of [
-        "project-model/model.json",
-        "scripts/project-model.ts",
+        "scripts/spec-check.ts",
         "scripts/optd-integration-verify.sh",
       ]
     ) await Deno.copyFile(join(root, path), join(fixture, path));
@@ -52,8 +47,7 @@ Deno.test("composed verifier propagates real prefix failures and unconditionally
       JSON.stringify(
         {
           tasks: {
-            "model:check":
-              "deno run --allow-read scripts/project-model.ts check",
+            "spec:check": "deno run --allow-read scripts/spec-check.ts",
             check: "deno check src/check.ts",
             test: "deno test tests/full.test.ts",
           },
@@ -63,7 +57,7 @@ Deno.test("composed verifier propagates real prefix failures and unconditionally
       ) + "\n",
     );
     await write("src/check.ts", "export const value: number = 1;\n");
-    const testPath = "tests/unit/optd_model_contract.test.ts";
+    const testPath = "tests/unit/optd_spec_contract.test.ts";
     const passing = 'Deno.test("fixture regression", () => {});\n';
     await write(testPath, passing);
     await write(
@@ -103,7 +97,7 @@ Deno.test("composed verifier propagates real prefix failures and unconditionally
     for (
       const failure of [
         "format",
-        "model",
+        "spec",
         "type",
         "regression",
         "distribution",
@@ -123,7 +117,7 @@ Deno.test("composed verifier propagates real prefix failures and unconditionally
         ? "tests/support/public_flows/equivalence.test.ts"
         : failure === "full"
         ? "tests/full.test.ts"
-        : failure === "model"
+        : failure === "spec"
         ? "spec/README.md"
         : failure === "regression"
         ? testPath
@@ -131,7 +125,7 @@ Deno.test("composed verifier propagates real prefix failures and unconditionally
       const original = await Deno.readTextFile(join(fixture, path));
       const broken = {
         format: "export const value:number=1;\n",
-        model: "deliberate frozen projection drift\n",
+        spec: "# Specs\n\nDeliberately missing contract index.\n",
         type: 'export const value: number = "wrong";\n',
         distribution:
           'Deno.test("distribution failure", () => {\n  throw new Error("deliberate distribution failure");\n});\n',
@@ -155,7 +149,7 @@ Deno.test("composed verifier propagates real prefix failures and unconditionally
         output,
         {
           format: /not formatted/,
-          model: /Specification drift/,
+          spec: /Invalid specification index/,
           type: /not assignable/,
           regression: /deliberate regression failure/,
           distribution: /deliberate distribution failure/,
@@ -168,26 +162,26 @@ Deno.test("composed verifier propagates real prefix failures and unconditionally
       assert.equal(await Deno.readTextFile(join(fixture, path)), broken);
       await write(path, original);
     }
-    // A successful regression command must not hide drift it introduced.
+    // A successful regression command must not hide structural damage.
     await write(
       testPath,
       'Deno.test("fixture introduces drift", async () => {\n  await Deno.writeTextFile("spec/README.md", "post-test drift\\n");\n});\n',
     );
     const postTestDrift = await run();
     assert.notEqual(postTestDrift.code, 0, decode(postTestDrift));
-    assert.match(decode(postTestDrift), /Specification drift/);
+    assert.match(decode(postTestDrift), /Invalid specification/);
     assert.ok(!decode(postTestDrift).includes("COMPOSED VERIFICATION PASSED"));
   } finally {
     await Deno.remove(fixture, { recursive: true });
   }
 });
 
-Deno.test("model command rejects generation instead of changing frozen authority", async () => {
+Deno.test("spec command rejects generation instead of changing authoritative prose", async () => {
   const result = await new Deno.Command(Deno.execPath(), {
     args: [
       "run",
       "--allow-read",
-      join(root, "scripts/project-model.ts"),
+      join(root, "scripts/spec-check.ts"),
       "generate",
     ],
     stdout: "piped",

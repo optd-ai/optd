@@ -1,8 +1,6 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-disposition-pre-mvp-open-questions; contract: 1; input: sha256:bec234ae156793c03631ab2333a157384d243f0903d3b2884f875900a82261c9 -->
-
 # Historical Pre-MVP Questions and Proposals
 
-Generated non-normative disposition view preserving the complete reviewed legacy source for auditability.
+Non-normative historical material; see [spec governance](model-governance.md).
 
 ## Migration disposition
 
@@ -10,7 +8,12 @@ Generated non-normative disposition view preserving the complete reviewed legacy
 
 ### Disposition — Historical Pre-MVP Questions and Proposals
 
-**Migration disposition.** This source is preserved literally below for auditability at `sha256:5a6c055370f5dec43e900095e537e07d90b48e974178a2e8cecb6acc8faa5ab7`, but remains non-normative historical, supporting research, prototype evidence, roadmap, or superseded planning material. Only separately accepted current project-model objects carry product authority.
+**Migration disposition.** This source is preserved literally below for
+auditability at
+`sha256:5a6c055370f5dec43e900095e537e07d90b48e974178a2e8cecb6acc8faa5ab7`, but
+remains non-normative historical, supporting research, prototype evidence,
+roadmap, or superseded planning material. Current normative specifications, not
+this historical material, carry product authority.
 
 > **Status:** resolved/superseded design history. This file no longer gates
 > planning. Frozen topic specs and `spec/README.md` are authoritative.

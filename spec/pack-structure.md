@@ -1,8 +1,6 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-pack-structure; contract: 1; input: sha256:76968b0eb036409f47f5d1b61a34af59db4df96d83c4b921f335b6f66a805632 -->
-
 # Pack Structure
 
-Generated exact-contract projection imported into project-model/model.json from the reviewed pack-structure.md source.
+Authoritative contract; edit this specification directly.
 
 ## Exact migrated contract
 
@@ -10,7 +8,12 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — Pack Structure
 
-**Migration provenance.** Exact normative contract imported from `spec/pack-structure.md` at `sha256:b785675a461bf23b8d7df58836f85457d20a46ecc2a9b5bc7cdea1dc3006be38`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
+**Migration provenance.** Exact normative contract imported from
+`spec/pack-structure.md` at
+`sha256:b785675a461bf23b8d7df58836f85457d20a46ecc2a9b5bc7cdea1dc3006be38`. Text
+explicitly labeled historical, research, prototype evidence, or deferred remains
+non-normative; all other versioned requirements below preserve the imported
+contract semantics as maintained directly in these specifications.
 
 ## Decisions
 
@@ -177,12 +180,13 @@ Rules:
   - `hooks/validate_lead.ts` -> hook name `validate_lead`
 - Relationship, lifecycle, role, policy, and seed files follow the same rule.
 
-Pack child definitions are global definition templates and omit runtime workspace
-identity. Applying a pack installs exactly one active server-wide revision; it
-does not materialize definitions or seed objects into a selected workspace.
-Runtime objects and explicit seed application carry workspace IDs separately. The
-pack `publisher` is global definition identity/provenance, not a runtime
-workspace. See [Pack Publishers and Workspaces](pack-publishers-and-workspaces.md).
+Pack child definitions are global definition templates and omit runtime
+workspace identity. Applying a pack installs exactly one active server-wide
+revision; it does not materialize definitions or seed objects into a selected
+workspace. Runtime objects and explicit seed application carry workspace IDs
+separately. The pack `publisher` is global definition identity/provenance, not a
+runtime workspace. See
+[Pack Publishers and Workspaces](pack-publishers-and-workspaces.md).
 
 Every child YAML file must include `metadata.name`. The file basename must match
 `metadata.name`. The platform must not infer names from file paths because packs
@@ -285,16 +289,16 @@ active pack revision:
 
 Seed authors never specify platform object IDs. The first creation generates the
 UUIDv7; every later reconcile locates and preserves that identity through the
-stable workspace-scoped business key. Concurrent missing-key creation is resolved
-by the database unique constraint and normal commit conflict behavior.
+stable workspace-scoped business key. Concurrent missing-key creation is
+resolved by the database unique constraint and normal commit conflict behavior.
 
 Reads and uniqueness facts become frozen stage dependencies. Preview records the
 seed effect manifest (`create|update` on its one resource). The invoking caller
 must have exact `seed:<publisher>/<pack>:<seed>` permission in the request
-workspace; the invocation-bound internal seed runner receives only that manifest.
-Ordinary schema/hooks still apply, and seed definitions are not a privileged
-bypass. Concurrent creation/update is caught by normal commit revalidation and
-constraints.
+workspace; the invocation-bound internal seed runner receives only that
+manifest. Ordinary schema/hooks still apply, and seed definitions are not a
+privileged bypass. Concurrent creation/update is caught by normal commit
+revalidation and constraints.
 
 CLI `optctl --workspace <slug> seed stage <publisher>/<pack> --all` returns a
 stage, while `seed commit` is the client-side stage-then-commit convenience;

@@ -117,29 +117,12 @@ export async function runReadOnly(
   }
 }
 
-export function expectedChallenge(model: unknown): string {
-  const records: Record<string, unknown>[] = [];
-  function visit(value: unknown) {
-    if (!value || typeof value !== "object") return;
-    if (!Array.isArray(value) && "body" in value) {
-      records.push(value as Record<string, unknown>);
-    }
-    for (const child of Object.values(value)) visit(child);
-  }
-  visit(model);
-  const values = ["DEC-optd-api-namespace", "EV-optd-domain-control-txt"].map(
-    (id) => {
-      const matches = records.filter((record) => record.id === id);
-      requireValue(matches.length === 1, "ambiguous-model-challenge");
-      const challenges = String(matches[0].body).match(
-        /pi-dag-workflow=[a-f0-9]{32}\b/g,
-      );
-      requireValue(challenges?.length === 1, "missing-model-challenge");
-      return challenges[0];
-    },
-  );
-  requireValue(values[0] === values[1], "inconsistent-model-challenge");
-  return values[0];
+export function expectedChallenge(specification: string): string {
+  // Retain the original DNS proof value; retiring the DAG tooling does not
+  // change the externally configured challenge.
+  const challenges = specification.match(/pi-dag-workflow=[a-f0-9]{32}\b/g);
+  requireValue(challenges?.length === 1, "missing-or-ambiguous-spec-challenge");
+  return challenges[0];
 }
 
 export function validateDns(
@@ -663,15 +646,13 @@ export async function verify() {
   let expected: string | undefined;
   await check("governing-challenge", async () => {
     expected = expectedChallenge(
-      JSON.parse(
-        await Deno.readTextFile(join(root, "project-model/model.json")),
-      ),
+      await Deno.readTextFile(join(root, "spec/packs-workspaces.md")),
     );
     return expected;
   });
   for (const server of dnsServers) {
     await check(`dns:${server}`, async () => {
-      requireValue(expected, "missing-model-challenge");
+      requireValue(expected, "missing-spec-challenge");
       const authoritative = server.endsWith("cloudflare.com");
       const result = await runReadOnly("dig", [
         `@${server}`,

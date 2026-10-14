@@ -1,8 +1,6 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-disposition-cel-sql-partial-indexes; contract: 1; input: sha256:43340deaa716e6450279f1804e6fab86b76cdb8a6fbc84ef9ecce59c0017a556 -->
-
 # CEL-to-SQL Partial-Index Prototype Evidence
 
-Generated non-normative disposition view preserving the complete reviewed legacy source for auditability.
+Non-normative historical material; see [spec governance](model-governance.md).
 
 ## Migration disposition
 
@@ -10,7 +8,12 @@ Generated non-normative disposition view preserving the complete reviewed legacy
 
 ### Disposition — CEL-to-SQL Partial-Index Prototype Evidence
 
-**Migration disposition.** This source is preserved literally below for auditability at `sha256:f782a2b70469350cf6f138a6a5d627a6c21f1e889b3bd943ef28d4513da1d512`, but remains non-normative historical, supporting research, prototype evidence, roadmap, or superseded planning material. Only separately accepted current project-model objects carry product authority.
+**Migration disposition.** This source is preserved literally below for
+auditability at
+`sha256:f782a2b70469350cf6f138a6a5d627a6c21f1e889b3bd943ef28d4513da1d512`, but
+remains non-normative historical, supporting research, prototype evidence,
+roadmap, or superseded planning material. Current normative specifications, not
+this historical material, carry product authority.
 
 > **Status:** supporting design/prototype evidence. `expression-language.md` and
 > `pack-definition-schemas.md` are normative where wording differs.

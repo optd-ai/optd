@@ -1,8 +1,6 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-resource-configuration; contract: 1; input: sha256:c2bef0df38b1d86ec914d008f15bc1d37bef4e05d423bd6870392b5a8df6e99a -->
-
 # Resource Configuration
 
-Generated exact-contract projection imported into project-model/model.json from the reviewed resource-configuration.md source.
+Authoritative contract; edit this specification directly.
 
 ## Exact migrated contract
 
@@ -10,7 +8,11 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — Resource Configuration
 
-**Migration provenance.** Exact normative contract imported from `spec/resource-configuration.md` at `sha256:f4c5f9b83e394d586a518df842041043e1bcb9bdc1cec45eb39a7c5f3ea8bd7a`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
+**Migration provenance.** Exact normative contract imported from
+`spec/resource-configuration.md` at
+`sha256:f4c5f9b83e394d586a518df842041043e1bcb9bdc1cec45eb39a7c5f3ea8bd7a`. Text
+explicitly labeled historical, research, prototype evidence, or deferred remains
+non-normative; all other versioned requirements below are preserved literally.
 
 ## Summary
 

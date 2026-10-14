@@ -1,8 +1,6 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-migration-classification; contract: 1; input: sha256:61c2a84f03e57a29679c8e07c02b69bc30400b50a42f717a0706730dbe325f9a -->
-
 # Migration Classification
 
-Generated exact-contract projection imported into project-model/model.json from the reviewed migration-classification.md source.
+Authoritative contract; edit this specification directly.
 
 ## Exact migrated contract
 
@@ -10,7 +8,12 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — Migration Classification
 
-**Migration provenance.** Exact normative contract imported from `spec/migration-classification.md` at `sha256:8ae2a4d42f2e975867343802a8096d95b797c8486f5bf1662a174b33737ddb3d`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
+**Migration provenance.** Exact normative contract imported from
+`spec/migration-classification.md` at
+`sha256:8ae2a4d42f2e975867343802a8096d95b797c8486f5bf1662a174b33737ddb3d`. Text
+explicitly labeled historical, research, prototype evidence, or deferred remains
+non-normative; all other versioned requirements below preserve the imported
+contract semantics as maintained directly in these specifications.
 
 ## Status
 

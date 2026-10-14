@@ -1,8 +1,6 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-mvp-implementation-boundaries; contract: 1; input: sha256:03e124951d3110dd4afe873c72cb21b6958837814eade2d18e64f03cdd50cf89 -->
-
 # MVP Implementation Boundaries
 
-Generated exact-contract projection imported into project-model/model.json from the reviewed mvp-implementation-boundaries.md source.
+Authoritative contract; edit this specification directly.
 
 ## Exact migrated contract
 
@@ -10,7 +8,11 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — MVP Implementation Boundaries
 
-**Migration provenance.** Exact normative contract imported from `spec/mvp-implementation-boundaries.md` at `sha256:1f4ab3155924d47d299805e18feec4a05b86c1d266be558b3f3f26c716635a72`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
+**Migration provenance.** Exact normative contract imported from
+`spec/mvp-implementation-boundaries.md` at
+`sha256:1f4ab3155924d47d299805e18feec4a05b86c1d266be558b3f3f26c716635a72`. Text
+explicitly labeled historical, research, prototype evidence, or deferred remains
+non-normative; all other versioned requirements below are preserved literally.
 
 ## Decision
 
@@ -180,8 +182,9 @@ Postgres `SKIP LOCKED`; horizontally scaled loops share the same protocol.
 
 - Server HTTP JSON is canonical; `optctl --json` preserves it and default output
   renders TOON.
-- CLI sends publisher-qualified definition identities plus explicit workspace UUID
-  resolved from context. Dotted namespace/workspace aliases are unsupported.
+- CLI sends publisher-qualified definition identities plus explicit workspace
+  UUID resolved from context. Dotted namespace/workspace aliases are
+  unsupported.
 - Direct commit commands are client orchestration of stage then commit; there is
   no combined server use case.
 - CLI must not duplicate schema, policy, migration, hook, seed, or changeset

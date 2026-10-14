@@ -1,8 +1,6 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-events-audit; contract: 1; input: sha256:786d84609aeacdfd2c90b204e01a00ff88e1ee1918102d2e3ab7f88808c86b8b -->
-
 # Events, Audit, History, and Outbox
 
-Generated exact-contract projection imported into project-model/model.json from the reviewed events-audit.md source.
+Authoritative contract; edit this specification directly.
 
 ## Exact migrated contract
 
@@ -10,7 +8,12 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — Events, Audit, History, and Outbox
 
-**Migration provenance.** Exact normative contract imported from `spec/events-audit.md` at `sha256:35dd1d329c316114cffc9641d5b4fd892bb1d1ec59dc2d256b2420fc115c9cc0`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
+**Migration provenance.** Exact normative contract imported from
+`spec/events-audit.md` at
+`sha256:35dd1d329c316114cffc9641d5b4fd892bb1d1ec59dc2d256b2420fc115c9cc0`. Text
+explicitly labeled historical, research, prototype evidence, or deferred remains
+non-normative; all other versioned requirements below preserve the imported
+contract semantics as maintained directly in these specifications.
 
 ## Status
 
@@ -93,9 +96,9 @@ and causation provenance cannot be rewritten. There is no special provenance
 redaction workflow for MVP; intentionally supplied auth-request reason/friendly
 name live on auth workflow records rather than auth contexts.
 
-Pre-auth databases may be invalidated when this schema is introduced. optd
-has no deployed auth users requiring `actor_id` backfill or compatibility. New
-code moves directly to `auth_context_id`; legacy `actor_id` is not a second
+Pre-auth databases may be invalidated when this schema is introduced. optd has
+no deployed auth users requiring `actor_id` backfill or compatibility. New code
+moves directly to `auth_context_id`; legacy `actor_id` is not a second
 authoritative identity source.
 
 ## Current Objects and Object Versions
@@ -230,9 +233,9 @@ audit_events
 - created_at               timestamptz not null default now()
 ```
 
-Comments are append-only records with their own UUIDv7, workspace/target identity,
-body, target object-version provenance, commit/auth context, and timestamp. They
-do not create or increment a target `object_versions` row.
+Comments are append-only records with their own UUIDv7, workspace/target
+identity, body, target object-version provenance, commit/auth context, and
+timestamp. They do not create or increment a target `object_versions` row.
 
 Why audit is separate from object versions:
 

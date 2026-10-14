@@ -1,8 +1,6 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-commit-revalidation; contract: 1; input: sha256:f5098ae7854bd6d05ba7e007321e594fc51d395ba65d42e769220a8c2ee6135f -->
-
 # Race-Free Commit Revalidation
 
-Generated exact-contract projection imported into project-model/model.json from the reviewed commit-revalidation.md source.
+Authoritative contract; edit this specification directly.
 
 ## Exact migrated contract
 
@@ -10,15 +8,20 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — Race-Free Commit Revalidation
 
-**Migration provenance.** Exact normative contract imported from `spec/commit-revalidation.md` at `sha256:28578f4b4f2d89784f9818d21d9dc2938f6b4a0a6a15622285aac6b1ec54d715`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
+**Migration provenance.** Exact normative contract imported from
+`spec/commit-revalidation.md` at
+`sha256:28578f4b4f2d89784f9818d21d9dc2938f6b4a0a6a15622285aac6b1ec54d715`. Text
+explicitly labeled historical, research, prototype evidence, or deferred remains
+non-normative; all other versioned requirements below are preserved literally.
 
 ## Purpose
 
 Staging runs hooks once and persists an immutable operation graph under
 [Immutable Staged Changeset Storage](staged-changeset-storage.md). Commit must
-still atomically revalidate current database, authorization, approval, workspace,
-and pack state with the writes. This contract prevents time-of-check/time-of-use
-races without synthetic global coordination rows or rerunning hooks.
+still atomically revalidate current database, authorization, approval,
+workspace, and pack state with the writes. This contract prevents
+time-of-check/time-of-use races without synthetic global coordination rows or
+rerunning hooks.
 
 Executable evidence is in `prototypes/commit-revalidation/` and uses real
 Postgres with independent concurrent connections.
@@ -152,11 +155,12 @@ One commit attempt performs:
 7. Acquire early `ROW EXCLUSIVE` table locks in canonical order.
 8. Re-read active pack metadata after waiting and compare every referenced exact
    pack revision.
-9. Lock affected workspace rows `FOR SHARE` in UUID order and verify active state.
+9. Lock affected workspace rows `FOR SHARE` in UUID order and verify active
+   state.
 10. Lock all staged object/relationship dependencies in canonical order: mutated
     rows `FOR UPDATE`, read-only rows `FOR SHARE`.
-11. Evaluate all operation/workspace authorization boundaries in one SQL statement
-    snapshot using current auth/session/ancestor/role/policy state.
+11. Evaluate all operation/workspace authorization boundaries in one SQL
+    statement snapshot using current auth/session/ancestor/role/policy state.
 12. Revalidate the frozen staged approval requirements, current requirement
     validity, authority, quorum, expiry, and decisions bound to the exact
     `stage_id + stage_digest`; never derive a different requirement set.

@@ -1,8 +1,6 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-hooks-and-scripts; contract: 1; input: sha256:a5927c1cf4845935ff897c693b42a980b2751175c312b0b0dc9a25bd90899053 -->
-
 # Hooks, Scripts, and Runtime Behavior
 
-Generated exact-contract projection imported into project-model/model.json from the reviewed hooks-and-scripts.md source.
+Authoritative contract; edit this specification directly.
 
 ## Exact migrated contract
 
@@ -10,7 +8,12 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — Hooks, Scripts, and Runtime Behavior
 
-**Migration provenance.** Exact normative contract imported from `spec/hooks-and-scripts.md` at `sha256:b371e08514baf02ac6628f871dcbe24ab57b0bdd97cc6f1b4c47661bb78458db`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
+**Migration provenance.** Exact normative contract imported from
+`spec/hooks-and-scripts.md` at
+`sha256:b371e08514baf02ac6628f871dcbe24ab57b0bdd97cc6f1b4c47661bb78458db`. Text
+explicitly labeled historical, research, prototype evidence, or deferred remains
+non-normative; all other versioned requirements below preserve the imported
+contract semantics as maintained directly in these specifications.
 
 ## Summary
 
@@ -434,8 +437,8 @@ Delivery status remains separate from changeset commit success. See
 ## Hook Data Access and Secrets
 
 Hooks receive curated ephemeral context in their stdin envelope and must not
-connect directly to the database. Stage hooks cannot call optd's own HTTP API
-or receive the initiating human/agent bearer token; optd objects are supplied
+connect directly to the database. Stage hooks cannot call optd's own HTTP API or
+receive the initiating human/agent bearer token; optd objects are supplied
 through current/proposed context and declared object-by-id reads whose immutable
 versions become stage dependencies. Arbitrary collection queries are deferred.
 

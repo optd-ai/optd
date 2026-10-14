@@ -1,8 +1,6 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-api-actions; contract: 1; input: sha256:56df6468e42dd9c8a471a8656757b20c935048d9153563a7ff87615f86ddf600 -->
-
 # API Actions
 
-Generated exact-contract projection imported into project-model/model.json from the reviewed api-actions.md source.
+Authoritative contract; edit this specification directly.
 
 ## Exact migrated contract
 
@@ -10,7 +8,11 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — API Actions
 
-**Migration provenance.** Exact normative contract imported from `spec/api-actions.md` at `sha256:4461056e2011d334fff22d1f33c83c3fd1fdfa64bf25584a5e0d6824755183a2`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
+**Migration provenance.** Exact normative contract imported from
+`spec/api-actions.md` at
+`sha256:4461056e2011d334fff22d1f33c83c3fd1fdfa64bf25584a5e0d6824755183a2`. Text
+explicitly labeled historical, research, prototype evidence, or deferred remains
+non-normative; all other versioned requirements below are preserved literally.
 
 ## Philosophy
 

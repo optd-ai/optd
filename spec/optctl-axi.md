@@ -1,8 +1,6 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-optctl-axi; contract: 1; input: sha256:9866d00851208588f0f388003cfc8ebbfe369d5f0cfd3d36234f12b8f8845278 -->
-
 # optctl AXI Guidance Model
 
-Generated exact-contract projection imported into project-model/model.json from the reviewed optctl-axi.md source.
+Authoritative contract; edit this specification directly.
 
 ## Exact migrated contract
 
@@ -10,7 +8,12 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — optctl AXI Guidance Model
 
-**Migration provenance.** Exact normative contract imported from `spec/optctl-axi.md` at `sha256:a0c0d6181e6a8bbc378c0ee893b0c34e267c2e1133fd3e3242c41681c2dd41aa`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
+**Migration provenance.** Exact normative contract imported from
+`spec/optctl-axi.md` at
+`sha256:a0c0d6181e6a8bbc378c0ee893b0c34e267c2e1133fd3e3242c41681c2dd41aa`. Text
+explicitly labeled historical, research, prototype evidence, or deferred remains
+non-normative; all other versioned requirements below preserve the imported
+contract semantics as maintained directly in these specifications.
 
 ## Purpose
 
@@ -263,8 +266,8 @@ spec:
 
 ## Pack-Level AXI Guidance
 
-Packs can define home-level guidance for `optctl pack home optd/crm` or
-`optctl` no-args when the pack is active.
+Packs can define home-level guidance for `optctl pack home optd/crm` or `optctl`
+no-args when the pack is active.
 
 ```yaml
 kind: Pack
@@ -290,8 +293,8 @@ spec:
 
 `optctl` contexts store only normalized server origin and optional default
 workspace; they never select identity, roles, or authorization. Commands include
-`context list/show/add/use/set-workspace/remove`. Bootstrap automatically creates
-and activates the successful origin context without confirmation.
+`context list/show/add/use/set-workspace/remove`. Bootstrap automatically
+creates and activates the successful origin context without confirmation.
 
 Credential selection walks to the nearest process binding and uses its one
 current authorization token. It never searches for a better credential based on
@@ -302,8 +305,8 @@ subtree. `auth doctor [--fix]` diagnoses/repairs local auth files and contexts.
 Authorization denials explain current principal/roles/boundary and failed
 capability but do not recommend escalation, roles, or auth commands. A denied
 auth request reports the human reason and stops. Global `--non-interactive` and
-`OPTD_NON_INTERACTIVE=1` disable prompts; piped-input and JSON commands do
-not prompt.
+`OPTD_NON_INTERACTIVE=1` disable prompts; piped-input and JSON commands do not
+prompt.
 
 Successful `changeset stage` and `action stage` commands return the complete
 staged-changeset representation produced by `changeset inspect`; an agent does

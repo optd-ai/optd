@@ -1,8 +1,6 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-disposition-planning-readiness-audit; contract: 1; input: sha256:3b0e1f1e58f59bd11cd7f912ff4971c44349ecdc949823610a0b2346ae9d2241 -->
-
 # Specification Planning-Readiness Audit
 
-Generated non-normative disposition view preserving the complete reviewed legacy source for auditability.
+Non-normative historical material; see [spec governance](model-governance.md).
 
 ## Migration disposition
 
@@ -10,7 +8,12 @@ Generated non-normative disposition view preserving the complete reviewed legacy
 
 ### Disposition — Specification Planning-Readiness Audit
 
-**Migration disposition.** This source is preserved literally below for auditability at `sha256:7f66e9379d2a6e2c8e8ecf09907dc92f1923fbe8a8a03ab819877116271dd339`, but remains non-normative historical, supporting research, prototype evidence, roadmap, or superseded planning material. Only separately accepted current project-model objects carry product authority.
+**Migration disposition.** This source is preserved literally below for
+auditability at
+`sha256:7f66e9379d2a6e2c8e8ecf09907dc92f1923fbe8a8a03ab819877116271dd339`, but
+remains non-normative historical, supporting research, prototype evidence,
+roadmap, or superseded planning material. Current normative specifications, not
+this historical material, carry product authority.
 
 **Reviewed:** 2026-07-14
 

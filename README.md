@@ -40,13 +40,14 @@ performed by local release automation.
 from complete validated local Git history is separate, explicitly authorized
 external work, not a transfer or a side effect of building this checkout.
 
-The authoritative contract is
-[project-model/model.json](project-model/model.json). The `spec/` projection is
-frozen; historical planning evidence is not current release status.
-CONTRIBUTING, SECURITY, CODE_OF_CONDUCT, CHANGELOG, CODEOWNERS, and hosted CI
-policies are not supplied by this local distribution candidate; public
-maintainership and security-reporting channels must be settled separately before
-announcing a public release.
+The authoritative contracts live in [spec/](spec/README.md). Edit the Markdown
+directly alongside implementation and tests; `deno task spec:check` validates
+structure without generating or freezing content. Retired model and planning
+evidence are non-normative and are not current release status. CONTRIBUTING,
+SECURITY, CODE_OF_CONDUCT, CHANGELOG, CODEOWNERS, and hosted CI policies are not
+supplied by this local distribution candidate; public maintainership and
+security-reporting channels must be settled separately before announcing a
+public release.
 
 ## License
 

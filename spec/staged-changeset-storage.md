@@ -1,8 +1,6 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-staged-changeset-storage; contract: 1; input: sha256:4089ed97e0e993ea22e5d1d9bbdae78e974e854b869caacbbaa43a551eb638b0 -->
-
 # Immutable Staged Changeset Storage
 
-Generated exact-contract projection imported into project-model/model.json from the reviewed staged-changeset-storage.md source.
+Authoritative contract; edit this specification directly.
 
 ## Exact migrated contract
 
@@ -10,7 +8,11 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — Immutable Staged Changeset Storage
 
-**Migration provenance.** Exact normative contract imported from `spec/staged-changeset-storage.md` at `sha256:c0079bec9f3da11cde8df6a5bc6cebfbe092630ff6a0293a45d01e074793b691`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below are preserved literally.
+**Migration provenance.** Exact normative contract imported from
+`spec/staged-changeset-storage.md` at
+`sha256:c0079bec9f3da11cde8df6a5bc6cebfbe092630ff6a0293a45d01e074793b691`. Text
+explicitly labeled historical, research, prototype evidence, or deferred remains
+non-normative; all other versioned requirements below are preserved literally.
 
 ## Decision
 
@@ -167,9 +169,9 @@ planned_deliveries[], commit|null, cancellation|null
 Arrays use the canonical ordinals stored above. Later lifecycle/decision/commit
 facts are outside `stage_digest`. The stage digest is RFC 8785/SHA-256 over a
 versioned object containing operation graph digest, canonical dependencies,
-pinned workspace/pack/resource/hook/policy revisions and security digests, staged
-policy decisions, required capabilities/effects, approval requirements, and
-planned event/delivery identities. It excludes auth/request/timestamps,
+pinned workspace/pack/resource/hook/policy revisions and security digests,
+staged policy decisions, required capabilities/effects, approval requirements,
+and planned event/delivery identities. It excludes auth/request/timestamps,
 warnings, stderr/durations, and later lifecycle facts. `operation_graph_digest`
 covers exactly the normalized operation graph specified in
 `changeset-operation-schema.md`.

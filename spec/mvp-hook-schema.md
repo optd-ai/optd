@@ -1,8 +1,6 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-mvp-hook-schema; contract: 1; input: sha256:fa2f6c9958d57ca13729c868ae5403716037547a20344ea6a67c11e802e37b68 -->
-
 # MVP Hook Schema v1
 
-Generated exact-contract projection imported into project-model/model.json from the reviewed mvp-hook-schema.md source.
+Authoritative contract; edit this specification directly.
 
 ## Exact migrated contract
 
@@ -10,7 +8,12 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — MVP Hook Schema v1
 
-**Migration provenance.** Exact normative contract imported from `spec/mvp-hook-schema.md` at `sha256:e19d1ee99064a0cf27392f7a809a234796b63346a9cf306bd2e3430f99e1ee83`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
+**Migration provenance.** Exact normative contract imported from
+`spec/mvp-hook-schema.md` at
+`sha256:e19d1ee99064a0cf27392f7a809a234796b63346a9cf306bd2e3430f99e1ee83`. Text
+explicitly labeled historical, research, prototype evidence, or deferred remains
+non-normative; all other versioned requirements below preserve the imported
+contract semantics as maintained directly in these specifications.
 
 Hooks are trusted pack-provided Deno/TypeScript scripts executed by the platform
 runner. They receive curated context as one JSON envelope on stdin, write
@@ -233,8 +236,8 @@ Environment access is explicit-only:
   allowlist; absent/empty allows no non-secret names. At invocation, only names
   declared by the hook, present in this allowlist, and present in the server
   process environment are copied into the child environment.
-- Names beginning `OPTD_`, `DENO_`, `LD_`, or `DYLD_` are reserved and cannot
-  be declared/allowed. Values have a configurable size guardrail. Confidential
+- Names beginning `OPTD_`, `DENO_`, `LD_`, or `DYLD_` are reserved and cannot be
+  declared/allowed. Values have a configurable size guardrail. Confidential
   values must use required secret slots/grants instead.
 - A declared name that is not operator-allowed/present fails stage with
   `hook_env_unavailable`. Pack preview validates syntax/reserved names but does
@@ -385,6 +388,6 @@ Hooks that produce operations declare their maximum reviewed effects as sorted
 unique `{resource, ops[]}` entries under `effects.operations`. Undeclared
 resource/operation pairs fail staging. Users authorize the semantic action plus
 its reviewed effect manifest; the invocation-bound runner capability is internal
-and cannot call optd's API. Pack hooks permanently receive no initiating
-token or self-API capability. Exact operation names/schemas are defined in
+and cannot call optd's API. Pack hooks permanently receive no initiating token
+or self-API capability. Exact operation names/schemas are defined in
 [Changeset Operation Schemas](changeset-operation-schema.md).

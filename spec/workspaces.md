@@ -1,8 +1,6 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-projects; contract: 1; input: sha256:cd52dcd4c290b2b2f619aa660835d62afd113bfc8d883e19f25e625f4204cc1e -->
-
 # Platform Workspaces
 
-Generated exact-contract projection imported into project-model/model.json from the reviewed workspaces.md source.
+Authoritative contract; edit this specification directly.
 
 ## Exact migrated contract
 
@@ -10,7 +8,12 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — Platform Workspaces
 
-**Migration provenance.** Exact normative contract imported from `spec/projects.md` at `sha256:28c4f76c1ab344d7cff1f0a36fcf5adee19095466087d726190e917fd81dc38e`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
+**Migration provenance.** Exact normative contract imported from
+`spec/projects.md` at
+`sha256:28c4f76c1ab344d7cff1f0a36fcf5adee19095466087d726190e917fd81dc38e`. Text
+explicitly labeled historical, research, prototype evidence, or deferred remains
+non-normative; all other versioned requirements below preserve the imported
+contract semantics as maintained directly in these specifications.
 
 ## Decision
 
@@ -54,11 +57,11 @@ workspaces
   without a second state transition.
 
 Reading/listing/creating/updating/archiving uses exact audited system actions
-`workspace.read`, `workspace.create`, `workspace.update`, or `workspace.archive`, not
-domain changeset operations. List only returns workspaces visible under current
-assignments/policy. It uses the shared auth-context and error contracts. The
-final useful workspace is not specially protected; the last-human-super-admin
-invariant remains independent.
+`workspace.read`, `workspace.create`, `workspace.update`, or
+`workspace.archive`, not domain changeset operations. List only returns
+workspaces visible under current assignments/policy. It uses the shared
+auth-context and error contracts. The final useful workspace is not specially
+protected; the last-human-super-admin invariant remains independent.
 
 ## Runtime behavior
 
@@ -70,10 +73,10 @@ invariant remains independent.
 - Stage records pin the workspace's ID and version/state as a dependency. Commit
   locks workspace rows in canonical UUID order and requires them still active;
   concurrent archive serializes and makes a later incompatible commit stale.
-- Archiving a workspace does not cancel already running outbox deliveries; durable
-  committed work follows the pinned outbox contract.
-- Cross-workspace changesets are allowed only when every operation names a workspace
-  and current authorization/policy covers every boundary.
+- Archiving a workspace does not cancel already running outbox deliveries;
+  durable committed work follows the pinned outbox contract.
+- Cross-workspace changesets are allowed only when every operation names a
+  workspace and current authorization/policy covers every boundary.
 
 ## API DTOs
 
@@ -109,8 +112,8 @@ At least one mutable field must be present; unknown fields fail.
 
 List defaults to active workspaces and accepts strict
 `status=active|archived|all`, optional exact `slug`, and cursor pagination.
-Exact slug lookup returns zero/one item and is how CLI resolves workspace context.
-Callers never provide owner/principal/role fields in workspace DTOs.
+Exact slug lookup returns zero/one item and is how CLI resolves workspace
+context. Callers never provide owner/principal/role fields in workspace DTOs.
 
 ## CLI
 
@@ -129,4 +132,11 @@ from process evidence.
 
 ## Fresh-install Workspace cutover
 
-This is a breaking release, not a compatibility migration. Project-era databases are rejected before schema writes with workspace_schema_requires_fresh_database. Operators must back up wanted data and initialize a fresh database. The public boundary is workspace_id, all_workspaces, /api/v1/workspaces, optctl workspace, --workspace, and OPTD_WORKSPACE. Old Project boundary aliases are not accepted. Publisher namespaces do not change. The Projects pack keeps optd/projects:project, with project_id denoting a work-project reference rather than platform scope.
+This is a breaking release, not a compatibility migration. Project-era databases
+are rejected before schema writes with workspace_schema_requires_fresh_database.
+Operators must back up wanted data and initialize a fresh database. The public
+boundary is workspace_id, all_workspaces, /api/v1/workspaces, optctl workspace,
+--workspace, and OPTD_WORKSPACE. Old Project boundary aliases are not accepted.
+Publisher namespaces do not change. The Projects pack keeps
+optd/projects:project, with project_id denoting a work-project reference rather
+than platform scope.

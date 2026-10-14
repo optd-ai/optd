@@ -1,8 +1,6 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-authentication; contract: 1; input: sha256:09c5cc8d160a0889ed7c19eb9d49a333991bdbb700f9c1a7110da42b4dbfeba7 -->
-
 # Authentication and Local Agent Grants
 
-Generated exact-contract projection imported into project-model/model.json from the reviewed authentication.md source.
+Authoritative contract; edit this specification directly.
 
 ## Exact migrated contract
 
@@ -10,7 +8,12 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — Authentication and Local Agent Grants
 
-**Migration provenance.** Exact normative contract imported from `spec/authentication.md` at `sha256:907cbfed4b2bd8237c2d423f8bbde8e829966e7d7706cb44009a85c2b73eb839`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
+**Migration provenance.** Exact normative contract imported from
+`spec/authentication.md` at
+`sha256:907cbfed4b2bd8237c2d423f8bbde8e829966e7d7706cb44009a85c2b73eb839`. Text
+explicitly labeled historical, research, prototype evidence, or deferred remains
+non-normative; all other versioned requirements below preserve the imported
+contract semantics as maintained directly in these specifications.
 
 ## Status
 
@@ -113,8 +116,8 @@ server authority; it only controls local access to a server-issued credential.
 
 ## One authentication model and testing strategy
 
-optd has one normal server authentication model for development, containers,
-and production: opaque server-issued bearer tokens resolved through server-side
+optd has one normal server authentication model for development, containers, and
+production: opaque server-issued bearer tokens resolved through server-side
 sessions, authorizations, role assignments, policy assignments, and auth
 contexts. Bootstrap and recovery are explicit installation states, not auth
 modes. Internal system execution and deterministic test authentication are
@@ -254,10 +257,10 @@ include `axi.summary` to explain their conditions in human terms; the server
 combines that prose with the structured rule but never uses prose to decide.
 
 `optctl auth roles` resolves an explicit or active-context
-workspace/all-workspace/system boundary and echoes it, then shows canonical role id,
-display name, and `role.spec.axi.summary`. It lists roles available through the
-anchoring human user's assignments even when no active policy currently grants
-useful capabilities; such roles remain visible with a warning.
+workspace/all-workspace/system boundary and echoes it, then shows canonical role
+id, display name, and `role.spec.axi.summary`. It lists roles available through
+the anchoring human user's assignments even when no active policy currently
+grants useful capabilities; such roles remain visible with a warning.
 
 `optctl auth roles --verbose` asks the server for boundary-specific structured
 capability explanations containing:
@@ -515,8 +518,8 @@ optctl --workspace sales auth request \
 The request may include optional, explicitly agent-reported metadata: `name`,
 `harness`, `external_session_id`, `provider`, `model`, and `reasoning_effort`.
 These typed fields are unverified approval context, never authorization input.
-optd does not accept arbitrary environment/settings dumps or infer this
-metadata from processes. The approver may override the friendly name.
+optd does not accept arbitrary environment/settings dumps or infer this metadata
+from processes. The approver may override the friendly name.
 
 `optctl auth roles` with no flags shows only role names and concise summaries.
 `--verbose` shows detailed permissions/capabilities for each role when the
@@ -722,7 +725,15 @@ narrower binding matches but its server authorization is revoked or
 insufficient, `optctl` must not retry with a broader ancestor credential; it may
 use only the authorization-request credential to request replacement authority.
 
-Human login and agent authorization requests anchor to the nearest verified persistent harness or interactive shell, not a transient command shell. Known command-shell wrappers are traversed; unknown launchers fail closed and must provide OPTD_AUTH_ANCHOR_PID for their own live PID. Explicit anchors must be in the caller's permitted ancestry and cannot bypass a nearer binding or isolate boundary. The selected ancestry is revalidated before use. On Linux, any narrow-reader helper resolves cat through PATH; a missing helper or boot identity reports process_inspection_unavailable rather than pretending a valid process disappeared.
+Human login and agent authorization requests anchor to the nearest verified
+persistent harness or interactive shell, not a transient command shell. Known
+command-shell wrappers are traversed; unknown launchers fail closed and must
+provide OPTD_AUTH_ANCHOR_PID for their own live PID. Explicit anchors must be in
+the caller's permitted ancestry and cannot bypass a nearer binding or isolate
+boundary. The selected ancestry is revalidated before use. On Linux, any
+narrow-reader helper resolves cat through PATH; a missing helper or boot
+identity reports process_inspection_unavailable rather than pretending a valid
+process disappeared.
 
 `optctl auth session-pid` prints the immediate caller PID as a machine-readable
 integer. A parent agent may launch a subagent with:
@@ -1121,8 +1132,8 @@ The server reads it from its environment and stores/compares only a digest.
 `optctl bootstrap init` reads the matching value from its own environment; there
 is no bootstrap-token CLI argument or file-specific workflow. Local shells,
 Docker Compose, and Kubernetes may inject the variable through their normal
-secret-management facilities. optd never generates or prints bootstrap
-secrets in server logs.
+secret-management facilities. optd never generates or prints bootstrap secrets
+in server logs.
 
 The token is accepted only in `bootstrap_required`, compared in constant time,
 and invalidated transactionally after successful use. A still-present
@@ -1149,10 +1160,9 @@ OPTD_BOOTSTRAP_TOKEN='<high-entropy-secret>' \
   bootstrap init --username jordan
 ```
 
-`optd server start` means starting the local server process when that
-packaging exists. Docker Compose, Kubernetes, the container entrypoint, a
-compiled server, or `deno run src/main_server.ts` have identical bootstrap
-semantics.
+`optd server start` means starting the local server process when that packaging
+exists. Docker Compose, Kubernetes, the container entrypoint, a compiled server,
+or `deno run src/main_server.ts` have identical bootstrap semantics.
 
 ### Interactive initialization
 
@@ -1265,24 +1275,25 @@ optctl context remove old
 
 Resolution precedence is explicit command flags, `OPTD_SERVER_URL` /
 `OPTD_WORKSPACE`, active context, then packaged local defaults. Explicit
-resource workspace and selected workspace must agree or return `workspace_conflict`.
-Origins normalize scheme, lowercase hostname, effective port, trailing slash,
-and IPv6 representation; origins contain no path/query/fragment. Credentials
-never follow redirects to another origin.
+resource workspace and selected workspace must agree or return
+`workspace_conflict`. Origins normalize scheme, lowercase hostname, effective
+port, trailing slash, and IPv6 representation; origins contain no
+path/query/fragment. Credentials never follow redirects to another origin.
 
 Successful bootstrap automatically creates/updates and activates a context—no
 confirmation. Loopback uses `local`, an explicit `--context` uses that name, and
 remote origins otherwise use the normalized hostname with deterministic
-collision handling. The workspace remains unset until one exists; creation of the
-first workspace may set it automatically only when the context has no default.
+collision handling. The workspace remains unset until one exists; creation of
+the first workspace may set it automatically only when the context has no
+default.
 
 ## CLI input and diagnostics
 
 Input policy is resolved once per invocation. Prompting is allowed only when
 stdin is a terminal and not supplying command data, `--json` and
-`--non-interactive` are absent, `OPTD_NON_INTERACTIVE` is unset, and the
-command explicitly permits the prompt. Permission repair prompts at most once
-per invocation and never retries. Ordinary object/query/changeset commands never
+`--non-interactive` are absent, `OPTD_NON_INTERACTIVE` is unset, and the command
+explicitly permits the prompt. Permission repair prompts at most once per
+invocation and never retries. Ordinary object/query/changeset commands never
 request passwords or approval.
 
 ```bash
@@ -1528,10 +1539,11 @@ context as defined in [Events and Audit](events-audit.md).
 `prototypes/authentication/` exercises the proposed public lifecycle in an
 isolated Hono server: one-time bootstrap, Argon2id login, retained/issued
 request credentials, idempotent multi-role requests, approval without token
-disclosure, requester nonce redemption, multi-workspace replacement authorization,
-per-workspace role use, agent-to-subagent approval and chain invalidation, denial
-without escalation suggestions, self-revocation, password-confirmed logout-all,
-targeted recovery, stable errors, and auth contexts without process evidence.
+disclosure, requester nonce redemption, multi-workspace replacement
+authorization, per-workspace role use, agent-to-subagent approval and chain
+invalidation, denial without escalation suggestions, self-revocation,
+password-confirmed logout-all, targeted recovery, stable errors, and auth
+contexts without process evidence.
 
 Observed evidence:
 

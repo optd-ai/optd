@@ -1,8 +1,6 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-crm-workflows; contract: 1; input: sha256:af535560f08ab6decc73dd3d2dd6c323794f3579b7bfb83a5e55dc30eb987199 -->
-
 # Headless CRM Workflows
 
-Generated exact-contract projection imported into project-model/model.json from the reviewed crm-workflows.md source.
+Authoritative contract; edit this specification directly.
 
 ## Exact migrated contract
 
@@ -10,7 +8,12 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — Headless CRM Workflows
 
-**Migration provenance.** Exact normative contract imported from `spec/crm-workflows.md` at `sha256:5175f46c78a9306567fd8cec586f09e8982c45167021752190a91ae8fc2a3597`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
+**Migration provenance.** Exact normative contract imported from
+`spec/crm-workflows.md` at
+`sha256:5175f46c78a9306567fd8cec586f09e8982c45167021752190a91ae8fc2a3597`. Text
+explicitly labeled historical, research, prototype evidence, or deferred remains
+non-normative; all other versioned requirements below preserve the imported
+contract semantics as maintained directly in these specifications.
 
 ## Research Summary
 

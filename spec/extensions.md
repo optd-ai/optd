@@ -1,8 +1,6 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-extensions; contract: 1; input: sha256:5702a47dbc882aebcdcc3314c4af6b4921a01d1fd97f59dafdbca312734f1c8d -->
-
 # Extensions
 
-Generated exact-contract projection imported into project-model/model.json from the reviewed extensions.md source.
+Authoritative contract; edit this specification directly.
 
 ## Exact migrated contract
 
@@ -10,7 +8,12 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — Extensions
 
-**Migration provenance.** Exact normative contract imported from `spec/extensions.md` at `sha256:9cf20279f696e6631047dee3a8905d6e1f2c2dd2fae76553dbf0811a52e5b167`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
+**Migration provenance.** Exact normative contract imported from
+`spec/extensions.md` at
+`sha256:9cf20279f696e6631047dee3a8905d6e1f2c2dd2fae76553dbf0811a52e5b167`. Text
+explicitly labeled historical, research, prototype evidence, or deferred remains
+non-normative; all other versioned requirements below preserve the imported
+contract semantics as maintained directly in these specifications.
 
 ## MVP decision
 

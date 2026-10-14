@@ -1,8 +1,6 @@
-<!-- generated-by: pi-dag-workflow/project-model; view: view-exact-changeset-operation-schema; contract: 1; input: sha256:14f68b07d0140cfda37c88f6a1ec1cc2f8edb3f1693cd7426af25a5b03078ed8 -->
-
 # Changeset Operation Schemas v1
 
-Generated exact-contract projection imported into project-model/model.json from the reviewed changeset-operation-schema.md source.
+Authoritative contract; edit this specification directly.
 
 ## Exact migrated contract
 
@@ -10,14 +8,19 @@ Generated exact-contract projection imported into project-model/model.json from 
 
 ### Exact v1 contract — Changeset Operation Schemas v1
 
-**Migration provenance.** Exact normative contract imported from `spec/changeset-operation-schema.md` at `sha256:b927be34a2e2a4d1bc9ee9881cd720262d59d75bdb142f923231eab0c9d52fdf`. Text explicitly labeled historical, research, prototype evidence, or deferred remains non-normative; all other versioned requirements below preserve the imported contract semantics as updated by accepted project-model decisions.
+**Migration provenance.** Exact normative contract imported from
+`spec/changeset-operation-schema.md` at
+`sha256:b927be34a2e2a4d1bc9ee9881cd720262d59d75bdb142f923231eab0c9d52fdf`. Text
+explicitly labeled historical, research, prototype evidence, or deferred remains
+non-normative; all other versioned requirements below preserve the imported
+contract semantics as maintained directly in these specifications.
 
 ## Purpose
 
-`changeset.operations.v1` is optd's single declarative write language for
-public changeset requests, action-stage hook output, CLI commands, and future
-agent protocols. `patch.v1` is the normalization-hook language applied to one
-proposed resource data document.
+`changeset.operations.v1` is optd's single declarative write language for public
+changeset requests, action-stage hook output, CLI commands, and future agent
+protocols. `patch.v1` is the normalization-hook language applied to one proposed
+resource data document.
 
 Staging executes hooks once, resolves and normalizes these schemas, generates
 all platform identities, and persists an immutable canonical operation graph.
@@ -56,9 +59,9 @@ A public changeset staging request contains:
 }
 ```
 
-`workspace_id` is optional only as single-workspace inheritance context; operations
-may instead carry explicit `workspace_id` values for a cross-workspace graph. An
-`action.stage` hook writes:
+`workspace_id` is optional only as single-workspace inheritance context;
+operations may instead carry explicit `workspace_id` values for a
+cross-workspace graph. An `action.stage` hook writes:
 
 ```json
 {
@@ -89,9 +92,10 @@ Operations preserve authored array order and may contain:
 - `op`: required operation discriminator.
 - `key`: optional operation-local identifier. It is required when another
   operation references an ID this operation will produce.
-- `workspace_id`: optional UUIDv7 inherited from a single-workspace staging/action
-  request context when omitted. A request spanning workspaces must set it on every
-  operation. The canonical stage always stores it explicitly.
+- `workspace_id`: optional UUIDv7 inherited from a single-workspace
+  staging/action request context when omitted. A request spanning workspaces
+  must set it on every operation. The canonical stage always stores it
+  explicitly.
 
 `key` values are unique within one staging attempt. They are not platform IDs
 and exist only for graph authoring/provenance. Unkeyed operations receive stable
@@ -161,7 +165,12 @@ Rules:
   fields, workspace ownership, and current-version pointers are forbidden inside
   `fields`.
 - Field values may contain structured operation references.
-- Direct changeset creates may additionally supply paired initial_state and nonblank import_reason. This explicit historical-import path requires a declared lifecycle state and independent import authorization, in addition to create authorization. The requested state and reason remain in the immutable operation graph and audit history. Actions and hooks cannot request historical import. Ordinary creates retain strict initial lifecycle state enforcement.
+- Direct changeset creates may additionally supply paired initial_state and
+  nonblank import_reason. This explicit historical-import path requires a
+  declared lifecycle state and independent import authorization, in addition to
+  create authorization. The requested state and reason remain in the immutable
+  operation graph and audit history. Actions and hooks cannot request historical
+  import. Ordinary creates retain strict initial lifecycle state enforcement.
 
 ### `update`
 
@@ -328,7 +337,8 @@ Rules:
   resolving references.
 - Unknown keys/properties fail staging.
 - A reference field or relationship endpoint must resolve within the consuming
-  operation's workspace; cross-workspace references/links fail `workspace_conflict`.
+  operation's workspace; cross-workspace references/links fail
+  `workspace_conflict`.
 - Persisted canonical operations contain resolved UUIDs and no `$ref` objects.
 - Strings such as `@company` have no special meaning.
 
@@ -380,8 +390,8 @@ Rules:
 - The first path segment must name a mutable pack-defined resource field.
 - Nested object/array paths follow RFC 6902 semantics.
 - Pack-defined fields named `metadata` are ordinary patchable data. Platform
-  identity/version/workspace/actor/timestamp/archive metadata is outside the patch
-  document and cannot be reached.
+  identity/version/workspace/actor/timestamp/archive metadata is outside the
+  patch document and cannot be reached.
 - Duplicate paths within one hook output are rejected.
 - Later ordered normalization hooks may patch a path changed by an earlier hook.
 - Failed `test` or invalid path/application fails staging.
