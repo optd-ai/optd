@@ -1,4 +1,4 @@
-import { assert, assertEquals } from "jsr:@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import { isUuidV7, uuidV7 } from "../../../src/domain/ids/uuid_v7.ts";
 import {
   validateDescription,

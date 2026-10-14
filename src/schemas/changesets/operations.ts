@@ -1,4 +1,4 @@
-import { type Static, Type } from "npm:@sinclair/typebox@0.34.38";
+import { type Static, Type } from "@sinclair/typebox";
 import { compileContract, strictObject } from "../api/contracts.ts";
 
 export const UuidV7Schema = Type.String({

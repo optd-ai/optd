@@ -3,7 +3,7 @@ import {
   assertEquals,
   assertRejects,
   assertStringIncludes,
-} from "jsr:@std/assert";
+} from "@std/assert";
 import { assertHealth } from "../support/live_harness.ts";
 import { BUILD_VERSION } from "../../src/config/build.ts";
 import { startAuthenticatedHarness } from "../support/authenticated_harness.ts";

@@ -26,7 +26,12 @@ subsequently fixed and passed in focused reruns, including complete CRM/Projects
 flows, PostgreSQL lifecycle checks, bootstrap, and exact Compose cleanup checks.
 This is not an exact-image release attestation. Local Docker is unavailable; the
 user approved committing/pushing and using the existing gated GitHub workflow
-for `v0.2.0`, with local installation only after publication succeeds.
+for `v0.2.0`, with local installation only after publication succeeds. That CI
+attempt correctly rejected lint errors and published nothing. The offending
+imports now use existing pinned import-map entries, the test helper uses a
+block-scoped arrow function, and the exact 221-file release-range lint check
+passes locally. The failed tag is preserved; the corrected release candidate is
+`v0.2.1`.
 
 ## Historical first update — close your own tickets
 

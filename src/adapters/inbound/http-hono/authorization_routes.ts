@@ -1,4 +1,4 @@
-import type { Hono } from "npm:hono";
+import type { Hono } from "hono";
 import type { AuthContext } from "../../../domain/auth/model.ts";
 import type { Result } from "../../../domain/errors/result.ts";
 import { toHttpStatus } from "../../../domain/errors/result.ts";

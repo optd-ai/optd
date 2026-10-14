@@ -1,4 +1,4 @@
-import { assertEquals } from "jsr:@std/assert";
+import { assertEquals } from "@std/assert";
 import { CurrentPolicyAgentAuthorizationGrantability } from "../../../src/application/services/auth/grantability.ts";
 import type {
   AgentAuthorizationGrantabilitySnapshot,

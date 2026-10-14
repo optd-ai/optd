@@ -1,4 +1,4 @@
-import { type Static, Type } from "npm:@sinclair/typebox@0.34.38";
+import { type Static, Type } from "@sinclair/typebox";
 import { compileContract, strictObject } from "../api/contracts.ts";
 
 const Name = Type.String({ pattern: "^[a-z][a-z0-9_]{0,62}$" });

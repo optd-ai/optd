@@ -1,9 +1,4 @@
-import {
-  assert,
-  assertEquals,
-  assertRejects,
-  assertThrows,
-} from "jsr:@std/assert@1";
+import { assert, assertEquals, assertRejects, assertThrows } from "@std/assert";
 import type {
   ProcessIdentity,
   ProcessInspector,
@@ -270,7 +265,7 @@ Deno.test("doctor reports references, liveness, partitions, orphans, temp files,
       JSON.stringify({ ...originalBinding, id: "duplicate" }),
       { mode: 0o600 },
     );
-    let duplicateReport = await store.doctor();
+    const duplicateReport = await store.doctor();
     assert(
       duplicateReport.findings.some((finding) =>
         finding.code === "session_binding_duplicate"

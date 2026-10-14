@@ -1,4 +1,4 @@
-import { Type } from "npm:@sinclair/typebox";
+import { Type } from "@sinclair/typebox";
 
 export const AuthorizationBoundarySchema = Type.Union([
   Type.Object({

@@ -7,7 +7,7 @@ is `optd`, source `https://github.com/optd-ai/optd`, server `optd`, CLI
 
 ## Workspace compatibility boundary
 
-Version 0.2.0 requires a fresh database and fresh local authentication/context
+Version 0.2.x requires a fresh database and fresh local authentication/context
 state. Project-era databases are rejected before migration writes; no in-place
 upgrade or old-boundary aliases are provided. Back up wanted data before
 replacing an installation. See

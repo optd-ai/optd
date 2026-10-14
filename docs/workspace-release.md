@@ -1,4 +1,4 @@
-# Workspace breaking release (0.2.0)
+# Workspace breaking release (0.2.x)
 
 This release requires a **fresh database**. It does not migrate Project-era
 schemas, stages, credentials, local context selections, or installed Pack

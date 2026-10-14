@@ -1,4 +1,4 @@
-import { assert, assertEquals, assertStringIncludes } from "jsr:@std/assert";
+import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import { isUuidV7 } from "../../../src/domain/ids/uuid_v7.ts";
 import { startLiveHarness } from "../../support/live_harness.ts";
 

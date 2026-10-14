@@ -11,11 +11,11 @@ Deno.test("Projects administrator initializes seeds, resolves its boundary, list
       password: "onboarding-admin-password",
     });
     assertEquals(bootstrap.code, 0, bootstrap.stderr);
-    async function cli(args: string[]) {
+    const cli = async (args: string[]) => {
       const result = await harness.runOptctl(["--json", ...args]);
       assertEquals(result.code, 0, result.stderr);
       return JSON.parse(result.stdout).data;
-    }
+    };
     await cli([
       "pack",
       "apply",
