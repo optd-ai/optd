@@ -1201,7 +1201,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
           body: JSON.stringify({
             username,
             password,
-            ...(prior.requestSessionId
+            ...(prior.requestSessionId && prior.requestToken
               ? { existing_request_session_id: prior.requestSessionId }
               : {}),
           }),
