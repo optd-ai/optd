@@ -433,11 +433,16 @@ ${clause}
     );
   }
 
+  for (const action of ["read", "read_archived", "history.read"]) {
+    const loaded = await loadPackFromFiles(files("lead_link", action));
+    assertEquals(
+      (loaded.policies.access.spec.rules as { actions: string[] }[])[0].actions,
+      [action],
+    );
+  }
+
   for (
     const action of [
-      "read",
-      "read_archived",
-      "history.read",
       "create",
       "update",
       "archive",
@@ -448,7 +453,7 @@ ${clause}
     await assertRejects(
       () => loadPackFromFiles(files("lead_link", action)),
       Error,
-      "relationship policy targets support only link and unlink",
+      "relationship policy targets support only link, unlink, read, read_archived and history.read",
       action,
     );
   }

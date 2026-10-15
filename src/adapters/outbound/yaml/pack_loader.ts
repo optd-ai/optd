@@ -910,9 +910,13 @@ function validateReferences(pack: LoadedPack) {
       }
       if (targetsRelationship) {
         for (const action of policyActions) {
-          if (action !== "link" && action !== "unlink") {
+          if (
+            typeof action !== "string" ||
+            !["link", "unlink", "read", "read_archived", "history.read"]
+              .includes(action)
+          ) {
             throw new Error(
-              `${def.path}: relationship policy targets support only link and unlink actions`,
+              `${def.path}: relationship policy targets support only link, unlink, read, read_archived and history.read actions`,
             );
           }
         }

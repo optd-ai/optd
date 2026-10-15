@@ -36,8 +36,12 @@ spec:
       from:
         - blocked
       to: done
+    - name: blocked_to_todo_7
+      from:
+        - blocked
+      to: todo
   axi:
-    purpose: task flow guidance for the optd/projects pack.
+    purpose: Task lifecycle; blocked to todo or done requires clearing blocked_reason to an empty string in the same transition.
     whenToUse:
       - Inspect lifecycle task_flow behavior and guidance before relying on it.
     help:

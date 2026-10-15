@@ -75,6 +75,26 @@ for (
   });
 }
 
+for (const state of ["todo", "done", "blocked"]) {
+  for (const reason of [undefined, "", "  ", "waiting"]) {
+    Deno.test(`Projects blocked task to ${state} validates reason ${JSON.stringify(reason)}`, async () => {
+      const result = await validate({
+        operation: {
+          op: "transition",
+          resource: "optd/projects:task",
+          to: state,
+        },
+        current: { title: "Task", state: "blocked", blocked_reason: "waiting" },
+        proposed: { title: "Task", state, blocked_reason: reason },
+      });
+      assertEquals(
+        result.allow,
+        state === "blocked" ? reason === "waiting" : reason !== "waiting",
+      );
+    });
+  }
+}
+
 async function validate(input: Record<string, unknown>) {
   const cacheDir = await Deno.makeTempDir({ prefix: "optd-task-completion-" });
   try {

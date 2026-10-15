@@ -163,13 +163,18 @@ tables when the link needs metadata, history, or policy.
 ```text
 todo -> in_progress -> blocked -> in_progress -> done
 todo -> blocked
-blocked -> done only when `blocked_reason` has been cleared; otherwise the
-stage is rejected (a manager may first stage the corrective update)
+blocked -> done or todo only when `blocked_reason` is cleared in the same
+transition; otherwise the stage is rejected
 ```
 
 The lifecycle field is `state` and initial state is `todo`. `stage_id` selects a
 board column whose seeded `state` must match; action hooks set both atomically.
-Done requires an absent `blocked_reason`, enforced by validation.
+Done requires no active `blocked_reason`, enforced by validation. Clear an
+existing reason with `blocked_reason: ""` in the transition's field updates;
+explicit null values are unsupported. Returning from blocked to todo likewise
+requires clearing the reason atomically. Direct CLI transitions should set the
+appropriate `stage_id` in the same input. `complete_task` already clears the
+reason and selects the done stage atomically.
 
 ## Actions
 
@@ -206,6 +211,20 @@ Minimum policy rules:
 - Workspace members can read workspace tasks and update tasks assigned to them.
 - Assignees can start/block/complete their assigned tasks.
 - Viewers can read visible workspaces/tasks.
+- Administrators and managers can read archived Projects resources and task
+  relationships within their Workspace boundary. Members and viewers do not gain
+  archived-read authority.
+- Administrators, managers, members and viewers can read active
+  `task_tag_assignment` and `task_milestone` relationships and their history
+  within their Workspace boundary. Relationship writes remain separately
+  authorized.
+- By-ID view/history automatically require `read_archived` for archived objects;
+  queries additionally require explicit `--include-archived`. Hidden or
+  unauthorized targets retain non-enumerating `not_found` responses.
+
+These read-policy and unblock changes ship in Projects pack `0.2.1`. Upgrading
+from `0.2.0` requires a reviewed migration; existing objects, history, seeds and
+assignments are preserved. No automatic seed reconciliation is performed.
 
 Use RBAC/ABAC and one-hop ReBAC only. Deep ReBAC is out of scope.
 

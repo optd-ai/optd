@@ -99,6 +99,12 @@ unlink
 comment
 ```
 
+Relationship identities may be policy targets for `link`, `unlink`, `read`,
+`read_archived`, and `history.read`. Other resource mutations remain invalid on
+relationship targets. Relationship-target rules do not accept `where` or
+`relation` clauses; scope and explicit grants still apply. Read permissions do
+not grant link/unlink authority or embedded access to endpoint objects.
+
 Semantic pack action/seed permissions are exact qualified strings:
 
 ```text

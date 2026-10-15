@@ -73,7 +73,7 @@ Deno.test("compiled optctl completes safe, destructive, stale, timeout, risky, a
     const aggregatedHome = await runOk(harness, ["home"], secrets);
     assertEquals(aggregatedHome.data.system.active_packs, [
       "optd/crm@0.2.0",
-      "optd/projects@0.2.0",
+      "optd/projects@0.2.1",
     ]);
 
     for (const slug of ["alpha", "beta"]) {

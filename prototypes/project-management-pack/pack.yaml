@@ -3,7 +3,7 @@ apiVersion: optd.dev/v1
 metadata:
   publisher: optd
   name: projects
-  version: 0.2.0
+  version: 0.2.1
 spec:
   purpose: Project and task management resources for agent-operated work tracking.
   axi:

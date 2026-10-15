@@ -34,8 +34,8 @@ export class PublicFlowAssets {
       await copyTree(await this.path("projects"), destination);
       await replace(
         join(destination, "pack.yaml"),
-        "version: 0.2.0",
         "version: 0.2.1",
+        "version: 0.2.2",
       );
       await writeProjectsAuxiliary(destination, this.#providerUrl);
       this.#generated.set(asset, destination);

@@ -37,7 +37,7 @@ spec:
       - in_progress
       - blocked
   axi:
-    purpose: complete task guidance for the optd/projects pack.
+    purpose: Complete an in-progress or blocked task, clearing blocked_reason to an empty string and setting the done stage atomically.
     whenToUse:
       - Use optd/projects:complete_task when its declared operation should be staged.
     stageFirst: true

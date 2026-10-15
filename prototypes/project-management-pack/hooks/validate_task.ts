@@ -24,19 +24,23 @@ if (resource === "optd/projects:task") {
     });
   }
   if (
-    after.state === "done" && after.blocked_reason &&
+    (after.state === "done" ||
+      (before?.state === "blocked" && after.state === "todo")) &&
+    after.blocked_reason &&
     String(after.blocked_reason).trim() !== ""
   ) {
     errors.push({
       path: "/blocked_reason",
       code: "blocked_reason_unresolved",
-      message: "Done tasks must have no active blocked_reason.",
+      message:
+        "Clear blocked_reason to an empty string in the same transition to done or back to todo; complete_task clears it automatically.",
     });
   }
   if (before?.state && after.state && before.state !== after.state) {
     const allowed = new Set([
       "todo->in_progress",
       "blocked->in_progress",
+      "blocked->todo",
       "todo->blocked",
       "in_progress->blocked",
       "in_progress->done",
