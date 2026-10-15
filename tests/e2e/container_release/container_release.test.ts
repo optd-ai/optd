@@ -261,7 +261,8 @@ Deno.test({
   async fn() {
     const provider = startHttpProvider([], {
       hostname: "0.0.0.0",
-      advertisedHostname: "host.docker.internal",
+      advertisedHostname: Deno.env.get("OPTD_CONTAINER_PROVIDER_HOST") ??
+        "host.docker.internal",
     });
     const harness = await createContainerHarness(await image());
     const pack = await Deno.makeTempDir({ prefix: "container-outbox-pack-" });
@@ -871,6 +872,7 @@ Deno.test({
       await runCommand("docker", [
         "run",
         "-d",
+        "--pull=never",
         "--name",
         pg,
         "--network",
@@ -920,6 +922,7 @@ Deno.test({
       await runCommand("docker", [
         "run",
         "-d",
+        "--pull=never",
         "--name",
         badPg,
         "--network",

@@ -44,6 +44,22 @@ having Buildx installed does not demonstrate that this accounting supports
 BuildKit. A builder mismatch must fail with retained evidence, not bypass
 ownership checks.
 
+Before the gate starts, establish the same Docker image prerequisites as CI:
+preload the exact `DENO_IMAGE` and `POSTGRES_IMAGE` references declared in
+`Dockerfile`, plus the negative-compatibility fixture `postgres:16-bookworm`.
+These are baseline dependencies, not gate-owned images. External PostgreSQL
+fixtures use `--pull=never`; a missing dependency must fail rather than silently
+change the image inventory during acceptance. Do not pull or prune images while
+a gate is running.
+
+Container callback tests normally advertise `host.docker.internal`. With
+rootless Docker, its `host-gateway` address may refer to the daemon's namespace
+rather than the host test provider. Set `OPTD_CONTAINER_PROVIDER_HOST` to an
+explicit host address reachable from containers (for example the host's LAN
+address) before running the gate. The provider still listens on an ephemeral
+port and uses only synthetic test data. This changes the test route, not the
+suite or its acceptance requirements.
+
 The gate freezes a clean exact commit into `git archive`, builds once, and runs
 the suite and artifact generation against that immutable image ID. See
 [runtime.md](runtime.md) for ownership-scoped cleanup and retained failure

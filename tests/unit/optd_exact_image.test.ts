@@ -96,6 +96,23 @@ Deno.test("BuildKit authority rejects mismatched, incomplete and foreign ownersh
   );
 });
 
+Deno.test("container fixtures forbid implicit pulls and allow explicit callback routing", async () => {
+  const fixture = await Deno.readTextFile(
+    join(root, "tests/e2e/container_release/container_release.test.ts"),
+  );
+  assert.match(fixture, /"--pull=never",\s*"--name",\s*pg,/);
+  assert.match(fixture, /"--pull=never",\s*"--name",\s*badPg,/);
+  const adapter = await Deno.readTextFile(
+    join(root, "tests/support/public_flows/container_adapter.ts"),
+  );
+  for (const source of [fixture, adapter]) {
+    assert.match(
+      source,
+      /advertisedHostname: Deno\.env\.get\("OPTD_CONTAINER_PROVIDER_HOST"\) \?\?\s*"host\.docker\.internal"/,
+    );
+  }
+});
+
 Deno.test("real gate rejects dirty composed trees and unavailable release base before build", async () => {
   const fixture = await Deno.makeTempDir({ prefix: "optd-image-source-" });
   const command = async (cmd: string, args: string[]) => {

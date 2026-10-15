@@ -28,7 +28,8 @@ export async function createContainerPublicFlowBackend(
 ): Promise<CompletePublicFlowBackend> {
   const provider = startHttpProvider([], {
     hostname: "0.0.0.0",
-    advertisedHostname: "host.docker.internal",
+    advertisedHostname: Deno.env.get("OPTD_CONTAINER_PROVIDER_HOST") ??
+      "host.docker.internal",
   });
   const harness = await createContainerHarness(image);
   const assetRoot = await Deno.makeTempDir({
