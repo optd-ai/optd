@@ -105,6 +105,12 @@ Deno.test("container fixtures forbid implicit pulls and allow explicit callback 
   const adapter = await Deno.readTextFile(
     join(root, "tests/support/public_flows/container_adapter.ts"),
   );
+  const harness = await Deno.readTextFile(
+    join(root, "tests/support/container_harness.ts"),
+  );
+  assert.match(harness, /const cursorKey = randomSecret\(\);/);
+  assert.match(harness, /OPTD_MASTER_KEY=\$\{cursorKey\}/);
+  assert.match(harness, /OPTD_SECRET_MASTER_KEY=\$\{masterKey\}/);
   for (const source of [fixture, adapter]) {
     assert.match(
       source,

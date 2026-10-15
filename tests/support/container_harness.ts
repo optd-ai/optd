@@ -126,6 +126,7 @@ export async function createContainerHarness(
   const container = `${id}-app`;
   const bootstrapToken = randomSecret();
   const masterKey = randomSecret();
+  const cursorKey = randomSecret();
   const cleanupArgs: string[][] = [];
   const gateLabel = gateId;
   const labelArgs = gateLabel
@@ -158,6 +159,8 @@ export async function createContainerHarness(
       `OPTD_BOOTSTRAP_TOKEN=${bootstrapToken}`,
       "--env",
       `OPTD_SECRET_MASTER_KEY=${masterKey}`,
+      "--env",
+      `OPTD_MASTER_KEY=${cursorKey}`,
       "--volume",
       `${volume}:/data`,
       ...extraArgs,
