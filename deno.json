@@ -15,7 +15,6 @@
   },
   "fmt": {
     "exclude": [
-      "docs/handoff-papercuts-2026-10-14.md",
       "docs/handoff-papercuts-v0.2.2.md",
       "spec/history/project-model/"
     ],

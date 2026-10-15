@@ -2,8 +2,10 @@
 
 Review baseline: `d494c23`
 (`fix(auth): recover missing request credentials on login`). Input:
-`docs/handoff-papercuts-2026-10-14.md`. The original handoff is preserved
-unchanged (and excluded from automatic formatting to preserve its bytes).
+`docs/handoff-papercuts-2026-10-14.md`. That superseded handoff was retired
+after the v0.3.0 reconciliation; its original contents remain in Git history at
+`v0.3.0:docs/handoff-papercuts-2026-10-14.md`. See
+[the current review](review-papercuts-v0.3.0.md) for remaining findings.
 
 ## Accepted update — fresh-install Workspace release
 
