@@ -123,11 +123,15 @@ export function makeInspectMetadataService(
       publisher,
       pack,
       name,
-      capability_projection: boundary.value,
-      axi_readiness: axiReadiness(kind, spec.axi),
     };
     if (section === "resources") {
       Object.assign(base, {
+        required_fields: Object.entries(jsonRecord(spec.fields)).filter((
+          [, field],
+        ) => jsonRecord(field).required === true).map(([name]) => name).sort(),
+        optional_fields: Object.entries(jsonRecord(spec.fields)).filter((
+          [, field],
+        ) => jsonRecord(field).required !== true).map(([name]) => name).sort(),
         schema: {
           fields: Object.fromEntries(
             Object.entries(jsonRecord(spec.fields)).sort((
@@ -139,18 +143,24 @@ export function makeInspectMetadataService(
             ),
           ),
         },
-        required_fields: Object.entries(jsonRecord(spec.fields)).filter((
-          [, field],
-        ) => jsonRecord(field).required === true).map(([name]) => name).sort(),
-        optional_fields: Object.entries(jsonRecord(spec.fields)).filter((
-          [, field],
-        ) => jsonRecord(field).required !== true).map(([name]) => name).sort(),
         axi: spec.axi ?? {},
       });
     } else if (section === "relationships") {
       Object.assign(base, {
         from: spec.from,
         to: spec.to,
+        commands: {
+          link:
+            `optctl --workspace <workspace> link ${publisher}/${pack}:${name} --from <source-object-id> --to <target-object-id> --stage`,
+          unlink:
+            `optctl --workspace <workspace> unlink ${publisher}/${pack}:${name} <relationship-instance-id> --stage`,
+          query:
+            `optctl --workspace <workspace> query relationship ${publisher}/${pack}:${name}`,
+          view:
+            `optctl --workspace <workspace> view relationship ${publisher}/${pack}:${name} <relationship-instance-id>`,
+          help:
+            "Link endpoints are object UUIDv7s; unlink takes the relationship instance UUIDv7. Omit --stage to commit.",
+        },
         schema: { fields: spec.fields ?? {} },
         axi: spec.axi ?? {},
       });
@@ -214,7 +224,34 @@ export function makeInspectMetadataService(
         capabilities: spec.capabilities ?? [],
       });
     } else if (section === "actions") {
+      const packRow = await deps.catalog.pack({ publisher, pack, options });
+      const lifecycles = jsonRecord(jsonRecord(packRow?.normalized).lifecycles);
+      const availabilityResource = jsonRecord(spec.availability).resource;
+      const lifecycleLinks = Object.entries(lifecycles).flatMap(
+        ([lifecycle, document]) => {
+          const definition = jsonRecord(jsonRecord(document).spec);
+          return availabilityResource &&
+              definition.resource === availabilityResource
+            ? [{
+              identity: `${publisher}/${pack}:${lifecycle}`,
+              resource: definition.resource,
+              field: definition.field,
+              inspect:
+                `optctl metadata lifecycle ${publisher}/${pack}:${lifecycle}`,
+            }]
+            : [];
+        },
+      );
       Object.assign(base, {
+        required_fields: Object.entries(jsonRecord(spec.input)).filter((
+          [, field],
+        ) => jsonRecord(field).required === true).map(([name]) => name).sort(),
+        optional_fields: Object.entries(jsonRecord(spec.input)).filter((
+          [, field],
+        ) => jsonRecord(field).required !== true).map(([name]) => name).sort(),
+        lifecycles: lifecycleLinks,
+        availability_note:
+          "Declared prerequisites only; staging and commit revalidate current state and authority.",
         input: spec.input ?? {},
         output: spec.output ?? {},
         availability: spec.availability ?? {},
@@ -237,7 +274,11 @@ export function makeInspectMetadataService(
         rows: spec.rows ?? [],
       });
     }
-    return ok(base);
+    return ok({
+      ...base,
+      capability_projection: boundary.value,
+      axi_readiness: axiReadiness(kind, spec.axi),
+    });
   };
   return {
     async home(options: MetadataOptions): Promise<Result<HomeDto>> {
@@ -384,6 +425,20 @@ export function makeInspectMetadataService(
         roles: names("roles"),
         policies: names("policies"),
         seeds: names("seeds"),
+        seed_initialization: {
+          automatic: false,
+          note:
+            "Installed seed definitions do not imply initialized workspace data. Explicit reconciliation may update existing data.",
+          inspect: names("seeds").map((name) =>
+            `optctl metadata seed ${publisher}/${pack}:${name}`
+          ),
+          stage_all:
+            `optctl --workspace <workspace> seed stage ${publisher}/${pack} --all`,
+          commit_all:
+            `optctl --workspace <workspace> seed commit ${publisher}/${pack} --all`,
+          select:
+            `optctl --workspace <workspace> seed commit ${publisher}/${pack} --seed <name>`,
+        },
         capability_projection: p.value,
         axi_readiness: {
           ready: missingGuidance.length === 0,

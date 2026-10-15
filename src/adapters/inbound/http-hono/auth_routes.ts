@@ -114,6 +114,10 @@ export type HumanAuthHttpService = {
 };
 
 export type AgentAuthHttpService = {
+  resolveWorkspace(
+    auth: AuthContext,
+    input: Record<string, unknown>,
+  ): Promise<Result<{ workspaceId: string }>>;
   roles(
     auth: AuthContext,
     boundary: unknown,
@@ -525,6 +529,17 @@ export function registerAuthRoutes(
           String(parsed.body!.capability ?? ""),
           parsed.body!.password,
         ),
+      ),
+    );
+  });
+  app.post("/api/v1/auth/workspace/resolve", async (c) => {
+    const parsed = await json(c);
+    if (parsed.response) return parsed.response;
+    return send(
+      c,
+      mapResult(
+        await agent.resolveWorkspace(c.get("auth"), parsed.body!),
+        (value) => ({ workspace_id: value.workspaceId }),
       ),
     );
   });

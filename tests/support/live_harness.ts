@@ -132,6 +132,7 @@ const MAX_DIAGNOSTIC_BYTES = 1024 * 1024;
 export async function startLiveHarness(
   options: {
     externalDatabaseUrl?: string;
+    isolateEnvironment?: boolean;
     bootstrapToken?: string | null;
     environment?: Record<string, string | null>;
     forceFreshCompile?: boolean;
@@ -155,15 +156,58 @@ export async function startLiveHarness(
     ),
   );
 
-  const dependencyCache = await ensureDenoDependencies();
-  const binarySourceDigest = await sourceDigest();
-  const binaryPath = await compileOptctl({
-    digest: binarySourceDigest,
-    forceFresh: options.forceFreshCompile ?? false,
-    isolation: rootDir,
-    denoDir: dependencyCache,
-  });
-  const env = Deno.env.toObject();
+  if (
+    options.isolateEnvironment &&
+    (options.externalDatabaseUrl || options.environment)
+  ) {
+    await Deno.remove(rootDir, { recursive: true });
+    throw new Error(
+      "isolated harness does not accept database or environment overrides",
+    );
+  }
+  const env: Record<string, string> = options.isolateEnvironment
+    ? Object.fromEntries(
+      [
+        "PATH",
+        "OPTD_PG_BIN_DIR",
+        "SSL_CERT_FILE",
+        "NIX_SSL_CERT_FILE",
+        "LANG",
+        "LC_ALL",
+        "TZ",
+      ]
+        .flatMap((key) => {
+          const value = Deno.env.get(key);
+          return value === undefined ? [] : [[key, value]];
+        }),
+    )
+    : Deno.env.toObject();
+  if (options.isolateEnvironment) {
+    env.OPTD_SECRET_MASTER_KEY = randomSecret(32);
+    env.HOME = homeDir;
+    env.XDG_CONFIG_HOME = xdgConfig;
+    env.XDG_STATE_HOME = xdgState;
+    env.XDG_DATA_HOME = join(homeDir, ".local", "share");
+    env.TMPDIR = rootDir;
+  }
+  let dependencyCache: string;
+  let binarySourceDigest: string;
+  let binaryPath: string;
+  try {
+    dependencyCache = await ensureDenoDependencies(env);
+    binarySourceDigest = await sourceDigest();
+    binaryPath = await compileOptctl({
+      digest: binarySourceDigest,
+      forceFresh: options.isolateEnvironment ||
+        (options.forceFreshCompile ?? false),
+      isolation: rootDir,
+      denoDir: dependencyCache,
+      environment: env,
+    });
+  } catch (error) {
+    await Deno.remove(rootDir, { recursive: true });
+    throw error;
+  }
   env.DENO_DIR = dependencyCache;
   env.OPTD_DATA_DIR = dataDir;
   env.OPTD_PORT = String(freePort());
@@ -197,11 +241,12 @@ export async function startLiveHarness(
   }
   let serverRunning = true;
   let crashedPostgresPid: number | undefined;
-  const legacyAuthBridge = testAuthStoreBridge(
-    homeDir,
-    xdgConfig,
-    () => running.url,
-  );
+  const legacyAuthBridge = options.isolateEnvironment
+    ? {
+      before: (_pid: number) => Promise.resolve(),
+      after: (_pid: number) => Promise.resolve(),
+    }
+    : testAuthStoreBridge(homeDir, xdgConfig, () => running.url);
   const databaseUrl = options.externalDatabaseUrl ??
     `postgres://optd@127.0.0.1:${env.OPTD_PG_PORT}/postgres`;
   const sql = createPostgresClient(databaseUrl);
@@ -219,6 +264,11 @@ export async function startLiveHarness(
     stdin?: string,
     environment: Record<string, string> = {},
   ): Promise<ActiveCliCommand> => {
+    if (options.isolateEnvironment && Object.keys(environment).length) {
+      throw new Error(
+        "isolated harness does not accept CLI environment overrides",
+      );
+    }
     const argv = ["--server", running.url, ...args];
     const startedAt = Date.now();
     await legacyAuthBridge.before(Deno.pid);
@@ -227,6 +277,7 @@ export async function startLiveHarness(
       child = new Deno.Command(binaryPath, {
         args: argv,
         env: { ...env, ...environment },
+        clearEnv: true,
         stdin: stdin === undefined ? "null" : "piped",
         stdout: "piped",
         stderr: "piped",
@@ -423,6 +474,11 @@ export async function startLiveHarness(
       });
     },
     async restart(restartOptions = {}) {
+      if (options.isolateEnvironment && restartOptions.environment) {
+        throw new Error(
+          "isolated harness does not accept restart environment overrides",
+        );
+      }
       await withLifecycle(async () => {
         if (restartOptions.bootstrapToken === null) {
           delete env.OPTD_BOOTSTRAP_TOKEN;
@@ -517,9 +573,11 @@ export async function assertHealth(baseUrl: string) {
   return body;
 }
 
-async function ensureDenoDependencies(): Promise<string> {
+async function ensureDenoDependencies(
+  environment: Record<string, string>,
+): Promise<string> {
   const root = join(
-    Deno.env.get("TMPDIR") ?? "/tmp",
+    environment.TMPDIR ?? "/tmp",
     "optd-deno-dependencies-v1",
   );
   const lock = `${root}.warm-lock`;
@@ -552,7 +610,8 @@ async function ensureDenoDependencies(): Promise<string> {
         "src/main_server.ts",
         "src/main_optctl.ts",
       ],
-      env: { ...Deno.env.toObject(), DENO_DIR: root },
+      env: { ...environment, DENO_DIR: root },
+      clearEnv: true,
       stdout: "piped",
       stderr: "piped",
     }).output();
@@ -574,6 +633,7 @@ async function compileOptctl(options: {
   forceFresh: boolean;
   isolation: string;
   denoDir: string;
+  environment: Record<string, string>;
 }): Promise<string> {
   const digest = options.digest;
   const cacheDir = options.forceFresh
@@ -635,7 +695,8 @@ async function compileOptctl(options: {
         temporary,
         "src/main_optctl.ts",
       ],
-      env: { ...Deno.env.toObject(), DENO_DIR: options.denoDir },
+      env: { ...options.environment, DENO_DIR: options.denoDir },
+      clearEnv: true,
       stdout: "piped",
       stderr: "piped",
     }).output();
@@ -704,6 +765,7 @@ async function launchServer(
       "src/main_server.ts",
     ],
     env,
+    clearEnv: true,
     stdout: "piped",
     stderr: "piped",
   }).spawn();

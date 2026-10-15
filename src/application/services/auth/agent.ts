@@ -5,6 +5,7 @@ import type {
 } from "../../../domain/auth/model.ts";
 import { validationError } from "../../../domain/errors/result.ts";
 import { isUuidV7 } from "../../../domain/ids/uuid_v7.ts";
+import { validateWorkspaceSelector } from "../../../domain/workspaces/model.ts";
 
 const rolePattern =
   /^(?:system:[a-z][a-z0-9_]*|[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*:[a-z][a-z0-9_]*)$/;
@@ -28,6 +29,24 @@ function boundary(value: unknown): AuthorizationBoundary | undefined {
 
 export function makeAgentAuthService(repository: AuthRepository) {
   return {
+    resolveWorkspace: (auth: AuthContext, input: Record<string, unknown>) => {
+      if (Object.keys(input).length !== 1 || !("workspace" in input)) {
+        return Promise.resolve({
+          ok: false as const,
+          error: validationError(
+            "validation_failed",
+            "expected only workspace",
+            {
+              field: "workspace",
+            },
+          ),
+        });
+      }
+      const selector = validateWorkspaceSelector(input.workspace);
+      return selector.ok
+        ? repository.resolveRequestWorkspace(auth, selector.value)
+        : Promise.resolve(selector);
+    },
     roles: (auth: AuthContext, input: unknown) => {
       const parsed = boundary(input);
       return parsed ? repository.discoverRoles(auth, parsed) : Promise.resolve({

@@ -1,4 +1,5 @@
 import { err, ok, type Result, validationError } from "../errors/result.ts";
+import { isUuidV7 } from "../ids/uuid_v7.ts";
 
 export type WorkspaceStatus = "active" | "archived";
 export type Workspace = {
@@ -29,6 +30,22 @@ export function validateWorkspaceSlug(value: unknown): Result<string> {
     );
   }
   return ok(value);
+}
+
+export function validateWorkspaceSelector(value: unknown): Result<string> {
+  if (typeof value === "string" && isUuidV7(value)) return ok(value);
+  const uuidShaped = typeof value === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      value,
+    );
+  if (!uuidShaped && validateWorkspaceSlug(value).ok) {
+    return ok(value as string);
+  }
+  return err(validationError(
+    "validation_failed",
+    "workspace must be a UUIDv7 or a slug matching [a-z][a-z0-9-]{0,62}",
+    { field: "workspace" },
+  ));
 }
 
 export function validateWorkspaceName(value: unknown): Result<string> {

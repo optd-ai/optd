@@ -138,6 +138,27 @@ export async function runCompleteProjectsPublicFlow(
       );
       assertParity(plain.data, structured.data);
       assertEquals(structured.data.axi_readiness?.ready ?? true, true);
+      if (command[1] === "pack") {
+        assertEquals(structured.data.seed_initialization.automatic, false);
+        assertStringIncludes(
+          structured.data.seed_initialization.commit_all,
+          "seed commit optd/projects --all",
+        );
+      }
+      if (command[1] === "resource") {
+        assert(Array.isArray(structured.data.required_fields));
+        assert(
+          Object.keys(structured.data).indexOf("required_fields") <
+            Object.keys(structured.data).indexOf("schema"),
+        );
+      }
+      if (command[1] === "action") {
+        assert(
+          structured.data.lifecycles.some((entry: any) =>
+            entry.identity === "optd/projects:task_flow"
+          ),
+        );
+      }
     }
 
     const secretV1 = `workspaces-secret-v1-${crypto.randomUUID()}`;
@@ -352,7 +373,7 @@ export async function runCompleteProjectsPublicFlow(
           "--boundary",
           "workspace",
           "--workspace",
-          workspaceId,
+          "delivery",
           "--reason",
           "Run independent Projects acceptance",
         ]),
@@ -622,6 +643,87 @@ export async function runCompleteProjectsPublicFlow(
     );
     const operation = (key: string) =>
       operationSetup.operations.find((value: any) => value.key === key);
+    const cliLink = json(
+      await ok(
+        agent.runCli([
+          "--json",
+          "--workspace",
+          workspaceId,
+          "link",
+          `${PROJECTS}:task_tag_assignment`,
+          "--from",
+          String(operation("archive_task").object_id),
+          "--to",
+          String(operation("new_tag").object_id),
+          "--input",
+          JSON.stringify({ source: "cli-onboarding" }),
+        ]),
+        output,
+      ),
+    );
+    const cliEdge = String(cliLink.data.created.op_000001);
+    assert(isUuidV7(cliEdge));
+    await ok(
+      agent.runCli([
+        "--json",
+        "--workspace",
+        workspaceId,
+        "unlink",
+        `${PROJECTS}:task_tag_assignment`,
+        cliEdge,
+        "--expected-version",
+        "1",
+      ]),
+      output,
+    );
+    const unlinked = json(
+      await ok(
+        human.runCli([
+          "--json",
+          "--workspace",
+          workspaceId,
+          "view",
+          "relationship",
+          `${PROJECTS}:task_tag_assignment`,
+          cliEdge,
+        ]),
+        output,
+      ),
+    );
+    assertEquals(unlinked.data.version, 2);
+    assert(unlinked.data.archived_at);
+    const pageArgs = [
+      "--json",
+      "query",
+      `${PROJECTS}:task_tag`,
+      "--limit",
+      "2",
+    ];
+    const firstPage = json(await ok(human.runCli(pageArgs), output));
+    assertEquals(firstPage.meta.has_more, true);
+    const nextPage = json(
+      await ok(
+        human.runCli([
+          ...pageArgs,
+          "--cursor",
+          String(firstPage.meta.next_cursor),
+        ]),
+        output,
+      ),
+    );
+    assert(
+      !nextPage.data.items.some((item: any) =>
+        firstPage.data.items.some((first: any) => first.id === item.id)
+      ),
+    );
+    const partial = await ok(
+      human.runCli(["query", `${PROJECTS}:task_tag`, "--limit", "2"]),
+      output,
+    );
+    assertStringIncludes(
+      partial.stdout.split("\n")[0],
+      "more results available",
+    );
     await assertHookQuiescence(
       harness,
       output,

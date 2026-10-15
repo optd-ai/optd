@@ -29,7 +29,7 @@ import {
   planArgonMaintenance,
 } from "../../../domain/auth/argon_profile.ts";
 import { err, ok, type Result } from "../../../domain/errors/result.ts";
-import { uuidV7 } from "../../../domain/ids/uuid_v7.ts";
+import { isUuidV7, uuidV7 } from "../../../domain/ids/uuid_v7.ts";
 import {
   beginBootstrap,
   completeBootstrap,
@@ -1662,6 +1662,62 @@ export class PostgresAuthRepository implements AuthRepository {
     } finally {
       release();
     }
+  }
+
+  async resolveRequestWorkspace(
+    auth: AuthContext,
+    selector: string,
+  ): Promise<Result<{ workspaceId: string }>> {
+    const identity = await this.currentIdentity(auth);
+    if (!identity.ok) return identity;
+    const workspace = (await query<{ id: string }>(
+      this.sql,
+      `select id from workspaces where status='active' and ${
+        isUuidV7(selector) ? "id=$1::uuid" : "slug=$1"
+      }`,
+      [selector],
+    )).rows[0];
+    const unavailable = () =>
+      err(authError(
+        "workspace_not_found",
+        "workspace is unavailable for authorization requests",
+        "not_found",
+      ));
+    if (!workspace) return unavailable();
+
+    // Request-only credentials may discover their human's requestable scope,
+    // but delegated agents must stay within their current, lineage-bound grants.
+    const assignments = auth.credentialKind === "agent_authorization"
+      ? identity.value.roleAssignments
+      : (await query<{
+        role_id: string;
+        boundary_type: "workspace" | "all_workspaces" | "system";
+        workspace_id: string | null;
+      }>(
+        this.sql,
+        `select role_id,boundary_type,workspace_id from role_assignments
+          where principal_id=$1 and active`,
+        [identity.value.humanUser.principalId],
+      )).rows.map((row) => ({
+        role: row.role_id,
+        boundary: boundaryFromRow(row),
+      }));
+    const activeRoles = new Set((await query<{ id: string }>(
+      this.sql,
+      `select r.id from system_roles r where r.active
+        and r.id=any($1::text[])
+        and exists(select 1 from role_definition_versions rv
+          where rv.role_id=r.id and rv.active)`,
+      [assignments.map((assignment) => assignment.role)],
+    )).rows.map((row) => row.id));
+    const permitted = assignments.some(({ role, boundary }) =>
+      activeRoles.has(role) && (
+        (role === "system:super_admin" && boundary.type === "system") ||
+        boundary.type === "all_workspaces" ||
+        (boundary.type === "workspace" && boundary.workspaceId === workspace.id)
+      )
+    );
+    return permitted ? ok({ workspaceId: workspace.id }) : unavailable();
   }
 
   async discoverRoles(auth: AuthContext, boundary: AuthorizationBoundary) {

@@ -64,6 +64,37 @@ Observed AXI patterns:
 10. **Skills/playbooks exist for deeper guidance.** Notion/Lavish expose “when
     to use” guidance and richer playbooks beyond normal command output.
 
+## Onboarding command and metadata requirements
+
+- `optctl --workspace <selector> link <qualified-relationship> --from <uuid-v7>
+  --to <uuid-v7> [--input <json-or-file> | --file <path>] [--stage]`
+  uses the ordinary authored link operation. Input is an object of relationship
+  fields; it cannot override the operation's endpoints.
+- `optctl --workspace <selector> unlink <qualified-relationship>
+  <relationship-instance-id> [--expected-version <positive-integer>] [--stage]`
+  uses the ordinary authored unlink operation, never an ambiguous endpoint pair.
+  Both commands commit by default, support existing commit timeout options and
+  preserve staging/commit authorization, approval, concurrency and replay
+  checks.
+- Pack metadata distinguishes installed seed definitions from initialized data,
+  exposes declared seed inspection commands, and points to explicit
+  `seed stage <pack> --all`, `seed commit <pack> --all`, or `--seed <name>`.
+  Selection of all seeds and named seeds is mutually exclusive; omission is an
+  actionable usage error. Reconciliation can update data and is never implicit
+  in global pack installation.
+- Resource metadata places required and optional field summaries before full
+  schemas. Action metadata includes required/optional inputs, declared
+  availability and reads, and inspection links to applicable lifecycles. Static
+  metadata does not promise successful execution under changing authority/state.
+- Relationship metadata gives link/unlink examples and distinguishes endpoint
+  object IDs from the relationship instance ID.
+- Queries use the same explicit Workspace, environment, and selected local
+  context resolution as other object commands; selecting a Workspace is
+  sufficient without repeating its selector on every query.
+- Human-readable partial query pages show their returned count and continuation
+  guidance before the payload. Totals stay optional. JSON stdout remains exactly
+  one canonical envelope with no prefixed prose, including when piped.
+
 ## optctl Design Goals
 
 - The CLI should be generic over configured resources.

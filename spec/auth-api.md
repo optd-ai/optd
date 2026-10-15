@@ -42,6 +42,33 @@ Authorization: optd-Recovery <token>
 
 Passwords/tokens never appear in URL parameters or ordinary CLI arguments.
 
+## Exact Workspace selectors for authorization requests
+
+`POST /api/v1/auth/workspace/resolve` accepts exactly
+`{"workspace":"<uuid-v7-or-slug>"}` and returns only
+`{"workspace_id":"<canonical-uuid-v7>"}` in the standard envelope. This route is
+available to authenticated full-human, request-only and agent credentials; it
+does not confer ordinary Workspace listing or resource-read authority.
+
+Resolve one exact active Workspace. A request-only credential can resolve only
+its active human's requestable role boundaries. Agents are limited to their
+current active lineage-bound role assignments, never their anchoring human's
+broader roles. Active system super-admin and all-workspaces grants cover active
+Workspaces; a specific Workspace grant covers only that Workspace. Inactive role
+definitions do not grant lookup. Unknown, inaccessible and archived selectors
+produce the same `workspace_not_found` error without identity details. Revoked
+sessions, disabled humans and invalid delegation lineage fail authentication.
+
+`auth request --workspace <uuid-or-slug>` and
+`auth roles --workspace
+<uuid-or-slug>` resolve through this route, not
+`/workspaces`. Stored request boundaries remain UUIDs and subsequent
+request/approval checks remain mandatory. A non-workspace `--boundary` cannot be
+combined with `--workspace`; the existing redundant `--boundary workspace` form
+remains supported. UUID-shaped selectors must be UUIDv7; other selectors use the
+existing lowercase Workspace slug grammar. Invalid selectors receive local
+argument diagnostics before network calls.
+
 ## Boundary DTO
 
 Exactly one variant:
@@ -370,6 +397,16 @@ context_conflict
 
 Authorization errors may show current authority and failed capability but never
 recommend escalation.
+
+## Local persistence preflight
+
+Before sending bootstrap or login requests, the CLI validates that it can
+resolve its process-binding anchor. An invalid or unknown launcher must not
+complete server-side bootstrap merely to fail afterward on known anchor
+resolution. Bootstrap help includes the same launcher/anchor guidance as login
+help. This preflight does not make server authentication and local filesystem
+persistence one atomic transaction; later I/O failure still requires explicit
+recovery.
 
 ## CLI exit/input contract
 

@@ -49,6 +49,16 @@ const boundary = [
   ],
   ["--boundary <boundary:string>", "system, all_workspaces, or workspace."],
 ] as const;
+const requestBoundary = [
+  [
+    "--workspace <workspace:string>",
+    "Exact Workspace UUIDv7 or slug within current requestable scope (no listing access).",
+  ],
+  [
+    "--boundary <boundary:string>",
+    "system or all_workspaces without --workspace; workspace is inferred when a selector is supplied.",
+  ],
+] as const;
 const password = [
   ["--username <username:string>", "Human username."],
   ["--password-stdin", "Read password from standard input, never an argument."],
@@ -163,12 +173,12 @@ const help: Record<string, Help> = {
   "auth request": {
     options: [
       ["--role <role:string>", "Requested role; repeat for multiple roles."],
-      ...boundary,
+      ...requestBoundary,
       reason,
       ["--agent-name <name:string>", "Agent display name."],
     ],
   },
-  "auth roles": { options: [...boundary, ...security] },
+  "auth roles": { options: [...requestBoundary, ...security] },
   "auth approve": {
     arguments: "<request-id:string>",
     options: [["--yes", "Confirm authorization approval."], [
@@ -266,8 +276,33 @@ const help: Record<string, Help> = {
     arguments: "<pack:string>",
     options: [[
       "--all",
-      "Reconcile all declared seeds in the selected workspace.",
+      "Explicitly reconcile all declared seeds in this workspace; may update data. Pack installation alone does not initialize seeds.",
     ], ["--seed <name:string>", "Seed name; repeat to select multiple seeds."]],
+  },
+  "link": {
+    arguments: "<relationship:string>",
+    options: [
+      ["--from <object-id:string>", "Required source object UUIDv7."],
+      ["--to <object-id:string>", "Required target object UUIDv7."],
+      input,
+      [
+        "--file <path:string>",
+        "Relationship fields JSON file; mutually exclusive with --input.",
+      ],
+      ["--stage", "Stage without committing."],
+      ...commit,
+    ],
+  },
+  "unlink": {
+    arguments: "<relationship:string> <relationship-id:string>",
+    options: [
+      [
+        "--expected-version <version:integer>",
+        "Expected relationship version; positive integer.",
+      ],
+      ["--stage", "Stage without committing."],
+      ...commit,
+    ],
   },
   "create": {
     arguments: "<resource:string>",

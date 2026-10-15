@@ -1,9 +1,54 @@
 # Onboarding usability release plan
 
-Status: proposed; planning only. Baseline: v0.2.2. Proposed release: v0.3.0 (new
-additive CLI/API functionality, not another storage cutover). Confirm the next
-unused version before tagging. No release or installation is authorized by this
-document. Preserve both handoff documents unchanged.
+Status: implemented; host validation passed, immutable release gate pending.
+Baseline: v0.2.2. Proposed release: v0.3.0 (new additive CLI/API functionality,
+not another storage cutover). Confirm the next unused version before tagging. No
+release or installation is authorized by this document. Preserve both handoff
+documents unchanged.
+
+## Implementation evidence (2026-10-15)
+
+- All four feature areas are implemented in the working tree. The resolver is
+  `POST /api/v1/auth/workspace/resolve`. Existing redundant
+  `--boundary workspace --workspace <selector>` remains compatible;
+  contradictory boundary types are rejected.
+- Latest combined unit/integration run: **391 passed, 0 failed**, using isolated
+  HOME/XDG state and environment. The host CRM/Projects shared public-flow
+  matrix also passed (12-test run including equivalence and focused CLI
+  acceptance). New relationship/slug/metadata/pagination assertions run through
+  the existing shared Projects driver, so they are included in future
+  exact-image acceptance.
+- The independent black-box observer used a frozen candidate and disposable
+  server/database without source lookup. Seed discovery, required fields,
+  lifecycle guidance, link/unlink and scoped slug requests succeeded. After
+  correcting the parent's missing cursor-key setup, resource and relationship
+  traversal succeeded; restricted viewers could paginate resources but were
+  correctly not assumed to have relationship-read grants.
+- The exploratory snapshot exposed selected-Workspace query inconsistency and
+  bootstrap's known-anchor failure after server mutation. Follow-up changes now
+  use shared Workspace context resolution for queries and preflight the anchor
+  before bootstrap/login; compiled regression tests cover both. The exploratory
+  binary predates those follow-ups and is not final-candidate acceptance
+  evidence.
+- Isolated harness mode allowlists environment, prevents external-database and
+  initial environment overrides, generates both encryption/cursor keys, disables
+  legacy auth-state bridging, and clears subprocess inheritance for build,
+  server and direct CLI execution. Independent test servers verified cleanup;
+  the main installation and credentials were not used.
+- A disposable source-runtime upgrade smoke passed from the v0.2.2 commit
+  `d82aa0b9dccea27fdf09e0484429c28cd5ef3432` to the candidate server, using only
+  public CLI setup/reads and the same database/auth state. Workspace, Project,
+  Task, relationship, role assignment, existing administrator session and viewer
+  login/scoped reads survived without a data reset. This is not an exact-image
+  upgrade attestation.
+- Remaining gates: clean committed candidate, full mandatory exact-image release
+  gate and artifact checks. No tag, publication or installation has occurred.
+
+Separate unresolved risk: another investigation reported that an agent launcher
+can inherit a human credential from an authenticated ancestor shell. This work
+neither changes that selection policy nor claims to fix it. Resolve or
+explicitly triage that issue separately before publication; do not infer its
+safety from the scoped resolver tests.
 
 ## Outcome and boundaries
 
@@ -257,10 +302,9 @@ onboarding sandbox, full release gate or installation change has occurred.
 
 Code inspection supports the existing relationship operation schemas, generic
 workspace-list resolver, current authorization requestability machinery,
-temporary live harness, and immutable release process. This planning turn has
-not executed feature tests, started a sandbox, changed product code, or
-published anything. The prior six passing focused tests remain baseline evidence
-only. The harness scout performed code inspection, not runtime validation; its
-isolation findings are incorporated above. Runtime isolation and
-implementation-time contract decisions must be verified before acceptance, not
-deferred until publication.
+temporary live harness, and immutable release process. Feature and isolated
+sandbox evidence is recorded above; it is not full release readiness. The prior
+six passing focused tests remain baseline evidence only. The harness scout
+performed code inspection, not runtime validation; its isolation findings are
+incorporated above. Runtime isolation and implementation-time contract decisions
+must be verified before acceptance, not deferred until publication.

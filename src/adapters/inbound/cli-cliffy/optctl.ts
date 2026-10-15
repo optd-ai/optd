@@ -26,6 +26,7 @@ import {
 } from "./auth_store.ts";
 import { opaqueToken, tokenDigest } from "../../../domain/auth/token.ts";
 import { isUuidV7 } from "../../../domain/ids/uuid_v7.ts";
+import { validateWorkspaceSelector } from "../../../domain/workspaces/model.ts";
 import {
   ProcessInspectionError,
   sameProcess,
@@ -155,11 +156,11 @@ function render(value: unknown, asJson?: boolean): string {
   const data = envelope?.data;
   const page = envelope?.meta?.has_more !== undefined ? envelope.meta : data;
   const notice = Array.isArray(data?.items) && page?.has_more
-    ? `\nShowing ${data.items.length}${
+    ? `Showing ${data.items.length}${
       typeof page.total === "number" ? ` of ${page.total}` : ""
     }; more results available. Use --cursor with next_cursor to continue (and --include-total for a count).`
     : "";
-  return formatToon(value) + notice;
+  return (notice ? `${notice}\n\n` : "") + formatToon(value);
 }
 async function readJsonFile(path: string): Promise<unknown> {
   return JSON.parse(await Deno.readTextFile(path));
@@ -425,6 +426,90 @@ async function stageResourceCommand(
   );
 }
 
+async function stageRelationshipCommand(
+  parsed: Parsed,
+  command: "link" | "unlink",
+): Promise<unknown> {
+  const identity = parsed.positional[1];
+  if (!identity) {
+    throw usageError(`${command} requires publisher/pack:relationship`);
+  }
+  splitDefinitionIdentity(identity);
+  const commit = commitPayloadOptions(parsed.positional.slice(2));
+  const args = [...commit.remaining];
+  const operation: Record<string, unknown> = {
+    op: command,
+    relationship: identity,
+  };
+  if (command === "unlink") {
+    const id = args.shift();
+    if (!id || !isUuidV7(id)) {
+      throw usageError("unlink requires a UUIDv7 relationship instance id");
+    }
+    operation.relationship_id = id;
+  }
+  const values = new Map<string, string>();
+  let stageOnly = false;
+  const allowed = command === "link"
+    ? ["--from", "--to", "--input", "--file"]
+    : ["--expected-version"];
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index];
+    if (arg === "--stage" && !stageOnly) {
+      stageOnly = true;
+      continue;
+    }
+    const equals = arg.indexOf("=");
+    const flag = equals < 0 ? arg : arg.slice(0, equals);
+    if (!allowed.includes(flag) || values.has(flag)) {
+      throw usageError(`unknown or duplicate ${command} option ${flag}`);
+    }
+    const value = equals < 0 ? args[++index] : arg.slice(equals + 1);
+    if (!value || value.startsWith("--")) {
+      throw usageError(`${flag} requires a value`);
+    }
+    values.set(flag, value);
+  }
+  if (command === "link") {
+    for (const endpoint of ["from", "to"]) {
+      const id = values.get(`--${endpoint}`);
+      if (!id || !isUuidV7(id)) {
+        throw usageError(`--${endpoint} requires a UUIDv7 object id`);
+      }
+      operation[endpoint] = id;
+    }
+    if (values.has("--input") && values.has("--file")) {
+      throw usageError("link accepts either --input or --file, not both");
+    }
+    if (values.has("--input") || values.has("--file")) {
+      const fields = values.has("--file")
+        ? await readJsonFile(values.get("--file")!)
+        : await resolveActionInput(["--input", values.get("--input")!]);
+      if (!fields || typeof fields !== "object" || Array.isArray(fields)) {
+        throw usageError("link fields must be a JSON object");
+      }
+      operation.fields = fields;
+    }
+  } else if (values.has("--expected-version")) {
+    const value = values.get("--expected-version")!;
+    if (!/^[1-9][0-9]*$/.test(value) || !Number.isSafeInteger(Number(value))) {
+      throw usageError("--expected-version requires a positive safe integer");
+    }
+    operation.expected_version = Number(value);
+  }
+  operation.workspace_id = await resolveReadWorkspace(parsed);
+  const staged = await postJson(`${parsed.server}/api/v1/changesets/stage`, {
+    operations: [operation],
+  });
+  if (stageOnly) return staged;
+  return await postJson(
+    `${parsed.server}/api/v1/changesets/${
+      String(envelopeData(staged).id)
+    }/commit`,
+    commit.payload,
+  );
+}
+
 function interactiveInputError(message: string): OptctlError {
   return new OptctlError(
     errorEnvelope({
@@ -679,6 +764,47 @@ function envelopeData(value: unknown): Record<string, unknown> {
   }
   return (value as { data: Record<string, unknown> }).data;
 }
+async function resolveRequestWorkspace(server: string, args: string[]) {
+  const selectors = args.filter((arg) =>
+    arg === "--workspace" || arg.startsWith("--workspace=")
+  );
+  const boundaryType = option(args, "--boundary");
+  if (!selectors.length) {
+    if (boundaryType === "workspace") {
+      throw usageError(
+        "--boundary workspace requires --workspace <uuid-or-slug>",
+      );
+    }
+    return undefined;
+  }
+  if (selectors.length !== 1) {
+    throw usageError("duplicate --workspace selector");
+  }
+  const selector = option(args, "--workspace");
+  if (boundaryType && boundaryType !== "workspace") {
+    throw usageError(
+      "--workspace cannot be combined with a non-workspace --boundary",
+    );
+  }
+  const valid = validateWorkspaceSelector(selector);
+  if (!valid.ok) throw usageError(`--workspace: ${valid.error.message}`);
+  const response = await decodeJsonResponse(
+    await boundedFetch(
+      `${server}/api/v1/auth/workspace/resolve`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...await requestCredentialHeaders(server),
+        },
+        body: JSON.stringify({ workspace: valid.value }),
+        redirect: "error",
+      },
+    ),
+  );
+  return String(envelopeData(response).workspace_id);
+}
+
 async function resolveWorkspace(
   server: string,
   value: string,
@@ -1124,6 +1250,8 @@ function cliCommand() {
       ["create", "Stage or commit a resource create operation."],
       ["update", "Stage or commit a resource update operation."],
       ["transition", "Stage or commit a resource transition operation."],
+      ["link", "Stage or commit a relationship between two objects."],
+      ["unlink", "Stage or commit removal of a relationship instance."],
       ["query", "Query committed resource or relationship facts."],
       ["view", "Read one committed object or relationship."],
       ["history", "Read immutable object or relationship history."],
@@ -1138,7 +1266,9 @@ function cliCommand() {
 }
 
 function helpText(args: string[]): string {
-  const words = args.filter((arg) => arg !== "--help" && arg !== "-h");
+  const words = parse(args).positional.filter((arg) =>
+    arg !== "--help" && arg !== "-h"
+  );
   const group = CLI_GROUPS.find(([name]) => name === words[0]);
   if (!group) {
     const command = cliCommand().getCommand(words[0]);
@@ -1161,10 +1291,19 @@ function helpText(args: string[]): string {
         `${name} ${words[1]}`,
       ).getHelp(),
       "",
-      ...(name === "auth" &&
-          ["request", "wait", "login", "session-pid", "anchor"].includes(
-            words[1],
-          )
+      ...(name === "pack" && words[1] === "apply"
+        ? [
+          "Pack installation does not initialize workspace seeds. Inspect optctl metadata pack <publisher/pack>,",
+          "then explicitly reconcile: optctl --workspace <workspace> seed commit <publisher/pack> --all (or --seed <name>).",
+          "Reconciliation may update existing data; use seed stage to inspect first.",
+          "",
+        ]
+        : []),
+      ...((name === "bootstrap" && words[1] === "init") ||
+          (name === "auth" &&
+            ["request", "wait", "login", "session-pid", "anchor"].includes(
+              words[1],
+            ))
         ? [
           "Process binding:",
           "  Credentials bind to the nearest recognized harness, interactive shell, or narrower existing binding.",
@@ -1186,6 +1325,16 @@ function helpText(args: string[]): string {
     "Commands:",
     ...subcommands.map((subcommand) => `  ${subcommand}`),
     "",
+    ...(name === "pack" || name === "seed"
+      ? [
+        "Seed initialization is explicit and Workspace-specific; pack installation alone does not initialize data.",
+        "  Inspect declared seeds: optctl metadata pack <publisher/pack>",
+        "  Reconcile all seeds: optctl --workspace <workspace> seed commit <publisher/pack> --all",
+        "  Reconcile selected seeds: optctl --workspace <workspace> seed commit <publisher/pack> --seed <name>",
+        "Reconciliation may update existing data; use seed stage to inspect before committing.",
+        "",
+      ]
+      : []),
   ].join("\n");
 }
 
@@ -1223,6 +1372,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
           "bootstrap init requires --username and OPTD_BOOTSTRAP_TOKEN configured",
         );
       }
+      await authAnchor(parsed.server);
       result = await decodeJsonResponse(
         await boundedFetch(`${parsed.server}/api/v1/auth/bootstrap`, {
           method: "POST",
@@ -1255,6 +1405,7 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
         throw usageError("auth login requires --username on first use");
       }
       const password = await readPassword(authArgs, false);
+      await authAnchor(parsed.server);
       result = await decodeJsonResponse(
         await boundedFetch(`${parsed.server}/api/v1/auth/login`, {
           method: "POST",
@@ -1566,7 +1717,10 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       }
     } else if (cmd === "auth" && sub === "roles") {
       const authArgs = parsed.positional.slice(2);
-      const workspaceId = option(authArgs, "--workspace");
+      const workspaceId = await resolveRequestWorkspace(
+        parsed.server,
+        authArgs,
+      );
       const boundaryType = workspaceId
         ? "workspace"
         : option(authArgs, "--boundary") ?? "system";
@@ -1582,7 +1736,10 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       const authArgs = parsed.positional.slice(2);
       const roles = options(authArgs, "--role");
       const reason = option(authArgs, "--reason") ?? "";
-      const workspaceId = option(authArgs, "--workspace");
+      const workspaceId = await resolveRequestWorkspace(
+        parsed.server,
+        authArgs,
+      );
       const boundaryType = workspaceId
         ? "workspace"
         : option(authArgs, "--boundary") ?? "system";
@@ -2026,6 +2183,8 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
         `${parsed.server}/api/v1/queries`,
         parseQueryPayload(workspaceId, "resource", sub, queryArgs),
       );
+    } else if (cmd === "link" || cmd === "unlink") {
+      result = await stageRelationshipCommand(parsed, cmd);
     } else if (cmd === "create" || cmd === "update" || cmd === "transition") {
       result = await stageResourceCommand(parsed, cmd);
     } else if (cmd === "pack" && sub === "preview" && value) {
@@ -2123,6 +2282,11 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       const args = commit?.remaining ?? seedArgs;
       const all = args.includes("--all");
       const names = options(args, "--seed");
+      if (args.includes("--all") === (names.length > 0)) {
+        throw usageError(
+          `seed ${sub} ${value} requires either --all or one or more --seed <name>; reconciliation may update workspace data`,
+        );
+      }
       for (let index = 0; index < args.length; index++) {
         const arg = args[index];
         if (arg === "--all" || arg.startsWith("--seed=")) continue;
@@ -2358,14 +2522,11 @@ export async function runOptctl(args: string[]): Promise<OptctlRunResult> {
       const relationship = sub === "relationship";
       const identity = relationship ? parsed.positional[2] : sub;
       if (!identity) throw usageError("query requires publisher/pack:name");
-      if (!parsed.workspace) {
-        throw usageError("query requires --workspace <UUID-or-slug>");
-      }
-      const workspace = await resolveWorkspace(parsed.server, parsed.workspace);
+      const workspaceId = await resolveReadWorkspace(parsed);
       result = await postJson(
         `${parsed.server}/api/v1/queries`,
         parseQueryPayload(
-          String(workspace.id),
+          workspaceId,
           relationship ? "relationship" : "resource",
           identity,
           parsed.positional.slice(relationship ? 3 : 2),

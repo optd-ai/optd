@@ -116,6 +116,10 @@ export interface AuthRepository extends BootstrapRepository {
     token: string;
     password: string;
   }): Promise<Result<LoginResult>>;
+  resolveRequestWorkspace(
+    auth: AuthContext,
+    selector: string,
+  ): Promise<Result<{ workspaceId: string }>>;
   discoverRoles(
     auth: AuthContext,
     boundary: AuthorizationBoundary,
