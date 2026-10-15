@@ -72,6 +72,66 @@ async function withCli(
   }
 }
 
+Deno.test("transition input is optional but explicit malformed input and missing write fields fail locally", async () => {
+  await withCli(async (run, requests) => {
+    const args = [
+      "--json",
+      "--workspace",
+      workspace,
+      "transition",
+      "optd/projects:task",
+      from,
+      "--version",
+      "2",
+      "--to",
+      "done",
+      "--stage",
+    ];
+    for (
+      const input of [[], ["--input", "{}"], [
+        "--input",
+        '{"blocked_reason":null}',
+      ]]
+    ) {
+      requests.length = 0;
+      const result = await run([...args, ...input]);
+      assertEquals(result.code, 0, result.stderr);
+      assertEquals(requests.length, 1);
+      const operation =
+        (requests[0].body.operations as Record<string, unknown>[])[0];
+      assertEquals(operation.to, "done");
+      assertEquals(operation.expected_version, 2);
+      assertEquals(operation.set, input.length ? JSON.parse(input[1]) : {});
+    }
+    for (
+      const input of [["--input"], ["--input", "[]"], ["--input", "null"], [
+        "--unknown",
+        "x",
+      ]]
+    ) {
+      requests.length = 0;
+      const result = await run([...args, ...input]);
+      assert(result.code !== 0, JSON.stringify(input));
+      assertEquals(requests.length, 0);
+    }
+    for (const command of ["create", "update"]) {
+      requests.length = 0;
+      const result = await run([
+        "--json",
+        "--workspace",
+        workspace,
+        command,
+        "optd/projects:task",
+        from,
+        "--version",
+        "2",
+      ]);
+      assertEquals(result.code, 2);
+      assertEquals(requests.length, 0);
+    }
+  });
+});
+
 Deno.test("onboarding selectors accept exact slugs and UUIDv7 but reject malformed UUIDs", () => {
   for (const value of [workspace, "sales", "sales-2026", "a".repeat(63)]) {
     assert(validateWorkspaceSelector(value).ok, value);

@@ -361,12 +361,19 @@ async function stageResourceCommand(
   const stageOnly = remaining.includes("--stage");
   const filtered = remaining.filter((arg) => arg !== "--stage");
   const inputAt = filtered.findIndex((arg) => arg === "--input");
-  if (inputAt < 0 || !filtered[inputAt + 1]) {
+  if (
+    (inputAt < 0 && command !== "transition") ||
+    (inputAt >= 0 && !filtered[inputAt + 1])
+  ) {
     throw usageError(`${command} requires --input <JSON-or-file>`);
   }
-  const fields = await resolveActionInput(filtered.slice(inputAt, inputAt + 2));
-  const before = filtered.slice(0, inputAt);
-  const after = filtered.slice(inputAt + 2);
+  const fields = inputAt < 0
+    ? {}
+    : await resolveActionInput(filtered.slice(inputAt, inputAt + 2));
+  const before = inputAt < 0
+    ? filtered.slice(0, 1)
+    : filtered.slice(0, inputAt);
+  const after = inputAt < 0 ? filtered.slice(1) : filtered.slice(inputAt + 2);
   const operation: Record<string, unknown> = {
     op: command,
     workspace_id: workspaceId,

@@ -222,12 +222,6 @@ async function prepareQuery(
   definition: Definition,
 ): Promise<PreparedQuery> {
   const params: unknown[] = [request.workspace_id];
-  const user = lowerExpression(request.where ?? "true", {
-    fields: definition.fields,
-    alias: "q",
-    parameterOffset: params.length,
-  });
-  params.push(...user.params);
   const policy = await resolvePolicyAuthorization(
     sql,
     request.workspace_id,
@@ -236,6 +230,29 @@ async function prepareQuery(
     request.include_archived ? ["read", "read_archived"] : ["read"],
     params,
   );
+  const visible = policy.superAdmin ||
+    ((policy.rules.read?.length ?? 0) > 0 &&
+      (!request.include_archived ||
+        (policy.rules.read_archived?.length ?? 0) > 0));
+  let user: ReturnType<typeof lowerExpression>;
+  try {
+    user = lowerExpression(visible ? request.where ?? "true" : "true", {
+      fields: definition.fields,
+      alias: "q",
+      parameterOffset: params.length,
+    });
+  } catch (error) {
+    if (!(error instanceof ExpressionError)) throw error;
+    throw new QueryPhysicalError("invalid_expression", {
+      issues: [{
+        ...error.details,
+        path: "/where",
+        code: error.code,
+        message: error.message,
+      }],
+    });
+  }
+  params.push(...user.params);
   return { params, user, policy };
 }
 

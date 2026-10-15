@@ -66,6 +66,16 @@ Observed AXI patterns:
 
 ## Onboarding command and metadata requirements
 
+- `transition <resource> <id> --version <version> --to <state>` defaults its
+  atomic field updates to `{}` when `--input` is omitted. Explicit input must
+  still be a valid JSON object or file. Create/update retain mandatory input;
+  omitted transition input never bypasses lifecycle, hook, version or policy
+  checks.
+- Query help points to `expression help` and the supported CEL subset. Invalid
+  user expressions return structured `bad_request` errors with `/where` issues,
+  not generic internal errors. Unauthorized definitions retain non-enumerating
+  errors; genuine server errors remain sanitized.
+
 - `optctl --workspace <selector> link <qualified-relationship> --from <uuid-v7>
   --to <uuid-v7> [--input <json-or-file> | --file <path>] [--stage]`
   uses the ordinary authored link operation. Input is an object of relationship

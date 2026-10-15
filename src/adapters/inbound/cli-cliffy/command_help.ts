@@ -35,7 +35,10 @@ const query = [
     "--fields <fields:string>",
     "Comma-separated projection fields, including id.",
   ],
-  ["--where <expression:string>", "Filter expression."],
+  [
+    "--where <expression:string>",
+    'CEL subset, e.g. title == "Task". See optctl expression help; regex and substring methods are unsupported.',
+  ],
   ["--sort <sort:string>", "Sort field and direction."],
   ["--limit <limit:integer>", "Maximum rows per page."],
   ["--cursor <cursor:string>", "Continue from next_cursor."],
@@ -329,7 +332,10 @@ const help: Record<string, Help> = {
   "transition": {
     arguments: "<resource:string> <object-id:string>",
     options: [
-      input,
+      [
+        "--input <input:string>",
+        "Optional JSON object or file of fields to set atomically with the transition; defaults to {}.",
+      ],
       version,
       ["--to <state:string>", "Required destination lifecycle state."],
       ["--stage", "Stage without committing."],
