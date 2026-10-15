@@ -21,6 +21,7 @@ export class ProcessInspectionError extends Error {
 
 export interface ProcessInspector {
   inspect(pid: number): Promise<ProcessIdentity>;
+  command(pid: number): Promise<string[]>;
   ancestry(startPid: number, stopPid?: number): Promise<ProcessIdentity[]>;
 }
 

@@ -12,6 +12,8 @@ import {
   sameProcess,
 } from "../../../application/ports/process_inspection.ts";
 
+import { isAgentHarness } from "../../../domain/auth/process_boundary.ts";
+
 const encoder = new TextEncoder();
 const SCHEMA_VERSION = 1;
 
@@ -484,7 +486,12 @@ export class FilesystemLocalAuthStore {
       const binding = bindings.find((candidate) =>
         candidate.origin === origin && sameProcess(candidate.anchor, process)
       );
-      if (!binding) continue;
+      if (!binding) {
+        if (isAgentHarness(await this.inspector.command(process.pid))) {
+          return null;
+        }
+        continue;
+      }
       try {
         const directory = join(path, "sessions", binding.session_id);
         const metadata = await readJson<SessionRecord>(

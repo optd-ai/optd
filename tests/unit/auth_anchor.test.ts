@@ -41,6 +41,13 @@ Deno.test("anchor traverses tool wrappers but stops at the nearest harness", asy
     20,
   );
   assertEquals(
+    (await resolveProcessAnchor(inspector(), 40, {
+      nearestBinding: chain[3],
+      explicitPid: 10,
+    })).pid,
+    20,
+  );
+  assertEquals(
     (await resolveProcessAnchor(inspector(), 40, { nearestBinding: chain[1] }))
       .pid,
     30,

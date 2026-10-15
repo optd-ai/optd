@@ -29,7 +29,13 @@ const agent: ProcessIdentity = {
 };
 
 class FakeInspector implements ProcessInspector {
-  constructor(readonly chain: ProcessIdentity[]) {}
+  constructor(
+    readonly chain: ProcessIdentity[],
+    readonly commands = new Map<number, string[]>(),
+  ) {}
+  command(pid: number): Promise<string[]> {
+    return Promise.resolve(this.commands.get(pid) ?? ["bash", "-c", "tool"]);
+  }
   inspect(pid: number): Promise<ProcessIdentity> {
     const value = this.chain.find((item) => item.pid === pid);
     if (!value) return Promise.reject(new Deno.errors.NotFound());
@@ -40,12 +46,18 @@ class FakeInspector implements ProcessInspector {
   }
 }
 
-async function temporaryStore(chain = [agent, child, human]) {
+async function temporaryStore(
+  chain = [agent, child, human],
+  commands = new Map<number, string[]>(),
+) {
   const root = await Deno.makeTempDir();
   if (Deno.build.os !== "windows") await Deno.chmod(root, 0o700);
   return {
     root,
-    store: new FilesystemLocalAuthStore(root, new FakeInspector(chain)),
+    store: new FilesystemLocalAuthStore(
+      root,
+      new FakeInspector(chain, commands),
+    ),
   };
 }
 
@@ -75,6 +87,70 @@ Deno.test("local store partitions origins and selects exactly the nearest bindin
       "other-token",
     );
     assertEquals(await store.select("http://localhost:8789", agent.pid), null);
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("harness boundaries never inherit outer human or agent bindings", async () => {
+  for (
+    const argv of [["claude"], ["pi"], ["codex"], [
+      "node",
+      "/opt/@anthropic-ai/claude-code/cli.js",
+    ]]
+  ) {
+    for (const outerAgent of [false, true]) {
+      const { root, store } = await temporaryStore(
+        [agent, child, human],
+        new Map([[child.pid, argv]]),
+      );
+      const origin = "http://127.0.0.1:18789";
+      try {
+        await store.updateState(origin, {
+          token: "outer-token",
+          ...(outerAgent ? { authorizationId: "outer-agent" } : {}),
+        }, human);
+        assertEquals(await store.select(origin, agent.pid), null);
+        // A binding on the boundary is usable; lookup still never crosses it.
+        await store.updateState(origin, {
+          token: "own-token",
+          authorizationId: "own-agent",
+        }, child);
+        assertEquals(
+          (await store.select(origin, agent.pid))?.token,
+          "own-token",
+        );
+        await store.removeAuthorization(origin, "own-agent");
+        assertEquals(await store.select(origin, agent.pid), null);
+        // An explicit narrower binding remains usable inside this harness.
+        await store.updateState(origin, {
+          token: "inner-token",
+          authorizationId: "inner-agent",
+        }, agent);
+        assertEquals(
+          (await store.select(origin, agent.pid))?.token,
+          "inner-token",
+        );
+      } finally {
+        await Deno.remove(root, { recursive: true });
+      }
+    }
+  }
+});
+
+Deno.test("unreadable harness classification never falls back to an ancestor", async () => {
+  const root = await Deno.makeTempDir();
+  const inspector = new FakeInspector([agent, child, human]);
+  inspector.command = () =>
+    Promise.reject(new Deno.errors.PermissionDenied("cannot inspect command"));
+  const store = new FilesystemLocalAuthStore(root, inspector);
+  try {
+    const origin = "http://127.0.0.1:18789";
+    await store.updateState(origin, { token: "outer-token" }, human);
+    await assertRejects(
+      () => store.select(origin, agent.pid),
+      Deno.errors.PermissionDenied,
+    );
   } finally {
     await Deno.remove(root, { recursive: true });
   }

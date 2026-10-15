@@ -687,22 +687,27 @@ Server-side enforcement is required even if `optctl` UI is bypassed.
 
 `optctl`, not the server, enforces local process bindings.
 
-A full human login binding applies to the complete descendant process tree. This
-is intentional so scripts, pipelines, and subagents can run `optctl` without
-random login failures. A user who wants an agent to begin with minimal authority
-should start that agent outside a human-authenticated tree, then log in and
-approve its request from another terminal.
+A full human login binding applies to descendant scripts and pipelines, but
+credential lookup always stops at the nearest recognized agent harness. Starting
+an agent inside a human-authenticated terminal does not give that agent the
+terminal's credential. The same boundary prevents a nested harness from
+inheriting an outer agent's credential. A binding on the harness itself or a
+nearer descendant remains usable; an unbound harness starts without ordinary API
+authority and must obtain its own approved binding.
 
-`optctl` walks ancestry and selects the nearest process binding, which points to
-one current authorization token. It does not inspect target roles/workspaces to
-choose among credentials, combine tokens, search other bindings after denial, or
-fall back to a broader ancestor. If no process binding matches, it uses the
-authorization-request credential only for its narrow auth workflow.
+`optctl` walks ancestry only as far as the nearest recognized agent harness
+(inclusive) and selects the nearest process binding within that boundary, which
+points to one current authorization token. It does not inspect target
+roles/workspaces to choose among credentials, combine tokens, search other
+bindings after denial, or fall back to a broader ancestor. If no process binding
+matches, it uses the authorization-request credential only for its narrow auth
+workflow.
 
 This allows a top-level agent to create a subagent, have the subagent request a
 subset of the parent's roles before work begins, and approve that request when
 the top-level agent has `auth.request.decide`. The subagent-specific binding
-then restricts/overrides inherited authority for that subtree.
+then grants authority to that subtree without inheriting the parent harness's
+binding before approval.
 
 A binding anchor identity requires:
 
@@ -715,8 +720,9 @@ A binding anchor identity requires:
 
 PID alone is never sufficient because operating systems reuse PIDs. Hostname,
 executable basename, redacted command summary, cwd/workspace path, and model or
-harness metadata are diagnostic/provenance fields only and do not establish a
-binding.
+harness metadata do not establish a binding. Recognized harness commands also
+limit the ancestry search; classification never substitutes for verified process
+identity.
 
 For every `optctl` invocation, the process inspector walks from the caller up
 through parent identities, rejects stale/reused identities, honors an optional
@@ -729,11 +735,11 @@ Human login and agent authorization requests anchor to the nearest verified
 persistent harness or interactive shell, not a transient command shell. Known
 command-shell wrappers are traversed; unknown launchers fail closed and must
 provide OPTD_AUTH_ANCHOR_PID for their own live PID. Explicit anchors must be in
-the caller's permitted ancestry and cannot bypass a nearer binding or isolate
-boundary. The selected ancestry is revalidated before use. On Linux, any
-narrow-reader helper resolves cat through PATH; a missing helper or boot
-identity reports process_inspection_unavailable rather than pretending a valid
-process disappeared.
+the caller's permitted ancestry and cannot bypass a nearer binding, recognized
+agent harness, or isolate boundary. The selected ancestry is revalidated before
+use. On Linux, any narrow-reader helper resolves cat through PATH; a missing
+helper or boot identity reports process_inspection_unavailable rather than
+pretending a valid process disappeared.
 
 `optctl auth session-pid` prints the immediate caller PID as a machine-readable
 integer. A parent agent may launch a subagent with:

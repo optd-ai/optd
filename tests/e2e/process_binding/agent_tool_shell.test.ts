@@ -63,6 +63,46 @@ Deno.test("compiled agent redemption survives temporary tool shells and rejects 
     }).output();
     assertEquals(compiled.code, 0, new TextDecoder().decode(compiled.stderr));
     const origin = `http://127.0.0.1:${server.addr.port}`;
+    const boundaryHome = join(root, "harness-boundary");
+    const inspector = platformProcessInspector();
+    const boundaryStore = new FilesystemLocalAuthStore(
+      join(boundaryHome, "optd", "auth"),
+      inspector,
+    );
+    await boundaryStore.updateState(origin, {
+      token: "synthetic-parent-human-token",
+      requestToken: "synthetic-request-token",
+    }, await inspector.inspect(Deno.pid));
+    for (const commandName of ["bash", "claude", "pi", "codex"]) {
+      // Keep the named harness alive while its transient tool child runs.
+      const status = await new Deno.Command("/bin/bash", {
+        args: [
+          "-c",
+          'exec -a "$1" /bin/bash -c \'"$@"; result=$?; exit "$result"\' -- "${@:2}"',
+          "--",
+          commandName,
+          binary,
+          "--server",
+          origin,
+          "--json",
+          "auth",
+          "status",
+        ],
+        env: {
+          PATH: Deno.env.get("PATH") ?? "/usr/bin:/bin",
+          HOME: boundaryHome,
+          XDG_DATA_HOME: boundaryHome,
+          OPTD_AUTH_ANCHOR_PID: String(Deno.pid),
+        },
+        clearEnv: true,
+        stdout: "piped",
+        stderr: "piped",
+      }).output();
+      assertEquals(status.code, 0, new TextDecoder().decode(status.stderr));
+      const data = JSON.parse(new TextDecoder().decode(status.stdout)).data;
+      assertEquals(data.authenticated, commandName === "bash", commandName);
+      assertEquals(data.request_credential_available, true);
+    }
     for (
       const [name, command, expectedAuthenticated] of [
         ["exec", 'exec "$@"', true],

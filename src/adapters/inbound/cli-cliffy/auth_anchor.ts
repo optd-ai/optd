@@ -4,25 +4,14 @@ import {
   sameProcess,
 } from "../../../application/ports/process_inspection.ts";
 
-type AnchorInspector = ProcessInspector & {
-  command(pid: number): Promise<string[]>;
-};
-const harnesses = new Set([
-  "pi",
-  "codex",
-  "claude",
-  "opencode",
-  "cursor-agent",
-  "aider",
-  "goose",
-]);
+import { isAgentHarness } from "../../../domain/auth/process_boundary.ts";
 const shells = new Set(["bash", "zsh", "sh", "dash", "fish", "nu"]);
 const basename = (path: string) => path.split("/").at(-1)!.replace(/^-/, "");
 
 export function isSessionBoundary(argv: string[]): boolean {
   if (!argv.length) return false;
   const name = basename(argv[0]);
-  if (harnesses.has(name)) return true;
+  if (isAgentHarness(argv)) return true;
   if (shells.has(name)) {
     // A command/script shell is a wrapper, not the interactive owner.
     return argv.slice(1).every((arg) => arg.startsWith("-")) &&
@@ -31,18 +20,11 @@ export function isSessionBoundary(argv: string[]): boolean {
         arg === "--stdin" || arg === "-s"
       );
   }
-  if (["node", "nodejs", "bun", "python", "python3"].includes(name)) {
-    const entry = argv[1] ?? "";
-    return harnesses.has(basename(entry).replace(/\.(?:[cm]?js|py)$/, "")) ||
-      /\/(?:pi-coding-agent|@anthropic-ai\/claude-code|@openai\/codex)\//.test(
-        entry,
-      );
-  }
   return false;
 }
 
 export async function resolveProcessAnchor(
-  inspector: AnchorInspector,
+  inspector: ProcessInspector,
   startPid: number,
   options: {
     stopPid?: number;

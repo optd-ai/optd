@@ -44,11 +44,13 @@ documents unchanged.
 - Remaining gates: clean committed candidate, full mandatory exact-image release
   gate and artifact checks. No tag, publication or installation has occurred.
 
-Separate unresolved risk: another investigation reported that an agent launcher
-can inherit a human credential from an authenticated ancestor shell. This work
-neither changes that selection policy nor claims to fix it. Resolve or
-explicitly triage that issue separately before publication; do not infer its
-safety from the scoped resolver tests.
+Follow-up policy decision: credential lookup must stop at the nearest recognized
+agent harness, whether or not that harness has a binding. This prevents
+inherited human or parent-agent bindings above it, while preserving bindings on
+or below it and the separate request-only workflow. The follow-up implementation
+shares harness classification with anchor creation and has dedicated store and
+compiled CLI regressions. It is separate from scoped resolver authorization and
+is not yet released.
 
 ## Outcome and boundaries
 

@@ -1307,6 +1307,7 @@ function helpText(args: string[]): string {
         ? [
           "Process binding:",
           "  Credentials bind to the nearest recognized harness, interactive shell, or narrower existing binding.",
+          "  Credential lookup never crosses a recognized agent harness, even if it has no binding.",
           "  Pipelines, subshells and command substitutions retain the owning harness.",
           "  Unknown harness launchers can set OPTD_AUTH_ANCHOR_PID to their own PID.",
           "  Explicit anchors must be ancestors inside auth isolate and cannot widen a nearer binding.",

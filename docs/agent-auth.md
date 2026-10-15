@@ -24,6 +24,12 @@ cannot redeem it. Authorization output contains metadata, never the bearer
 token. The shared request-only credential remains available to other unapproved
 trees; it does not authorize application operations.
 
+Credential lookup stops at the nearest recognized agent harness, even when no
+binding exists there. Starting Claude, Pi, or another supported harness inside
+an authenticated human terminal does not inherit that terminal's credential.
+Nested harnesses likewise do not inherit a parent agent's credential. Only a
+binding on the nearest harness or below it is eligible.
+
 ## Anchor selection
 
 Walk from the CLI's parent toward the root, stopping at the nearest:
@@ -56,18 +62,17 @@ caller PID.
 
 ## Security and contract change
 
-Nearest-credential selection is unchanged: no combining grants and no fallback
-to a broader ancestor after a narrow grant is denied/revoked. Process-name
-recognition does not grant server permissions. Same-OS-user malware remains
-outside the filesystem credential provider's threat model; this is not a
-hardened OS security boundary.
+Nearest-credential selection is bounded by the nearest recognized agent harness:
+no combining grants, crossing that boundary, or falling back to a broader
+ancestor after a narrow grant is denied/revoked. Process-name recognition does
+not grant server permissions. Same-OS-user malware remains outside the
+filesystem credential provider's threat model; this is not a hardened OS
+security boundary.
 
-This intentionally supersedes the immediate-parent creation rule in the frozen
-`spec/authentication.md` for the new CLI behavior. The frozen model/spec files
-are not edited here. Requests made by older clients lack a recorded request
-anchor and must be recreated; existing valid full bindings remain selectable.
-Stale bindings are never reassigned to another PID or revived by copying a
-credential.
+The authoritative contract is `spec/authentication.md`. Requests made by older
+clients without a recorded request anchor must be recreated; existing valid full
+bindings remain selectable only within the harness boundary. Stale bindings are
+never reassigned to another PID or revived by copying a credential.
 
 Regression coverage includes compiled commands through six shell launch shapes,
 sibling redemption rejection, nested recognized harnesses, explicit and isolate
