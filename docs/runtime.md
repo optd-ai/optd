@@ -121,13 +121,17 @@ owned Docker name, label, Compose project, and durable registry entry.
 The parent trap is installed as soon as the single state root exists. On every
 exit it revalidates registered Docker labels and Linux process identity before
 cleanup, never uses name-prefix ownership, and never prunes. The image baseline
-is the exact sorted result of `docker image ls --all --no-trunc --quiet`.
-Because the supported daemon uses the legacy builder, the gate durably captures
-that one build's stdout, stderr, exit status, and terminating signal. Only IDs
-on legacy builder result lines can be resolved against the exact post-build
-delta; creation times, parent chains, final history when available, and the
-final run label must agree before each proven full ID is fsynced to the
-registry.
+is the exact sorted result of `docker image ls --all --no-trunc --quiet`. The
+gate durably captures that one build's stdout, stderr, exit status, and
+terminating signal. For the default Docker Buildx driver, ownership binds the
+immutable input archive, successful load, IID and manifest/config metadata,
+exact one-image inventory delta, and final source/run labels. A local load may
+attach one repository digest, but only for the build tag's exact repository and
+its bound manifest digest. The accepted tag/digest set is persisted and must
+remain unchanged through cleanup; foreign repositories, additional references,
+and reference additions or removals fail closed. The legacy transcript path also
+checks builder result lines, creation times, and parent chains. Each proven full
+ID is fsynced to the registry before cleanup.
 
 Before its first image removal, cleanup revalidates the complete registered set,
 immutable evidence, final tag and label, parent/child relationships, tags,

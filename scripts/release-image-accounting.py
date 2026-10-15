@@ -852,12 +852,29 @@ def buildkit_identity(iid: str, metadata: dict[str, Any], item: dict[str, Any]) 
         raise RuntimeError("malformed BuildKit manifest digest")
     if config and config != identity:
         raise RuntimeError("BuildKit config digest differs from loaded daemon image")
+    if manifest and manifest != identity and not config:
+        raise RuntimeError("BuildKit manifest is not bound to the loaded config/image ID")
     if iid != identity and (not config or iid != manifest):
         raise RuntimeError("BuildKit IID is not bound to the loaded config/image ID")
     descriptor = metadata.get("containerimage.descriptor")
     if descriptor is not None and descriptor.get("digest") != manifest:
         raise RuntimeError("BuildKit manifest descriptor disagrees with digest")
     return identity
+
+
+def buildkit_references(tag: str, metadata: dict[str, Any], item: dict[str, Any]) -> dict[str, list[str]]:
+    references = image_references(item)
+    manifest = metadata.get("containerimage.digest", "")
+    # Containerd-backed Docker stores attach a repository digest on local --load.
+    # Accept only the build's exact repository and independently bound manifest.
+    expected_digest = tag.rsplit(":", 1)[0] + "@" + manifest
+    if references["tags"] != [tag] or (
+        references["digests"] and (
+            not FULL_ID.fullmatch(manifest) or references["digests"] != [expected_digest]
+        )
+    ):
+        raise RuntimeError("BuildKit loaded image gained foreign references")
+    return references
 
 
 def account_buildkit(args: argparse.Namespace, state: TrustedState, paths: dict[str, str],
@@ -894,8 +911,7 @@ def account_buildkit(args: argparse.Namespace, state: TrustedState, paths: dict[
     revision = next(value.split("=", 1)[1] for value in argv if value.startswith("OPTD_REVISION="))
     if labels.get(LABEL) != args.run_id or labels.get("org.opencontainers.image.revision") != revision:
         raise RuntimeError("BuildKit loaded image source/run label mismatch")
-    if image_references(item) != {"tags": [args.tag], "digests": []}:
-        raise RuntimeError("BuildKit loaded image gained foreign references")
+    loaded_references = buildkit_references(args.tag, metadata, item)
     # BuildKit honors SOURCE_DATE_EPOCH, so Created is not a wall-clock proof.
     # Ownership instead requires the initially absent tag/ID, unique run label,
     # immutable archive invocation, successful load, and IID/config agreement.
@@ -908,7 +924,7 @@ def account_buildkit(args: argparse.Namespace, state: TrustedState, paths: dict[
         "id": identity, "run_id": args.run_id, "role": "final", "tag": args.tag,
         "parent": item.get("Parent") or "", "created": item.get("Created"),
         "created_by": history[0].get("CreatedBy"), "labels": labels,
-        "dockerfile_sha256": dockerfile_hash,
+        "dockerfile_sha256": dockerfile_hash, "references": loaded_references,
     }
     state.create_json(f"{registry}/image-evidence/{identity[7:]}.json", proof)
     state.append(f"{registry}/images", f"{identity}\tfinal\n".encode())
@@ -1022,7 +1038,10 @@ def validate_cleanup_world(
             raise RuntimeError(f"image parent/history/creation evidence changed: {identity}")
         tags = normalized_list(actual.get("RepoTags"))
         digests = normalized_list(actual.get("RepoDigests"))
-        if digests:
+        if buildkit and identity == args.final_id:
+            if buildkit_references(args.tag, metadata, actual) != proof.get("references"):
+                raise RuntimeError("BuildKit loaded image references changed before cleanup")
+        elif digests:
             raise RuntimeError(f"registered image gained RepoDigests: {identity} {digests!r}")
         if proof.get("role") == "final":
             if identity != args.final_id or image_labels(actual).get(LABEL) != args.run_id or tags != [args.tag] or (buildkit and image_labels(actual) != proof.get("labels")):

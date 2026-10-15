@@ -92,7 +92,7 @@ Deno.test("BuildKit authority rejects mismatched, incomplete and foreign ownersh
   assert.equal(result.code, 0, new TextDecoder().decode(result.stderr));
   assert.equal(
     new TextDecoder().decode(result.stdout).trim().split("\n").length,
-    20,
+    28,
   );
 });
 

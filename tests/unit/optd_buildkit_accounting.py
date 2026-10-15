@@ -87,10 +87,22 @@ def change_json(path, change):
     path.write_text(json.dumps(value))
 
 
-for mode in ("success", "iid-mismatch", "config-mismatch", "tag-mismatch", "label-mismatch", "preexisting-id", "preexisting-tag", "foreign-delta", "failed", "partial-load", "missing-metadata", "foreign-tags", "foreign-reference", "concurrent-image", "baseline-tags", "cleanup-iid-tamper", "unsafe-metadata", "metadata-symlink", "missing-iid", "cleanup-metadata-tamper"):
+for mode in ("success", "success-digest", "success-index-digest", "foreign-digest", "foreign-repository", "duplicate-digest", "cleanup-digest-added", "cleanup-digest-changed", "cleanup-digest-removed", "iid-mismatch", "config-mismatch", "tag-mismatch", "label-mismatch", "preexisting-id", "preexisting-tag", "foreign-delta", "failed", "partial-load", "missing-metadata", "foreign-tags", "foreign-reference", "concurrent-image", "baseline-tags", "cleanup-iid-tamper", "unsafe-metadata", "metadata-symlink", "missing-iid", "cleanup-metadata-tamper"):
     with tempfile.TemporaryDirectory(prefix="optd-buildkit-contract-") as temporary:
         root = pathlib.Path(temporary)
         args, images, references, removed = fixture(root)
+        if mode in ("success-digest", "cleanup-digest-changed", "cleanup-digest-removed"):
+            images[IMAGE]["RepoDigests"] = ["optd@" + MANIFEST]
+        if mode == "success-index-digest":
+            (root / "iid").write_text(IMAGE)
+            change_json(root / "metadata", lambda value: (value.pop("containerimage.config.digest"), value.update({"containerimage.digest": IMAGE})))
+            images[IMAGE]["RepoDigests"] = ["optd@" + IMAGE]
+        if mode == "foreign-digest":
+            images[IMAGE]["RepoDigests"] = ["optd@" + FOREIGN]
+        if mode == "foreign-repository":
+            images[IMAGE]["RepoDigests"] = ["foreign@" + MANIFEST]
+        if mode == "duplicate-digest":
+            images[IMAGE]["RepoDigests"] = ["optd@" + MANIFEST] * 2
         if mode == "iid-mismatch":
             (root / "iid").write_text(FOREIGN)
         if mode == "config-mismatch":
@@ -118,11 +130,17 @@ for mode in ("success", "iid-mismatch", "config-mismatch", "tag-mismatch", "labe
         if mode == "metadata-symlink":
             (root / "metadata").rename(root / "real-metadata")
             (root / "metadata").symlink_to(root / "real-metadata")
-        if mode in ("iid-mismatch", "config-mismatch", "tag-mismatch", "label-mismatch", "preexisting-id", "preexisting-tag", "foreign-delta", "failed", "partial-load", "missing-metadata", "unsafe-metadata", "metadata-symlink", "missing-iid"):
+        if mode in ("foreign-digest", "foreign-repository", "duplicate-digest", "iid-mismatch", "config-mismatch", "tag-mismatch", "label-mismatch", "preexisting-id", "preexisting-tag", "foreign-delta", "failed", "partial-load", "missing-metadata", "unsafe-metadata", "metadata-symlink", "missing-iid"):
             reject(lambda: m.command_account(args))
             assert not (root / "registry/image-authority.json").exists()
         else:
             assert m.command_account(args) == 0
+            if mode == "cleanup-digest-added":
+                images[IMAGE]["RepoDigests"] = ["optd@" + MANIFEST]
+            if mode == "cleanup-digest-changed":
+                images[IMAGE]["RepoDigests"] = ["optd@" + FOREIGN]
+            if mode == "cleanup-digest-removed":
+                images[IMAGE]["RepoDigests"] = []
             if mode == "foreign-tags":
                 images[IMAGE]["RepoTags"].append("foreign:keep")
             if mode == "foreign-reference":
@@ -135,16 +153,17 @@ for mode in ("success", "iid-mismatch", "config-mismatch", "tag-mismatch", "labe
                 (root / "iid").write_text(FOREIGN)
             if mode == "cleanup-metadata-tamper":
                 change_json(root / "metadata", lambda value: value.update({"containerimage.config.digest": FOREIGN}))
-            if mode == "success":
+            if mode in ("success", "success-digest", "success-index-digest"):
                 assert m.command_cleanup(args) == 0
                 assert removed == [IMAGE]
                 assert images == {BASE: {"Id": BASE, "RepoTags": ["existing:keep"], "RepoDigests": []}}
             else:
                 reject(lambda: m.command_cleanup(args))
-        if mode != "success":
+        if mode not in ("success", "success-digest", "success-index-digest"):
             assert removed == []
         print(mode + ": ok")
 
 # A manifest digest alone never establishes which config was loaded.
 reject(lambda: m.buildkit_identity(MANIFEST, {"containerimage.digest": MANIFEST}, {"Id": IMAGE}))
+reject(lambda: m.buildkit_identity(IMAGE, {"containerimage.digest": MANIFEST}, {"Id": IMAGE}))
 assert m.buildkit_identity(IMAGE, {}, {"Id": IMAGE}) == IMAGE
